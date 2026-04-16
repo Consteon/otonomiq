@@ -1,0 +1,4020 @@
+import 'dart:async';
+import 'dart:io';
+import 'dart:math';
+import 'dart:convert';
+import 'different_code/different_code.dart';
+import 'part/build_part/channel.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:get/get.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import "package:http/http.dart" as http;
+import 'package:http/io_client.dart'; // part of dart.http package
+import 'package:googleapis_auth/auth_io.dart' as auth;
+import 'model/otq_state.dart';
+import 'widget/build_theme.dart';
+import 'widget/ftz_webview.dart';
+import 'package:transparent_image/transparent_image.dart';
+import 'crypto/auth_crypto.dart';
+import 'firestore_repository/firestore_generic_repository.dart';
+import 'firestore_repository/proxy_repository.dart';
+import 'firestore_repository/table_repository.dart';
+import 'ftz_secret.dart';
+import 'global.dart';
+import 'global2.dart';
+import 'redux/screen_transaction.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:ntp/ntp.dart';
+import 'firebase_notification_handler.dart';
+import 'widget/ui_component.dart';
+import 'bloc_timer/bloc.dart';
+import 'model/function_body.dart';
+import 'login/api/user_repository.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geolocator/geolocator.dart';
+import 'bloc_submit/bloc.dart';
+// import 'package:mobile_number/mobile_number.dart'; // android only
+import 'package:permission_handler/permission_handler.dart';
+import 'package:pointycastle/export.dart';
+import 'widget/photo_camera.dart';
+import 'package:camera/camera.dart';
+import 'package:intl/intl.dart';
+import 'model/general_get_controller.dart';
+import 'package:geocoding/geocoding.dart';
+
+Future apiTest() async {
+  bool testNow = true;
+  int d = 1;
+  if (testNow) {
+    // argon test
+    const pw = '287738';
+    try {
+      var testSHash = passwordHashCreate(pw);
+      bool testResult = passwordVerify(pw, testSHash);
+      bool testResult2 = passwordVerify('937898', testSHash);
+      d = 1;
+    } catch (ae) {
+      d = 1;
+    }
+  } // end if (testNow)
+} // end of apiTest
+
+int getTableVid(String? com) {
+  int result = appCodeController.applicationTableVid;
+  if (com != null && com.isNotEmpty) {
+    switch (com.toLowerCase()) {
+      case 'con':
+        result = 20342033315492;
+        break;
+      case 'auz':
+        result = 70027002611015;
+        break;
+      case 'otq':
+        result = 60936087747650;
+        break;
+      default:
+        result = appCodeController.applicationTableVid;
+    } // end switch (com.toLowerCase())
+  } // end if (com != null && com.isNotEmpty)
+  return result;
+} // end of getTableVid
+
+Future<void> callEventFunction() async {
+  if (internetConnected()) {
+    const String functionName = 'callEventFunction';
+    String? currentSsid =
+        await waitUntilNotNullScreenTx(functionName, '#INTERFACE_KEY', 20);
+    if (currentSsid != loginSsid) {
+      Timer(const Duration(seconds: 3), () async {
+        if (currentSsid != null) {
+          dynamic qParams = {"ssid": currentSsid};
+          devPrint('=== call $eventFunctionName with param=$qParams');
+          dynamic uri = Uri.https(functionFront, eventFunctionName);
+          try {
+            callHttpPost(uri, qParams);
+          } catch (eHttp) {
+            debugPrint(
+                'Error in calling $eventCollectionName: $eHttp'); // do nothing
+          }
+        }
+      });
+    } // end if (ssid != loginSsid)
+  } // end if (internetConnected())
+} // end of callEventFunction
+
+Future scheduleSendImagesInImageMap() async {
+  // run sendImagesInImageMap in a schedule.
+  // because user tend to open the app and close it immediately
+  // Run immediately
+  await sendImagesInImageMap();
+  historyTrim(day: 7).then((_) async {
+    await historySync('scheduleSendImagesInImageMap1', false);
+    await saveHistory();
+    callEventFunction();
+  });
+  // Schedule to run after 1 minute
+  Timer(const Duration(minutes: 1), () async {
+    await sendImagesInImageMap();
+    historySync('scheduleSendImagesInImageMap2', false);
+    // Schedule to run after 2 minutes
+    Timer(const Duration(minutes: 1), () async {
+      await sendImagesInImageMap();
+      historySync('scheduleSendImagesInImageMap3', false);
+      // Schedule to run every 2 minutes thereafter
+      Timer.periodic(imageUploadInterval, (Timer timer) async {
+        await sendImagesInImageMap();
+        historySync('scheduleSendImagesInImageMap4', false);
+      });
+    });
+  });
+} // end of scheduleSendImagesInImageMap
+
+bool isGpsUpdated(int delay) {
+  // true if gpsTime and current time difference is less than delay (in ms)
+  return (DateTime.now().millisecondsSinceEpoch +
+              time2GpsOffset -
+              gpsTime.value)
+          .abs() <
+      delay;
+} // end of isGpsUpdated
+
+Future<void> startGettingGpsData() async {
+  int? lastGTime = prefs.getInt('@lastGpsTime');
+  if (lastGTime == null) {
+    lastGTime = 0;
+    await prefs.setInt('@lastGpsTime', lastGTime);
+  }
+  dynamic gpsArray = await Future.wait([
+    secureRead(key: 'gpsData'),
+    secureRead(key: 'gpsPlaceMark'),
+  ]);
+
+  if (gpsArray[0] != null) {
+    gpsData = convertToPosition(gpsArray[0]);
+  }
+  if (gpsArray[1] != null) {
+    gpsPlaceMark = convertToPlaceMark(gpsArray[1]);
+  }
+  // trigger location stream
+  LocationSettings locationSettings = myLocationSetting();
+  bool gpsEnabled = await Geolocator.isLocationServiceEnabled();
+  dynamic gpsPermission = await Geolocator.checkPermission();
+  if (gpsPermission == LocationPermission.denied ||
+      gpsPermission == LocationPermission.deniedForever) {
+    gpsPermission = await Geolocator.requestPermission();
+  }
+  if (gpsEnabled &
+      ((gpsPermission == LocationPermission.always) |
+          (gpsPermission == LocationPermission.whileInUse))) {
+    positionStream =
+        Geolocator.getPositionStream(locationSettings: locationSettings);
+    positionStreamSubs = positionStream.listen((Position position) {
+      // update app gps
+      int currentEpoch = DateTime.now().millisecondsSinceEpoch;
+      if (position.timestamp.millisecondsSinceEpoch > 0 &&
+          gpsTime.value <
+              (position.timestamp.millisecondsSinceEpoch + time2GpsOffset)) {
+        gpsData = positionCopy(position);
+        gpsTime.value = gpsData.timestamp.millisecondsSinceEpoch;
+        time2GpsOffset =
+            position.timestamp.millisecondsSinceEpoch - currentEpoch;
+      } // end if (position.timestamp.millisecondsSinceEpoch > 0)
+      // devPrint("gpsTime:${gpsTime.value} , time2GpsOffset:$time2GpsOffset");
+      gpsSaveTimer ??= Timer.periodic(const Duration(minutes: 3), (_) {
+        getAppGps();
+        devPrint('=======-======---= saved by 3 minute ${DateTime.now()}');
+      });
+    });
+  } // end if (gpsEnabled & (gpsPermission == LocationPermission.always))
+} // end of startGettingGpsData
+
+Future<dynamic> getAppGps() async {
+  // check if gps data is available and updated
+  // save to persistence storage if gps data is updated
+  // return data from gpsData, gpsTime, gpsPlaceMark
+  dynamic returnValue;
+  const int getGpsDataWaitTime = 5; // in seconds
+  const int acceptableGpsTime = 1800000; // in milliseconds, 30 minutes
+  // positionStreamSubs
+  //devPrint(
+  //    'gpsTime= ${gpsTime.value}, lat=${gpsData.latitude}, alt=${gpsData.altitude}');
+  if (gpsTime.value <= 0) {
+    await gpsTime.stream.firstWhere((value) => value > 0).timeout(
+          const Duration(seconds: getGpsDataWaitTime),
+          onTimeout: () => 0, // Do nothing on timeout
+        ); // wait until get location for max 5 seconds
+  }
+  if (isGpsUpdated(acceptableGpsTime)) {
+    // save data when gps data have meaningfully value
+    if (internetConnected()) {
+      // devPrint('--get placemark from gps');
+      try {
+        List<Placemark> temp =
+            await placemarkFromCoordinates(gpsData.latitude, gpsData.longitude);
+        gpsPlaceMark = placeMarkCopy(temp[0]);
+      } catch (e) {
+        gpsPlaceMark = placeMarkCopy(null);
+      }
+      // devPrint('--end placemark from gps');
+    } else {
+      gpsPlaceMark = placeMarkCopy(null);
+    }
+    devPrint('== saving gps data etc');
+    storage.write(key: 'gpsData', value: json.encode(gpsData));
+    secureWrite(key: 'gpsPlaceMark', value: json.encode(gpsPlaceMark));
+    prefs.setInt('@lastGpsTime', gpsTime.value);
+    String gpsDataStream = positionToGpsString(gpsData);
+    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
+        {'#GPSDATA': gpsDataStream, '#LASTGPSTIME': gpsTime.value})));
+    returnValue = {
+      'gpsData': gpsData,
+      'gpsTime': gpsTime.value,
+      'gpsPlaceMark': gpsPlaceMark
+    };
+  } else {
+    // when gps data is not updated return invalid gps data
+    returnValue = {
+      'gpsData': Position(
+        latitude: invalidLocation,
+        longitude: invalidLocation,
+        // longitude: gpsData.longitude,
+        altitude: -88.0,
+        accuracy: 0.0,
+        speed: 0.0,
+        speedAccuracy: 0.0,
+        heading: 0.0,
+        isMocked: false,
+        timestamp: invalidTime,
+        altitudeAccuracy: 0.0,
+        headingAccuracy: 0.0,
+      ), // gpsdData wi,
+      'gpsTime': 0,
+      'gpsPlaceMark': placeMarkCopy(null)
+    };
+  } // end if (gpsTime.value > 0)
+  dynamic currentLat = returnValue['gpsData'].latitude;
+  if (returnValue['gpsData'].latitude == invalidLocation ||
+      returnValue['gpsData'].longitude == invalidLocation) {
+    // Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high).then((Position position) {
+    await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+      accuracy: LocationAccuracy.high,
+    )).then((Position position) async {
+      try {
+        gpsData = positionCopy(position);
+        gpsTime.value = gpsData.timestamp.millisecondsSinceEpoch;
+        returnValue['gpsTime'] = position.timestamp.millisecondsSinceEpoch;
+        returnValue['gpsData'] = position;
+        storage.write(key: 'gpsData', value: json.encode(position));
+        String gpsDataStream = positionToGpsString(position);
+        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+          '#GPSDATA': gpsDataStream,
+          '#LASTGPSTIME': position.timestamp.millisecondsSinceEpoch
+        })));
+        prefs.setInt('@lastGpsTime', position.timestamp.millisecondsSinceEpoch);
+        List<Placemark> myPL = await placemarkFromCoordinates(
+            position.latitude, position.longitude);
+        returnValue['gpsPlaceMark'] = placeMarkCopy(myPL[0]);
+        secureWrite(
+            key: 'gpsPlaceMark',
+            value: json.encode(returnValue['gpsPlaceMark']));
+      } catch (e) {
+        try {
+          returnValue['gpsData'] = position;
+        } catch (e1) {
+          returnValue['gpsData'] = Position(
+            latitude: invalidLocation,
+            longitude: invalidLocation,
+            altitude: -88.0,
+            accuracy: 0.0,
+            speed: 0.0,
+            speedAccuracy: 0.0,
+            heading: 0.0,
+            isMocked: false,
+            timestamp: invalidTime,
+            altitudeAccuracy: 0.0,
+            headingAccuracy: 0.0,
+          );
+        } // end try gpsData
+        try {
+          returnValue['gpsTime'] = position.timestamp.millisecondsSinceEpoch;
+        } catch (e2) {
+          returnValue['gpsTime'] = 0;
+        } // end try gpsTime
+        try {
+          List<Placemark> myPL2 = await placemarkFromCoordinates(
+              position.latitude, position.longitude);
+          returnValue['gpsPlaceMark'] = placeMarkCopy(myPL2[0]);
+        } catch (e3) {
+          returnValue['gpsPlaceMark'] = placeMarkCopy(null);
+          returnValue['gpsPlaceMark'].name = 'Error $e';
+        } // end try gpsPlaceMark
+      } // end try
+    });
+  }
+  return returnValue;
+} // end of getAppGps
+
+int getCurrentTimeComparableToGpsTime() {
+  return DateTime.now().millisecondsSinceEpoch + time2GpsOffset;
+} // end of getCurrentTimeComparableToGpsTime
+
+void updateAppGps(Position position) async {
+  // update app gps
+  int currentEpoch = DateTime.now().millisecondsSinceEpoch;
+  if (position.timestamp.millisecondsSinceEpoch > 0 &&
+      gpsTime.value < position.timestamp.millisecondsSinceEpoch) {
+    gpsData = positionCopy(position);
+    gpsTime.value = gpsData.timestamp.millisecondsSinceEpoch;
+    time2GpsOffset = position.timestamp.millisecondsSinceEpoch - currentEpoch;
+    gpsSaveTimer ??= Timer.periodic(const Duration(minutes: 3), (_) {
+      getAppGps();
+      devPrint('=======-======---= saved by 3 minute ${DateTime.now()}');
+    });
+  } // end if (position.timestamp.millisecondsSinceEpoch > 0)
+} // end of updateAppGps
+
+Future secureWrite({required String key, required String value}) async {
+  // write encrypted value to secure storage
+  try {
+    return storage.write(key: key, value: value);
+  } catch (e) {
+    // errorReport(e);
+    return null;
+  }
+} // end of secureWrite
+
+Future<String?> secureRead({required String key}) async {
+  // read encrypted value from secure storage
+  try {
+    return storage.read(key: key);
+  } on PlatformException {
+    // errorReport(e);
+    return null;
+  } catch (e) {
+    // errorReport(e);
+    return null;
+  }
+} // end of secureRead
+
+Future<void> vibrate({int duration = 50}) async {
+  // vibrate device in millisecond
+  try {
+    if (andrew) {
+      // Use HapticFeedback for Android
+      // HapticFeedback.vibrate(HapticFeedbackType.light);
+      // await Future.delayed(Duration(milliseconds: duration));
+      // HapticFeedback.vibrate(HapticFeedbackType.light);
+    } else if (sinner) {
+      // Use platform channel for iOS (example implementation)
+      //await Platform.invokeMethod('vibrate', {"duration": duration});
+    } else {
+      // Handle other platforms or web
+      debugPrint('Vibration not supported on this platform');
+    }
+  } on PlatformException catch (e) {
+    debugPrint("Error: $e");
+  }
+} // end of vibrate
+
+bool canInitializePage(String? thePage) {
+  // check if the page is home or listed in asHomeArray
+  // return true if the page is not home and not in asHomeArray
+  // return false if the page cannot be initialized
+  bool result = false;
+  if (thePage != null) {
+    result = (thePage == home && asHomeArray.contains(thePage));
+  } // end if (thePage != null)
+  return result;
+} // end of canInit
+
+bool internetConnected() {
+  return internetConnectionFlag.value;
+} // end of internetConnected
+
+Future<bool> internetConnectedCheck({bool forceTest = false}) async {
+  // check internet connection flag
+  // use https://pub.dev/packages/internet_connection_checker_plus
+  if (forceTest) {
+    bool nowConnected = await internetConnection
+        .hasConnection; //.InternetConnection().hasInternetAccess;
+    if (nowConnected != internetConnectionFlag.value) {
+      internetConnectionFlag.value = nowConnected;
+    } // end if (nowConnected != internetConnectionFlag.value)
+  } // end if (forceTest)
+  return internetConnectionFlag.value;
+} // end of internetConnected
+
+Placemark placeMarkCopy(Placemark? placeMark) {
+  return Placemark(
+    name: placeMark?.name ?? emptyString,
+    street: placeMark?.street ?? emptyString,
+    isoCountryCode: placeMark?.isoCountryCode ?? invalidCountry,
+    country: placeMark?.country ?? invalidCountry,
+    postalCode: placeMark?.postalCode ?? emptyString,
+    administrativeArea: placeMark?.administrativeArea ?? emptyString,
+    subAdministrativeArea: placeMark?.subAdministrativeArea ?? emptyString,
+    locality: placeMark?.locality ?? emptyString,
+    subLocality: placeMark?.subLocality ?? emptyString,
+    thoroughfare: placeMark?.thoroughfare ?? emptyString,
+    subThoroughfare: placeMark?.subThoroughfare ?? emptyString,
+  );
+} // end of Placemark
+
+Position positionCopy(Position? position) {
+  return Position(
+    latitude: position?.latitude ?? 0,
+    longitude: position?.longitude ?? 0,
+    accuracy: position?.accuracy ?? 0,
+    altitude: position?.altitude ?? 0,
+    floor: position?.floor ?? 0,
+    heading: position?.heading ?? 0,
+    speed: position?.speed ?? 0,
+    speedAccuracy: position?.speedAccuracy ?? 0,
+    timestamp: position?.timestamp ?? DateTime.now(),
+    isMocked: position?.isMocked ?? false,
+    altitudeAccuracy: position?.altitudeAccuracy ?? 0.0,
+    headingAccuracy: position?.headingAccuracy ?? 0.0,
+  );
+} // end of positionCopy
+
+Future<dynamic> callHttpPost(dynamic uri, dynamic param) async {
+  if (await internetConnectedCheck()) {
+    return await http.post(uri, body: param);
+  } else {
+    return "No internet connection";
+  } // end if (internetConnected())
+} // end of callHttpPost
+
+Future<List<dynamic>> sendHistoryImagesToCloud(position, content) async {
+  // wrapper for position and content
+  return [position, await replaceLocalImageToUrl(content)];
+  //return [position, await uploadImageToCloud(content)];
+} // end of sendHistoryImagesToCloud
+
+Future<String> replaceLocalImageToUrl(String input) async {
+  // replace local image to cloud url
+  // input the whole event string
+  // return new text
+  String result = input;
+  if (internetConnected()) {
+    const pointerPrefix = 'FTZ||';
+    String pattern = r"aum__(.*?)__mua";
+    RegExp regex = RegExp(pattern);
+    String newInput = input;
+    try {
+      Iterable<Match> matches = regex.allMatches(input);
+      List<Future<dynamic>> futures = [];
+      int c = 0;
+      for (Match match in matches) {
+        List<String> fileArray = match.group(1)!.split('___');
+        String rawFolder = Uri.decodeComponent(fileArray[0]);
+        String folder = rawFolder.substring(
+            rawFolder.lastIndexOf('$localImageBeginningFolderDivider/') +
+                localImageBeginningFolderDivider.length +
+                1);
+        futures.add(uploadImageToCloud(match.group(1)!));
+        // futures.add(saveImageToCloud(
+        //     imagePath: match.group(1)!,
+        //     folder: folder,
+        //     rawFileName: fileArray[1]));
+        String pointer = '$pointerPrefix${(++c).toString().padLeft(3, '0')}';
+        newInput =
+            newInput.replaceFirst(match.group(0) ?? emptyString, pointer);
+      } // end for (RegExpMatch match in matches)
+      List<dynamic> urls = await Future.wait(futures);
+      for (int i = 0; i < urls.length; i++) {
+        String pointer = '$pointerPrefix${(i + 1).toString().padLeft(3, '0')}';
+        String newUrl = urls[i];
+        if (newUrl.contains(invalidPathPrefix) || newUrl == emptyString) {
+          newUrl = defaultImage;
+        } // end if (newUrl.contains(invalidPathPrefix))
+        newInput = newInput.replaceFirst(pointer, newUrl);
+      } // end for (int i = 0; i < urls.length; i++)
+      result = newInput;
+    } catch (e) {
+      result = input;
+    } // end try
+  }
+  return result;
+} // end of replaceLocalImagetoUrl
+
+Future<String> prepareImageAsLocal(
+    {required String imagePath,
+    required String folder,
+    required String fileName}) async {
+  // prepare image as local file, rename it with local name standard
+  String result = emptyString;
+  String finalImagePath = await renamePath(
+      originalImagePath: imagePath, folder: folder, fileName: fileName);
+  // finalImagePath = finalImagePath.replaceAll('.jpg', '');
+  result = '$localImagePrefix$finalImagePath$localImagePostfix';
+  return result;
+} // end of prepareImageAsLocal
+
+Future saveImagePutInImageMap(String url) async {
+  // put url entry in tableContent[imageMapName]
+  // if connected to internet then try to send the image to cloud
+  String localPath =
+      url.replaceAll(localImagePrefix, '').replaceAll((localImagePostfix), '');
+  dynamic imageMapEntry = imageMapGet(localPath);
+  if (imageMapEntry == null) {
+    imageMapEntry = [
+      DateTime.now().millisecondsSinceEpoch,
+      emptyString,
+      false,
+      0,
+      0
+    ];
+    await imageMapUpdateUrl(localPath, emptyString);
+  } // end if (imageMapEntry == null)
+  if (await internetConnectedCheck()) {
+    if (imageMapEntry[1].length < 5) {
+      // try to upload the image to cloud
+      List<String> fileArray = localPath.split('___');
+      String rawFolder = Uri.decodeComponent(fileArray[0]);
+      String folder = rawFolder.substring(
+          rawFolder.lastIndexOf('$localImageBeginningFolderDivider/') +
+              localImageBeginningFolderDivider.length +
+              1);
+      await saveImageToCloud(
+          imagePath: localPath, folder: folder, rawFileName: fileArray[1]);
+    }
+  } // end if (await internetConnectedCheck())
+} // end of saveImagePutInImageMap
+
+Future replaceAumImageInHistoryUnUsed(
+    String oldImage, String folder, String fileName) async {
+  // replace relevant oldImage  in all history records with newImage from _IMAGEMap table
+  String imagePath = oldImage
+      .replaceAll(localImagePrefix, '')
+      .replaceAll((localImagePostfix), '');
+  String url = await uploadToCloudStorage(imagePath, "$folder/$fileName.jpg");
+  if (isValidImageUrl(url)) {
+    await historyLock('replaceAumImageInHistory');
+    for (int i = 0; i < tableContent[historyName].length; i++) {
+      if (tableContent[historyName][i][2].contains(oldImage)) {
+        tableContent[historyName][i][2] =
+            tableContent[historyName][i][2].replaceAll(oldImage, url);
+      } // end if (tableContent[historyName][i][2].includes(oldImage))
+    } // end for (int i = 0; i < tableContent[historyName].length)
+    historyUnLock('replaceImageInHistory');
+    await saveHistory();
+  } // end if (url != emptyImageUrl)
+} // end of replaceImageInHistory
+
+Future<List<String>> saveImageToCloud(
+    {required String imagePath,
+    required String folder,
+    required String rawFileName}) async {
+  String fileName = rawFileName.replaceAll('.jpg', '');
+  List<String> result = [emptyString, emptyString];
+  String finalImagePath = await renamePath(
+      originalImagePath: imagePath, folder: folder, fileName: fileName);
+  dynamic state = transactionStore.state.screenTx;
+  try {
+    if (await internetConnectedCheck()) {
+      if (File(finalImagePath).existsSync()) {
+        String tempResult =
+            await uploadToCloudStorage(finalImagePath, "$folder/$fileName.jpg");
+        if (isValidImageUrl(tempResult)) {
+          result = [finalImagePath, tempResult];
+          await imageMapUpdateUrl(finalImagePath, tempResult);
+        } else {
+          result = [
+            finalImagePath,
+            '${invalidPathPrefix}01$invalidPathPostfix'
+          ]; // not a valid url
+        }
+      } else {
+        result = [
+          finalImagePath,
+          '${invalidPathPrefix}02$invalidPathPostfix'
+        ]; // file not exist
+      } // end if (file.existsSync())
+    } // end if (transactionStore.state.screenTx['#INTERNET'] ?? false)
+  } catch (e) {
+    // result = '$localImagePrefix$finalImagePath$localImagePostfix';
+    result = [
+      finalImagePath,
+      '${invalidPathPrefix}03:${e.toString()}$invalidPathPostfix'
+    ]; // general error
+  }
+  return result;
+} // end of saveImageToCloud
+
+Future<String> renamePath(
+    {required String originalImagePath,
+    required String folder,
+    required String fileName}) async {
+  String tempImagePath = originalImagePath.replaceFirst(localImagePrefix, "");
+  tempImagePath = tempImagePath.endsWith(localImagePostfix)
+      ? tempImagePath.substring(
+          0, tempImagePath.length - localImagePostfix.length)
+      : tempImagePath;
+  String finalImagePath = tempImagePath;
+  bool originalPath =
+      tempImagePath.contains(localImageArtifact); // original path from camera
+  if (originalPath) {
+    String finalFolder = folder.isEmpty || folder.endsWith('/')
+        ? folder.substring(0, folder.length - 1)
+        : folder; // delete '/' at the end of folder
+    finalImagePath =
+        '${tempImagePath.split(localImageArtifact)[0]}$localImageBeginningFolderDivider%2F${Uri.encodeComponent(finalFolder)}$localImageFolderSeparator${Uri.encodeComponent(fileName)}.jpg';
+    try {
+      await File(tempImagePath).rename(finalImagePath);
+    } catch (e) {
+      finalImagePath = tempImagePath;
+      debugPrint(
+          'Cannot rename $tempImagePath to $finalImagePath :${e.toString()}');
+    }
+  } else {
+    finalImagePath = tempImagePath;
+  } // end if (originalPath
+  return finalImagePath;
+} // end of renamePath
+
+Widget displayImage({String imageUrl = defaultImage, bool cached = true}) {
+  const int duration = 100;
+  String finalUrl = defaultImage;
+  late Widget result;
+  if (imageUrl.isNotEmpty) {
+    finalUrl = imageUrl;
+  } // end if (imageUrl.isNotEmpty)
+  try {
+    if (finalUrl.startsWith(localImagePrefix)) {
+      String localImage = finalUrl.substring(
+          localImagePrefix.length, finalUrl.length - localImagePostfix.length);
+      File localFile = File(localImage);
+      if (!localFile.existsSync()) {
+        result = CachedNetworkImage(
+            imageUrl: defaultImage,
+            placeholder: (context, url) => Container(
+                  color: Colors.transparent, // Set transparency
+                  width: double.infinity, // Match image size
+                  height: double.infinity, // Match image size
+                )); // default image
+      } else {
+        result = Image.file(localFile, fit: BoxFit.contain);
+      } // end if (!localFile.existsSync())
+    } else {
+      if (cached) {
+        result = CachedNetworkImage(
+          imageUrl: finalUrl,
+          placeholder: (context, url) => Container(
+            color: Colors.transparent, // Set transparency
+            width: double.infinity, // Match image size
+            height: double.infinity, // Match image size
+          ), // Placeholder while loading
+          errorWidget: (context, url, error) =>
+              const Icon(Icons.error), // Error widget
+          fadeInDuration:
+              const Duration(milliseconds: duration), // Fade-in effect
+        );
+      } else {
+        result = FadeInImage.memoryNetwork(
+            fit: BoxFit.contain,
+            placeholder: kTransparentImage,
+            image: finalUrl);
+      } // end if(cached)
+    }
+  } catch (e) {
+    result = CachedNetworkImage(
+      imageUrl: defaultImage,
+      placeholder: (context, url) => Container(
+        color: Colors.transparent, // Set transparency
+        width: double.infinity, // Match image size
+        height: double.infinity, // Match image size
+      ), // Placeholder while loading
+      errorWidget: (context, url, error) =>
+          const Icon(Icons.error), // Error widget
+      fadeInDuration: const Duration(milliseconds: duration), // Fade-in effect
+    );
+  } // end try
+  return result;
+} // end of displayImage
+
+String getAppVid(String ssid) {
+  // should access to ssid and fetch the application vid from it
+  String result = 'TestVid049848784'; // todo change this for production
+  return result;
+} // end of getAppVid
+
+String getLocationString(
+    String locId, String imageUrl, String position3, OtqState locSensor) {
+  final diamond = separator[1];
+  String result = diamond; //1
+  result += locSensor.nowTime.millisecondsSinceEpoch.toString() + diamond; //2
+  result += position3 + diamond; //3
+  result += locId + diamond; //4
+  result += locSensor.latitude.toString() + diamond; //5
+  result += locSensor.longitude.toString() + diamond; //6
+  result += imageUrl + diamond; //7
+  result += locSensor.isoCountryCode + diamond; //8
+  result += locSensor.postalCode + diamond; //9
+  result += cleanupString(locSensor.administrativeArea) + diamond; //10
+  result += cleanupString(locSensor.subAdministrativeArea) + diamond; //11
+  result += cleanupString(locSensor.locality) + diamond; //12
+  result += cleanupString(locSensor.subLocality) + diamond; //13
+  result += cleanupString(locSensor.thoroughfare) + diamond; //14
+  result += cleanupString(locSensor.subThoroughfare);
+  result += diamond + cleanupString(locSensor.locationStatus); // 15
+
+  return result;
+} // end of getLocationString
+
+String myCountryCode() {
+  try {
+    dynamic cc = transactionStore.state.screenTx['#COUNTRY'];
+    debugPrint('cc=$cc');
+    int dd = 1;
+  } catch (e) {
+    int d = 1;
+  }
+  return transactionStore.state.screenTx['#COUNTRY'].toString();
+} // end of getCountryCode
+
+String phoneWithoutCC(String inp) {
+  String result =
+      inp.replaceAllMapped(RegExp(r'( |\.|-|\+|\(|\)|\[|\])'), (match) {
+    return '';
+  });
+  String result1 =
+      result.replaceAllMapped(RegExp(r'^' + myCountryCode()), (match) {
+    return '';
+  });
+  String result2 = result1.replaceAllMapped(RegExp(r'^0'), (match) {
+    return '';
+  });
+  return result2;
+} // end of phoneWithoutCC
+
+String phoneWithCC(String inp) {
+  return '${myCountryCode()}${phoneWithoutCC(inp)}';
+} // end of String phoneWithCC
+
+Future<String> getQRContent(
+    String qrType,
+    String rawText,
+    Position? position,
+    String? rawTableString,
+    String? negativeTableString,
+    List<int>? refClusters) async {
+  /*
+     qrType L = location qr; U = user qr; G|other = no conversion
+     output with prefix '#ErrorXX' indicate error number XX
+     01 = out of range
+     02 = no qr result
+     05 = qr not in reference list
+     06 = qr is not in positive list
+     07 = qr is in negative list
+     98 = qr not recognized
+     99 = generic error
+  */
+  String tableString =
+      normalizeTableName(autheniumDecode(rawTableString) ?? '');
+  final String errString = textList["ErrorPrefix"];
+  dynamic result = '${errString}99';
+  dynamic refTable;
+  final List<int> clusters = refClusters ?? [];
+  List<String> tableCodeArray = tableString.split(separator[1]) ?? [];
+  String? tableCode = tableCodeArray.isNotEmpty ? tableCodeArray[0] : null;
+  int tableColumn = max(
+      0,
+      ((tableCodeArray.length > 1) ? int.tryParse(tableCodeArray[1]) ?? 1 : 1) -
+          1);
+  List<String> negativeTableCodeArray =
+      negativeTableString?.split(separator[1]) ?? [];
+  String? negativeTableCode =
+      negativeTableCodeArray.isNotEmpty ? negativeTableCodeArray[0] : null;
+  int negativeTableColumn = max(
+      0,
+      ((negativeTableCodeArray.length > 1)
+              ? int.tryParse(negativeTableCodeArray[1]) ?? 1
+              : 1) -
+          1);
+  try {
+    if (qrType == 'L') {
+      dynamic p;
+      dynamic q;
+      await Future.wait([
+        omLqrReaderP(),
+        osLqrMakerQ(),
+      ]).then((res) {
+        p = res[0];
+        q = res[1];
+      });
+      String lqr = await lqrVerify(p, q, rawText);
+      if (lqr == errorString) {
+        result = '${errString}98';
+      } else {
+        String resultOk = empty;
+        if (tableCode == null || tableCode.isEmpty) {
+          refTable = transactionStore.state.screenTx['#LQR_LIST'];
+        } else {
+          refTable = transactionStore.state.screenTx['#TABLE$tableCode'];
+        }
+        resultOk = (refTable[lqr]) != null ? lqr : empty;
+        if (resultOk == empty || resultOk == errorString) {
+          result = '${errString}02';
+        } else {
+          int tol = (refTable[lqr][3] ?? 0).round();
+          num finalTolerance =
+              (position == null ? 0 : (position.accuracy ?? 0).round()) + tol;
+          num d = (distanceM(position!.latitude, position.longitude,
+                  refTable[lqr][1], refTable[lqr][2]))
+              .round();
+          if (d > finalTolerance) {
+            result = '${errString}01';
+          } else {
+            result = lqr;
+            //locationStatus = 1;
+            // for (int t = 0; t < newArray.length; t++) {
+            //   newArray[t] = newArray[t].replaceAll('<L>', resultOk);
+            // } // end for newArray
+          } // end if (d > finalTolerance)
+        } // end if (resultOk != empty && resultOk != errorString)
+      } // end if (finalQrText != empty && finalQrText != errorString)
+    } else if (qrType == 'U') {
+      if (tableCode == null) {
+        refTable = {};
+      } else {
+        refTable = transactionStore.state.screenTx['#TABLE$tableCode'];
+      }
+      result = await getVidUQR(rawText);
+      if (result == -1) {
+        result = '${errString}98'; // qr not recognized
+      } else {
+        result = result.toString();
+        if (refTable[result] == null) {
+          result = '${errString}05'; // user not in list
+        } // if (refTable[result]==null)
+      }
+    } else if (qrType == 'A') {
+      // A for Asset
+      String universalCode =
+          await assetVerify(rawText, 9); // Todo use component
+      if (universalCode == errorString) {
+        result = '${errString}98';
+      } else {
+        String resultOk = empty;
+        if (tableCode == null || tableCode.isEmpty) {
+          refTable = {};
+        } else {
+          refTable = transactionStore.state.screenTx['#TABLE$tableCode'];
+        }
+        resultOk = (refTable[universalCode]) != null ? universalCode : empty;
+        if (resultOk == empty || resultOk == errorString) {
+          result = '${errString}02';
+        } else {
+          if (negativeTableCode == null || negativeTableCode.isEmpty) {
+            result = universalCode;
+          } else {
+            dynamic negativeList =
+                transactionStore.state.screenTx['#TABLE$negativeTableCode'];
+            resultOk =
+                (negativeList[universalCode]) != null ? universalCode : empty;
+            if (resultOk == empty || resultOk == errorString) {
+              result = universalCode; // not in negative list
+            } else {
+              result = '${errString}07'; // in negative list
+            } // end if (resultOk == empty || resultOk == errorString)
+          } // end if (tableCode == null || tableCode.isEmpty)
+        } // end if (resultOk != empty && resultOk != errorString)
+      } // end if (finalQrText != empty && finalQrText != errorString)
+    } else {
+      result = rawText;
+    } // end if (qrType == 'L')
+  } catch (e) {
+    result += ' $e';
+  } // end try
+  return result;
+} // end of getQRContent
+
+String ftzDateTimeFormatConverter(String source) {
+  return source;
+} // end of ftzDateTimeFormatConverter
+
+Future syncLocaleTable() async {
+  // load locale table from proxy's Locale!A1 checksum
+  //   and Locale!B1:C
+  // localeText : {
+  //   "checksum": "329756954", last 6 digits = checksum, the front = last row
+  //   "language": "id",
+  //   "country": "ID",
+  //   100010: "Masuk",
+  //  }
+  //  localeText will be read by function getLocaleText(String key)
+  List response = [];
+  const int nullValue = -99999;
+  try {
+    int lastChecksum = (prefs.getInt('@localeCheckSum') ?? nullValue);
+    int wholeCS = 0;
+    List response = await proxyRead(['Locale!A1']);
+    wholeCS = response[0][0][0];
+    if (lastChecksum != wholeCS) {
+      int lastRow = (wholeCS / 1000000).floor();
+      response = await proxyRead(["Locale!B1:C$lastRow"]);
+      localeText = {};
+      localeText['checksum'] = wholeCS;
+      localeText['language'] = response[0][2][1];
+      localeText['country'] = response[0][7][1];
+      for (int i = 16; i < response[0].length; i++) {
+        if (response[0][i][0].toString().isNotEmpty) {
+          localeText[(response[0][i][0]).toString()] = response[0][i][1];
+        } // end if isNotEmpty
+      } // end for response[0]
+      prefs.setString(
+          '@localeText', stringCompress(jsonEncode(localeText)) ?? emptyString);
+      prefs.setInt('@localeCheckSum', wholeCS);
+      int ddd = 1;
+    } else {
+      String? stored = prefs.getString('@localeText');
+      localeText = jsonDecode(stringDecompress(stored) ?? '{}');
+      int d = 1;
+    } // end if (lastChecksum != wholeCS)
+  } catch (e) {
+    //result = {}; // error in reading Locale checksum
+    int d1 = 2;
+  }
+  int dd = 1;
+} // end of loadLocaleTable
+
+String? stringCompress(String? inp) {
+  String? result;
+  try {
+    if (inp != null) {
+      final utf8EncodedString = utf8.encode(inp);
+      final gZipString = gzip.encode(utf8EncodedString);
+      result = base64.encode(gZipString);
+    } // end (inp != null)
+  } catch (_) {}
+  return result;
+} // end of stringCompress
+
+String? stringDecompress(String? inp) {
+  String? result;
+  try {
+    if (inp != null) {
+      final decodedBase64Input = base64.decode(inp);
+      final decodedGZipInput = gzip.decode(decodedBase64Input);
+      result = utf8.decode(decodedGZipInput);
+    } // end (inp != null)
+  } catch (_) {}
+  return result;
+} // end of stringDecompress
+
+Future<List> proxyRead(dynamic ranges) async {
+  // ranges = ["Locale!A1","Locale!B1:C"]
+  // result = [[result from range1],[results from range2]]
+  List result = [];
+  try {
+    FunctionBody functionBody = getFunctionBody(
+        transactionStore.state.screenTx['#INTERFACE_KEY'], ranges);
+    dynamic response =
+        await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+    result = jsonDecode(response.body);
+    int d = 1;
+  } catch (e) {
+    result = [];
+  }
+  return result;
+} // end of proxyRead
+
+List<dynamic> getCurrencyFormat(String? inp) {
+  const defaultLang = "en_US";
+  const dotLang = "id_ID";
+  List<dynamic> result = [
+    "",
+    defaultLang,
+    0
+  ]; // symbol, thousand separator, mantissa
+  String decodedInp = autheniumDecode(inp) ?? '';
+  if (inp != null && inp.isNotEmpty) {
+    List<dynamic> splitArray = decodedInp.split(separator[3]); // black star
+    String lang = defaultLang;
+    int aLen = splitArray.length;
+    if (aLen == 1) {
+      result = [splitArray[0], defaultLang, 0];
+    } else if (aLen == 2) {
+      try {
+        lang = splitArray[1].toString().trim();
+        if (lang == ".") {
+          lang = dotLang;
+        } else if (lang == ",") {
+          lang = defaultLang;
+        }
+      } catch (e) {
+        lang = defaultLang;
+      }
+      result = [splitArray[0], lang, 0];
+    } else {
+      int mantis = 0;
+      try {
+        mantis = int.parse(splitArray[2]);
+      } catch (e) {
+        mantis = 0;
+      }
+      try {
+        lang = splitArray[1].toString().trim();
+        if (lang == ".") {
+          lang = dotLang;
+        } else if (lang == ",") {
+          lang = defaultLang;
+        }
+      } catch (e) {
+        lang = defaultLang;
+      }
+      result = [splitArray[0], lang, mantis];
+    } // end if alen
+  }
+  return result;
+} // end of getCurrencyFormat
+
+Future<String> dataProcess(BuildContext context, String inputText,
+    String screenName, dynamic component) async {
+  String resultOk = empty;
+  String finalQrText = empty;
+  List<dynamic> tArray = diamondTextToList(component['text'] ?? empty);
+
+  // Platform messages may fail, so we use a try/catch PlatformException.
+  try {
+    int nowTime = 0; // = await ntpTimeSec();
+    Position? position;
+    dynamic p;
+    dynamic q;
+
+    await Future.wait([
+      // getCurrentPosition(desiredAccuracy: LocationAccuracy.high),
+      omLqrReaderP(),
+      osLqrMakerQ(),
+    ]).then((res) {
+      p = res[0];
+      q = res[1];
+    });
+
+    if (inputText != empty) {
+      //got qr
+      var scannedText = inputText;
+      finalQrText = await lqrVerify(p, q, scannedText);
+      if (finalQrText != errorString) {
+        if (transactionStore.state.screenTx['#LQR_LIST'] == null) {
+          resultOk = empty;
+        } else {
+          resultOk = (transactionStore.state.screenTx['#LQR_LIST']
+                      [finalQrText]) !=
+                  null
+              ? transactionStore.state.screenTx['#LQR_LIST'][finalQrText][0]
+              : empty;
+        } // end if (transactionStore.state.screenTx['#LQR_LIST'] == null)
+      } else {
+        resultOk = errorString;
+      } // end if finalQrText
+    } else {
+      // got selfie url
+      resultOk = errorString;
+    } // end if inputText != empty
+
+    actionLock('dataProcess api');
+    switch (resultOk) {
+      case empty: // valid qr but not listed in proxy
+        // await Vibration.vibrate(duration: 50);
+        // await Future.delayed(const Duration(milliseconds: 100));
+        // Vibration.vibrate(duration: 50);
+        if (component['position'] != null) {
+          txfController[screenName]![getPosition(component['position'])]!
+              .controller
+              .text = textList["LocNotListed"];
+          txfController[screenName]![getPosition(component['position'])]!
+              .finalData = finalQrText;
+        } // end if (widget.component['position'] != null)
+        break;
+
+      case errorString:
+        // await Vibration.vibrate(duration: 50);
+        // await Future.delayed(const Duration(milliseconds: 100));
+        // await Vibration.vibrate(duration: 50);
+        // await Future.delayed(const Duration(milliseconds: 100));
+        // Vibration.vibrate(duration: 50);
+        if (component['position'] != null) {
+          txfController[screenName]![getPosition(component['position'])]!
+              .controller
+              .text = "";
+          txfController[screenName]![getPosition(component['position'])]!
+              .finalData = "";
+        } // end  if (widget.component['position'] != null)
+        break;
+
+      default: // valid location qr
+        // Vibration.vibrate(duration: 100);
+        if (component['position'] != null) {
+          txfController[screenName]![getPosition(component['position'])]!
+              .controller
+              .text = resultOk;
+          txfController[screenName]![getPosition(component['position'])]!
+              .finalData = finalQrText;
+        } // end if (widget.component['position'] != null)
+    } // end of switch(resultOk)
+  } catch (e) {
+    errorReport(e);
+    resultOk = errorString;
+  }
+  setDataOK('2'); // reload pages and display green status.
+  return resultOk;
+} // end of dataProcess
+
+String getThousandSeparator(String lang) {
+  late String result;
+  try {
+    dynamic fmt = NumberFormat("#,##0.00", lang);
+    String thousandFormatted = fmt.format(1000.00);
+    result = thousandFormatted[1];
+  } catch (e) {
+    result = ".";
+  }
+  return result;
+} // end of getThousandSeparator
+
+Future<void> openInWebView(
+    BuildContext context, String url, String? title) async {
+  Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (ctx) => Scaffold(
+        appBar: AppBar(
+            backgroundColor: Theme.of(context).primaryColor,
+            title: Text(title ?? url)),
+        body: Builder(
+          builder: (BuildContext context) {
+            return WebView(
+              url: url,
+            );
+          }, // end of builder
+        ),
+      ),
+    ),
+  );
+} // end of openInWebView
+
+int getNowMillisecondFromEpoch() {
+  // return milliseconds from epoch integer
+  //   relatively close to ntp, from device local time
+  int result = DateTime.now().millisecondsSinceEpoch;
+  int temp = result;
+  try {
+    dynamic state = transactionStore.state.screenTx;
+    if (state['#REF_TIME_START'] != null) {
+      result = (result + state['#REF_TIME_START'] - state['#DEVICE_TIME_START'])
+          .round();
+    } // end (state['#REF_TIME_START'] != null)
+  } catch (e) {
+    result = temp;
+  } // end try
+  return result;
+} // end of getNowTime
+
+String dateTimeToGSheet(DateTime myDate, bool utc) {
+  String result = emptyString;
+  result = utc
+      ? NumberFormat("##0").format(myDate.millisecondsSinceEpoch)
+      : NumberFormat("##0").format(
+          myDate.millisecondsSinceEpoch + myDate.timeZoneOffset.inMilliseconds);
+  return result;
+} // end of dateTimeToGSheet
+
+String timeOfDayToGSheet(TimeOfDay myTime, bool utc) {
+  String result = utc
+      ? NumberFormat("##0").format(myTime.hour * 3600000 +
+          myTime.minute * 60000 -
+          DateTime.now().timeZoneOffset.inMilliseconds)
+      : NumberFormat("##0")
+          .format(myTime.hour * 3600000 + myTime.minute * 60000);
+  return result;
+} // end of dateTimeToGSheet
+
+void getLqrList(String? proxySsid) async {
+  Map<String, dynamic> lqr = {};
+  String? lqrString;
+  try {
+    lqrString = await secureRead(
+        key: "lqrList"); //= get documentID of entry in msg_xxxx collection
+    if (lqrString != null) {
+      lqr = json.decode(lqrString);
+      transactionStore.dispatch(
+          UpdateScreenTxAction(ScreenTransaction({'#LQR_LIST': lqr})));
+    }
+  } catch (er) {
+    errorReport(er);
+  }
+
+  try {
+    while (locRange == '--') {
+      // Wait until locRange is populated
+      await Future.delayed(const Duration(milliseconds: 300));
+      int d = 1;
+    }
+    FunctionBody functionBody = getFunctionBody(proxySsid!, [locRange]);
+    dynamic locString =
+        await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+    dynamic lqrArray = json.decode(locString.body)[0];
+    lqr = {};
+    for (int i = 0; i < lqrArray.length && lqrArray[i][3] != ""; i++) {
+      lqr[lqrArray[i][3]] = [
+        lqrArray[i][2],
+        lqrArray[i][0],
+        lqrArray[i][1],
+        lqrArray[i][4]
+      ];
+    } // end for in lqrArray
+  } catch (eLoc) {
+    errorReport(eLoc);
+  }
+  transactionStore
+      .dispatch(UpdateScreenTxAction(ScreenTransaction({'#LQR_LIST': lqr})));
+  storage.write(key: "lqrList", value: json.encode(lqr));
+} //end of getLqrList
+
+Future<void> getAllPermission() async {
+  // Map<Permission, PermissionStatus> statuses =
+  await [
+    Permission.location,
+    Permission.phone,
+    Permission.camera,
+    Permission.microphone,
+  ].request();
+  // devPrint('Location:${statuses[Permission.location]}');
+  // devPrint('Phone:${statuses[Permission.phone]}');
+}
+
+void getCountryCodeList() async {
+  // get list of country code from sim card (Android only)
+  // TODO: add getCountryCodeList ios part
+  // List<String> cCodes = ['62', '63', '60', '66', '91', '84', '65'];
+  List<String> cCodes = [defaultCountry];
+  // try {
+  //   // final List<SimCard> simCards = (await MobileNumber.getSimCards)!;
+  //   // cCodes = simCards
+  //   //     .map((SimCard sim) => '62')
+  //   //     .toSet()
+  //   //     .toList();
+  //
+  // } on PlatformException catch (e) {
+  //   devPrint("Failed to get mobile number because of '${e.message}'");
+  // }
+  transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
+      {'#SIM_COUNTRY_CODES': cCodes, '#COUNTRY': cCodes[0]})));
+}
+
+Future setStatus(msgId, status) async {
+  var statusUpdate = {
+    "st": 101, // set to no need action
+  };
+  FirebaseFirestore.instance
+      .collection(firestoreNotif + "/msg")
+      .doc(msgId)
+      .update(statusUpdate);
+
+  final notifRef = FirebaseFirestore.instance.doc(firestoreNotif);
+  await FirebaseFirestore.instance.runTransaction((Transaction tx) async {
+    final docSnapshot = await tx.get<Map<String, dynamic>>(notifRef);
+    var currentUnread = (docSnapshot.data()!['urd'] - 1) >= 0
+        ? docSnapshot.data()!['urd'] - 1
+        : 0;
+    var updateData = {
+      "urd": currentUnread,
+    };
+    tx.update(notifRef, updateData);
+  }); // end of firebase transaction
+}
+
+Future sendMessage(mTo, mFrom, mDisplay, mData, mIn, mStatus) async {
+  var tStamp = DateTime.now().millisecondsSinceEpoch;
+  String msgId;
+  var toVid = jsonDecode(mTo);
+//  var myState = transactionStore.state.screenTx;
+  for (var i = 0; i < toVid.length; i++) {
+    var val = toVid[i];
+    var sendCollection = "$fsMsgCollection/$val/io/$mFrom";
+    var messageCollection =
+        FirebaseFirestore.instance.collection("$sendCollection/msg");
+    var msg = {
+      "to": val,
+      "fr": mFrom,
+      "dp": mDisplay,
+      "dt": mData,
+      "im": mIn,
+      "st": mStatus,
+      "id": '',
+      "tr": tStamp,
+      // should be deleted because time received will be written by receiver
+    };
+    await messageCollection.add(msg).then((doc) {
+      msgId = doc.id;
+      var updateData = {
+        "id": msgId,
+      };
+      FirebaseFirestore.instance
+          .collection("$sendCollection/msg")
+          .doc(msgId)
+          .update(updateData);
+    });
+
+    try {
+      DocumentSnapshot docSnap =
+          await FirebaseFirestore.instance.doc(sendCollection).get();
+      final postRef = FirebaseFirestore.instance.doc(sendCollection);
+      await FirebaseFirestore.instance.runTransaction((Transaction tx) async {
+        final docSnapshot = await tx.get<Map<String, dynamic>>(postRef);
+        var currentUnread = docSnapshot.data()!['urd'] + 1;
+        var updateData = {
+          "lm": mDisplay,
+          "urd": currentUnread,
+          "lt": tStamp,
+        };
+        tx.update(postRef, updateData);
+      }); // end of firebase transaction
+    } catch (eTrans) {
+      errorReport(e);
+    }
+  }
+} // end of sendMessage
+
+Future<int> resetVid(List<dynamic> targets) async {
+  String operationString = 'reset-device';
+  // result : 1 = success
+  //    -4 = general error; -5 vid registered in more than 1 user
+  //    -6 = error accessing firebase
+  int result = -4;
+  // search for vid in dvc collection
+  // if more than 1 user then return -5 error
+  // reset all dvc :
+  //  user => e : "-" ; u : "-"
+  //  dvc => did : "TBD" ; in : false
+  Map<String, dynamic> dvcData = {
+    'did': 'TBD',
+    'in': false,
+  };
+  Map<String, dynamic> userData = {
+    'e': '-',
+    'u': '-',
+  };
+
+  try {
+    for (dynamic target in targets) {
+      operationString = 'reset-device';
+      result = await FirebaseFirestore.instance
+          .collectionGroup('dvc')
+          .where('vid', isEqualTo: target[0]) // vid
+          .get()
+          .then((res) {
+        String proxy = '';
+        if (target[1] != null && target[1].isNotEmpty) {
+          userData = {
+            'e': '-',
+            'u': '-',
+            'i': phoneWithoutCC(target[1]),
+          };
+          operationString = 'reset-device-update-phone-number';
+        } else {
+          userData = {
+            'e': '-',
+            'u': '-',
+          };
+          operationString = 'reset-device';
+        } // end if (target[1] != null && target[1].isNotEmpty)
+        bool parentUpdated = false;
+        for (dynamic dvc in res.docs) {
+          dynamic dvcRef = dvc.reference;
+          proxy = dvc.data()['lif'];
+          dvcRef.update(dvcData); //= write updated data to user dvc
+          if (!parentUpdated) {
+            dvcRef.parent.parent
+                .update(userData); //= write updated data to user
+            parentUpdated = true;
+          } // if (!parentUpdated)
+        } // end for (dynamic dvc in dvcDocs)
+        registerDeviceOperation(
+            proxy, target[2], operationString, phoneWithCC(target[1]));
+        return 1;
+      });
+    } // end for (String vid in vids)
+  } catch (e) {
+    result = -5;
+  }
+  return result;
+} // end of resetVid
+
+void resetVidUid(String userUid) async {
+  // call GCP resetVid with uid as parameter.
+  // delete all occurrence of uid in firebase and SQL
+  // making user can be linked to other account
+  // this is used by QA team
+  var qParams = {"uid": userUid};
+  var uri = Uri.https(cloudFunctionDomain, resetVidName, qParams);
+  await http.post(uri);
+}
+
+Future getNewVid(String userUid, String userName, String userEmail) {
+  // call function getNewVid. This function will give new vid and update firebase accordingly
+  // output will be content of dvc entry
+  var qParams = {"uid": userUid};
+  if (userName != '') {
+    qParams["name"] = userName;
+  }
+  if (userEmail != '') {
+    qParams["email"] = userEmail;
+  }
+  var uri = Uri.https(cloudFunctionDomain, getNewVidFunctionName, qParams);
+  return http.post(uri);
+}
+
+void getLinkInterfaceKey(BuildContext context, String vid, String pin) {
+  String result = '';
+  var b = transactionStore.state;
+  var vidKey = b.screenTx['#VID_KEY'];
+  dynamic vidList;
+  int foundRow = -1;
+
+  Future.wait([
+    // TODO get from Firebase (get data from vidKey).
+    sheetApi.spreadsheets.values.batchGet(vidKey,
+        ranges: [vidRange],
+        dateTimeRenderOption: "SERIAL_NUMBER",
+        valueRenderOption: "UNFORMATTED_VALUE"),
+  ]).then((entryList) {
+    vidList = entryList[0].valueRanges![0].values;
+    bool found = false;
+    for (var i = 0; i < vidList.length && !found; i++) {
+      // loop for search of the right vid
+      if (vidList[i][0] == vid || vidList[i][0] == int.parse(vid)) {
+        found = true;
+        foundRow = i;
+      }
+    }
+    if (found) {
+      // if vid found
+      if (vidList[foundRow][4] == pin || // check for pin
+          vidList[foundRow][4] == int.parse(pin)) {
+        transactionStore.dispatch(UpdateScreenTxAction(//   if pin ok then
+            ScreenTransaction({'#VID': int.parse(vid)}))); //     set state #VID
+        result = vidList[foundRow][2]; //     put interface key as result
+        storage.write(key: 'myLif', value: result).then((val) {
+          // put interface key in secure storage
+          transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
+              {'#INTERFACE_KEY': result}))); //     set state #INTERFACE_KEY
+          readSettings(result, 1).then((_) {
+            rootThis.setState(() {
+              rootThis.key = UniqueKey(); //     refresh page
+            });
+          });
+        }); // store in secure & persistent storage
+      } else {
+        showDialog(
+            context: context,
+            builder: (BuildContext context) {
+              return AlertDialog(
+                //   else (pin not match)
+                title: const Text("User not found"),
+                content: const Text(
+                    "Pin salah, masukan sekali lagi."), // show dialog
+                actions: <Widget>[
+                  TextButton(
+                    child: const Text("OK"),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                    },
+                  )
+                ],
+              );
+            });
+      }
+    } else {
+      // else (vid not found
+      showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              //   show dialog (vid not found)
+              title: const Text("User not found"),
+              content: const Text("Vid tidak ditemukan."),
+              actions: <Widget>[
+                TextButton(
+                  child: const Text("OK"),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                )
+              ],
+            );
+          });
+    }
+  });
+} // end of getLinkInterfaceKey
+
+Future setDataOK(String iNumber) async {
+  // iNumber = 1 : reload and set data ok
+  // 1Number = 2 : set data ok only, because there is a cancel operation
+  // iNumber = 3 : set data ok and reload (async)
+  // iNumber = 4 : set data ok and reload without reading from spreadsheet (called by subscribeToProxy)
+  // application will get green light by submit_bloc.dart > _mapSubmitUpdatedToState
+  String desc = '';
+  dynamic state = transactionStore.state;
+  setTransactionOK('setDataOK $iNumber');
+  transactionStore.dispatch(UpdateScreenTxAction(
+      ScreenTransaction({'#DATA_OK': true, '#REFRESH': false})));
+  switch (iNumber) {
+    case '1': // reload from proxy
+      desc = '1=>reload from proxy';
+      var lifKey = state.screenTx['#INTERFACE_KEY'];
+      String newRoute = transactionStore.state.screenTx['#CURRENT_ROUTE'];
+      try {
+        await readSettings(lifKey, 2) // read from JSON2
+            .timeout(const Duration(seconds: 15)); // 15 sec timeout
+        if (newRoute == home) {
+          List<Widget> newElementList = reloadPage(newRoute);
+          rootThis.setState(() {
+            rootThis.pageName = newRoute;
+            rootThis.pageElements = newElementList;
+            rootThis.wait = false;
+            rootThis.touch = !rootThis.touch;
+            rootThis.dataColor = readyColor;
+          });
+        }
+      } catch (e) {
+        rootThis.setState(() {
+          rootThis.wait = false;
+          rootThis.touch = !rootThis.touch;
+          rootThis.dataColor = readyColor;
+        });
+        errorReport(e);
+      }
+      break;
+
+    case '2': // set data ok only
+      desc = '2=>set data ok only';
+      rootThis.setState(() {
+        rootThis.wait = false;
+        rootThis.touch = !rootThis.touch;
+        rootThis.dataColor = readyColor;
+      });
+      break;
+
+    case '3': // reload from proxy
+      desc = '3=>reload from proxy';
+      var lifKey = state.screenTx['#INTERFACE_KEY'];
+      String newRoute = transactionStore.state.screenTx['#CURRENT_ROUTE'];
+      try {
+        readSettings(lifKey, 2) // read from JSON2
+            .timeout(const Duration(seconds: 15)); // 15 sec timeout
+        if (newRoute == home) {
+          List<Widget> newElementList = reloadPage(newRoute);
+          rootThis.setState(() {
+            rootThis.pageName = newRoute;
+            rootThis.pageElements = newElementList;
+            rootThis.wait = false;
+            rootThis.touch = !rootThis.touch;
+            rootThis.dataColor = readyColor;
+          });
+        }
+      } catch (e) {
+        rootThis.setState(() {
+          rootThis.wait = false;
+          rootThis.touch = !rootThis.touch;
+          rootThis.dataColor = readyColor;
+        });
+        errorReport(e);
+      }
+      break;
+
+    case '4':
+      desc =
+          '4=>reload without reading from spreadsheet (called by subscribeToProxy)';
+      String newRoute = transactionStore.state.screenTx['#CURRENT_ROUTE'];
+      List<Widget> newElementList = reloadPage(newRoute);
+      if (rootThis != null) {
+        rootThis.setState(() {
+          rootThis.pageName = newRoute;
+          rootThis.pageElements = newElementList;
+          rootThis.wait = false;
+          rootThis.touch = !rootThis.touch;
+          rootThis.dataColor = readyColor;
+        });
+      } // end if (rootThis != null)
+      break;
+  }
+  transactionStore
+      .dispatch(UpdateScreenTxAction(ScreenTransaction({'#CAMERA': false})));
+  debugPrint('setDataOK $desc');
+  // devPrint(
+  //     "Updating Done! #DATA_OK:${transactionStore.state.screenTx['#DATA_OK']}");
+} // end of setDataOK
+
+Future<dynamic> getDataFromCloud() async {
+  // get data from functionName['appSettings'] ~ /appSettings3
+  dynamic returnValue = [
+    {body: jsonEncode(defaultCloudConfig)}
+  ];
+  if (internetConnected()) {
+    try {
+      dynamic qParams = {"app": appsCode};
+      dynamic uri =
+          Uri.https(autsorzFunctionDomain, appSettingFunctionName, qParams);
+      dynamic rawReturnValue = await Future.wait([
+        http.post(uri),
+//      getServiceAccountCredential(), //= TODO uncomment this
+      ]);
+      returnValue = [
+        {'body': rawReturnValue[0].body}
+      ];
+    } catch (e) {
+      returnValue = [
+        {body: jsonEncode(defaultCloudConfig)}
+      ];
+    }
+  }
+  return returnValue;
+} // end of getDataFromCloud
+
+Future settingUp() async {
+  // TODO call function in nearest server & use function callable. Still problem with firebase function
+  dynamic r = [
+    {body: jsonEncode(defaultCloudConfig)}
+  ];
+  String? storedAppSettings = await secureRead(key: 'appSettings');
+  if (storedAppSettings == null || storedAppSettings == emptyString) {
+    try {
+      dynamic raw = await getDataFromCloud();
+      String? data = raw[0][body];
+      if (data != null) {
+        dynamic j = json.decode(data);
+        locRange = j['locRange'];
+      } else {
+        locRange = defaultCloudConfig['locRange'].toString();
+      }
+      secureWrite(key: 'appSettings', value: data ?? emptyString);
+      r.add({body: data ?? emptyString});
+    } catch (eCloud) {
+      r = [
+        {body: jsonEncode(defaultCloudConfig)}
+      ];
+      locRange = defaultCloudConfig['locRange'].toString();
+    }
+  } else {
+    dynamic j = json.decode(storedAppSettings);
+    locRange = j['locRange'];
+    r = [
+      {'body': storedAppSettings}
+    ];
+    if (internetConnected()) {
+      try {
+        getDataFromCloud().then((result) {
+          try {
+            String? data = result[0][body];
+            if (data != null) {
+              dynamic j = json.decode(data);
+              locRange = j['locRange'];
+            } else {
+              locRange = defaultCloudConfig['locRange'].toString();
+            }
+            secureWrite(key: 'appSettings', value: data ?? emptyString);
+            devPrint('=======>>>>>> data saved to secure appSettings: $data');
+          } catch (eCloud) {
+            // do nothing
+          }
+        }); // end of getDataFromCloud().then
+      } catch (e) {
+        // do nothing
+      }
+    } // end if (internetConnected())
+  } // end if (storedAppSettings == null)
+  return r;
+} // end of settingUp
+
+Future oldSettingUpShouldBeDeleted() async {
+  return [];
+} // end of settingUp
+
+Future<bool> newUpdateApp() async {
+  String? lastVersion;
+  try {
+    lastVersion = await secureRead(key: 'lastVersion');
+  } catch (e) {
+    dynamic error = e;
+  }
+  bool test = lastVersion != null && lastVersion != '$version$subVersion';
+  return (lastVersion != null && lastVersion != '$version$subVersion');
+} // end of newUpdateApp
+
+readSettingsStart(String? lifKey, int opt) async {
+  // opt 1 = regular startup, load only home.
+  // opt 2 = fastened setup, load as second loader in asyncAppStartup2
+  debugPrint('start readSettingsStart opt=$opt');
+  var myState = transactionStore.state.screenTx;
+  //getLqrList(lifKey);
+  debugCount = 521;
+  trace(debugCount);
+  var aRes = myState['#SETTINGS'];
+  debugCount = 522;
+  var res = json.decode(aRes[0]['body']);
+  debugCount = 523;
+  bool signInProcess = false;
+  String guestRange = "JSON!B51:E51";
+  String asHome = home;
+  int guestIndex = 0;
+  debugCount = 524;
+  systemJsonRange = res['systemRange'];
+  screenJsonRange = res['screenRange'];
+  debugCount = 525;
+  settingKey = lifKey;
+  userKey = settingKey;
+  String localeString = Platform.localeName;
+  debugCount = 526;
+  transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
+      {'#INTERFACE_KEY': settingKey}))); // set state #INTERFACE_KEY
+  dynamic response;
+  String lastPages = '';
+  if (opt == 1 && !(await newUpdateApp())) {
+    try {
+      lastPages = prefs.getString('@screenUI') ?? "";
+    } catch (e) {
+      dynamic error = e;
+    }
+  }
+  bool firstTimeRun = lastPages.isEmpty;
+  try {
+    if (opt == 2 || lastPages.isEmpty) {
+      debugCount = 527;
+      trace(debugCount);
+      signInProcess = settingKey == myState['#GUEST_LIF'];
+      if (signInProcess) {
+        // this is sign in process. Get dedicated page for this app type
+        guestIndex = (50 + myState['#GUEST_INDEX']).toInt();
+        debugCount = 528;
+        if (needUpgrade != empty) {
+          guestIndex = 59; // get info page
+        }
+        guestRange =
+            "JSON!B$guestIndex:E$guestIndex"; // get dedicated sign in page from appSettings. #GUEST_INDEX was defined in serverSetup()
+        debugCount = 529;
+      } else {
+        if (needUpgrade != empty) {
+          guestIndex = (51 + myState['#VM_UPGRADE_INDEX']).toInt();
+          if (opt == 2) {
+            // as secondary loader
+            guestRange = res['screenRange']; // load all pages
+          } else {
+            guestRange =
+                "JSON!B$guestIndex:E$guestIndex"; // get dedicated sign in page from appSettings. #GUEST_INDEX was defined in serverSetup()
+          }
+          debugCount = 5210;
+        }
+        debugCount = 5211;
+        trace(debugCount);
+        await runSheetStartup(settingKey, myState['#CLUSTER']);
+        debugCount = 5212;
+      }
+      trace(debugCount);
+      if (firstTimeRun) {
+        devPrint('First time run');
+        debugCount = 52121;
+        trace(debugCount);
+        try {
+          FunctionBody functionBody = getFunctionBody(
+              settingKey, [systemJsonRange, guestRange, lifSetting]);
+          response = await http.post(Uri.parse(functionBody.url),
+              body: functionBody.body);
+          debugCount = 5213;
+          trace(debugCount);
+          lastPages = response.body;
+        } catch (e) {
+          debugCount = 5214;
+          errorReport(e);
+        }
+        dynamic getResult = jsonDecode(response.body);
+        debugCount = 5215;
+        trace(debugCount);
+        //systemUIComponent.clear();
+        for (var i = 0;
+            i < getResult[0].length &&
+                getResult[0][i].length > 0 &&
+                getResult[0][i][0].length > 0;
+            i++) {
+          var combination = combineJson(getResult[0][i]);
+          systemUIComponent[getResult[0][i][0]] = json.decode(combination);
+        }
+        debugCount = 5216;
+        buildTheme(systemUIComponent[theme]);
+        //screenUIComponent.clear();
+        screenUIComponent['_NewPin'] = json.decode(newPinPage);
+        screenUIComponent['_Legal'] = json.decode(legalPage);
+        screenUIComponent['_Invitation'] = json.decode(invitationPage);
+        debugCount = 5217;
+        getResult[1].forEach((scr) {
+          var combination = combineJson(scr);
+          try {
+            screenUIComponent[scr[0]] = json.decode(combination);
+          } catch (_) {
+            screenUIComponent[scr[0]] = json.decode(errorPage);
+          }
+        });
+        debugCount = 5218;
+        trace(debugCount);
+        if (signInProcess) {
+          asHome = getResult[1][0][0];
+          screenUIComponent[home] = screenUIComponent[
+              asHome]; // if in sign in process, copy this page as home
+          debugCount = 5219;
+          trace(debugCount);
+        } else if (needUpgrade != empty) {
+          asHome = getResult[1][0][0];
+          screenUIComponent[home] = screenUIComponent[
+              asHome]; // if in sign in process, copy this page as home
+          debugCount = 5220;
+          trace(debugCount);
+        }
+        debugCount = 5221;
+        if (getResult[2][0][0].toString().isNotEmpty) {
+          var currentVid = getResult[2][0][0];
+          transactionStore.dispatch(
+              UpdateScreenTxAction(ScreenTransaction({'#VID': currentVid})));
+          String myCluster = (await secureRead(key: "myCluster"))!;
+          String myMsgId = (await secureRead(key: "myMsgId"))!;
+          firestoreIO = '$msgPrefix$myCluster/$myMsgId/io';
+          firestoreMsg = firestoreIO;
+          firestoreEventCollection = '$eventPrefix$myCluster';
+          debugCount = 5222;
+        }
+        debugCount = 5223;
+        if (getResult[2][1][0].length > 0) {
+          transactionStore.dispatch(UpdateScreenTxAction(
+              ScreenTransaction({'#NAME': getResult[2][1][0]})));
+        }
+        debugCount = 5224;
+        if (getResult[2][2][0].length > 0) {
+          transactionStore.dispatch(UpdateScreenTxAction(
+              ScreenTransaction({'#EMAIL': getResult[2][2][0]})));
+        }
+        debugCount = 5225;
+        if (getResult[2][3][0].toString().isNotEmpty) {
+          transactionStore.dispatch(UpdateScreenTxAction(
+              ScreenTransaction({'#PHONE': getResult[2][3][0].toString()})));
+        }
+        debugCount = 5226;
+        if (getResult[2][4][0].length > 0) {
+          transactionStore.dispatch(UpdateScreenTxAction(
+              ScreenTransaction({'#TYPE': getResult[2][4][0]})));
+        }
+        debugCount = 5227;
+        trace(debugCount);
+        await readUIPages(
+          settingKey,
+          guestIndex,
+        );
+        debugCount = 5228;
+        trace(debugCount);
+      } else {
+        devPrint('Not first time run');
+        debugCount = 52281;
+        trace(debugCount);
+      } // end if (firstTimeRun)
+      debugCount = 52282;
+      trace(debugCount);
+    } else {
+      String lastSystem = prefs.getString('@systemUI')!;
+      systemUIComponent.clear();
+      systemUIComponent = jsonDecode(lastSystem);
+      screenUIComponent.clear();
+      screenUIComponent = jsonDecode(lastPages);
+      debugCount = 5229;
+    } // end if (opt == 2 || lastPages.isEmpty)
+    devPrint('saving screenUIComponent & systemUIComponent to pref');
+    prefs.setString('@screenUI', json.encode(screenUIComponent)).then((_) {
+      devPrint('Done saving screenUIComponent to pref');
+    });
+    prefs.setString('@systemUI', json.encode(systemUIComponent)).then((_) {
+      devPrint('Done saving systemUIComponent to pref');
+    });
+    debugCount = 52291;
+    trace(debugCount);
+    if (opt == 2) {
+      int launchOk = 0;
+      launchOk = await launchCheck(); // Check launch status
+      if (launchOk > 0) {
+        // error in launchCheck
+        // TODO create error message to display
+        debugCount = 5230;
+        trace(debugCount);
+      } else {
+        debugCount = 5231;
+        trace(debugCount);
+      } // end if launchOk
+    }
+    constructAllPageElements();
+    debugCount = 5232;
+  } catch (e) {
+    errorReport(e);
+    //debugCount = 5233;
+  }
+
+  debugPrint('end readSettingsStart');
+} // end of readSettingsStart
+
+readUIPages(String lifKey, int guestIndex) async {
+  // read json part of lif and put them in screenUIComponent
+  FunctionBody functionBody = getFunctionBody(settingKey, [screenJsonRange]);
+  var response =
+      await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+  var entryList = jsonDecode(response.body);
+  entryList[0].forEach((scr) {
+    var combination = combineJson(scr);
+    try {
+      screenUIComponent[scr[0]] = json.decode(combination);
+    } catch (_) {
+      screenUIComponent[scr[0]] = json.decode(errorPage);
+    }
+  });
+  if (guestIndex > 0) {
+    // this is sign in process
+    screenUIComponent[home] = screenUIComponent[entryList[0][guestIndex - 51]
+        [0]]; // change home with dedicated signin page
+  }
+  // await prefs.setString('@systemUI', jsonEncode(systemUIComponent));
+  // await prefs.setString('@screenUI', jsonEncode(screenUIComponent));
+  // constructAllPageElements();
+} // end of readUIPages
+
+readSettings(String lifKey, int opt) async {
+  // opt 1 = Load as usual from JSON etc; 2 = load from JSON2 only
+  // then constructPageElement of the respective screen
+
+  var myState = transactionStore.state.screenTx;
+  var aRes = myState['#SETTINGS'];
+  var res = json.decode(aRes[0]['body']);
+
+  // if (devMode) {
+  //   systemJsonRange = _res['devSystemRange'];
+  //   screenJsonRange = _res['devScreenRange'];
+  // } else {
+  systemJsonRange = res['systemRange'];
+  screenJsonRange = res['screenRange'];
+  if (opt == 2) {
+    screenJsonRange = res['screenRange2'];
+  }
+  // }
+  settingKey = lifKey;
+
+  // transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
+  //     {'#INTERFACE_KEY': userKey}))); // set state #INTERFACE_KEY
+  userKey = settingKey;
+  String tempVidKey = res['vidKey'];
+  transactionStore.dispatch(UpdateScreenTxAction(
+      ScreenTransaction({'#VID_KEY': tempVidKey, '#INTERFACE_KEY': userKey})));
+
+  late http.Response response;
+  try {
+    FunctionBody functionBody;
+    if (opt == 1) {
+      functionBody = getFunctionBody(
+          settingKey, [systemJsonRange, screenJsonRange, lifSetting]);
+    } else {
+      //opt == 2
+      functionBody = getFunctionBody(settingKey, [screenJsonRange]);
+    }
+    response =
+        await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+  } catch (e) {
+    errorReport(e);
+  }
+  var getResult = jsonDecode(response.body);
+  if (opt == 1) {
+    // systemUIComponent.clear();
+    for (var i = 0;
+        i < getResult[0].length &&
+            getResult[0][i].length > 0 &&
+            getResult[0][i][0].length > 0;
+        i++) {
+      var combination = combineJson(getResult[0][i]);
+      systemUIComponent[getResult[0][i][0]] = json.decode(combination);
+    }
+    // screenUIComponent.clear();
+    buildTheme(systemUIComponent[theme]);
+    screenUIComponent['_Legal'] = json.decode(legalPage);
+    screenUIComponent['_Invitation'] = json.decode(invitationPage);
+    screenUIComponent['_NewPin'] = json.decode(newPinPage);
+    getResult[1].forEach((scr) {
+      var combination = combineJson(scr);
+      try {
+        screenUIComponent[scr[0]] = json.decode(combination);
+      } catch (_) {
+        screenUIComponent[scr[0]] = json.decode(errorPage);
+      }
+    });
+    if (settingKey == myState['#GUEST_LIF']) {
+      // sign in process
+      int index = myState['#GUEST_INDEX'] - 1;
+      if (needUpgrade == empty) {
+        screenUIComponent[home] = screenUIComponent[getResult[1][index][0]];
+      } else {
+        screenUIComponent[home] =
+            screenUIComponent[myState['#GUEST_UPGRADE_INDEX']]; // row 59
+      }
+    } else if (needUpgrade != empty) {
+      screenUIComponent[home] = screenUIComponent[needUpgrade];
+    }
+    if (getResult[2][0].toString().isNotEmpty) {
+      var currentVid = getResult[2][0][0];
+      transactionStore.dispatch(
+          UpdateScreenTxAction(ScreenTransaction({'#VID': currentVid})));
+      // firestoreIO = '$firestoreCollection/$currentVid/io';
+      // firestoreMsg = firestoreIO;
+      //  firestoreMsg = 'users/922250226073/io/vid1111/msg';
+      if (getResult[2][1][0].length > 0) {
+        transactionStore.dispatch(UpdateScreenTxAction(
+            ScreenTransaction({'#NAME': getResult[2][1][0]})));
+      }
+      if (getResult[2][2][0].length > 0) {
+        transactionStore.dispatch(UpdateScreenTxAction(
+            ScreenTransaction({'#EMAIL': getResult[2][2][0]})));
+      }
+      if (getResult[2][3][0].toString().isNotEmpty) {
+        transactionStore.dispatch(UpdateScreenTxAction(
+            ScreenTransaction({'#PHONE': getResult[2][3][0].toString()})));
+      }
+      if (getResult[2][4][0].length > 0) {
+        transactionStore.dispatch(UpdateScreenTxAction(
+            ScreenTransaction({'#TYPE': getResult[2][4][0]})));
+      }
+    }
+    constructAllPageElements();
+  } else {
+    // opt == 2
+    getResult[0].forEach((scr) {
+      var combination = combineJson(scr);
+      if (combination.trim().length > 1) {
+        // devPrint('JSON2 : ${scr[0]}');
+        try {
+          screenUIComponent[scr[0]] = json.decode(combination);
+          constructPageElements(scr[0]);
+        } catch (_) {
+          screenUIComponent[scr[0]] = json.decode(errorPage);
+        }
+      }
+    });
+  }
+  // save array tp persistence data
+
+  try {
+    var saveLast = <Future>[];
+    saveLast.add(prefs.setString('@systemUI', json.encode(systemUIComponent)));
+    saveLast.add(prefs.setString('@screenUI', json.encode(screenUIComponent)));
+    await Future.wait(saveLast);
+  } catch (e) {
+    errorReport("Error in saving to shared preferences (readSettings): $e");
+  }
+  // await prefs.setString('@systemUI', json.encode(systemUIComponent));
+  // await prefs.setString('@screenUI', json.encode(screenUIComponent));
+} // end of readSettings
+
+readSettingsContext(BuildContext context, String lifKey, int opt) async {
+  // opt 1 = Load as usual from JSON etc; 2 = load from JSON2 only
+  // then constructPageElement of the respective screen
+
+  var myState = transactionStore.state.screenTx;
+  var aRes = myState['#SETTINGS'];
+  var res = json.decode(aRes[0]['body']);
+
+  // if (devMode) {
+  //   systemJsonRange = _res['devSystemRange'];
+  //   screenJsonRange = _res['devScreenRange'];
+  // } else {
+  systemJsonRange = res['systemRange'];
+  screenJsonRange = res['screenRange'];
+  if (opt == 2) {
+    screenJsonRange = res['screenRange2'];
+  }
+  // }
+  settingKey = lifKey;
+  // showAlert(context, "Test1");
+  // transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
+  //     {'#INTERFACE_KEY': userKey}))); // set state #INTERFACE_KEY
+  userKey = settingKey;
+  String tempVidKey = res['vidKey'];
+  transactionStore.dispatch(UpdateScreenTxAction(
+      ScreenTransaction({'#VID_KEY': tempVidKey, '#INTERFACE_KEY': userKey})));
+
+  http.Response? response;
+  try {
+    FunctionBody functionBody;
+    if (opt == 1) {
+      functionBody = getFunctionBody(
+          settingKey, [systemJsonRange, screenJsonRange, lifSetting]);
+    } else {
+      //opt == 2
+      functionBody = getFunctionBody(settingKey, [screenJsonRange]);
+    }
+    response =
+        await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+  } catch (e) {
+    errorReport(e);
+    showAlert(
+        context, textList["ErrorLoading"] + " [readSettingsContext] : $e");
+  }
+  if (response != null) {
+    var getResult = [];
+    try {
+      getResult = jsonDecode(response.body);
+      if (opt == 1) {
+        // systemUIComponent.clear();
+        for (var i = 0;
+            i < getResult[0].length &&
+                getResult[0][i].length > 0 &&
+                getResult[0][i][0].length > 0;
+            i++) {
+          var combination = combineJson(getResult[0][i]);
+          systemUIComponent[getResult[0][i][0]] = json.decode(combination);
+        }
+        buildTheme(systemUIComponent[theme]);
+        screenUIComponent['_Legal'] = json.decode(legalPage);
+        screenUIComponent['_Invitation'] = json.decode(invitationPage);
+        screenUIComponent['_NewPin'] = json.decode(newPinPage);
+        getResult[1].forEach((scr) {
+          var combination = combineJson(scr);
+          try {
+            if (scr[0].length > 0) {
+              screenUIComponent[scr[0]] = json.decode(combination);
+            }
+          } catch (e) {
+            errorReport(e);
+            showAlert(context,
+                textList["ErrorLoading"] + " : $e : scr[0] = ${scr[0]}");
+            screenUIComponent[scr[0]] = json.decode(errorPage);
+          }
+        });
+
+        if (settingKey == myState['#GUEST_LIF']) {
+          // sign in process
+          int index = myState['#GUEST_INDEX'] - 1;
+          if (needUpgrade == empty) {
+            screenUIComponent[home] = screenUIComponent[getResult[1][index][0]];
+          } else {
+            screenUIComponent[home] =
+                screenUIComponent[myState['#GUEST_UPGRADE_INDEX']]; // row 59
+          }
+        } else if (needUpgrade != empty) {
+          screenUIComponent[home] = screenUIComponent[needUpgrade];
+        }
+        if (getResult[2][0].toString().isNotEmpty) {
+          var currentVid = getResult[2][0][0];
+          transactionStore.dispatch(
+              UpdateScreenTxAction(ScreenTransaction({'#VID': currentVid})));
+          // firestoreIO = '$firestoreCollection/$currentVid/io';
+          // firestoreMsg = firestoreIO;
+          //  firestoreMsg = 'users/922250226073/io/vid1111/msg';
+          if (getResult[2][1][0].length > 0) {
+            transactionStore.dispatch(UpdateScreenTxAction(
+                ScreenTransaction({'#NAME': getResult[2][1][0]})));
+          }
+          if (getResult[2][2][0].length > 0) {
+            transactionStore.dispatch(UpdateScreenTxAction(
+                ScreenTransaction({'#EMAIL': getResult[2][2][0]})));
+          }
+          if (getResult[2][3][0].toString().isNotEmpty) {
+            transactionStore.dispatch(UpdateScreenTxAction(
+                ScreenTransaction({'#PHONE': getResult[2][3][0].toString()})));
+          }
+          if (getResult[2][4][0].length > 0) {
+            transactionStore.dispatch(UpdateScreenTxAction(
+                ScreenTransaction({'#TYPE': getResult[2][4][0]})));
+          }
+        }
+        constructAllPageElements();
+      } else {
+        // opt == 2
+        getResult[0].forEach((scr) {
+          var combination = combineJson(scr);
+          if (combination.trim().length > 1) {
+            // devPrint('JSON2 : ${scr[0]}');
+            try {
+              screenUIComponent[scr[0]] = json.decode(combination);
+              constructPageElements(scr[0]);
+            } catch (_) {
+              errorReport(e);
+              showAlert(context, textList["ErrorLoading"] + " : $e");
+              screenUIComponent[scr[0]] = json.decode(errorPage);
+            }
+          }
+        });
+      }
+      // save array tp persistence data
+
+      try {
+        var saveLast = <Future>[];
+        saveLast
+            .add(prefs.setString('@systemUI', json.encode(systemUIComponent)));
+        saveLast
+            .add(prefs.setString('@screenUI', json.encode(screenUIComponent)));
+        await Future.wait(saveLast);
+      } catch (e) {
+        errorReport(e);
+        showAlert(context, textList["ErrorLoading"] + " : $e");
+        // devPrint ("Error in saving to shared preferences (readSettings): $e");
+      }
+    } catch (ep) {
+      errorReport(ep);
+      showAlert(context, textList["ErrorLoading"] + " : $ep");
+    }
+  } // end if (response != null)
+} // end of readSettingsContext
+
+void showAlert(BuildContext context, String msg) {
+  showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          //   else (pin not match)
+          title: const Text("Alert"),
+          content: Text(msg), // show dialog
+          actions: <Widget>[
+            TextButton(
+              child: const Text("OK"),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            )
+          ],
+        );
+      });
+} // end of ShowAlert
+
+String combineJson(var j) {
+  return '${j.length > 1 ? j[1].replaceAll('%26', '&') : ""}${j.length > 2 ? j[2].replaceAll('%26', '&') : ""}${j.length > 3 ? j[3].replaceAll('%26', '&') : ""}';
+}
+
+Future getServiceAccountCredential() async {
+  var scopes = [
+//    'https://www.googleapis.com/auth/drive',
+//    'https://www.googleapis.com/auth/drive.appdata',
+    'https://www.googleapis.com/auth/spreadsheets',
+  ];
+  var client = http.Client();
+  return auth.obtainAccessCredentialsViaServiceAccount(
+      auth.ServiceAccountCredentials.fromJson(
+          await rootBundle.loadStructuredData("start.sct", (jsonStr) async {
+        return json.decode(jsonStr);
+      })),
+      scopes,
+      client);
+}
+
+String getSettingKey() {
+  int idx = 4;
+  String rKey = vSetting[idx].substring(0, 14) +
+      vSetting[idx].substring(17, vSetting[idx].length);
+  return rKey;
+}
+
+Future getSetting() {
+  dynamic result;
+  var qParams = {"app": appsCode};
+  var uri = Uri.https("us-central1-collanium1-4babc.cloudfunctions.net",
+      "/getPoxSettings", qParams);
+  // devPrint("api.getSetting; ${uri.toString()}");
+  return http.post(uri).then((res) {
+    result = json.decode(res.body);
+    return result;
+  });
+}
+
+class GoogleHttpClient extends IOClient {
+  // from https://stackoverflow.com/questions/48477625/how-to-use-google-api-in-flutter/48485898#48485898
+  final Map<String, String> _headers;
+
+  GoogleHttpClient(this._headers) : super();
+
+  @override
+  //Future<http.StreamedResponse> send(http.BaseRequest request) =>
+  Future<IOStreamedResponse> send(http.BaseRequest request) =>
+      super.send(request..headers.addAll(_headers));
+
+  @override
+  Future<http.Response> head(Uri url, {Map<String, String>? headers}) =>
+      super.head(url, headers: headers!..addAll(_headers));
+}
+
+Future<void> handleSignIn() async {
+  try {
+    // await vGoogleSignIn.signIn();
+    await vGoogleSignIn.authenticate();
+  } catch (error) {
+    errorReport(error);
+  }
+}
+
+Future<String> appendToSheetOld(dynamic val) async {
+  var state = transactionStore.state.screenTx;
+  try {
+    FunctionBody functionBody =
+        appendSSA1(state['#INTERFACE_KEY'], [val], defaultCluster);
+    await http
+        .post(Uri.parse(functionBody.url), body: functionBody.body)
+        .timeout(const Duration(seconds: 10));
+
+    TimerBloc timerBloc = state['#TIMER_BLOC'];
+    timerBloc.add(Start(duration: state['#TIMER_DURATION']));
+  } catch (e) {
+    errorReport(e);
+  }
+  setDataOK('1');
+  return 'End of appendToSheet';
+} // end of appendToSheet
+
+Future runSheetStartup(String lif, String clt) async {
+  if (!appStartupRun) {
+    debugPrint('start runSheetStartup');
+    getLqrList(lif);
+    Duration nw = DateTime.now().timeZoneOffset;
+    String tz = (nw.inMinutes / 60).toString();
+    // dynamic physicalScreenSize = window.physicalSize;
+    dynamic physicalScreenSize =
+        WidgetsBinding.instance.platformDispatcher.views.first.physicalSize;
+    dynamic physicalWidth = physicalScreenSize.width;
+    dynamic physicalHeight = physicalScreenSize.height;
+    // final List<Locale> systemLocales = window.locales;
+    final List<Locale> systemLocales =
+        WidgetsBinding.instance.platformDispatcher.locales;
+    String lang = systemLocales[0].toString();
+    String country = '';
+    dynamic osInfo = await getOsInfo();
+    String? info = getInfo(osInfo);
+
+    String startupUrl =
+        "https://$autsorzFunctionDomain${functionName['runStartup']}";
+    var bodyElement = {
+      "ssid": lif,
+      "clt": clt,
+      "ver": version + subVersion,
+      "tz": tz,
+      "wd": physicalWidth.round().toString(),
+      "hg": physicalHeight.round().toString(),
+      "lc": lang,
+      "cc": country,
+      "dvc": info
+    };
+
+    try {
+      if (internetConnected()) {
+        http.post(Uri.parse(startupUrl), body: bodyElement);
+        debugPrint('call ${functionName['runStartup']} function');
+        appStartupRun = true;
+      }
+    } catch (e) {
+      devPrint(e);
+    }
+  } // end if (!appStartupRun)
+} // end of runSheetStartup
+
+// TODO make getVidData; updateVidData; deleteVidData
+Future getVidData() async {
+  dynamic ref;
+  dynamic messageRef;
+  try {
+    fsCollection = (await secureRead(key: "myPath"))!;
+    String docId = (await secureRead(key: "myDoc"))!;
+    // String myMsgId = (await storage.read(key: "myMsgId"))!;
+    String myCluster = (await secureRead(key: "myCluster"))!;
+    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+      '#FS_PATH': fsCollection,
+      '#CLUSTER': myCluster,
+      '#FS_IO': firestoreIO,
+    })));
+    fsMsgCollection =
+        "$msgPrefix$myCluster"; //= set singleton for whole project
+    var myVid = transactionStore.state.screenTx['#VID'].toString();
+
+    var futures = <Future>[];
+    futures.add(firestoreDb //= get user data from firestore
+        .collection(fsCollection)
+        .doc(docId)
+        .get());
+
+    futures.add(getFirestoreMessageRef(myVid));
+
+    //https://alvinalexander.com/dart/how-run-multiple-dart-futures-in-parallel/
+    await Future.wait(futures).then((List<dynamic> res) {
+      ref = res[0];
+      messageRef = res[1];
+    });
+    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+      '#FS_DOC': docId,
+      '#FS_REF': ref.reference,
+      '#MSG_REF': messageRef,
+    })));
+  } catch (e) {
+    ref = null;
+  }
+  return ref.data();
+} // end of getVidData
+
+Future updateVidData(String key, var val) async {
+  dynamic res;
+  try {
+    var state = transactionStore.state.screenTx;
+    var myVid = state['#VID'].toString();
+    await FirebaseFirestore.instance
+        .collection(fsCollection)
+        .doc(myVid)
+        .update({key: val}); // put back updated data
+  } catch (_) {
+    res = null;
+  }
+  return res;
+} // end of getVidData
+
+Future getGPSLoc() async {
+  //    Position position = await Geolocator().getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+  // var latLang = await Gps.currentGps();
+  Position? geoPos;
+  // Placemark myPlace;
+  // await getCurrentPosition(desiredAccuracy: LocationAccuracy.best)
+  // await getLocation()
+  //     .then((Position position) async {
+  geoPos = await getLocation();
+  if (geoPos != null) {
+    // List<Placemark> p =
+    //     await placemarkFromCoordinates(geoPos.latitude, geoPos.longitude);
+    // myPlace = p[0];
+  }
+  // });
+  transactionStore.dispatch(
+      // UpdateScreenTxAction(ScreenTransaction({'#LOCATION': latLang})));
+      UpdateScreenTxAction(ScreenTransaction({'#LOCATION': geoPos})));
+  //devPrint('Latitude:${latLang.lat}, Longitude : ${latLang.lng}');
+  return geoPos;
+}
+
+Future getMyImei() async {
+  var myImei = '-';
+  try {
+    myImei = await getDeviceId();
+  } catch (erImei) {
+    errorReport(erImei);
+  }
+  transactionStore.dispatch(
+      UpdateScreenTxAction(ScreenTransaction({'#DID': myImei}))); //  set #IMEI
+  return myImei;
+}
+
+Future kickedOut() async {
+  await unsubscribeUserReset();
+  FirebaseAuth.instance.signOut();
+  GoogleSignIn.instance.signOut();
+  // GoogleSignIn().signOut();
+  // signInOption: SignInOption.standard,
+  // scopes: [],
+  // ).signOut();
+  await signOut();
+} // end of kickedOut
+
+Future signOut() async {
+  // reset uid, imei, in = false, fcm
+  const functionName = 'signOut';
+  var state = transactionStore.state.screenTx;
+  // var cUser = state['#FIREBASE_USER']; // get current firebase user data
+  var updateData = <String, dynamic>{};
+  var myDocRef = state['#FS_REF'];
+  // String myFirebaseUid = cUser.uid;
+  updateData["in"] = false;
+  //updateData["fcm"] = "";
+  updateData["ph1"] = "";
+  try {
+    myDocRef.update(updateData);
+    var pgName = routeStack.popAll();
+    dynamic signUpKey;
+    if (demoApp) {
+      signUpKey = state['#DEMO_SIGNUP_KEY'];
+    } else {
+      signUpKey = state['#SIGNUP_KEY'];
+    }
+    storage.write(key: 'myLif', value: signUpKey);
+    storage.write(key: 'myMsgId', value: null);
+    storage.write(key: 'lqrList', value: null); // delete location qr list
+    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+      '#INTERFACE_KEY': signUpKey,
+      '#LQR_LIST': {}
+    }))); // set state #INTERFACE_KEY
+    await historyLock(functionName);
+    tableContent[historyName].clear();
+    await storage.write(key: historyName, value: 'null');
+    historyUnLock(functionName);
+    await imageMapClear();
+    await storage.write(key: imageMapSecureName, value: 'null');
+    // devPrint("After in = false; try to signOut from firebaseAuth");
+    if (!demoApp) {
+//        FirebaseAuth.instance.signOut(); // signOut from firebase
+      // TODO signOut from google, facebook, twitter
+    }
+    unSubscribeToEvent(); // unsubscribe to proxy event listener
+    await Future.wait([
+      prefs.remove('@systemUI'),
+      prefs.remove('@screenUI'),
+      prefs.remove('@lastGpsTime'),
+    ]);
+    readSettings(signUpKey, 1).then((_) {
+      // constructAllPageElements();
+      transactionStore.dispatch(
+          UpdateScreenTxAction(ScreenTransaction({'#REFRESH': false})));
+      List<Widget> newElementList = reloadPage(pgName);
+      rootThis.setState(() {
+        rootThis.pageName = pgName;
+        rootThis.pageElements = newElementList;
+      });
+      setDataOK('2');
+    });
+  } catch (err) {
+    // devPrint("Error writing to firestore :" + err.toString());
+    await Future.wait([
+      prefs.remove('@systemUI'),
+      prefs.remove('@screenUI'),
+      prefs.remove('@lastGpsTime'),
+    ]);
+    setDataOK('2');
+  }
+} // end of signOut
+
+Future<int> userIntegrityCheck() async {
+  //= deprecated
+  int result = 99;
+  Map<String, dynamic> updateData = {};
+  try {
+    var state = transactionStore.state.screenTx;
+    var myVid = state['#VID'].toString();
+
+    // check fcm token & Imei, update when firebase in = true;
+    // ask other device to logout first
+    var vidData = await getVidData();
+    var cUser = state['#FIREBASE_USER'];
+    if (cUser == null) {
+      // no #FIREBASE_USER. This can happen when user close the app but not signed out
+      // This is default state for most user. User is not recommended to log out
+      cUser = await getFirebaseUser();
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#FIREBASE_USER': cUser, // #FIREBASE_USER should be available afterward
+      })));
+    }
+
+    if ((vidData['in'] != null && vidData['in']) &&
+        (vidData['uid'] != null && vidData['uid'] != cUser.uid)) {
+      result = 101; // other user with different uid logged in
+    } else {
+      if ((vidData['in'] == null || !vidData['in']) && !demoApp) {
+        result = 102; // user not logged in yet
+      } else {
+        // update Firebase Cloud Messaging token with current token
+        if (vidData['fcm'] == null) {
+          updateData['fcm'] = state['#FCM_TOKEN'];
+        } else {
+          if (vidData['fcm'] != state['#FCM_TOKEN']) {
+            updateData['fcm'] = state['#FCM_TOKEN'];
+          }
+        }
+        if (vidData['email'] == null) {
+          if (cUser.email != null) updateData['email'] = cUser.email;
+        } else {
+          if (cUser.email != null && vidData['email'] != cUser.email) {
+            updateData['email'] = state['#FCM_TOKEN'];
+          }
+        }
+        FirebaseFirestore.instance
+            .collection(fsCollection)
+            .doc(myVid)
+            .update(updateData); // write updated data to firestore
+
+        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+          '#EMAIL': cUser.email,
+        })));
+
+        try {
+          secureRead(key: 'pinHash').then((myPinHash) {
+            // TODO check pin hash integrity with lif
+            if (myPinHash == null) {
+              sheetApi.spreadsheets.values
+                  .batchGet(settingKey, // read from Link Interface
+                      ranges: ['Settings!G10'],
+                      dateTimeRenderOption: "SERIAL_NUMBER",
+                      valueRenderOption: "UNFORMATTED_VALUE")
+                  .then((entryList) {
+                if (entryList.valueRanges![0].values == null) {
+                  transactionStore.dispatch(UpdateScreenTxAction(
+                      ScreenTransaction({'#NEED_PINHASH': true})));
+                } else {
+                  var lifHash = entryList.valueRanges![0].values![0][0];
+                  storage.write(
+                      key: 'pinHash',
+                      value: lifHash
+                          .toString()); // store pinHash in secure & persistent storage
+                  transactionStore.dispatch(UpdateScreenTxAction(
+                      ScreenTransaction({'#NEED_PINHASH': false})));
+                }
+              });
+            } else {
+              transactionStore.dispatch(UpdateScreenTxAction(
+                  ScreenTransaction({'#NEED_PINHASH': false})));
+            }
+          }).catchError((_) {
+            sheetApi.spreadsheets.values
+                .batchGet(settingKey, // read from Link Interface
+                    ranges: ['Settings!G10'],
+                    dateTimeRenderOption: "SERIAL_NUMBER",
+                    valueRenderOption: "UNFORMATTED_VALUE")
+                .then((entryList) {
+              var lifHash = entryList.valueRanges![0].values![0][0];
+              if (lifHash == null) {
+                transactionStore.dispatch(UpdateScreenTxAction(
+                    ScreenTransaction({'#NEED_PINHASH': true})));
+              } else {
+                storage.write(
+                    key: 'pinHash',
+                    value: lifHash
+                        .toString()); // store pinHash in secure & persistent storage
+                transactionStore.dispatch(UpdateScreenTxAction(
+                    ScreenTransaction({'#NEED_PINHASH': false})));
+              }
+            });
+          });
+        } catch (erLif) {
+          transactionStore.dispatch(
+              UpdateScreenTxAction(ScreenTransaction({'#NEED_PINHASH': true})));
+        }
+        result = 0;
+      }
+    }
+  } catch (e) {
+    result = 99; // general error in integrity check
+    errorReport(e);
+  }
+  return result;
+} // end of userIntegrityCheck
+
+Future getLifProfileData(String lifKey) async {
+  Map<String, dynamic> profileData = {};
+  FunctionBody functionBody =
+      getFunctionBody(lifKey, [lifSetting, lifSetting2]);
+  var response =
+      await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+  var getResult = jsonDecode(response.body);
+
+//  var getResult = await sheetApi.spreadsheets.values
+//      .batchGet(lifKey, // read from Link Interface
+//          ranges: [lifSetting, lifSetting2],
+//          dateTimeRenderOption: "SERIAL_NUMBER",
+//          valueRenderOption: "UNFORMATTED_VALUE");
+  profileData['vid'] = getResult[0][0][0];
+  profileData['imei'] = getResult[1][0][0];
+  profileData['pinHash'] = getResult[1][9][0];
+  profileData['cipherText'] = getResult[1][10][0];
+  profileData['publicKey'] = getResult[1][11][0];
+  profileData['address'] = getResult[1][13][0];
+  return profileData;
+}
+
+Future<int> launchCheck() async {
+  // TODO finish justLaunch procedure
+  // Launch with logged in status. Always run at launch like good old autoexec.bat
+  // firstLogin, reLogin, run this function
+
+  int result = 99; // return > 0 when something wrong
+  dynamic state;
+  Map<String, dynamic> updateData = {};
+  try {
+    // historyLoadFromSecureStorage();
+    await FirebaseNotifications()
+        .setUpFirebase(); // setup fcm notification for app
+    result = 991;
+    //-- user integrity check
+    state = transactionStore.state.screenTx;
+    // subscribeToProxy(state['#INTERFACE_KEY']); // subscribe to firebase proxy
+    var vidData = await getVidData(); // get vid data plus uid
+    var cUser = state['#FIREBASE_USER'];
+    if (cUser == null) {
+      // no #FIREBASE_USER. This can happen when user close the app but not signed out
+      // This is default state for most user. User is not recommended to log out
+      cUser = await getFirebaseUser();
+      result = 992;
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#FIREBASE_USER': cUser, // #FIREBASE_USER should be available afterward
+      })));
+    }
+    try {
+      await secureRead(key: 'pinHash').then((myPinHash) async {
+        // Checking pinhash with Lif. Pinhash in Lif is the main data.
+        result = 993;
+        if (myPinHash == null || myPinHash == "") {
+          updateData["ph1"] = empty;
+          result = 994;
+          FunctionBody functionBody =
+              getFunctionBody(settingKey, ['Settings!G10']);
+          result = 995;
+          var response = await http.post(Uri.parse(functionBody.url),
+              body: functionBody.body);
+          result = 996;
+          var entryList = jsonDecode(response.body);
+          result = 997;
+          if (entryList[0][0][0] == null) {
+            transactionStore.dispatch(UpdateScreenTxAction(
+                ScreenTransaction({'#NEED_PINHASH': true})));
+            result = 998;
+          } else {
+            var lifHash = entryList[0][0][0];
+            storage.write(
+                key: 'pinHash',
+                value: lifHash); // store pinHash in secure & persistent storage
+            updateData["ph1"] = lifHash;
+            transactionStore.dispatch(UpdateScreenTxAction(
+                ScreenTransaction({'#NEED_PINHASH': false})));
+            result = 999;
+          }
+//          });
+        } else {
+          result = 9910;
+          updateData["ph1"] = myPinHash;
+          FunctionBody functionBody =
+              getFunctionBody(settingKey, ['Settings!G10']);
+          result = 9911;
+          var response = await http.post(Uri.parse(functionBody.url),
+              body: functionBody.body);
+          result = 9912;
+          var entryList = jsonDecode(response.body);
+          result = 9913;
+//          await sheetApi.spreadsheets.values
+//              .batchGet(settingKey, // read from Link Interface
+//                  ranges: ['Settings!G10'],
+//                  dateTimeRenderOption: "SERIAL_NUMBER",
+//                  valueRenderOption: "UNFORMATTED_VALUE")
+//              .then((entryList) {
+          if (entryList[0][0][0] == null) {
+            storage.write(
+                key: 'pinHash',
+                value:
+                    '--'); //= delete storage.pinhash if pinhash in lif = null
+            transactionStore.dispatch(UpdateScreenTxAction(
+                ScreenTransaction({'#NEED_PINHASH': true})));
+            result = 9914;
+          } else {
+            result = 9915;
+            var lifHash = entryList[0][0][0];
+            storage.write(
+                key: 'pinHash',
+                value: lifHash); // store pinHash in secure & persistent storage
+            updateData["ph1"] = lifHash;
+            transactionStore.dispatch(UpdateScreenTxAction(
+                ScreenTransaction({'#NEED_PINHASH': false})));
+            result = 9916;
+          }
+//          }); // end of sheetApi
+        }
+      }).catchError((er) async {
+        result = 9917;
+        //  retry read pinhash in LIF
+        FunctionBody functionBody =
+            getFunctionBody(settingKey, ['Settings!G10']);
+        result = 9918;
+        var response = await http.post(Uri.parse(functionBody.url),
+            body: functionBody.body);
+        result = 9919;
+        var entryList = jsonDecode(response.body);
+        result = 9920;
+        if (entryList[0][0][0] == null) {
+          storage.write(
+              key: 'pinHash',
+              value: '--'); //= delete storage.pinhash if pinhash in lif = null
+          transactionStore.dispatch(
+              UpdateScreenTxAction(ScreenTransaction({'#NEED_PINHASH': true})));
+          result = 9921;
+        } else {
+          result = 9922;
+          var lifHash = entryList[0][0][0];
+          storage.write(
+              key: 'pinHash',
+              value: lifHash); // store pinHash in secure & persistent storage
+          updateData["ph1"] = lifHash;
+          transactionStore.dispatch(UpdateScreenTxAction(
+              ScreenTransaction({'#NEED_PINHASH': false})));
+          result = 9923;
+        }
+      });
+    } catch (erLif) {
+      result = 9924;
+      transactionStore.dispatch(
+          UpdateScreenTxAction(ScreenTransaction({'#NEED_PINHASH': true})));
+    }
+    // end of integrity check
+
+    state = transactionStore.state.screenTx;
+    String? myDid = state['#DID'];
+    result = 9925;
+    if (myDid == null) {
+      //= if deviceId is not read
+      myDid = await getDeviceId(); //= get deviceID
+      result = 9926;
+      transactionStore
+          .dispatch(UpdateScreenTxAction(ScreenTransaction({'#DID': myDid})));
+    }
+    updateData["did"] = myDid;
+    updateData["in"] = true;
+    updateData["pk1"] = state['publicKey'];
+    var docRef = state['#FS_REF']; //= get user doc reference for firestore
+    result = 9927;
+    docRef.update(updateData); //= write updated data to user dpc
+    result = 9928;
+    docRef = state['#MSG_REF']; //= get message doc reference for firestore
+    FirebaseFirestore.instance.runTransaction((Transaction tx) async {
+      result = 9929;
+      var msgSnapshot = await tx.get<Map<String, dynamic>>(docRef);
+      Map<String, dynamic> updateMsg = {};
+      result = 9930;
+      updateMsg["f"] = state['#FCM_TOKEN'];
+      result = 9931;
+      if (msgSnapshot.exists) {
+        result = 9932;
+        if (msgSnapshot.data()!["n"] == null) {
+          updateMsg["n"] = cUser.displayName ?? '';
+          result = 9933;
+        }
+        if (msgSnapshot.data()!["p"] == null) {
+          updateMsg["p"] = cUser.photoURL ?? '';
+          result = 9934;
+        }
+        //await tx.update(docRef, updateMsg);
+      }
+      result = 9935;
+      tx.update(docRef, updateMsg);
+      result = 9936;
+    }); // end of firebase transaction
+//    docRef.updateData(updateData); //= write updated data to message doc
+    // write user qr seed to secure storage
+    bool secureWrite = true;
+    try {
+      String? sd1 = await secureRead(key: 'sd1');
+      if (sd1 != null) {
+        secureWrite = false;
+      } // end if (sd2 != null)
+    } catch (e) {
+      secureWrite = true;
+    } // end try
+    if (secureWrite) {
+      await storage.write(
+          key: 'sd1',
+          value: ftzSecretOneSeed); //   put Account key in secure storage
+    } // end if (write)
+    secureWrite = true;
+    try {
+      String? sd2 = await secureRead(key: 'sd2');
+      if (sd2 != null) {
+        secureWrite = false;
+      } // end if (sd2 != null)
+    } catch (e) {
+      secureWrite = true;
+    } // end try
+    if (secureWrite) {
+      await storage.write(
+          key: 'sd2',
+          value: ftzSecretOneSeed2R); //   put Account key in secure storage
+    } // end if (write)
+    result = 0;
+    apiTest();
+  } catch (e) {
+    errorReport(e);
+  }
+  if (result == 0) {
+    storage.write(key: 'lastVersion', value: '$version$subVersion');
+  }
+  return result;
+} // end of launchCheck
+
+Future apiInit1() async {
+  // async api init
+  try {
+    //var uptime = await Uptime.uptime;
+    //bool _init = await TrueTime.init(ntpServer: 'pool.ntp.org');
+  } catch (e) {
+    errorReport(e);
+  }
+  return true;
+}
+
+String autheniumDecrypt(String cipherText) {
+  // TODO put decryption algorithm here
+  return cipherText;
+}
+
+String autheniumEncrypt(String rawText, String encryptionType) {
+  // TODO put encryption algorithm here
+  return rawText;
+}
+
+String getAutheniumKey(String keyType) {
+  // TODO put algorithm to get authenium key
+  return "11223344";
+}
+
+Future getDeviceId() async {
+  return await getDeviceIdCore();
+} // end of getDeviceId
+
+Future getFirestoreUserData(
+    String myUid, String myEmail, String county, String inv) async {
+  /*
+        output :
+        is not String = login successful
+        is String = login failure, content of output = error message
+  */
+  dynamic result;
+  String myDevice = await getDeviceId();
+  transactionStore
+      .dispatch(UpdateScreenTxAction(ScreenTransaction({'#DID': myDevice})));
+  Map<String, dynamic> user;
+  var invitationStatus = 0; // 0 = init, 1 = found, 901 = not found
+  bool needToRegisterInvLogin = false;
+  var uidUser = await FirebaseFirestore.instance
+      .collection(
+          topCollection) // search data in firebase with corresponding uid
+      .where('u', isEqualTo: myUid)
+      .get();
+  var recFound = uidUser.docs.length;
+  if (recFound < 1) {
+    // Uid not found in firebase
+    uidUser = await FirebaseFirestore.instance
+        .collection(
+            topCollection) // search data in firebase with corresponding uid
+        .where('e', isEqualTo: myEmail)
+        .where('u', isEqualTo: 'TBD')
+        .get();
+    recFound = uidUser.docs.length;
+    if (recFound >= 1) {
+      // Email and TBD found
+      // This is a new login of predefined user. Put uid in u
+      var docRef = uidUser.docs[0].reference;
+      var data = {"u": myUid};
+      await docRef.update(data);
+    } else {
+      // Email and TBD not found, check invitation
+      // var nowTime = DateTime.now().millisecondsSinceEpoch;
+      uidUser = await FirebaseFirestore.instance
+          .collection(topCollection) // search data in firebase with invitation
+          .where('i',
+              isEqualTo: inv == "" ? "OtonomiqInvitationNotExist..." : inv)
+          // .where('e', isEqualTo: "-") // Find invitation that is not used
+          // .where('x', isGreaterThan: nowTime)
+          .get();
+      recFound = uidUser.docs.length;
+      if (recFound <= 0) {
+        // Not found
+        invitationStatus = 3;
+      } else if (recFound == 1) {
+        // Found 1 Invitation.
+        if (uidUser.docChanges[0].doc.data()!["e"] == null ||
+            uidUser.docChanges[0].doc.data()!["e"] == "-" ||
+            uidUser.docChanges[0].doc.data()!["e"] == "TBD") {
+          //  This is new user login with invitation for the first time
+          var docRef = uidUser.docs[0].reference;
+          var data = {
+            // "x": FieldValue.delete(),
+            "e": myEmail,
+            "u": myUid
+          }; // set as used
+          await docRef.update(data);
+          needToRegisterInvLogin = true; // put flag to register invLogin
+          //TODO call cloud function to register email, etc
+          invitationStatus = 1;
+        } else {
+          recFound = 0;
+          invitationStatus =
+              7; // Invitation has been used by another user with different email
+        }
+      } else {
+        // Found more than 1,
+        // TODO: should ask for country
+        if (uidUser.docChanges[0].doc.data()!["e"] == "-") {
+          // Check email
+          var docRef = uidUser.docs[0].reference; // process only the first rec
+          var data = {
+            // "x": FieldValue.delete(),
+            "e": myEmail,
+            "u": myUid
+          }; // set as used
+          await docRef.update(data);
+          invitationStatus = 1;
+        } else {
+          recFound = 0;
+          invitationStatus =
+              7; // Invitation has been used by another user with different email
+        } // end if e = "-"
+      } // end if recFound == 0
+    } // end if recFound >= 1
+  } // end if recFound < 1
+  if (recFound >= 1) {
+    //= user exist
+    var ref2 = uidUser.docs[0].reference; //= get only the first uid found
+    user = uidUser.docs[0].data(); //= record user tier 1
+    if (user["d"] == 1) {
+      //= found regular user
+      await ref2 //= get dvc entry
+          .collection(fsDeviceSubCollection) // search data dvc sub collection
+          .limit(1)
+          .get()
+          .then((results) async {
+        user = results.docs[0].data();
+        if (results.docs.length == 1) {
+          if (user['in'] && user["did"] != myDevice) {
+            // TODO handle situation when user deny imei access
+            result = 802;
+            // TODO call function to send reset email
+            //   add prefix ";R"(reset) firebaseDocName
+            // "Login fail. You already signed in with other device, or you deny access to phone."; //= return result
+          } else {
+            result = results.docs[0]; //= return result
+          }
+        } else {
+          //= for some reason user was registered but no data in dvc. Treat like new user.
+          // TODO add new vid to user
+          result = 809;
+        }
+      });
+    } else if (user["d"] < 1) {
+      //= uid registered but no data, check dvc
+      await ref2 //= get dvc entry
+          .collection(fsDeviceSubCollection) // search data dvc sub collection
+          .get()
+          .then((results) async {
+        if (results.docs.length == 1) {
+          if (user['in'] && user["did"] != myDevice) {
+            // TODO handle situation when user deny imei access
+            result = 802; // error 802
+            // "Login fail. You already signed in with other device, or you deny access to phone."; //= return result
+          } else {
+            result = results.docs[0]; //= return result
+          }
+        } else if (results.docs.isEmpty) {
+          //= for some reason user was registered but no data in dvc. Treat like new user.
+          // TODO add new vid to user
+          result = 809;
+        } else {
+          //= multiple entry. Found demo or dev account
+          bool deviceFound = false;
+          int idx = 0;
+          for (int i = 0; i < results.docs.length && !deviceFound; i++) {
+            if (results.docs[i].data()["did"] == myDevice ||
+                results.docs[i].data()["did"] == "TBD") {
+              deviceFound = true;
+              idx = i;
+            }
+          }
+          if (deviceFound) {
+            result = results.docs[idx]; //= return result
+          } else {
+            result = 809; //"This device id is not registered.";
+          }
+        }
+      });
+    } else {
+      //= more than 1 dvc entry => demo | dev user
+      await ref2 //= get dvc entry
+          .collection(fsDeviceSubCollection) // search data dvc sub collection
+          .get()
+          .then((results) async {
+        bool deviceFound = false;
+        int idx = 0;
+        for (int i = 0; i < results.docs.length && !deviceFound; i++) {
+          if (results.docs[i].data()["did"] == myDevice ||
+              results.docs[i].data()["did"] == "TBD") {
+            deviceFound = true;
+            idx = i;
+          }
+        }
+        if (deviceFound) {
+          result = results.docs[idx]; //= return result
+        } else {
+          result = 809;
+          // "This device id is not registered. Deleted?"; //= return result
+        }
+      });
+    }
+  } else {
+    //= not found, try to search email in e field (in case she is a new predefined user)
+    // var cUser = state['#FIREBASE_USER']; //= get current firebase user data
+    // result =
+    //     getNewVid(cUser.uid, user.displayName, user.email); //= return result
+    // TODO add new vid to user
+    if (invitationStatus > 1) {
+      result = invitationStatus; // Something wrong with invitation
+    } else {
+      result = 809;
+    }
+  }
+  if (!(result is String || result is int) && needToRegisterInvLogin) {
+    String proxy = result.data()['lif'];
+    registerNewInvitationLogin(proxy, myEmail);
+  }
+  return result;
+} // end of getFirestoreUserData
+
+void registerNewInvitationLogin(String proxy, String email) {
+  const jsonEncoder = JsonEncoder();
+  String data = jsonEncoder.convert([proxy, email]);
+  var qParams = {"d": ";0$data"};
+  var uri = Uri.https(autsorzFunctionDomain, functionName['InvLogin'], qParams);
+  try {
+    http.post(uri);
+  } catch (e) {
+    errorReport(e);
+  }
+} //end of registerNewInvitationLogin
+
+void registerDeviceOperation(
+    String proxy, String email, String operation, String phone) {
+  const jsonEncoder = JsonEncoder();
+  String data = jsonEncoder.convert([proxy, email, operation, phone]);
+  var qParams = {"d": ";0$data"};
+  var uri = Uri.https(
+      autsorzFunctionDomain, functionName['deviceOperation'], qParams);
+  try {
+    http.post(uri);
+  } catch (e) {
+    errorReport(e);
+  }
+} //end of registerNewInvitationLogin
+
+Future updateFirestore(var data) async {
+  // update user's firestore data.
+  var docRef = transactionStore
+      .state.screenTx["#FS_REF"]; //= get this user firestore reference
+  return docRef.updateData(data);
+}
+
+Future getFirestoreMessageRef(String myVid) async {
+  /*
+    output :
+      message doc reference
+
+    if not exist, will generate blank document for this vid
+  */
+  dynamic result;
+  dynamic messageDocument;
+  dynamic myMessageId;
+  try {
+    myMessageId = await secureRead(
+        key: "myMsgId"); //= get documentID of entry in msg_xxxx collection
+  } catch (er) {
+    errorReport(er);
+  }
+  if (myMessageId == null) {
+    //= do not have message id stored
+    try {
+      messageDocument = await FirebaseFirestore.instance //= try to get anyway
+          .collection(
+              fsMsgCollection) //= search data in firebase with corresponding uid
+          .where('v', isEqualTo: myVid)
+          .limit(1)
+          .get();
+      if (messageDocument.docs.length > 0) {
+        //= message record exist
+        result = messageDocument.docs[0].reference;
+      } else {
+        //= not found, new user
+        var myUid = transactionStore.state.screenTx['#FIREBASE_USER'].uid;
+        result = await createNewMessageDocument(myVid, myUid);
+      }
+    } catch (er) {
+      errorReport(er);
+    }
+  } else {
+    try {
+      messageDocument = await FirebaseFirestore.instance
+          .collection(fsMsgCollection)
+          .doc(myMessageId)
+          .get();
+      if (messageDocument.exists) {
+        result = messageDocument.reference;
+      } else {
+        //= not found, new user
+        var myUid = transactionStore.state.screenTx['#FIREBASE_USER'].uid;
+        result = await createNewMessageDocument(myVid, myUid);
+      }
+    } catch (er) {}
+  }
+  return result;
+} // end of getFirestoreMessageRef
+
+Future createNewMessageDocument(String myVid, String myUid) async {
+  var data = {
+    "u": myUid,
+    "v": myVid,
+  };
+  var newDoc =
+      await FirebaseFirestore.instance.collection(fsMsgCollection).add(data);
+  return newDoc;
+} // end of createNewMessageDocument
+
+String otqStateToGpsString(dynamic position) {
+  String result = "";
+  result = position.latitude.toString() +
+      separator[3] +
+      position.longitude.toString() +
+      separator[3] +
+      (((position.accuracy * 100).round()) / 100).toString() +
+      separator[3] +
+      position.gpsTimestamp!.millisecondsSinceEpoch.toString() +
+      separator[3] +
+      (position.mock ? "mocked" : "true") +
+      separator[3] +
+      position.heading.toString() +
+      separator[3] +
+      (((position.speed * 100).round()) / 100).toString() +
+      separator[3] +
+      (((position.speedAccuracy * 100).round()) / 100).toString() +
+      separator[3] +
+      position.altitude.round().toString() +
+      separator[3] +
+      position.floor.toString() +
+      separator[3] +
+      position.isoCountryCode.toString() +
+      separator[3] +
+      position.postalCode.toString() +
+      separator[3] +
+      cleanupString(position.administrativeArea.toString()) +
+      separator[3] +
+      cleanupString(position.subAdministrativeArea.toString()) +
+      separator[3] +
+      cleanupString(position.locality.toString()) +
+      separator[3] +
+      cleanupString(position.subLocality.toString()) +
+      separator[3] +
+      cleanupString(position.thoroughfare.toString()) +
+      separator[3] +
+      cleanupString(position.subThoroughfare.toString());
+  return result;
+} // end of otqStateToGpsString
+
+String positionToGpsString(dynamic position) {
+  String result = "";
+  result = position.latitude.toString() +
+      separator[3] +
+      position.longitude.toString() +
+      separator[3] +
+      (((position.accuracy * 100).round()) / 100).toString() +
+      separator[3] +
+      position.timestamp!.millisecondsSinceEpoch.toString() +
+      separator[3] +
+      (position.isMocked ? "mocked" : "true") +
+      separator[3] +
+      position.heading.toString() +
+      separator[3] +
+      (((position.speed * 100).round()) / 100).toString() +
+      separator[3] +
+      (((position.speedAccuracy * 100).round()) / 100).toString() +
+      separator[3] +
+      position.altitude.round().toString() +
+      separator[3] +
+      position.floor.toString();
+  return result;
+} // end of positionToGpsString
+
+Future serverSetup() async {
+  // do all initial server, firebase storage.
+  try {
+    // late LocationSettings locationSettings;
+    // if (Platform.isAndroid) {
+    //   locationSettings = AndroidSettings(
+    //     accuracy: LocationAccuracy.bestForNavigation,
+    //     // distanceFilter: 1,
+    //     forceLocationManager: true,
+    //     intervalDuration: const Duration(seconds: 2),
+    //   );
+    //   // WebView.platform = AndroidWebView(); // set default web view platform
+    // } else if (Platform.isIOS || Platform.isMacOS) {
+    //   locationSettings = AppleSettings(
+    //     accuracy: LocationAccuracy.high,
+    //     // activityType: ActivityType.fitness,
+    //     // distanceFilter: 1,
+    //     pauseLocationUpdatesAutomatically: true,
+    //   );
+    // } else {
+    //   locationSettings = const LocationSettings(
+    //     accuracy: LocationAccuracy.high,
+    //     // distanceFilter: 100,
+    //   );
+    // } // end if Platform
+    debugCount = 210;
+    trace(debugCount);
+    // positionStream =
+    //     Geolocator.getPositionStream(locationSettings: locationSettings);
+    // positionStreamSubs = positionStream.listen((Position position) {
+    //   updateAppGps(position);
+    //   String gpsDataStream = positionToGpsString(position);
+    //   int calculatedTime =
+    //       DateTime.now().millisecondsSinceEpoch + time2GpsOffset;
+    //   int elapsedTime = calculatedTime - gpsTime.value;
+    //   devPrint(
+    //       "gpsTime:${gpsTime.value} , time2GpsOffset:$time2GpsOffset ,  Position stream: $gpsDataStream");
+    //   devPrint("  calculatedTime: $calculatedTime , elapsedTime: $elapsedTime");
+    // });
+  } catch (er) {
+    errorReport(er);
+  } // end try location stream
+  debugCount = 2101;
+  trace(debugCount);
+  dynamic aRes;
+  try {
+    aRes = await settingUp();
+  } catch (er) {
+    errorReport(er);
+  }
+  debugCount = 211;
+  trace(debugCount);
+  var res = json.decode(aRes[0]['body']);
+  debugCount = 212;
+  var signUpDemo = res['signupDemo'];
+  location = json.decode(res['location']);
+  debugCount = 213;
+  debugCount = 214;
+  debugCount = 215;
+  trace(debugCount);
+  FirebaseStorage storageBucket = FirebaseStorage.instanceFor(
+      bucket: 'gs://otq-01-ase2'); //= TODO move to procedure after sign in
+  debugCount = 216;
+  trace(debugCount);
+  transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+    '#GUEST_LIF': res['signupLif'],
+    '#GUEST_INDEX': res['signupIdx'],
+    '#GUEST_UPGRADE_INDEX': res['guestUpgradeIdx'],
+    '#VM_UPGRADE_INDEX': res['vmUpgradeIdx'],
+    '#SETTINGS': aRes,
+    '#DEMO_SIGNUP_KEY': signUpDemo,
+    '#STORAGE_BUCKET': storageBucket,
+  }))); // set result of settingUp (function getPoxSettings as state #SETTING
+  debugCount = 217;
+  trace(debugCount);
+} // end of serverSetup
+
+int defaultVid() {
+  return 70027002611015; // autsorz
+} // end of defaultVid
+
+String getEventDocName(String vidTime) {
+  String str = sha3_256B64(vidTime);
+  return base64ForUrl(str.substring(str.length - 21).substring(0, 20));
+} // end of getEventDocName
+
+void clearData(String scrName) {
+  // clear all data in a page
+  if (txfController[scrName] == null) return;
+
+  final List<String> widgetsToUpdate = [];
+
+  txfController[scrName]!.forEach((k, input) {
+    // clear all data
+    try {
+      String wId = '$scrName-${input.position}';
+      // GeneralGetXController.to.getWidgetId(scrName, input.position);
+
+      // Restore state
+      input.controller.text = input.initialValue;
+      input.finalData = input.initialValue;
+      input.isEnabled = input.initialIsEnabled; // Restore isEnabled state
+      input.stateObject = input.initialStateObject; // Restore state object
+
+      widgetsToUpdate.add(wId);
+
+      dynamic theController =
+          GeneralGetXController.to.getController(scrName, input.position);
+      if (theController is TextEditingController) {
+        theController.text = input.initialValue;
+        devPrint(
+            'clearing input controller for txf myController $wId initialValue = ${input.initialValue}');
+      }
+
+      devPrint('clearing GetXController $wId');
+      GeneralGetXController.to
+          .deleteAllWidget(scrName, input.position); // for images
+      devPrint('GetXController $wId cleared');
+    } catch (e) {
+      // do nothing
+    }
+  });
+
+  if (widgetsToUpdate.isNotEmpty) {
+    Get.find<WidgetUpdateController>().update(widgetsToUpdate);
+  }
+} // end of clearData
+
+String replacePlaceHoldersFromTxfController(String scrName, String text) {
+  // Define a regular expression to find the placeholder.
+  // The `r''` denotes a raw string, and `\d+` matches one or more digits.
+  // The parentheses `()` create a capturing group for the number.
+  // {{POS(n)}} will be replaced with ref[1][n]
+  final RegExp regex = RegExp(r'{{(POS|DOC)\((\d+)\)}}');
+
+  // Use replaceAllMapped to find all matches and apply a function to each one.
+  return text.replaceAllMapped(regex, (match) {
+    try {
+      final String type = match.group(1)!;
+      // Get the captured number (from the first capturing group).
+      final int index = int.parse(match.group(2)!);
+
+      // Access the value from the ref list and return it.
+      // Assuming the user's example of ref[1][n] is the required structure.
+      String content = txfController[scrName]![index]?.finalData ?? 'No-DATA';
+      if (type == 'DOC') {
+        return getDocumentName(content);
+      } else if (type == 'POS') {
+        // Otherwise, it's a POS placeholder, return the value directly.
+        return content;
+      } else {
+        return 'NO-$type';
+      }
+    } catch (e) {
+      errorReport(e);
+    }
+    // Return NO-DATA if the index is out of bounds.
+    return 'NO-DATA';
+  });
+} // end of replacePlaceHoldersFromTxfController
+
+String replacePlaceholders(String text, List<List<dynamic>> ref) {
+  // Define a regular expression to find the placeholder.
+  // The `r''` denotes a raw string, and `\d+` matches one or more digits.
+  // The parentheses `()` create a capturing group for the number.
+  // {{POS(n)}} will be replaced with ref[1][n]
+  final RegExp regex = RegExp(r'{{(POS|DOC)\((\d+)\)}}');
+
+  // Use replaceAllMapped to find all matches and apply a function to each one.
+  return text.replaceAllMapped(regex, (match) {
+    try {
+      final String type = match.group(1)!;
+      // Get the captured number (from the first capturing group).
+      final int index = int.parse(match.group(2)!);
+
+      // Access the value from the ref list and return it.
+      // Assuming the user's example of ref[1][n] is the required structure.
+      if (ref.length > 1 && ref[1].length > index) {
+        if (type == 'DOC') {
+          return getDocumentName((ref[1][index] ?? 'No-DATA').toString());
+        } else if (type == 'POS') {
+          // Otherwise, it's a POS placeholder, return the value directly.
+          return (ref[1][index] ?? 'No-DATA').toString();
+        } else {
+          return 'NO-$type';
+        }
+      }
+    } catch (e) {
+      errorReport(e);
+    }
+
+    // Return NO-DATA if the index is out of bounds.
+    return 'NO-DATA';
+  });
+} // end of replacePlaceholders
+
+void saveSend(
+    int? timeStamp, String scrName, var component, String locString, int appVid,
+    {bool send = true}) {
+  int currentTableVid = appVid;
+  if (component['com'] == 'con') {
+    currentTableVid = consteonVid;
+  }
+  setTransactionNotOK('saveSend');
+  try {
+    /*
+    var state = transactionStore.state.screenTx;
+    TimerBloc timerBloc = state['#TIMER_BLOC'];
+    var route = component['route'] ?? scrName;
+    rootThis.setState(() {
+      rootThis.wait = true;
+    });
+    timerBloc.add(Start(duration: 5)); //  get timerBloc from transactionStore
+    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+      '#NEXTROUTE': route,
+      '#TIMER_CONTEXT': context,
+      '#TIMER_DURATION': component['delay'] ?? 5,
+    }))); // set state #NEXTROUTE route that will be displayed after waitScreen
+    */
+    dynamic state = transactionStore.state.screenTx;
+    String flag = component['flag'] ??
+        emptyString; // flag to be written with ⬤ separator at the end
+    List<dynamic> row = List<dynamic>.filled(
+        sheetSystemLength + txfController[scrName]!.length, null,
+        growable: true);
+    int maxPosition = 0;
+    row[0] = null;
+    row[1] = scrName;
+    row[2] = state['#VID'];
+    row[3] = 'NTP';
+    row[8] = 'E0';
+    if (component['type'].toString().trim().toLowerCase() == 'checker') {
+      //separator[5] = white diamond
+      row[4] =
+          '${separator[5]}${component['checker']}${separator[5]}${component['checkie']}';
+    } else {
+      row[4] = '';
+    } // end (component['type'].toString().trim().toLowerCase() == 'checker')
+
+    txfController[scrName]!.forEach((k, input) {
+      try {
+        if (1 <= input.position && input.position <= 100) {
+          if (input.table != null) {
+            // if table is not null or empty
+            input.table!.forEach((documentName, content) {
+              String finalName =
+                  replacePlaceHoldersFromTxfController(scrName, documentName);
+              writeToStaticTable(currentTableVid, finalName, content);
+            });
+          } // end if (input.table != null && input.table != emptyString)
+          int pos = input.position + sheetSystemLength - 1;
+          maxPosition =
+              input.position > maxPosition ? input.position : maxPosition;
+          if (pos >= row.length) {
+            int dif = pos - row.length;
+            for (var ii = 0; ii < dif; ii++) {
+              row.add('');
+            }
+            row.add(input.finalData == emptyString
+                ? (stringCleanUp(input.controller.text) ?? "")
+                    .replaceAll("\n", "\\n")
+                : (stringCleanUp(input.finalData) ?? '')
+                    .replaceAll("\n", "\\n")); // get data from txf controller
+            int d = 1;
+          } else {
+            row[pos] = input.finalData == emptyString
+                ? (stringCleanUp(input.controller.text) ?? '')
+                    .replaceAll("\n", "\\n")
+                : (stringCleanUp(input.finalData) ?? '')
+                    .replaceAll("\n", "\\n"); // get data from txf controller
+          } // end if if (pos >= row.length)
+        } // end if input.position > 0
+      } catch (eEach) {
+        errorReport(eEach);
+      } // end try
+    }); // end for each txfController
+    row = row.sublist(
+        0, (maxPosition + 15 < row.length) ? maxPosition + 15 : row.length);
+    List<List<dynamic>> ref = [];
+    ref.add(row.sublist(0, 14));
+    ref.add(row.sublist(14));
+    String? tableString;
+    try {
+      tableString = component['addToTable'] ?? '';
+      // "${component['saveToTable'] ?? ''}${separator[0]}" +
+      // "${component['appendToTable'] ?? ''}${separator[0]}" +
+      // "${component['addToTable'] ?? ''}";
+      tableString = autheniumDecode(tableString) ?? '';
+      tableString = tableString
+          .replaceAll("◼A⭘", "◼A⭘tableVid◼${currentTableVid}⭘")
+          .replaceAll("◼D⭘", "◼D⭘tableVid◼${currentTableVid}⭘")
+          .replaceAll("◼S⭘", "◼S⭘tableVid◼${currentTableVid}⭘");
+      tableString = replacePlaceholders(tableString, ref);
+      int d = 1;
+    } catch (e) {
+      // tableString = null;
+    } // end try
+
+    if (routeExist(component['route'])) {
+      devPrint('start clearing txfController');
+      clearData(scrName);
+    }
+    setTransactionOK('saveSend');
+    if (send) {
+      saveSendRows(scrName, '', row, flag, timeStamp, locString, tableString,
+          currentTableVid, component['desc'] ?? '', component['type'] ?? '');
+    } // end if (send)
+    // setTransactionOK('setDataOK');
+  } catch (err) {
+    setDataOK('1');
+    errorReport(err);
+  }
+} // end of saveSend
+
+Future saveSendRows(
+    String screenName,
+    String tail,
+    List<dynamic> row,
+    String flag,
+    int? timeStamp,
+    String locString,
+    String? tableString,
+    int appVid,
+    String desc,
+    String widgetType) async {
+  if (timeStamp == null) {
+    row[0] = await getRealTime();
+  } else {
+    row[0] = timeStamp;
+  }
+  String originalText = '0'; // encryption type 0 = no encryption
+  if (!identical(flag, emptyString)) {
+    originalText += flag;
+  }
+  originalText += locString + separator[0]; // black circle
+  for (int c = 15; c < row.length; c++) {
+    if (15 < c) originalText += separator[3]; // formerly 1=black diamond
+    if (row[c] != null) originalText += row[c];
+  }
+  row[2] = '$originalText$tail';
+  row = row.sublist(0, 3);
+  // dynamic tableResult = writeToTable(tableString, jsonEncode(row));
+  // try {
+  //   dynamic tableResult = writeToTable(tableString, row);
+  // } catch (e) {
+  //   String d = e.toString();
+  // }
+  appendToSheet(row, appVid, flag, desc, widgetType, tableString);
+} // end of saveSendRows
+
+Future<String> appendToSheet(dynamic val, int appVid, String flag, String desc,
+    String wType, String? tableString) async {
+  var state = transactionStore.state.screenTx;
+  try {
+    String c = jsonEncode(val);
+    c.replaceAll('#', '--');
+    devPrint("Submit value = $c");
+    var ss = state['#INTERFACE_KEY'];
+    var id =
+        '${state['#VID']}${(Random.secure().nextDouble() * 1000).toString()}';
+    SubmitBloc submitBloc = state['#SUBMIT_BLOC'];
+    // SubmitBloc submitBloc = BlocProvider.of<SubmitBloc>(context);
+    submitBloc.add(AddSubmit(Submit(
+      st: 0,
+      ss: ss,
+      c: c,
+      id: id,
+      appVid: appVid,
+      t: val[0],
+      p: val[1],
+      c2: val[2],
+      d: desc,
+      f: flag,
+      w: wType,
+      tb: tableString,
+    ))); // append to firestore
+    submitBloc.add(LoadSubmit()); // refresh cache
+    TimerBloc timerBloc = state['#TIMER_BLOC'];
+    timerBloc.add(Start(duration: state['#TIMER_DURATION']));
+    actionUnLock('appendToSheet');
+  } catch (e) {
+    setDataOK('1');
+    errorReport(e);
+  }
+  return 'End of appendToSheet';
+} // end of appendToSheet
+
+Future getRealTime() async {
+  // get data from device. If connected to internet, get from ntp
+  // in no internet connection, get time from gps
+  // if everything fail, return device time in millisecondSinceEpoch
+  DateTime n = DateTime.now();
+  int retVal = n.millisecondsSinceEpoch + time2GpsOffset;
+  try {
+    if (internetConnected()) {
+      n = await NTP.now().timeout(const Duration(seconds: 2));
+      retVal = n.millisecondsSinceEpoch;
+      // } else {
+      // try {
+      //   Position? pos2 = await Geolocator.getCurrentPosition();
+      //   gpsTime.value = pos2.timestamp.millisecondsSinceEpoch;
+      //   transactionStore.dispatch(UpdateScreenTxAction(
+      //       ScreenTransaction({'#LASTGPSTIME': gpsTime.value})));
+      //   prefs.setInt('@lastGpsTime', gpsTime.value);
+      // } catch (eGps) {
+      //   errorReport(e);
+      // } // end try
+      // if (gpsTime.value > 0) {
+      //   retVal = gpsTime.value;
+      // }
+    } // end if internetConnected()
+  } catch (e) {
+    errorReport(e);
+  }
+  // devPrint('Ntp returning : ${n.millisecondsSinceEpoch}');
+  return retVal;
+} // end of getRealTime
+
+FunctionBody getFunctionBody(String ssid, var range) {
+  // range is an array
+  // Return url and body for gcf call
+  var job = "[";
+  for (int i = 0; i < range.length; i++) {
+    if (i > 0) job += ',';
+    job += '{"ssid":"$ssid","type":"A1","rg":"${range[i]}"}';
+  }
+  job += "]";
+  Map<String, String> qParams = {
+    "eData": "--",
+    "clt": defaultCluster,
+    "job": job
+  };
+  var url = "https://$autsorzFunctionDomain${functionName['readSS']}";
+  FunctionBody result = FunctionBody(url, qParams);
+  return result;
+//  return http.post(url, body: qParams);
+}
+
+FunctionBody appendSSA1(String ssid, var rowData, String clt) {
+  // range is an array
+  // Return url and body for gcf call
+  List job = [];
+  for (int i = 0; i < rowData.length; i++) {
+    job.add({"ssid": ssid, "dt": rowData[i]});
+  }
+  String jobStr = jsonEncode(job);
+  Map<String, String> qParams = {
+    "eData": "--",
+    "clt": clt,
+    "ver": version,
+    "job": jobStr
+  };
+  var url = "https://$autsorzFunctionDomain${functionName['addFL']}";
+  FunctionBody result = FunctionBody(url, qParams);
+  return result;
+//  return http.post(url, body: qParams);
+}
+
+Future<Position?> getLocation() async {
+  // get gps location, until #LASTGPSTIME <> current readings>
+  devPrint('getLocation');
+  dynamic allGpsData = await getAppGps();
+  Position myPosition = allGpsData['gpsData'];
+  dynamic myLatitude = myPosition.latitude;
+  return allGpsData['gpsData'];
+} // end of getLocation
+
+int exp2Epoch(String? inp) {
+  // convert mm/yy => millisecond from epoch
+  int result = DateTime.now().millisecondsSinceEpoch;
+  if (inp != null) {
+    dynamic inpArray = inp.split("/");
+    if (inpArray.length == 2) {
+      result = DateTime(2000 + int.parse(inpArray[1]), int.parse(inpArray[0]))
+          .millisecondsSinceEpoch;
+    }
+  }
+  return result;
+} // end of exp2Epoch
+
+bool locationToleranceCheck(Position position, var locArray, int tolerance) {
+  bool found = false;
+  var accuracy = position.accuracy;
+  var finalTolerance = tolerance + accuracy;
+  for (int i = 0; i < locArray.length && !found; i++) {
+    var d = distanceM(
+        position.latitude, position.longitude, locArray[i][0], locArray[i][1]);
+    found = d <= finalTolerance; //? true : false;
+  } // end for locArray
+  return found;
+} // end of locationToleranceCheck
+
+Future locationVerify(var locArray, var tolerance, OtqState? otqData) async {
+  // return bool, for any location in locArray with distance <= tolerance
+  // bool locOk = await locationVerify([ [-6.3161284,106.6448379],[-6.3161284,106.6448379],],100, OtqState);
+  bool found = false;
+  try {
+    if (otqData == null) {
+      sleep(const Duration(milliseconds: 100));
+    }
+    if (otqData != null) {
+      OtqState position = otqData;
+      for (var l = 0; l < 10 && !position.gpsDone; l++) {
+        sleep(Duration(milliseconds: 100 + l * 20));
+      } // end while !otqData.gpsDone
+      if (position.gpsDone) {
+        var accuracy = position.accuracy;
+        var finalTolerance = tolerance + accuracy;
+        for (int i = 0; i < locArray.length && !found; i++) {
+          var d = distanceM(position.latitude, position.longitude,
+              locArray[i][0], locArray[i][1]);
+          found = d <= finalTolerance; //? true : false;
+        } // end for i
+      } // end if position.gpsDone
+    } // end if otqData != null
+  } catch (e) {
+    errorReport(e);
+  } // end try
+  return found;
+} // end of locationVerify
+
+distanceM(var lat1, var lon1, var lat2, var lon2) {
+  // inspired by https://www.movable-type.co.uk/scripts/latlong.html
+  const R = 6371000;
+  const piRad = 0.0174532925199433; // pi/180
+  num t1 = lat1 * piRad;
+  num t2 = lat2 * piRad;
+  num dt = (lat2 - lat1) * piRad;
+  num dl = (lon2 - lon1) * piRad;
+  num a =
+      sin(dt / 2) * sin(dt / 2) + cos(t1) * cos(t2) * sin(dl / 2) * sin(dl / 2);
+  num c = 2 * atan2(sqrt(a), sqrt(1 - a));
+  return R * c;
+} //end of distanceM
+
+Future<String> getPhotoCameraImage(
+  List<CameraDescription> cameras,
+  String title,
+  String lens,
+  int maxsize,
+  int quality,
+  String folder,
+  String fileName,
+  double? height,
+  double? width,
+) async {
+  final String pickedFileUrl = await acquireCamera(
+      cameras, title, lens, maxsize, quality, height, width);
+  // String url = await saveImageToCloud(
+  //     imagePath: pickedFileUrl, folder: folder, fileName: fileName);
+  String url = await prepareImageAsLocal(
+      imagePath: pickedFileUrl, folder: folder, fileName: fileName);
+  saveImagePutInImageMap(url); // save image to imageMap
+  // var state = transactionStore.state.screenTx;
+  // var storageBucket = state['#STORAGE_BUCKET'];
+  // Reference storageRef = storageBucket.ref().child("$folder/$fileName.jpg");
+  // UploadTask uploadTask2 = storageRef.putFile(File(pickedFileUrl));
+  // TaskSnapshot taskSnapshot = await uploadTask2;
+  // var url = await taskSnapshot.ref.getDownloadURL();
+  return url;
+} // end of getPhotoCameraImage
+
+Future<String> getCameraImageNotUsed(
+    double w, double h, int quality, String folder, String rawFileName) async {
+  /*
+  String fileName = rawFileName.replaceAll(".jpg", "");
+  final picker = ImagePicker();
+  final pickedFile = (await picker.pickImage(
+      source: ImageSource.camera,
+      preferredCameraDevice: CameraDevice.front,
+      maxHeight: h,
+      maxWidth: w,
+      imageQuality: quality))!;
+  var state = transactionStore.state.screenTx;
+  var storageBucket = state['#STORAGE_BUCKET'];
+  Reference storageRef = storageBucket.ref().child("$folder/$fileName.jpg");
+  UploadTask uploadTask2 = storageRef.putFile(File(pickedFile.path));
+  TaskSnapshot taskSnapshot = await uploadTask2;
+  var url = await taskSnapshot.ref.getDownloadURL();
+  return url;
+  */
+  return emptyImageUrl;
+} // end of selfie
+
+String encForOtonomiqCall(txt) {
+  // Encrypt txt with totp aes then return clean Base64
+  //  clean = '+' = '-'; "/" = '_'
+  // key = any length B32.
+  // Input text will be prefixed with ";;" for 1 or 2 totp identification
+  // This prefix will be deleted when decrypted.
+  String result = "";
+  // var totp1 = totp(getOtqK(1), 16, 30);
+  // Uint8List d = Uint8List.fromList(utf8.encode(totp1[1]));
+  // var h = getSHA3(d);
+  // String hHex = uint8ToHex(h);
+  // let k = getSha3(256, totp1[1].toString());        // use later totp
+  // let e = CryptoJS.AES.encrypt(internalPrefix + txt, k
+  //     , {
+  //       mode: CryptoJS.mode.CBC                       // for this library, CBC is the only mode supported
+  //       , padding: CryptoJS.pad.Pkcs7
+  //     }
+  // );
+  // return prefix+e.toString().replace(/\//g, '_').replace(/\+/g, '-');
+  return result;
+} // end of encForOtonomiqCall
+
+List totp(String keycode, int len, int sec) {
+  // var keycode = secret code doesn't care space and upper/lowercase (BASE32)
+  // return an array,[totp before, totp current]
+  // This is algorithm that used in Google Authenticator with len = 6
+  var retArray = [];
+  var m1 = (DateTime.now().millisecondsSinceEpoch / (sec * 1000)).floor();
+  m1 = 54427511; // TODO delete this for production
+  Uint8List k3 = hexToUInt8(base32ToHex(keycode.replaceAll(" ", "")));
+  final hmac1 = uInt8ToHex(
+      hmacSha1(k3, hexToUInt8(m1.toRadixString(16).padLeft(16, "0"))));
+  final hmac2 = uInt8ToHex(
+      hmacSha1(k3, hexToUInt8((m1 - 1).toRadixString(16).padLeft(16, "0"))));
+  int position =
+      int.parse(hmac2.substring(hmac2.length - 1, hmac2.length), radix: 16) * 2;
+  String s1 =
+      (BigInt.parse((hmac2.substring(position, position + 8)), radix: 16) &
+              BigInt.from(2147483647))
+          .toString();
+  s1 = len < s1.length ? s1.substring(s1.length - len, s1.length) : s1;
+  retArray.add(s1); // older number goes first
+  position =
+      int.parse(hmac1.substring(hmac1.length - 1, hmac1.length), radix: 16) * 2;
+  s1 = (BigInt.parse((hmac1.substring(position, position + 8)), radix: 16) &
+          BigInt.from(2147483647))
+      .toString();
+  s1 = len < s1.length ? s1.substring(s1.length - len, s1.length) : s1;
+  retArray.add(s1); // latest number goes second
+  return retArray;
+} // end of totp
+
+Uint8List hmacSha1(Uint8List hmacKey, Uint8List data) {
+  final hmac =
+      HMac(SHA1Digest(), 64) // for HMAC SHA-256, block length must be 64
+        ..init(KeyParameter(hmacKey));
+  return hmac.process(data);
+}
+
+Uint8List getSHA3(Uint8List data) {
+  final sha3 = SHA3Digest(256);
+  return sha3.process(data);
+}
+
+String uInt8ToHex(Uint8List ar) {
+  String result = "";
+  for (var i = 0; i < ar.length; i++) {
+    result += ar[i].toRadixString(16).padLeft(2, "0");
+  }
+  return result;
+} // end of uInt8ToHex
+
+Uint8List hexToUInt8(hexString) {
+  int resultLen = (hexString.length / 2).ceil();
+  List<int> result = [];
+  for (var i = 0; i < resultLen; i++) {
+    result.add(int.parse(hexString.substring(i * 2, i * 2 + 2), radix: 16));
+  } // end for resultLen
+  return Uint8List.fromList(result);
+} // end of hexToUInt8
+
+String base32ToHex(base32) {
+  String base32chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+  String bits = "";
+  String hex = "";
+  for (var i = 0; i < base32.length; i++) {
+    int val = base32chars.indexOf(base32[i].toUpperCase());
+    bits += val.toRadixString(2).padLeft(5, "0");
+  }
+  for (var i = 0; i + 4 <= bits.length; i += 4) {
+    var chunk = bits.substring(i, i + 4 > bits.length ? bits.length : i + 4);
+    hex = hex + int.parse(chunk, radix: 2).toRadixString(16);
+  }
+  return hex;
+} // end of base32ToHex
+
+String getOtqK(int o) {
+  // key for autsorz crypto
+  return o == 1
+      ? "7N4PUB2M6ZM56GXWHJTHTPSPYI36KZFKCTRQHQKI6LCU5HHPGDKPPFDYUPHAK527"
+      : "32EGJUG5HNLDUMFR3FCX5T2NF7UVJOQ7C5JM27EN42ULLFBMMV4YSYUTLCAOR5CD";
+} // end of getOtqK
+//TODO:add flutter sound from ref : https://github.com/Canardoux/tau/blob/master/flutter_sound/example/lib/soundEffect/sound_effect.dart
+
+Future asyncAppStartup2() async {
+  // debugPrint('start asyncAppStartup2');
+  actionUnLock('asyncAppStartup2');
+  String? myLif =
+      await waitUntilNotNullScreenTx('asyncAppStartup2', '#INTERFACE_KEY', 20);
+  if (myLif != null) {
+    await readSettingsStart(myLif, 2);
+  } else {
+    debugPrint('#INTERFACE_KEY = NULL  in asyncAppStartup2');
+  }
+  // debugPrint('end asyncAppStartup2');
+}
+
+// void encryptionTest() {
+//   // dynamic keys = location.keys;
+//   // for (String k in keys) {
+//   //   devPrint ('location [$k] = ${location[k]}');
+//   // } // end for location
+//   location.forEach((enc, dcp) {
+//     // devPrint ('location [$enc] = $dcp');
+//     String eec = aecDecrypt(enc, 'l');
+//     if (eec != dcp) {
+//       devPrint ('wrong => $enc');
+//     }
+//     // else {
+//     //   devPrint('ok => $ec');
+//     // }
+//   }); // end of location.forEach
+//   int d = 1;
+// } // end of encryptionTest
+
+// Future writeToSheetRange(
+//     String sheetKey, String sheetRange, dynamic val) async {
+//   /// Write to google Spreadsheet
+//   var state = transactionStore.state.screenTx;
+//   if (state['#SHEET_API']) {
+//     ValueRange vu = ValueRange.fromJson({"values": val});
+//     sheetApi.spreadsheets.values
+//         .update(vu, sheetKey, sheetRange, valueInputOption: 'USER_ENTERED');
+//   }
+// } // end of writeToSheetRange
+
+// void getSheetApi(var _cred) {
+//   auth.AuthClient client = auth.authenticatedClient(http.Client(), _cred);
+//   sheetApi = SheetsApi(client);
+//   transactionStore
+//       .dispatch(UpdateScreenTxAction(ScreenTransaction({'#SHEET_API': true})));
+// }
