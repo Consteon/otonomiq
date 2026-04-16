@@ -1,0 +1,1732 @@
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+// import 'package:fluttercontactpicker/fluttercontactpicker.dart';
+import 'package:group_radio_button/group_radio_button.dart';
+import '../../global.dart';
+import 'package:intl/intl.dart';
+// import 'package:qr_code_scanner/qr_code_scanner.dart';
+import 'package:flutter/services.dart';
+import '../../otq_icons.dart';
+import '../api.dart';
+import '../bloc_timer/timer_bloc.dart';
+import '../bloc_timer/timer_event.dart';
+import '../init_values.dart';
+import '../main_bloc/main_bloc.dart';
+import '../main_bloc/main_event.dart';
+import 'package:flutter_multi_formatter/flutter_multi_formatter.dart';
+import 'package:get/get.dart';
+import '../model/general_get_controller.dart';
+import '../redux/screen_transaction.dart';
+import 'ftz_array_search.dart';
+import 'ftz_contact_picker.dart';
+// import '../part/android_part/ftz_mobile_scanner.dart';
+import '../firestore_repository/table_repository.dart';
+import 'package:geolocator/geolocator.dart';
+// import 'package:flutter_native_contact_picker/flutter_native_contact_picker.dart';
+import 'package:barcode_scan2/barcode_scan2.dart';
+part '../part/build_part/otq_txf_part.dart';
+
+// child method call
+// https://stackoverflow.com/questions/48481590/how-to-set-update-state-of-statefulwidget-from-other-statefulwidget-in-flutter
+// credit card format idea : https://appvesto.medium.com/flutter-formatting-textfield-with-textinputformatter-c73ee2167514
+// more of credit card data input including logos
+// https://medium.com/flutter-community/validating-and-formatting-payment-card-text-fields-in-flutter-bebe12bc9c60
+// https://github.com/wilburt/Payment-Card-Validation/tree/master/assets/images
+// multi formatter :
+// https://pub.dev/packages/flutter_multi_formatter/example
+
+class OtqTxf extends StatefulWidget {
+  /*
+    Full blown txf widget
+  */
+  const OtqTxf({
+    required Key key,
+    required this.scrName,
+    required this.component,
+    required this.lPad,
+    required this.tPad,
+    required this.rPad,
+    required this.bPad,
+    this.cnt,
+  }) : super(key: key);
+  final String scrName;
+  final dynamic component;
+  final double lPad;
+  final double tPad;
+  final double rPad;
+  final double bPad;
+  final TextEditingController? cnt; //external controller, used by parent widget
+  // null indicate that this is a stand-alone widget
+  @override
+  OtqTxfState createState() => OtqTxfState();
+}
+
+class OtqTxfState extends State<OtqTxf>
+    with AutomaticKeepAliveClientMixin<OtqTxf> {
+  // with AutomaticKeepAliveClientMixin<TxfFull> will keep this widget when scroll
+  var selectedDate = DateTime.now();
+  late TextEditingController myController;
+  TextEditingController searchController = TextEditingController();
+  bool touch = true;
+  bool obscure = false;
+  String errorCode = emptyString; // emptyString = no Error
+  String? lastValue;
+  List<double> margin = [];
+  List<dynamic> style = [];
+  List<String> radioOption = []; // menu of ratio button
+  Axis radioAxis = Axis.vertical; // axis of ratio button
+  MainAxisAlignment radioAlignment =
+      MainAxisAlignment.start; // alignment of radio button
+  String? _picked; // picked item in radio button
+  int maxLength =
+      -1; // maximum length of input text (from component['maxlength']
+  late bool editable;
+  List<TextInputFormatter> tiFormatter = [];
+  dynamic formatArray = [];
+
+  // for currency, 0 = symbol (default = ""= no symbol)
+  // 1 = thousands separator (default ",")
+  // 2 = length of mantissa (default = 0)
+  List<dynamic> textArray = [];
+  String labelStr = '', hintStr = '', cancelStr = '';
+  String searchDisplayType = '', searchContent = '', searchContentBase = '';
+
+  // RxList<dynamic> localTable =
+  //     [].obs; // Full array type of table for text search
+  // RxList<dynamic> pickTable = [].obs; // searched localTable
+  List<dynamic> localTable = []; // Full array type of table for text search
+  List<dynamic> pickTable = []; // searched localTable
+  bool tableSearchFound = false;
+  Position? gpsPosition; // current position
+  String qrType = 'G'; // default qr type = Generic
+  Map<String, String> errString = {};
+
+  String formatNumber(dynamic format, num? value) {
+    // format = [symbol, language, mantissa]
+    late String result;
+    try {
+      num factor = pow(10, format[2]);
+      num value2 = ((value ?? 0) * factor).round() / factor;
+      String template = "#,##0";
+      if (format[2] > 0) {
+        template += ".${"0" * format[2]}";
+      } // end if (format[2] > 0)
+      result = format[0] == ""
+          ? ""
+          : "${format[0]} ${NumberFormat(template, format[1]).format(value2)}";
+    } catch (e) {
+      result = "";
+    } // end try num factor
+    return result;
+  } // end of formatNumber
+
+  DateTime _string2DT(String? inp, bool utc) {
+    /*
+      inp = millisecond from epoch or millisecond from beginning of day
+    */
+    var now = DateTime.now();
+    DateTime returnValue = now;
+    bool isDate = false;
+    int n = now.hour * 3600000 + now.minute * 60000 + now.second * 1000;
+    int init;
+    try {
+      init = (inp == null || inp == "") ? n : int.parse(inp);
+      isDate = init >= 86400000 ? true : false;
+    } catch (_) {
+      init = n;
+    }
+    if (utc) {
+      init += DateTime.now().timeZoneOffset.inMilliseconds;
+    }
+    if (isDate) {
+      returnValue = DateTime.fromMillisecondsSinceEpoch(init);
+    } else {
+      int hour = (init / 3600000).floor();
+      int minute = ((init % 3600000) / 60000).floor();
+      int sec = ((init % 1000) / 1000).round();
+      returnValue = DateTime(now.year, now.month, now.day, hour, minute, sec);
+    } // end if (isDate)
+    return returnValue;
+  } // end of String2DT
+
+  List<dynamic> getTotalValueFormatted() {
+    // result = [dynamic data to be stored / totalValue (if any), String? formatted totalValue or original)
+    String? cData = (widget.component['currentValue'] ?? "").toString();
+    late List<dynamic> result;
+
+    try {
+      if (cData.toString().substring(0, 7) == "_u2605_") {
+        // test for star
+        List<String> currentArray = cData.split("_u2605_");
+        num subTotal = 0;
+        bool sum = currentArray[1].toString().trim() == "+";
+        bool multiply = currentArray[1].toString().trim() == "*";
+        for (var i = 2; i < currentArray.length; i++) {
+          late num newValue;
+          try {
+            int newPosition = int.parse(currentArray[i]);
+            newValue = num.parse(
+                txfController[widget.scrName]![newPosition]!.finalData);
+          } catch (e) {
+            newValue = 0;
+          }
+          if (sum) {
+            subTotal += newValue;
+          } else if (multiply) {
+            subTotal = subTotal * newValue;
+          } // end if sum
+        } // end for currentArray
+        if (formatArray.length <= 0) {
+          formatArray = getCurrencyFormat(widget.component['format']);
+        }
+        result = [subTotal.toString(), formatNumber(formatArray, subTotal)];
+      } else {
+        result = [numericCleanUp(formatArray, cData), cData];
+      } // end if "_u2605_"
+    } catch (e) {
+      result = [cData, cData]; // default
+    }
+    return result;
+  } // end of getTotalValueFormatted
+
+  @override
+  void initState() {
+    super.initState();
+    GeneralGetXController.to
+        .registerWidget(widget.scrName, widget.component['position']);
+    if (widget.component['table'] != null &&
+        widget.component['table'].toString().trim() != '') {
+      subscribeToTable(widget.component['table']).then((_) {
+        localTable = tableToArray(
+            transactionStore.state.screenTx[
+                '#TABLE${widget.component['table'].toString().trim()}'],
+            widget.component['table'],
+            widget.component['sort']);
+        // setState(() {
+        //   pickTable = List.from(localTable).obs;
+        // });
+      });
+      // todo unsubscribe at dispose if desirable (will be need to load again)
+    } // end if (widget.component['table'] != null)
+    if (widget.component['qr'] == null ||
+        widget.component['qr'].toString().trim().isEmpty) {
+      qrType = 'G';
+    } else if (widget.component['qr'].toString().trim().toLowerCase() ==
+        'uqr') {
+      qrType = 'U';
+    } else if (widget.component['qr'].toString().trim().toLowerCase() ==
+        'lqr') {
+      getLocation().then((pos) {
+        gpsPosition = pos;
+      });
+      qrType = 'L';
+    }
+    editable = true;
+    selectedDate = DateTime.now();
+    myController = (widget.cnt == null) ? TextEditingController() : widget.cnt!;
+    // : myController = widget.cnt!;
+    GeneralGetXController.to.putController(
+        widget.scrName, widget.component['position'], myController);
+    // GeneralGetXController.to.putController(
+    //     widget.scrName, widget.component['position'], (widget.cnt == null)
+    //     ? TextEditingController()
+    //     : widget.cnt!);
+    // TextEditingController theController = GeneralGetXController.to
+    //     .getController(widget.scrName, widget.component['position']);
+    maxLength = widget.component['maxLength'] ?? -1;
+    if (maxLength <= 0) {
+      maxLength = -1;
+    }
+    if (widget.component['format'] != null) {
+      formatArray = getCurrencyFormat(widget.component['format']);
+    } // end if (widget.component['format'] != null)
+    String variant = widget.component['variant'].toString().toLowerCase();
+    if (variant == 'creditcardnumber') {
+      //formatArray = getCurrencyFormat(widget.component['format']);
+      tiFormatter.add(MaskedInputFormatter(
+        "#### #### #### ####",
+        allowedCharMatcher: RegExp(r'[0-9]+'),
+      ));
+    } else if (variant == 'money') {
+      if (formatArray.length <= 0) {
+        // for money formatArray is mandatory
+        formatArray = getCurrencyFormat(widget.component['format']);
+      }
+      tiFormatter.add(CurrencyInputFormatter(
+        leadingSymbol: formatArray[0],
+        thousandSeparator: formatArray[1] == "."
+            ? ThousandSeparator.Period
+            : ThousandSeparator.Comma,
+        mantissaLength: formatArray[2],
+        useSymbolPadding: formatArray[0].toString().isNotEmpty ? true : false,
+      ));
+    } else if (variant == 'creditcardexpire') {
+      tiFormatter.add(CreditCardExpirationDateFormatter());
+    } else if (variant == 'static') {
+      editable = false;
+    } else if (variant == 'searchtable') {
+      editable = false;
+    } else {
+      tiFormatter.add(LengthLimitingTextInputFormatter(maxLength));
+    } // end if variant (tiFormatter)
+
+    try {
+      List<dynamic> valueArray = getTotalValueFormatted();
+      if (widget.component['position'] != null) {
+        switch (widget.component['variant']) {
+          case 'searchTable':
+            myController.text = widget.component['currentValue'] == null
+                ? ''
+                : widget.component['currentValue'].toString();
+            break;
+
+          case 'time':
+            String fm = widget.component['format'] == null ||
+                    widget.component['format'] == ""
+                ? "H:mm"
+                : widget.component['format'];
+            myController.text = widget.component['currentValue'] == null ||
+                    widget.component['currentValue'] == ""
+                ? emptyString
+                : DateFormat(fm).format(_string2DT(
+                    widget.component['currentValue'],
+                    string2Bool(widget.component['utc'])));
+            selectedDate = _string2DT(widget.component['currentValue'],
+                string2Bool(widget.component['utc']));
+            break;
+
+          case 'date':
+            String fm = widget.component['format'] == null ||
+                    widget.component['format'] == ""
+                ? "d-MMM-yyyy"
+                : widget.component['format'];
+            myController.text = widget.component['currentValue'] == null ||
+                    widget.component['currentValue'] == ""
+                ? emptyString
+                : DateFormat(fm).format(
+                    _string2DT(widget.component['currentValue'], false));
+            if (widget.component['currentValue'] == null ||
+                widget.component['currentValue'] == '') {
+              selectedDate = _string2DT(
+                  DateTime.now().millisecondsSinceEpoch.toString(),
+                  string2Bool(widget.component['utc']));
+            } else {
+              selectedDate =
+                  _string2DT(widget.component['currentValue'], false);
+            } // end if (widget.component['currentValue'] == null
+            selectedDate = DateTime(selectedDate.year, selectedDate.month,
+                selectedDate.day); // trim hourly data
+            break;
+
+          case 'dateTime':
+            String fm = widget.component['format'] == null ||
+                    widget.component['format'] == ""
+                ? "d-MMM-yyyy H:mm"
+                : widget.component['format'];
+            myController.text = widget.component['currentValue'] == null ||
+                    widget.component['currentValue'] == ""
+                ? emptyString
+                : DateFormat(fm).format(_string2DT(
+                    widget.component['currentValue'],
+                    string2Bool(widget.component['utc'])));
+            if (widget.component['currentValue'] == null ||
+                widget.component['currentValue'] == '') {
+              selectedDate = _string2DT(
+                  DateTime.now().millisecondsSinceEpoch.toString(),
+                  string2Bool(widget.component['utc']));
+            } else {
+              selectedDate = _string2DT(widget.component['currentValue'],
+                  string2Bool(widget.component['utc']));
+            }
+            break;
+
+          case 'static':
+            myController.text = (widget.component['line'] == null ||
+                    widget.component['line'] <= 1)
+                ? (valueArray[1]).replaceAll("\n", " ")
+                : valueArray[1];
+            break;
+
+          case 'creditCardExpire':
+            myController.text = valueArray[1];
+            valueArray[0] = exp2Epoch(widget.component['currentValue']);
+            break;
+
+          default:
+            myController.text = (widget.component['line'] == null ||
+                    widget.component['line'] <= 1)
+                ? (valueArray[1]).replaceAll("\n", " ")
+                : valueArray[1];
+        }
+
+        if (widget.component['position'] != null) {
+          txfControllerCheck(
+              widget.scrName, widget.component['position']); // build txfController if necessary
+          if (canInitializePage(widget.scrName)) {
+            txfController[widget.scrName]![widget.component['position']]!
+                .finalData = valueArray[0];
+            txfController[widget.scrName]![widget.component['position']]!
+                .initialValue = myController.text;
+          } // end if (canInitializePage(widget.scrName))
+        } // end if (widget.component['position'] != null)
+
+        // txfControllerCheck(widget.scrName, widget.component['position']);
+        // txfController[widget.scrName]![widget.component['position']]!
+        //     .finalData = valueArray[0];
+        // txfController[widget.scrName]![widget.component['position']]!
+        //     .initialValue = myController.text;
+        lastValue = myController.text;
+        if (widget.component['tableContentReference'] != null &&
+            widget.component['tableContentReference'] > 0) {
+          txfControllerCheck(
+              widget.scrName, widget.component['tableContentReference']);
+          if (canInitializePage(widget.scrName)) {
+            txfController[widget.scrName]![
+            widget.component['tableContentReference']]!
+                .finalData = '';
+          } // end if (canInitializePage(widget.scrName))
+        } // end if (widget.component['tableContentReference'] > 0)
+        if (widget.component['locationNamePosition'] != null &&
+            widget.component['locationNamePosition'] > 0) {
+          txfControllerCheck(
+              widget.scrName, widget.component['locationNamePosition']);
+          if (canInitializePage(widget.scrName)) {
+            txfController[widget.scrName]![
+            widget.component['locationNamePosition']]!
+                .finalData = '';
+          } // end if (canInitializePage(widget.scrName))
+        } // end if (widget.component['tableContentReference'] > 0)
+      } else {
+        //myController = TextEditingController();
+        errorCode = textList["NoPosition"]; // No position error
+      } // end if component['position'] != null
+    } catch (controllerE) {
+      errorCode = textList[
+          "TXFInitError"]; // No position error // error while initializing controller
+    } // end of try controller
+    margin = marginArray(widget.component['margin']);
+    style = styleArray(widget.component['style']);
+    radioOption = List<String>.from((widget.component['radio'] == null ||
+            widget.component['radio'].length <= 0)
+        ? [emptyString]
+        : widget.component['radio']); // for radio button
+    radioAxis = (widget.component['buttonLayout'] ?? 'vertical')
+                .toString()
+                .toLowerCase() ==
+            'horizontal'
+        ? Axis.horizontal
+        : Axis.vertical; // for radio button
+    radioAlignment =
+        mainAlignmentConst(widget.component['alignment']); // for radio button
+    textArray = (widget.component['text'] == null)
+        ? []
+        : diamondTextToList(widget.component['text']);
+    labelStr = textArray.isNotEmpty
+        ? textArray[0]
+        : (widget.component['label'] ?? 'Label');
+    hintStr = textArray.length > 1
+        ? textArray[1]
+        : (widget.component['hint'] ?? 'Hint');
+    // labelStr = widget.component['label'] ??
+    //     (textArray.isNotEmpty ? textArray[0] : 'Label');
+    hintStr = widget.component['hint'] ??
+        (textArray.length > 1 ? textArray[1] : 'Hint');
+    cancelStr = textArray.length > 2 ? textArray[2] : 'Cancel';
+    const noObject = {"searchDisplayType": "none", "content": ""};
+    dynamic tempObj = noObject;
+    if (textArray.length > 6) {
+      // content string
+      // content of search card
+      try {
+        tempObj = textArray[6] == '' ? noObject : json.decode(textArray[6]);
+      } catch (e) {
+        tempObj = noObject;
+      } // end try
+    } // end if (textArray.length > 6)
+    if (textArray.length > 10) {
+      // error messages
+      errString['03'] = textArray[7];
+      errString['05'] = textArray[8];
+      errString['04'] = textArray[9];
+      errString['98'] = textArray[10];
+      errString['99'] = textArray[11];
+    } // end if (textArray.length > 10)
+    searchDisplayType = tempObj['searchDisplayType'];
+    searchContent = tempObj['content'] ?? '';
+    searchContentBase = searchContent;
+  } // end of initState
+
+  @override
+  Future<void> dispose() async {
+    super.dispose();
+    GeneralGetXController.to
+        .putController(widget.scrName, widget.component['position'], null);
+    myController.dispose();
+    searchController.dispose();
+    localTable.clear();
+    pickTable.clear();
+    margin.clear();
+    style.clear();
+    radioOption.clear();
+    formatArray.clear();
+    textArray.clear();
+    // txfController[widget.scrName]!.remove(widget.component['position']);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GetBuilder<GeneralGetXController>(
+        id: GeneralGetXController.to
+            .getWidgetId(widget.scrName, widget.component['position']),
+        builder: (_) {
+          super.build(context); // needed by AutomaticKeepAliveClientMixin
+          // double _lPad = (systemUIComponent['Mobile']['leftPad'] ?? 0.0).toDouble();
+          // double _tPad = (systemUIComponent['Mobile']['topPad'] ?? 0.0).toDouble();
+          // double _rPad = (systemUIComponent['Mobile']['rightPad'] ?? 0.0).toDouble();
+          // double _bPad = (systemUIComponent['Mobile']['bottomPad'] ?? 0.0).toDouble();
+          Widget result;
+          var component = widget.component;
+          String scrName = widget.scrName;
+          final txfKey = widget.key;
+          // myController.text = txfController[scrName]![component['position']]!
+          //     .initialValue;  // set back to initial value. needed by GetBuilder mechanism
+          // to display original value after saveSend
+
+          void saveData(String scrName, String locString) {
+            TimerBloc timerBloc =
+                transactionStore.state.screenTx['#TIMER_BLOC'];
+            var route = widget.component['route'] ?? widget.scrName;
+            rootThis.setState(() {
+              rootThis.wait = true;
+            });
+            timerBloc.add(const Start(
+                duration: 5)); //  get timerBloc from transactionStore
+            transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+              '#NEXTROUTE': route,
+              '#TIMER_CONTEXT': context,
+              '#TIMER_DURATION': widget.component['delay'] ?? 5,
+            }))); // set state #NEXTROUTE route that will be displayed after waitScreen
+            saveSend(null, scrName, widget.component, locString, defaultVid());
+          } // end of saveData
+
+          Future<void> scan1() async {
+            String barcodeScanRes = "";
+            // Platform messages may fail, so use a try/catch PlatformException.
+            try {
+              if (barcodeScanRes != "") {
+                setState(() {
+                  myController.text = barcodeScanRes;
+                });
+                vibrate(duration: 150);
+              }
+            } on PlatformException {
+              barcodeScanRes = textList["ScanFailed"];
+            }
+          } // end of _scan1
+
+          Future<void> scan2() async {
+            String barcodeScanRes = "";
+            // Platform messages may fail, so we use a try/catch PlatformException.
+            try {
+              if (barcodeScanRes != "") {
+                setState(() {
+                  myController.text = barcodeScanRes;
+                });
+                vibrate(duration: 150);
+                // int beepNow = await pool.play(scannerBeep);
+                saveData(scrName, separator[1] * 15);
+              }
+            } on PlatformException {
+              barcodeScanRes = textList["ScanFailed"];
+            }
+          } // end of _scan2
+
+          chooseDate(BuildContext context, String initialDateString,
+              dynamic component) {
+            late dynamic modal, frm;
+            bool isDate = true;
+            if (widget.component['variant'] == 'date') {
+              modal = CupertinoDatePickerMode.date;
+              frm = widget.component['format'] == null ||
+                      widget.component['format'] == ""
+                  ? "d-MMM-yyyy"
+                  : widget.component['format'];
+            } else {
+              isDate = false;
+              modal = CupertinoDatePickerMode.dateAndTime;
+              frm = widget.component['format'] == null ||
+                      widget.component['format'] == ""
+                  ? "d-MMM-yyyy H:mm"
+                  : widget.component['format'];
+            } // end if (widget.component['variant'] == 'date')
+            myController.text = DateFormat(frm).format(selectedDate);
+            if (isDate) {
+              txfControllerCheck(widget.scrName, widget.component['position']);
+              txfController[scrName]![widget.component['position']]!
+                  .finalData = DateTime(
+                      selectedDate.year, selectedDate.month, selectedDate.day)
+                  .add(Duration(minutes: selectedDate.timeZoneOffset.inMinutes))
+                  .millisecondsSinceEpoch
+                  .toString();
+            } else {
+              txfControllerCheck(widget.scrName, widget.component['position']);
+              txfController[scrName]![widget.component['position']]!.finalData =
+                  string2Bool(widget.component['utc'])
+                      ? (selectedDate.toUtc().millisecondsSinceEpoch).toString()
+                      : (selectedDate
+                              .add(Duration(
+                                  minutes:
+                                      selectedDate.timeZoneOffset.inMinutes))
+                              .millisecondsSinceEpoch)
+                          .toString();
+            } // end if (isDate)
+            showCupertinoModalPopup(
+                context: context,
+                builder: (BuildContext builder) {
+                  DateTime startDate = widget.component['startDate'] == null
+                      ? DateTime(minYear)
+                      : DateTime.fromMillisecondsSinceEpoch(
+                          widget.component['startDate']);
+                  DateTime endDate = widget.component['endDate'] == null
+                      ? DateTime.now().add(Duration(days: maxPlusYear * 365))
+                      : DateTime.fromMillisecondsSinceEpoch(
+                          widget.component['endDate']);
+                  if (startDate.isAfter(selectedDate)) {
+                    startDate = selectedDate;
+                  } // end if (startDate.isAfter(initialDate))
+                  return Container(
+                    height:
+                        MediaQuery.of(context).copyWith().size.height * 0.25,
+                    //color: Theme.of(context).textTheme.bodyText1!.backgroundColor,
+                    color: Colors.white,
+                    child: CupertinoDatePicker(
+                      mode: modal,
+                      dateOrder: DatePickerDateOrder.dmy,
+                      onDateTimeChanged: (value) {
+                        if (value != selectedDate) {
+                          setState(() {
+                            selectedDate = value;
+                            myController.text =
+                                DateFormat(frm).format(selectedDate);
+                          }); // end of setState
+                          if (isDate) {
+                            txfControllerCheck(
+                                widget.scrName, widget.component['position']);
+                            txfController[scrName]![
+                                    widget.component['position']]!
+                                .finalData = DateTime(selectedDate.year,
+                                    selectedDate.month, selectedDate.day)
+                                .add(Duration(
+                                    minutes:
+                                        selectedDate.timeZoneOffset.inMinutes))
+                                .millisecondsSinceEpoch
+                                .toString();
+                          } else {
+                            txfControllerCheck(
+                                widget.scrName, widget.component['position']);
+                            txfController[scrName]![
+                                        widget.component['position']]!
+                                    .finalData =
+                                string2Bool(widget.component['utc'])
+                                    ? (selectedDate
+                                            .toUtc()
+                                            .millisecondsSinceEpoch)
+                                        .toString()
+                                    : (selectedDate
+                                            .add(Duration(
+                                                minutes: selectedDate
+                                                    .timeZoneOffset.inMinutes))
+                                            .millisecondsSinceEpoch)
+                                        .toString();
+                          } // end if (isDate)
+                        } // end if value != selectedDate
+                      },
+                      // end of onDateTimeChanged
+                      initialDateTime: selectedDate,
+                      minimumDate: startDate,
+                      maximumDate: endDate,
+                    ),
+                  );
+                });
+          } // end of _chooseDate
+
+          chooseTime(BuildContext context, dynamic component) {
+            showCupertinoModalPopup(
+                context: context,
+                builder: (BuildContext builder) {
+                  return Container(
+                    height:
+                        MediaQuery.of(context).copyWith().size.height * 0.25,
+                    //color: Theme.of(context).textTheme.bodyText1!.backgroundColor,
+                    color: Colors.white,
+                    child: CupertinoDatePicker(
+                      mode: CupertinoDatePickerMode.time,
+                      onDateTimeChanged: (value) {
+                        if (value != selectedDate) {
+                          setState(() {
+                            selectedDate = value;
+                            myController.text = DateFormat(
+                                    widget.component['format'] == null ||
+                                            widget.component['format'] == ""
+                                        ? "k:mm"
+                                        : widget.component['format'])
+                                .format(selectedDate);
+                          }); // end of setState
+                          txfControllerCheck(
+                              widget.scrName, widget.component['position']);
+                          txfController[scrName]![widget.component['position']]!
+                                  .finalData =
+                              timeOfDayToGSheet(
+                                  TimeOfDay(
+                                      hour: selectedDate.hour,
+                                      minute: selectedDate.minute),
+                                  string2Bool(widget.component['utc']));
+                        } // end if value != selectedDate
+                      }, // end of onDateTimeChanged
+                      initialDateTime: selectedDate,
+                    ),
+                  );
+                });
+          } // end of _chooseTime
+
+          Future chooseContact(BuildContext context) async {
+            // final PhoneContact result =
+            //     await FlutterContactPicker.pickPhoneContact();
+            // todo make a contact picker here
+            myController.text = await chooseContactAndGetPhoneNumber(
+                    widget.component['label']) ??
+                '';
+            txfControllerCheck(widget.scrName, widget.component['position']);
+            txfController[scrName]![component['position']]!.finalData =
+                myController.text;
+          } // end of _chooseContact
+
+          Future chooseFromTable(dynamic component, dynamic tableArray) async {
+            // localTable = tableToArray(
+            //     transactionStore.state.screenTx['#TABLE${widget.component['table']}'],
+            //     widget.component['table'],
+            //     widget.component['sort']);
+            localTable =
+                deepCopy2(tableContent[widget.component['table']] ?? []);
+            double contentHeight =
+                ((MediaQuery.of(context).size.height) * 0.7).round() * 1.0;
+            return Get.dialog(AlertDialog(
+              content: SizedBox(
+                width: double.maxFinite,
+                height: contentHeight, // Specify the height explicitly
+                // child: FtzStaticArraySearch(
+                child: FtzArraySearch(
+                  localTable: localTable,
+                  resultController: myController,
+                  component: widget.component,
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  child: Text(cancelStr),
+                  onPressed: () {
+                    Get.back(result: false);
+                  },
+                ),
+              ],
+            )); // end Get.dialog
+          } // end of chooseFromTable
+
+          String getSearchContent(String contentSource, String? searchKey) {
+            String res = contentSource;
+            if (searchKey != null &&
+                transactionStore.state
+                            .screenTx['#TABLE${widget.component['table']}']
+                        [searchKey] !=
+                    null) {
+              List<dynamic> elementArray = [searchKey];
+              elementArray.addAll(transactionStore.state
+                  .screenTx['#TABLE${widget.component['table']}'][searchKey]);
+              res = replaceMarker(contentSource, elementArray,
+                  widget.component['indexStart'] ?? 0, true);
+            }
+            return res;
+          } // end of getSearchContent
+
+          // void onQRViewCreated(QRViewController controller) {
+          //   rootThis.controller = controller;
+          //   controller.scannedDataStream.listen((scanData) {
+          //     setState(() {
+          //       myController.text = scanData.code ?? emptyString;
+          //     });
+          //   });
+          // } // end of onQRViewCreated
+
+          void txfOnTap() {
+            switch (component['variant'].toString().toLowerCase()) {
+              case 'tablesearch':
+                chooseFromTable(component, localTable).then((result) {
+                  setState(() {
+                    searchContent =
+                        getSearchContent(searchContentBase, myController.text);
+                    tableSearchFound = (transactionStore.state.screenTx[
+                                '#TABLE${widget.component['table'].toString().trim()}']
+                            [myController.text] !=
+                        null);
+                    if (component['tableContentReference'] > 0) {
+                      String contentResult = atiCode;
+                      if (tableSearchFound) {
+                        txfController[widget.scrName]![
+                                widget.component['position']]!
+                            .finalData = myController.text;
+                        var content = transactionStore.state.screenTx[
+                                '#TABLE${widget.component['table'].toString().trim()}']
+                            [myController.text];
+                        for (dynamic e in content) {
+                          if (contentResult != atiCode) {
+                            contentResult += separator[6];
+                          } // end if (contentResult != '')
+                          try {
+                            contentResult += e.toString();
+                          } catch (err) {
+                            // do nothing
+                          }
+                        } // end for (dynamic e in content)
+                      } else {
+                        try {
+                          contentResult += separator[6] *
+                              getNumberOfField(
+                                  tableHeader[widget.component['table']]);
+                        } catch (e) {
+                          contentResult += separator[6];
+                        }
+                      } // end if (tableSearchFound)
+                      txfController[widget.scrName]![
+                              widget.component['tableContentReference']]!
+                          .finalData = contentResult;
+                    } // end if (component['tableContentReference'] > 0)
+                  }); // end of set state
+                });
+                break;
+
+              case 'time':
+                chooseTime(context, component);
+                break;
+
+              case 'date':
+                chooseDate(context, myController.text, component);
+                break;
+
+              case 'datetime':
+                chooseDate(context, myController.text, component);
+                break;
+
+              case 'barcode1': // should barcode1
+                scan1();
+                break;
+
+              case 'barcode2':
+                scan2();
+                break;
+
+              case 'barcode3':
+                scan1();
+                break;
+            } // end switch (component['variant'].toString().toLowerCase())
+          } // end of txfOnTap
+
+          try {
+            late Widget element;
+            TextInputType kbType = TextInputType.text;
+            String variant =
+                (component['variant'] ?? emptyString).toString().toLowerCase();
+            if (variant == 'date' ||
+                variant == 'datetime' ||
+                variant == 'time') {
+              kbType = TextInputType.none;
+            } else if (variant == 'numeric' ||
+                variant == 'creditcardnumber' ||
+                variant == 'creditcardexpire' ||
+                variant == 'money') {
+              kbType = TextInputType.number;
+            } else if (variant == 'contact') {
+              kbType = TextInputType.number;
+            } else if (variant == 'pin') {
+              kbType = TextInputType.number;
+              obscure = true;
+            } else if (variant == 'password') {
+              kbType = TextInputType.text;
+              obscure = true;
+            } else {
+              kbType = TextInputType.text;
+            }
+            // switch (component['variant'].toString().toLowerCase()) {
+            //   case 'date':
+            //     kbType = TextInputType.none;
+            //     break;
+            //   case 'dateTime':
+            //     kbType = TextInputType.none;
+            //     break;
+            //
+            //   case 'time':
+            //     kbType = TextInputType.none;
+            //     break;
+            //
+            //   case 'numeric':
+            //     {
+            //       kbType = TextInputType.number;
+            //     }
+            //     break;
+            //   default:
+            //     {
+            //       kbType = TextInputType.text;
+            //     }
+            // }
+            Widget radioSelection = radioOption[0] == emptyString
+                ? Container()
+                : RadioGroup<String>.builder(
+                    groupValue: _picked ?? "",
+                    direction: radioAxis,
+                    horizontalAlignment:
+                        mainAlignmentConst(widget.component['alignment']),
+                    onChanged: (value) => setState(() {
+                      setState(() {
+                        _picked = value;
+                        txfController[widget.scrName]![
+                                widget.component['position']]!
+                            .controller
+                            .text = _picked ?? "";
+                        myController.text = value ?? "";
+                      });
+                      txfControllerCheck(
+                          widget.scrName, widget.component['position']);
+                      txfController[widget.scrName]![
+                              widget.component['position']]!
+                          .finalData = _picked ?? "";
+                    }),
+                    items: radioOption,
+                    itemBuilder: (item) => RadioButtonBuilder(
+                      item,
+                      textPosition: ((radioAxis == Axis.vertical) &&
+                              radioAlignment == MainAxisAlignment.end)
+                          ? RadioButtonTextPosition.left
+                          : RadioButtonTextPosition.right,
+                    ),
+                  );
+            result = Builder(
+              builder: (BuildContext context) {
+                Widget txf;
+                String cValueString =
+                    (widget.component['currentValue'] ?? "").toString();
+                if (widget.component['variant'] == 'static' &&
+                    cValueString.length >= 7 &&
+                    cValueString.substring(0, 7) == "_u2605_") {
+                  // if static and subtotal type (star in currentValue)
+                  List<dynamic> valueArray = getTotalValueFormatted();
+                  myController.text = (widget.component['line'] == null ||
+                          widget.component['line'] <= 1)
+                      ? (valueArray[1]).replaceAll("\n", " ")
+                      : valueArray[1];
+                  txfControllerCheck(
+                      widget.scrName, widget.component['position']);
+                  txfController[widget.scrName]![widget.component['position']]!
+                      .finalData = valueArray[0];
+                } // end if (widget.component['variant']== 'static')
+                try {
+                  txf = Container(
+                    margin: EdgeInsets.only(top: margin[0], bottom: margin[1]),
+                    padding: EdgeInsets.fromLTRB(widget.lPad + margin[2],
+                        widget.tPad, widget.rPad + margin[3], widget.bPad),
+                    child: Column(children: <Widget>[
+                      (widget.component['fieldPosition'] ?? 'bottom')
+                                  .toString()
+                                  .toLowerCase() ==
+                              'top'
+                          ? Container()
+                          : radioSelection,
+                      TextFormField(
+                        key: txfKey,
+                        controller: myController,
+                        keyboardType: (component['line'] == null ||
+                                component['line'] <= 1)
+                            ? kbType
+                            : TextInputType.multiline,
+                        obscureText: obscure,
+                        enabled: editable,
+                        inputFormatters: tiFormatter,
+                        onTap: txfOnTap,
+                        onChanged: (value) async {
+                          // if (!await dataOk(context)) {
+                          //   setState(() {
+                          //     myController.text = lastValue ?? "";
+                          //   });
+                          // } else {
+                          //   try {
+                          //     lastValue = myController.text;
+                          //     setState(() {
+                          //       myController.text = value;
+                          //     });
+                          //   } catch (_e) {
+                          //     errorReport(_e);
+                          //   }
+                          // } // end if !transactionStore.state.screenTx['#DATA_OK']
+                          txfControllerCheck(
+                              widget.scrName, widget.component['position']);
+                          String variant = (widget.component['variant'] ?? '')
+                              .toString()
+                              .trim()
+                              .toLowerCase();
+                          if (variant == 'creditcardexpire') {
+                            txfController[widget.scrName]![
+                                    widget.component['position']]!
+                                .finalData = exp2Epoch(value).toString();
+                          } else if (variant == 'qrscan') {
+                            txfController[widget.scrName]![
+                                    widget.component['position']]!
+                                .finalData = value.toString();
+                            if (widget.component['locationNamePosition'] !=
+                                    null &&
+                                widget.component['locationNamePosition']
+                                        .toString()
+                                        .trim() !=
+                                    '') {
+                              txfControllerCheck(widget.scrName,
+                                  widget.component['locationNamePosition']);
+                              txfController[widget.scrName]![
+                                      widget.component['locationNamePosition']]!
+                                  .finalData = value.toString();
+                            } // end if (widget.component['locationNamePosition'] != null
+                          } else {
+                            txfController[widget.scrName]![
+                                        widget.component['position']]!
+                                    .finalData =
+                                numericCleanUp(formatArray, myController.text);
+                            if (variant == 'tablesearch') {
+                              setState(() {
+                                if (transactionStore.state.screenTx[
+                                            '#TABLE${widget.component['table']}']
+                                        [value] !=
+                                    null) {
+                                  searchContent = getSearchContent(
+                                      searchContentBase, value);
+                                  tableSearchFound = true;
+                                } else {
+                                  tableSearchFound = false;
+                                }
+                              });
+                            } // end if (widget.component['variant'] == 'tableSearch')
+                          }
+                        },
+                        //end of onChanged
+                        minLines: (component['line'] == null ||
+                                component['line'] <= 1)
+                            ? 1
+                            : component['line'],
+                        maxLines: (component['line'] == null ||
+                                component['line'] <= 1)
+                            ? 1
+                            : component['line'],
+                        decoration: InputDecoration(
+                          prefixIcon: component['icon'].toString().isNotEmpty
+                              ? Icon(
+                                  otqIcons[component['icon'].toString()],
+                                )
+                              : null,
+                          // suffixIcon: component['icon'].toString().isNotEmpty
+                          //     ? IconButton(
+                          //         icon: Icon(otqIcons[component['icon'].toString()]),
+                          //         onPressed: () {},
+                          //       )
+                          //     : null,
+                          hintText: hintStr,
+                          labelText: labelStr,
+                          // '${GeneralGetXController.to.getWidgetItem(widget.scrName, widget.component['position'])!.counter} $labelStr',
+                          border: (component['border'] == null ||
+                                  component['border']
+                                          .toString()
+                                          .toLowerCase() ==
+                                      'false')
+                              ? const UnderlineInputBorder()
+                              : const OutlineInputBorder(
+                                  borderRadius:
+                                      BorderRadius.all(Radius.circular(4)),
+                                  borderSide: BorderSide()),
+                        ),
+                        style: TextStyle(
+                          color: (component['color'] ?? 'default') != 'default'
+                              ? Color(int.parse(component['color']))
+                              : Theme.of(context).textTheme.bodyLarge!.color,
+                          backgroundColor:
+                              (component['background'] ?? 'default') !=
+                                      'default'
+                                  ? Color(int.parse(component['background']))
+                                  : Theme.of(context)
+                                      .textTheme
+                                      .bodyLarge!
+                                      .backgroundColor,
+                          fontWeight: style[0],
+                          fontStyle: style[1],
+                          decoration: style[2],
+                          fontSize:
+                              0.0 + (component['size'] ?? 16.0).toDouble(),
+                        ),
+                        // obscureText: (component['variant'] ?? 'generic') == 'password'
+                        //     ? true
+                        //     : false,
+                        // onFieldSubmitted: (String value) {
+                        //   //inputTxt[_txfKey] = value;
+                        // },
+//            validator: (String value) {
+//              return value.contains('@')
+//                  ? 'Do not use the @ char.'
+//                  : null;
+//            },
+                      ),
+                      (widget.component['fieldPosition'] ?? 'bottom')
+                                  .toString()
+                                  .toLowerCase() ==
+                              'bottom'
+                          ? Container()
+                          : radioSelection,
+                    ]),
+                  );
+                } catch (eTxf) {
+                  txf =
+                      Text("-- TXF -- $scrName, $txfKey : ${eTxf.toString()}");
+                }
+                bool errorHappened = false;
+                switch (component['variant'].toString().toLowerCase()) {
+                  case 'contact':
+                    element = Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: txf,
+                        ),
+                        IconButton(
+                          icon: Icon(
+                            otqIcons[component['buttonIcon'] ?? 'contact_page'],
+                            size: 8.0 + (component['size'] ?? 16.0),
+                          ),
+                          tooltip: 'Contact',
+                          onPressed: (() {
+                            chooseContact(context);
+                          }),
+                        ),
+                      ],
+                    );
+                    break;
+
+                  case 'tablesearch':
+                    element = Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: txf,
+                        ),
+                        IconButton(
+                          icon: Icon(
+                            otqIcons[component['buttonIcon'] ?? 'flare'],
+                            size: 8.0 + (component['size'] ?? 16.0),
+                          ),
+                          tooltip: 'Scan',
+                          onPressed: (() async {
+                            if (!await dataOk(context)) {
+                              setState(() {
+                                myController.text = lastValue ?? "";
+                              });
+                            } else {
+                              if (txfController[scrName] != null &&
+                                  txfController[scrName]![
+                                          component['position']] !=
+                                      null) {
+                                lastValue = myController.text;
+                              }
+                              actionLock('tableSearch otq_txf');
+                              String? rawQRText = await takeQR(
+                                  context,
+                                  textArray.length > 3
+                                      ? textArray[3]
+                                      : 'Scan QR',
+                                  scrName,
+                                  component,
+                                  'txt');
+                              if (rawQRText != null &&
+                                  rawQRText != emptyString &&
+                                  rawQRText != 'null') {
+                                String qrResult = (await getQRContent(
+                                        qrType,
+                                        rawQRText,
+                                        gpsPosition,
+                                        component['table']))
+                                    .toString();
+                                String errorMessage = '';
+                                if (qrResult.substring(0, 6) ==
+                                    textList["ErrorPrefix"]) {
+                                  errorHappened = true;
+                                  switch (qrResult.substring(6, 8)) {
+                                    case '01': //out of range
+                                      errorMessage = textArray.length > 9
+                                          ? textArray[9]
+                                          : textList['GPSOutOfRange'];
+                                      break;
+
+                                    case '02': // no qr result
+                                      errorMessage = textArray.length > 11
+                                          ? textArray[11]
+                                          : textList["QRError"];
+                                      break;
+
+                                    case '05': //user not in list
+                                      errorMessage = textArray.length > 8
+                                          ? textArray[8]
+                                          : textList['QRNotListed2'];
+                                      break;
+
+                                    case '98': //qr not recognized
+                                      errorMessage = textArray.length > 10
+                                          ? textArray[10]
+                                          : textList['QRError'];
+                                      break;
+
+                                    default:
+                                      errorMessage = textList['GeneralError'];
+                                  } // end switch (qrResult.substring(6, 8))
+                                  // qrResult += ' $errorMessage';
+                                  qrResult = errorMessage;
+                                } // end if (qrResult.substring(0,6)
+                                setState(() {
+                                  dynamic refTable = {};
+                                  bool table = false;
+                                  if (widget.component['table'] == null ||
+                                      widget.component['table']
+                                          .toString()
+                                          .isEmpty) {
+                                    if (qrType == 'L') {
+                                      refTable = transactionStore
+                                          .state.screenTx['#LQR_LIST'];
+                                    }
+                                    table = false;
+                                  } else {
+                                    refTable = transactionStore.state.screenTx[
+                                        '#TABLE${widget.component['table']}'];
+                                    table = true;
+                                  }
+                                  if (qrType == 'L') {
+                                    if (errorHappened) {
+                                      myController.text = qrResult;
+                                    } else {
+                                      myController.text = (table
+                                              ? refTable[qrResult][2]
+                                              : refTable[qrResult][0])
+                                          .toString(); // location name
+                                    } // end if (qrResult.substring(0, 6)
+                                  } else if (qrType == 'U') {
+                                    myController.text = qrResult; // vid
+                                  } else {
+                                    myController.text = qrResult;
+                                  } // end if (widget.component['qr'] == 'lqr')
+                                  txfController[widget.scrName]![
+                                          component['position']]!
+                                      .finalData = qrResult;
+                                  if (refTable[qrResult] != null) {
+                                    searchContent = getSearchContent(
+                                        searchContentBase, qrResult);
+                                    tableSearchFound = true;
+                                    if (!errorHappened) {
+                                      if (component['tableContentReference'] >
+                                          0) {
+                                        var content = refTable[qrResult];
+                                        // String contentResult = '';
+                                        String contentResult = atiCode;
+                                        for (dynamic e in content) {
+                                          if (contentResult != atiCode) {
+                                            contentResult += separator[6];
+                                          } // end if (contentResult != '')
+                                          try {
+                                            contentResult += e.toString();
+                                          } catch (err) {
+                                            // do nothing
+                                          }
+                                        } // end for (dynamic e in content)
+                                        txfController[widget.scrName]![
+                                                component[
+                                                    'tableContentReference']]!
+                                            .finalData = contentResult;
+                                      } // end if (component['tableContentReference'] > 0)
+                                    } // end if (!errorHappend)
+                                  } else {
+                                    tableSearchFound = false;
+                                  } // end if (transactionStore.state.screenTx
+                                });
+                              }
+                              setDataOK(
+                                  '2'); // reload pages and display green status.
+                            } // end if !transactionStore.state.screenTx['#DATA_OK']
+                          }),
+                        ),
+                      ],
+                    );
+                    if (searchDisplayType == 'text1') {
+                      element = Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          element,
+                          !tableSearchFound
+                              ? Container()
+                              : Container(
+                                  margin: EdgeInsets.only(
+                                      top: margin[0], bottom: margin[1]),
+                                  padding: EdgeInsets.fromLTRB(
+                                      widget.lPad + margin[2],
+                                      widget.tPad,
+                                      widget.rPad + margin[3],
+                                      widget.bPad),
+                                  child: Text(
+                                    searchContent,
+                                    softWrap: true,
+                                    style: TextStyle(
+                                      color: (component['color'] ??
+                                                  'default') !=
+                                              'default'
+                                          ? Color(int.parse(component['color']))
+                                          : Theme.of(context)
+                                              .textTheme
+                                              .bodyLarge!
+                                              .color,
+                                      backgroundColor:
+                                          (component['background'] ??
+                                                      'default') !=
+                                                  'default'
+                                              ? Color(int.parse(
+                                                  component['background']))
+                                              : Theme.of(context)
+                                                  .textTheme
+                                                  .bodyLarge!
+                                                  .backgroundColor,
+                                      fontWeight: style[0],
+                                      fontStyle: style[1],
+                                      decoration: style[2],
+                                      fontSize: 0.0 +
+                                          (int.parse((component['size'] ?? 16)
+                                              .toString())),
+                                    ),
+                                  ),
+                                ),
+                        ],
+                      );
+                    } // end if (searchDisplayType == 'text1')
+                    break;
+
+                  case 'barcode1': // should barcode1
+                    {
+                      element = Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: txf,
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.flare),
+                            tooltip: 'Scan',
+                            onPressed: (() {
+                              scan1();
+                            }),
+                          ),
+                        ],
+                      );
+                    }
+                    break;
+
+                  case 'qrscan':
+                    {
+                      element = Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: txf,
+                          ),
+                          IconButton(
+                            icon: Icon(
+                              otqIcons[component['buttonIcon'] ?? 'flare'],
+                              size: 8.0 + (component['size'] ?? 16.0),
+                            ),
+                            tooltip: 'Scan',
+                            onPressed: (() async {
+                              if (!await dataOk(context)) {
+                                setState(() {
+                                  myController.text = lastValue ?? "";
+                                });
+                              } else {
+                                if (txfController[scrName] != null &&
+                                    txfController[scrName]![
+                                            component['position']] !=
+                                        null) {
+                                  lastValue = myController.text;
+                                }
+                                actionLock('qrScan otq_txf');
+                                String? rawQRText = await takeQR(
+                                    context,
+                                    textArray.length > 3
+                                        ? textArray[3]
+                                        : 'Scan QR',
+                                    scrName,
+                                    component,
+                                    'txt');
+                                if (rawQRText != null &&
+                                    rawQRText != emptyString &&
+                                    rawQRText != 'null') {
+                                  String qrResult = (await getQRContent(
+                                          qrType,
+                                          rawQRText,
+                                          gpsPosition,
+                                          component['table']))
+                                      .toString();
+                                  if (qrResult.substring(0, 6) !=
+                                      textList["ErrorPrefix"]) {
+                                    Map<String, dynamic> refTable = {};
+                                    if (component['table'] == null ||
+                                        component['table']
+                                            .toString()
+                                            .trim()
+                                            .isEmpty) {
+                                      if (qrType == 'L') {
+                                        refTable = transactionStore
+                                            .state.screenTx['#LQR_LIST'];
+                                      }
+                                    } else {
+                                      refTable =
+                                          transactionStore.state.screenTx[
+                                              '#TABLE${component['table']}'];
+                                    } // end if (component['table'] == null)
+                                    // refTable ??= {};
+                                    setState(() {
+                                      if (refTable[qrResult] != null) {
+                                        myController.text =
+                                            refTable[qrResult][0].toString();
+                                        txfController[widget.scrName]![
+                                                component['position']]!
+                                            .finalData = qrResult;
+                                        if (component['locationNamePosition'] !=
+                                                null &&
+                                            component['locationNamePosition']
+                                                .toString()
+                                                .trim()
+                                                .isNotEmpty) {
+                                          try {
+                                            txfControllerCheck(
+                                                widget.scrName,
+                                                widget.component[
+                                                    'locationNamePosition']);
+                                            txfController[
+                                                    widget
+                                                        .scrName]![component[
+                                                    'locationNamePosition']]!
+                                                .finalData = refTable[qrResult]
+                                                    [0]
+                                                .toString();
+                                          } catch (e) {
+                                            // do nothing
+                                            devPrint(e);
+                                          } // end try
+                                        } // end if (component['locationNamePosition']
+                                      } else {
+                                        txfController[widget.scrName]![
+                                                component['position']]!
+                                            .finalData = '';
+                                        if (qrType == 'L') {
+                                          myController.text = textList[
+                                              "QRError"]; // location not defined #Error02
+                                        } else if (qrType == 'U') {
+                                          myController.text = textList[
+                                              'QRNotListed2']; // location not defined #Error05
+                                        } else {
+                                          myController.text = qrResult;
+                                          txfController[widget.scrName]![
+                                                  component['position']]!
+                                              .finalData = qrResult;
+                                          if (component[
+                                                      'locationNamePosition'] !=
+                                                  null &&
+                                              component['locationNamePosition']
+                                                  .toString()
+                                                  .trim()
+                                                  .isNotEmpty) {
+                                            try {
+                                              txfControllerCheck(
+                                                  widget.scrName,
+                                                  widget.component[
+                                                      'locationNamePosition']);
+                                              txfController[
+                                                      widget
+                                                          .scrName]![component[
+                                                      'locationNamePosition']]!
+                                                  .finalData = qrResult;
+                                              // textList['QRNotListed2'];
+                                            } catch (e) {
+                                              // do nothing
+                                            } // end try
+                                          } // end if (component['locationNamePosition']
+                                        } // end if (qrType == 'L')
+                                      } // end if (refTable[qrResult] != null)
+                                    });
+                                  } else {
+                                    txfController[widget.scrName]![
+                                            component['position']]!
+                                        .finalData = '';
+                                    switch (qrResult.substring(6, 8)) {
+                                      case '01': //out of range
+                                        myController.text = textArray.length > 9
+                                            ? textArray[9]
+                                            : textList['GPSOutOfRange'];
+                                        break;
+
+                                      case '02': // no qr result
+                                        myController.text =
+                                            textArray.length > 11
+                                                ? textArray[11]
+                                                : textList["QRError"];
+                                        break;
+
+                                      case '05': //user not in list
+                                        myController.text = textArray.length > 8
+                                            ? textArray[8]
+                                            : textList['QRNotListed2'];
+                                        break;
+
+                                      case '98': //qr not recognized
+                                        myController.text =
+                                            textArray.length > 10
+                                                ? textArray[10]
+                                                : textList['QRError'];
+                                        break;
+
+                                      default:
+                                        myController.text =
+                                            textList['GeneralError'];
+                                    } // end switch (q
+                                  } // end if (qrResult.substring(0,6) != '#Error')
+                                }
+                                setDataOK(
+                                    '2'); // reload pages and display green status.
+                              } // end if !transactionStore.state.screenTx['#DATA_OK']
+                            }),
+                          ),
+                        ],
+                      );
+                    }
+                    break;
+
+                  case 'qrAttend1': // barcode4 => scanner
+                    {
+                      BlocProvider.of<MainBloc>(context).add(QrAttend1Scan(
+                        front: component['front'] ?? false,
+                        flash: component['flash'] ?? false,
+                        size: component['size'] ?? 300,
+                        fSize: component['dataFont'] ?? 16,
+                        exitSize: component['exitFont'] ?? 16,
+                        exitRoute: component['route'] ?? home,
+//                      crypto: 'attend1',
+                        crypto: 'raw',
+                        exitString: component['exitText'] ?? 'Exit',
+                        position: component['position'] ?? 1,
+                        screenName: scrName,
+                      ));
+                    }
+                    break;
+
+//                 case 'newPin':
+//                   {
+//                     var getPin1;
+//                     var getPin2;
+//                     element = Center(
+//                         child: Column(
+//                       children: <Widget>[
+//                         PinPut(
+//                           fieldsCount: _component['digit'] ?? 4,
+//
+// //                          isTextObscure:
+// //                              (_component['obscure'] ?? 'TRUE') == 'TRUE',
+// //                          unFocusWhen: false,
+// //                          onSubmit: (String pin) {
+// //                            getPin1 = pin;
+// //                          },
+// //                          onClear: (String s) {
+// //                            getPin1 = '';
+// //                          },
+//                         ),
+// //                         PinPut(
+// //                           fieldsCount: _component['digit'] ?? 4,
+// // //                          isTextObscure:
+// // //                              (_component['obscure'] ?? 'TRUE') == 'TRUE',
+// // //                          unFocusWhen: false,
+// //                           onSubmit: (String pin) {
+// //                             getPin2 = pin;
+// //                           },
+// // //                          onClear: (String s) {
+// // //                            getPin2 = '';
+// // //                          },
+// //                         ),
+//                         RaisedButton(
+//                           child: Text(_component['submitButton'] ?? 'Save',
+//                               style: TextStyle(
+//                                 color: (_component['color'] ?? 'default') !=
+//                                         'default'
+//                                     ? Color(int.parse(_component['color']))
+//                                     : Theme.of(context)
+//                                         .textTheme
+//                                         .bodyText1
+//                                         .color,
+//                                 backgroundColor: (_component['background'] ??
+//                                             'default') !=
+//                                         'default'
+//                                     ? Color(int.parse(_component['background']))
+//                                     : Theme.of(context)
+//                                         .textTheme
+//                                         .bodyText1
+//                                         .backgroundColor,
+//                                 fontWeight:
+//                                     (_component['bold'] ?? 'FALSE') == 'TRUE'
+//                                         ? FontWeight.bold
+//                                         : FontWeight.normal,
+//                                 fontStyle:
+//                                     (_component['italic'] ?? 'FALSE') == 'TRUE'
+//                                         ? FontStyle.italic
+//                                         : FontStyle.normal,
+//                                 decoration:
+//                                     (_component['underline'] ?? 'FALSE') ==
+//                                             'TRUE'
+//                                         ? TextDecoration.underline
+//                                         : TextDecoration.none,
+//                                 fontSize: 0.0 + (_component['size'] ?? 16.0),
+//                               )),
+//                           color: Theme.of(context).buttonColor,
+//                           onPressed: () {
+//                             if (getPin1 == getPin2) {
+//                               BlocProvider.of<MainBloc>(context)
+//                                   .add(NewPinSubmit(
+//                                 pin: getPin1,
+//                               ));
+//                               showDialog(
+//                                 context: context,
+//                                 builder: (BuildContext context) {
+//                                   return AlertDialog(
+//                                     title: Text("Success"),
+//                                     content: Text(_component[
+//                                             'successMessage'] ??
+//                                         'Do not give your pin to others.'), // show dialog
+//                                     actions: <Widget>[
+//                                       FlatButton(
+//                                         child: Text("OK"),
+//                                         onPressed: () {
+//                                           Navigator.of(context).pop();
+//                                           gotoRoute(
+//                                               _component['route'] ?? home);
+//                                         },
+//                                       )
+//                                     ],
+//                                   );
+//                                 },
+//                               );
+//                             } else {
+//                               showDialog(
+//                                 context: context,
+//                                 builder: (BuildContext context) {
+//                                   return AlertDialog(
+//                                     title: Text("PIN not match"),
+//                                     content: Text(_component['errorMessage'] ??
+//                                         'PIN not match'), // show dialog
+//                                     actions: <Widget>[
+//                                       FlatButton(
+//                                         child: Text("OK"),
+//                                         onPressed: () {
+//                                           Navigator.of(context).pop();
+//                                         },
+//                                       )
+//                                     ],
+//                                   );
+//                                 },
+//                               );
+// //                              BlocProvider.of<MainBloc>(context)
+// //                                  .add(PinNotMatch(
+// //                                message: _component['errorMessage'] ??
+// //                                    'Pin not match',
+// //                              ));
+//                             }
+//                           },
+//                         ),
+//                       ],
+//                     ));
+//                   }
+//                   break;
+
+//                 case 'pin':
+//                   {
+//                     var state = transactionStore.state.screenTx;
+//                     var payloadTest =
+//                         '{"action":"DISPLAY","route":"{\\\"title\\\":\\\"Konfirmasi Pesanan\\\",\\\"targetVIDs\\\":[777250221000,777250221003,922250226073],\\\"mainTid\\\":\\\"Tid1111\\\",\\\"tag\\\":\\\"CONFIRMATION\\\",\\\"children\\\":[{\\\"type\\\":\\\"TXT\\\",\\\"beforeSpacing\\\":20,\\\"afterSpacing\\\":0,\\\"size\\\":24,\\\"bold\\\":\\\"TRUE\\\",\\\"data\\\":\\\"Pesanan: 2 Donut Keju. Masukan pin untuk menyetujui transaksi ini.\\\"},{\\\"type\\\":\\\"TXF\\\",\\\"variant\\\":\\\"pin\\\",\\\"digit\\\":6,\\\"obscure\\\":\\\"TRUE\\\",\\\"route\\\":\\\"{}\\\",\\\"interval\\\":300,\\\"signature\\\":\\\"111111\\\",\\\"position\\\":10,\\\"errorMessage\\\":\\\"PIN salah\\\",\\\"data\\\":\\\"Data to be put in position 10 when pin ok.\\\"}]}"}';
+//                     element = Center(
+//                       child: PinPut(
+//                         fieldsCount: _component['digit'] ?? 4,
+// //                        isTextObscure:
+// //                            (_component['obscure'] ?? 'TRUE') == 'TRUE',
+// //                        unFocusWhen: true,
+//                         onSubmit: (String pin) {
+//                           if (_component['position'] != null) {
+//                             txfController[scrName][_txfKey].controller.text =
+//                                 _component['data'] ?? 'From pin';
+//                           }
+//                           var sj = jsonEncode(_component['screenJson']);
+//                           var tv = jsonEncode(_component['targetVids']);
+//                           BlocProvider.of<MainBloc>(context).add(PinSubmit(
+//                               pin: pin,
+//                               targetVids: tv,
+//                               from: state['#VID'].toString(),
+//                               data: sj ?? payloadTest,
+//                               errorMid: _component['errorMid'] ?? '0',
+//                               screenJson: sj,
+//                               route: _component['route'] ?? home,
+//                               scrName: scrName,
+//                               mainTid: _component['mainTid'] ?? '',
+//                               notifyText: _component['notifyText'] ??
+//                                   'Message from somebody.'));
+//                         },
+// //                        onClear: (String s) {},
+//                       ),
+//                     );
+//                   }
+//                   break;
+
+                  // case 'barcodefront--': // should  be barcodefront
+                  //   {
+                  //     final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
+                  //     element = QRView(
+                  //       key: qrKey,
+                  //       onQRViewCreated: onQRViewCreated,
+                  //     );
+                  //   }
+                  //   break;
+
+                  default:
+                    {
+                      element = txf;
+                    }
+                } // end switch (component['variant'].toString().toLowerCase())
+                return Container(
+                  // margin: EdgeInsets.only(
+                  // top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+                  // bottom: (component['afterSpacing'] ?? 0.0).toDouble()),
+                  // padding: EdgeInsets.fromLTRB(_lPad, _tPad, _rPad, _bPad),
+                  child: element,
+                );
+              }, // end of builder
+            );
+          } catch (e) {
+            result = Text('--TXF-- (otq_txt): $e');
+          }
+          return result;
+        });
+  } // end of build
+
+  // rebuildMe() {
+  //   setState(() {});
+  // } // end of rebuildMe
+
+  @override
+  bool get wantKeepAlive => true;
+} // end of class _TxfFullState

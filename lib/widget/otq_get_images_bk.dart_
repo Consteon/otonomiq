@@ -1,0 +1,357 @@
+import 'package:camera/camera.dart';
+import 'package:get/get_state_manager/src/simple/get_state.dart';
+import '../global.dart';
+import '../global2.dart';
+import 'package:flutter/material.dart';
+import '../api.dart';
+import '../init_values.dart';
+import '../model/general_get_controller.dart';
+import 'otq_formatted_text.dart';
+import 'package:uuid/uuid.dart';
+
+class OtqGetImages extends StatefulWidget {
+  const OtqGetImages({
+    required Key key,
+    required this.wKey,
+    required this.component,
+    required this.scrName,
+    required this.lPad,
+    required this.tPad,
+    required this.rPad,
+    required this.bPad,
+  }) : super(key: key);
+  final Key wKey;
+  final dynamic component;
+  final String scrName;
+  final double lPad;
+  final double tPad;
+  final double rPad;
+  final double bPad;
+
+  @override
+  OtqGetImagesState createState() => OtqGetImagesState();
+}
+
+class OtqGetImagesState extends State<OtqGetImages>
+    with AutomaticKeepAliveClientMixin<OtqGetImages> {
+  int maxImages = 99999;
+  List<double> margin = [];
+  double h = 0;
+  double w = 0;
+  late final int? _position;
+
+  void buttonPressed(dynamic component, bool isEnabled) async {
+    List<CameraDescription> cams = transactionStore.state.screenTx['#CAMS'];
+    late List<int> imgParameter;
+    try {
+      List<String> imgParStr = (component['imageParameter'] ?? "400,400,80")
+          .toString()
+          .split(separator[4]);
+      imgParameter = [
+        int.parse(imgParStr[0]),
+        int.parse(imgParStr[1]),
+        int.parse(imgParStr[2])
+      ];
+    } catch (e) {
+      imgParameter = [400, 400, 80];
+    }
+    String imgUrl = await getPhotoCameraImage(
+      cams,
+      component['label'] ?? 'Camera',
+      (component['camera'] ?? 1) == 0 ? 'front' : 'back',
+      (imgParameter[0] > imgParameter[1]) ? imgParameter[0] : imgParameter[1],
+      imgParameter[2], // quality
+      component['folder'] ?? 'default',
+      (component['filename'] ?? 'file') +
+          '_' +
+          const Uuid().v4().replaceAll('-', '').substring(2, 7),
+      h,
+      w,
+    );
+    if (imgUrl != emptyImageUrl) {
+      setState(() {
+        GeneralGetXController.to.addWidget(widget.scrName,
+            widget.component['position'], buildImageWidget(imgUrl, isEnabled), imgUrl);
+      });
+
+      String urlOutput = processData(GeneralGetXController.to
+          .getStringList(widget.scrName, widget.component['position']));
+      try {
+        if (widget.component['position'] != null) {
+          txfControllerCheck(widget.scrName, widget.component['position']);
+          txfController[widget.scrName]![widget.component['position']]!
+              .controller
+              .text = urlOutput;
+          txfController[widget.scrName]![widget.component['position']]!
+              .finalData = urlOutput;
+        }
+      } catch (e) {
+        errorReport(e);
+      }
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _position = widget.component['position'] as int?;
+
+    if (widget.component['position'] != null &&
+        widget.component['currentValue'] != null) {
+
+      txfControllerCheck(widget.scrName, widget.component['position']);
+      final bool initialIsEnabled = txfController[widget.scrName]![widget.component['position']]!.initialIsEnabled;
+
+      List<String> currentUrlList = widget.component['currentValue']
+          .toString()
+          .trim()
+          .isNotEmpty
+          ? widget.component['currentValue'].toString().trim().split('_u2605_')
+          : [];
+      for (String url in currentUrlList) {
+        if (url.trim().isNotEmpty) {
+          GeneralGetXController.to.addWidget(widget.scrName,
+              widget.component['position'], buildImageWidget(url, initialIsEnabled), url);
+        }
+      }
+
+      String urlOutput = getImageInitValue(widget.scrName, widget.component);
+      try {
+        if (widget.component['position'] != null) {
+          txfControllerCheck(widget.scrName,
+              widget.component['position']); // build txfController if necessary
+          if (canInitializePage(widget.scrName)) {
+            txfController[widget.scrName]![widget.component['position']]!
+                .controller
+                .text = urlOutput;
+            txfController[widget.scrName]![widget.component['position']]!
+                .initialValue = urlOutput;
+            txfController[widget.scrName]![widget.component['position']]!
+                .finalData = urlOutput;
+          }
+        }
+      } catch (e) {
+        errorReport(e);
+      }
+    }
+    margin = marginArray(widget.component['margin']);
+    try {
+      maxImages = widget.component['max'] ?? 9999;
+    } catch (e) {
+      maxImages = 9999;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    h = MediaQuery.of(context).size.height;
+    w = MediaQuery.of(context).size.width;
+
+    if (_position == null) {
+      return _buildContent(context, true);
+    }
+
+    return GetBuilder<WidgetUpdateController>(
+      id: '${widget.scrName}-$_position',
+      builder: (_) {
+        txfControllerCheck(widget.scrName, _position);
+        final controller = txfController[widget.scrName]![_position!]!;
+        final bool isEnabled = controller.isEnabled;
+        return _buildContent(context, isEnabled);
+      },
+    );
+  }
+
+  Widget _buildContent(BuildContext context, bool isEnabled) {
+    final imageItem = GeneralGetXController.to.getWidgetItem(widget.scrName, widget.component['position']);
+    final imageWidgets = imageItem?.widgetList ?? [];
+    final imageUrls = imageItem?.stringList ?? [];
+
+    return Container(
+      margin: EdgeInsets.only(top: margin[0], bottom: margin[1]),
+      padding: EdgeInsets.fromLTRB(widget.lPad + margin[2], widget.tPad,
+          widget.rPad + margin[3], widget.bPad),
+      child: Column(
+        children: [
+          (widget.component['labelPosition'] ?? "left")
+              .toString()
+              .toLowerCase() ==
+              'right'
+              ? Row(
+            mainAxisAlignment:
+            mainAlignmentConst(widget.component['alignment']),
+            children: <Widget>[
+              (imageUrls.length < maxImages)
+                  ? ElevatedButton(
+                onPressed:
+                isEnabled ? () => buttonPressed(widget.component, isEnabled) : null,
+                style: ElevatedButton.styleFrom(
+                  disabledBackgroundColor: Colors.grey.shade300,
+                  disabledForegroundColor: Colors.grey.shade500,
+                ),
+                child: OtqFormattedText(
+                  textData: widget.component['text'] ?? "",
+                  component: widget.component,
+                  isEnabled: isEnabled,
+                ),
+              )
+                  : Container(),
+              const SizedBox(
+                width: 8,
+                height: 1,
+              ),
+              OtqFormattedText(
+                textData: widget.component['label'] ?? "",
+                component: widget.component,
+                isEnabled: isEnabled,
+              ),
+            ],
+          )
+              : Row(
+            mainAxisAlignment:
+            mainAlignmentConst(widget.component['alignment']),
+            children: <Widget>[
+              OtqFormattedText(
+                textData: widget.component['label'] ?? "",
+                component: widget.component,
+                isEnabled: isEnabled,
+              ),
+              const SizedBox(
+                width: 8,
+                height: 1,
+              ),
+              (imageUrls.length < maxImages)
+                  ? ElevatedButton(
+                onPressed:
+                isEnabled ? () => buttonPressed(widget.component, isEnabled) : null,
+                style: ElevatedButton.styleFrom(
+                  disabledBackgroundColor: Colors.grey.shade300,
+                  disabledForegroundColor: Colors.grey.shade500,
+                ),
+                child: OtqFormattedText(
+                  textData: widget.component['text'] ?? "",
+                  component: widget.component,
+                  isEnabled: isEnabled,
+                ),
+              )
+                  : Container(),
+            ],
+          ),
+          imageWidgets.isEmpty
+              ? Container()
+              : const SizedBox(
+            height: 4,
+            width: 1,
+          ),
+          imageWidgets.isEmpty
+              ? SizedBox(
+            width: double.infinity,
+            height:
+            (widget.component['previewSize'] ?? 90.0).toDouble() + 4,
+            child: Card(
+                child: SizedBox(
+                  height:
+                  (widget.component['previewSize'] ?? 90.0).toDouble() +
+                      4,
+                )),
+          )
+              : SizedBox(
+            width: double.infinity,
+            height: (widget.component['previewSize'] ?? 90.0).toDouble(),
+            child: Card(
+              child: GridView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: imageWidgets.length,
+                  gridDelegate:
+                  SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent:
+                      (widget.component['previewSize'] ?? 90.0)
+                          .toDouble()),
+                  itemBuilder: (BuildContext context, int index) {
+                    return imageWidgets[index];
+                  }),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildImageWidget(String imageUrl, bool isEnabled) {
+    return Stack(children: <Widget>[
+      Card(
+        child: InkWell(
+          onTap: () {
+            // TODO add functionality to edit
+          },
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              AspectRatio(
+                aspectRatio: 1,
+                child: displayImage(imageUrl: imageUrl, cached: true),
+              ),
+            ],
+          ),
+        ),
+      ),
+      Align(
+        alignment: Alignment.topRight,
+        child: InkWell(
+            onTap: isEnabled
+                ? () {
+              // delete image
+              int imageIndex = GeneralGetXController.to
+                  .getStringList(
+                  widget.scrName, widget.component['position'])
+                  .indexOf(imageUrl);
+              if (imageIndex >= 0) {
+                setState(() {
+                  GeneralGetXController.to.deleteWidgetAt(widget.scrName,
+                      widget.component['position'], imageIndex);
+                });
+                String urlOutput = processData(GeneralGetXController.to
+                    .getStringList(
+                    widget.scrName, widget.component['position']));
+                try {
+                  if (widget.component['position'] != null) {
+                    txfControllerCheck(
+                        widget.scrName, widget.component['position']);
+                    txfController[widget.scrName]![
+                    widget.component['position']]!
+                        .controller
+                        .text = urlOutput;
+                    txfController[widget.scrName]![
+                    widget.component['position']]!
+                        .finalData = urlOutput;
+                  }
+                } catch (e) {
+                  errorReport(e);
+                }
+              }
+            }
+                : null,
+            child: Icon(
+              Icons.cancel_outlined,
+              color: isEnabled ? Colors.red : Colors.grey.shade400,
+            )),
+      )
+    ]);
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+    try {
+      GeneralGetXController.to
+          .deleteAllWidget(widget.scrName, widget.component['position']);
+    } catch (e) {
+      errorReport(e);
+    }
+  }
+
+  @override
+  bool get wantKeepAlive => true;
+}
+

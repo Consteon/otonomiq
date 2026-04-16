@@ -1,0 +1,160 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'table_repository.dart';
+//import 'table_repository.dart';
+import '../global.dart';
+import '../api.dart';
+import '../redux/screen_transaction.dart';
+
+Future<String> uploadToCloudStorage(
+    String localImage, String cloudFolder) async {
+  // upload local image to cloud storage
+  // return emptyImageUrl if failed; return cloud url if success
+  // delete local file if success
+  const String functionName = 'uploadToCloudStorage';
+  List<dynamic>? imageMapEntry = imageMapGet(localImage);
+  String result = emptyImageUrl;
+  if (imageMapEntry != null && isValidImageUrl(imageMapEntry[1].toString())) {
+    result = imageMapEntry[1].toString();
+  } else {
+    if (await imageFirebaseLock.itemLockWait(functionName, localImage)) {
+      if (internetConnected()) {
+        try {
+          String currentLocal = localImage;
+          // currentLocal += 't'; // debug only, will make send images fail
+          // devPrint('send images will fail : $currentLocal');
+          File file = File(currentLocal);
+          if (file.existsSync()) {
+            dynamic storageBucket =
+            transactionStore.state.screenTx['#STORAGE_BUCKET'];
+            Reference storageRef = storageBucket.ref().child(cloudFolder);
+            try {
+              result = await storageRef.getDownloadURL();
+            } catch (eu) {
+              var c = eu.toString();
+              if (c.contains('object-not-found')) {
+                // Upload the file if it does not exist
+                TaskSnapshot taskSnapshot = await storageRef.putFile(file);
+                result = await taskSnapshot.ref.getDownloadURL();
+                if (isValidImageUrl(result)) {
+                  await imageMapUpdateUrl(currentLocal, result);
+                  Future.delayed(const Duration(seconds: 5)).then((_) {
+                    // delay file deletion
+                    file.delete(); // file successfully uploaded, delete local file
+                  });
+                }
+              } else {
+                // Handle other errors
+                rethrow;
+              } // end if (c.contains('object-not-found'))
+            } // end try eu
+          } // end if (file.existsSync())
+        } catch (e) {
+          // do nothing
+          devPrint('error uploading image $e');
+        } // end try
+      } // end if (internetConnected())
+      imageFirebaseLock.itemUnlockWait(functionName, localImage);
+    } // end if (await imageFirebaseLock.itemLockWait(functionName, localImage))
+  } // end if (imageMapEntry != null && isValidImageUrl(imageMapEntry[1]))
+  return result;
+} // end of uploadToCloudStorage
+
+bool isValidImageUrl(String url) {
+  final RegExp urlPattern = RegExp(
+    r'^https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^\/]+\/o\/[^?]+\?alt=media&token=[a-f0-9\-]+$',
+    caseSensitive: false,
+  );
+  return urlPattern.hasMatch(url);
+} // end of isValidImageUrl
+
+Future<String?> checkIfUserReset(var user, String did) async {
+  // check
+  String? result;
+  String path = topCollection;
+  final query = await firestoreDb
+      .collection(fsCollection)
+      .where("u", isEqualTo: user.uid)
+      .get();
+  if (query.docs.length > 0) {
+    path += '/${query.docs[0].id}';
+    final device = await query.docs[0].reference
+        .collection('dvc')
+        .where('did', isEqualTo: did)
+        .get();
+    if (device.docs.length > 0) {
+      result =
+          '$path/dvc${separator[1]}${device.docs[0].id}'; // get first record
+    }
+  } // end if (query.docs.length >0)
+  return result;
+} // end of checkIfUserReset
+
+Future subscribeToUserReset(String docId) async {
+  try {
+    String myDid = await getDeviceId();
+    List<String> docPath = docId.split(separator[1]);
+    dynamic deviceListener =
+        transactionStore.state.screenTx['#DEVICE_LISTENER'];
+    bool needToListen = false;
+    if (deviceListener == null) {
+      devPrint('No DEVICE_LISTENER subscribed');
+      needToListen = true;
+    } else {
+      devPrint('DEVICE_LISTENER has already subscribed');
+    } // end if (deviceListener == null)
+    if (needToListen) {
+      devPrint('subscribe to DEVICE_LISTENER');
+      final docRef = firestoreDb.collection(docPath[0]).doc(docPath[1]);
+      if (docRef != null) {
+        try {
+          deviceListener = docRef.snapshots().listen(
+            (event) {
+              bool kicked = false;
+              if (event.data() == null) {
+                kicked = true;
+              } else {
+                if (event.data()['did'] != myDid) {
+                  kicked = true;
+                }
+              } // end if (event.data() == null)
+              if (kicked) {
+                kickedOut();
+              }
+            },
+            onError: (error) => devPrint("Listen failed: $error"),
+          ); // end of listener
+          transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+            '#DEVICE_LISTENER': deviceListener,
+          })));
+        } catch (e1) {
+          devPrint('error listening to device $e1');
+        }
+      } else {
+        devPrint('No document $docId');
+      } // end if (docRef != null)
+    } // end if (needToListen)
+  } catch (e) {
+    devPrint(e);
+  } // end try (e)
+} // end of listenToUserReset
+
+Future unsubscribeUserReset() async {
+  try {
+    var handle = transactionStore.state.screenTx['#DEVICE_LISTENER'];
+    if (handle != null) {
+      await handle.close();
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#DEVICE_LISTENER': null,
+      })));
+    } // end if (handle != null)
+  } catch (e) {
+    devPrint(e);
+  }
+} // end of unsubscribeTable
+
+String getDevicePath(var device) {
+  String result = '$fsCollection${separator[1]}${device.id}';
+  return result;
+}

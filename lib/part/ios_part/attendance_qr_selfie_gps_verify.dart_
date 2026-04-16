@@ -1,0 +1,1310 @@
+import 'dart:io';
+import 'package:get/get.dart';
+import '../../crypto/auth_crypto.dart';
+import 'package:camera/camera.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/material.dart';
+// import 'package:vibration/vibration.dart';
+import '../../global.dart';
+import '../../model/otq_state.dart';
+import '../../api.dart';
+import '../../redux/screen_transaction.dart';
+// import '../../part/android_part/ftz_mobile_scanner.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:barcode_scan2/barcode_scan2.dart';
+import 'package:uuid/uuid.dart';
+
+part '../part/build_part/attend_qr_gps_selfie_state_part.dart';
+
+/*
+  Widget for employee attendance.
+  component:
+    type : location
+    opMode :
+      qr-single = scan lqr and verify
+      selfie = take selfie
+      checker-lqr-single
+      checker-lqr-photo-single
+      checker-lqr-continuous
+      checker-lqr-photo-continuous
+    url : image url
+    text : display/dialog text, diamond separated
+    route : next route
+    flag : flag to be written in output
+    imHeight : stored acquired image height (pixels)
+    imWidth : stored acquired image width (pixels)
+    folder : folder in Google Cloud storage to store acquired image
+    filename : acquired image name (without .png)
+    lockList : list of valid location [[lat1,lon1],[lat2,lon2],[lat3,lon3]]
+    tolerance : integer in meter (default 50)
+    actionLast : last action = check-in | check-out
+    width : displayed image (from url) width (height will be calculated)
+    displayMode : deprecated - ignored
+    timeClockOut1: utc millisecond to determine attendance scenario
+    timeClockOut2: 1599124581957 to determine attendance scenario
+
+    algorithm :
+       get current position (with accuracy < 50 m ???)
+       if scanQr = false => selfie & record log
+       else
+         if (locationArray == null) then selfie & record loc
+         else
+           check all location with current position if there is a location within tolerance range
+           if found => scan Qr => verifyQr
+             if verified => record qr input and loc
+             if not verified => rescan for 3 X if fail then selfie & record loc
+           else selfie & record loc
+        if combo = true
+          scanQr
+          selfie
+          display route
+          with same location algorithm as above
+        end if
+
+ */
+class AttendQrGpsSelfie extends StatefulWidget {
+  const AttendQrGpsSelfie({
+    required Key key,
+    required this.component,
+    required this.scrName,
+    required this.single,
+  }) : super(key: key);
+  final String scrName;
+  final dynamic component;
+  final bool single;
+
+  @override
+  AttendQrGpsSelfieState createState() => AttendQrGpsSelfieState();
+} // end of class AttendQrGpsSelfie
+
+class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
+  bool change = true;
+  final controller = TextEditingController(text: '-');
+  bool tapped = false;
+  dynamic media;
+  double h = 0;
+  double w = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    String selfieUrl = '';
+
+    Future<dynamic> attendanceSuccessDialog(
+        {String title = 'Success',
+        String message1 = '',
+        String message2 = '',
+        String message3 = '',
+        String okString = 'Ok'}) async {
+      vibrate(duration: 50);
+      await Get.dialog(AlertDialog(
+        // dialog 3
+        title: Text(title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message1),
+            Container(
+              height: 12,
+            ),
+            Text(message2),
+            Container(
+              height: 12,
+            ),
+            Text(message3),
+          ],
+        ),
+
+        actions: <Widget>[
+          TextButton(
+            child: Text(okString),
+            onPressed: () {
+              Get.back();
+              // Navigator.of(con).pop();
+            },
+          ),
+        ],
+      ));
+      return 1;
+    } // end of checkerSuccessDialog
+
+    Future<String?> attendanceDialog(
+        {String title = '',
+        String message = '',
+        String okString = 'Ok'}) async {
+      return showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              // dialog 3
+              title: Text(title),
+              content: Container(
+                alignment: const Alignment(0.0, 0.0),
+                height: dialogHeight,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(message),
+                  ],
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  child: Text(okString),
+                  onPressed: () {
+                    routeStack.pop();
+                    Get.back();
+                    // Navigator.of(context).pop();
+                  },
+                ),
+              ],
+            );
+          });
+    } // end of checkerDialog
+
+    /*
+    Future<String?> attendanceTakeQR(
+        String label, String scrName, var component, String caller) async {}
+    moved to part '../../part/attend_qr_gps_selfie_state_part.dart';
+    */
+
+    // Future<String?> attendanceTakeQR(
+    //     String label, String scrName, var component, String caller) async {
+
+    Future<String> takePicture(String lens) async {
+      // get selfie, save to firebase, then return url to selfie image
+      List<CameraDescription> cams = transactionStore.state.screenTx['#CAMS'];
+      String selfieUrl = await getPhotoCameraImage(
+        cams,
+        widget.component['label'] ?? 'Camera',
+        lens,
+        (widget.component['imgWidth'] ?? 540) >
+                (widget.component['imgHeight'] ?? 540)
+            ? widget.component['imgWidth'] ?? 540
+            : widget.component['imgHeight'] ?? 540,
+        widget.component['quality'] ?? 80,
+        widget.component['folder'] ?? 'default',
+        widget.component['filename'] ?? const Uuid().v4().replaceAll('-', ''),
+        h,
+        w,
+      );
+      return selfieUrl;
+    } // end of takePicture
+
+    Future saveData(String scrName, String locString) async {
+      // TimerBloc timerBloc = transactionStore.state.screenTx['#TIMER_BLOC'];
+      var route = widget.component['route'] ?? widget.scrName;
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#NEXTROUTE': route,
+        '#TIMER_CONTEXT': context,
+        '#TIMER_DURATION': widget.component['delay'] ?? 5,
+      }))); // set state #NEXTROUTE route that will be displayed after waitScreen
+      int timeStamp = await getRealTime();
+      saveSend(timeStamp, scrName, widget.component, locString, defaultVid());
+    } // end of saveData
+
+    Future<void> processData(tArray, String dialogText1, String selfieUrl,
+        fromLinkOption, OtqState locSensor) async {
+      try {
+        // actionLock('processData attendance_qr_selfie_gps_verify');
+        // pool.play(scannerBeep);
+        while (!locSensor.gpsDone) {
+          // waiting for gps location (if not done)
+          sleep(const Duration(milliseconds: 100));
+        } // end while !locSensor.gpsDone
+        vibrate(duration: 100);
+        widget.component['route'] =
+            widget.component['route'] ?? home; //= default route = Home
+        String locString =
+            getLocationString('', selfieUrl, fromLinkOption, locSensor);
+        await saveData(widget.scrName, locString); //= send record to FromLink
+
+        // display dialog 1
+        await attendanceSuccessDialog(
+            title: tArray[2] ?? '-- Title --',
+            message1: dialogText1,
+            message2: locSensor.isoCountryCode == '88'
+                ? ""
+                : "${locSensor.subThoroughfare} ${locSensor.thoroughfare}, ${locSensor.administrativeArea} ${locSensor.postalCode}",
+            message3: '$plusMinus ${locSensor.accuracy.round()}m',
+            okString: tArray[8]);
+      } on PlatformException catch (err) {
+        setDataOK(
+            '1'); // reload pages and display green anyway. So the app will not lock up
+        errorReport(err);
+
+        await Get.dialog(AlertDialog(
+          // dialog 3
+          title: Text(textList["Fail"]),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(textList["Retry"]),
+              Text("System: (${err.toString()})"),
+              const Text("Position: attendance_qr_selfie_gps_verify(1)"),
+              Text(textList["ScreenShot"]),
+            ],
+          ),
+
+          actions: <Widget>[
+            TextButton(
+              child: Text(textList["OK"]),
+              onPressed: () {
+                Get.back();
+                //Navigator.of(context1).pop();
+              },
+            ),
+          ],
+        ));
+        /*
+        await showDialog(
+            context: context,
+            builder: (BuildContext context1) {
+              return AlertDialog(
+                // dialog 3
+                title: Text(textList["Fail"]),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(textList["Retry"]),
+                    Text("System: (${err.toString()})"),
+                    const Text("Position: attendance_qr_selfie_gps_verify(1)"),
+                    Text(textList["ScreenShot"]),
+                  ],
+                ),
+
+                actions: <Widget>[
+                  TextButton(
+                    child: Text(textList["OK"]),
+                    onPressed: () {
+                      Navigator.of(context1).pop();
+                    },
+                  ),
+                ],
+              );
+            }); // end of dialog
+
+         */
+      } catch (e) {
+        setDataOK(
+            '1'); // reload pages and display green anyway. So the app will not lock up
+        errorReport(e);
+        Get.dialog(AlertDialog(
+          // dialog 3
+          title: Text(textList["Fail"]),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(textList["Retry"]),
+              Text("System: (${e.toString()})"),
+              const Text("Position: attendance_qr_selfie_gps_verify(2)"),
+              Text(textList["ScreenShot"]),
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: Text(textList["OK"]),
+              onPressed: () {
+                Get.back();
+                // Navigator.of(context1).pop();
+              },
+            ),
+          ],
+        ));
+        /*
+        await showDialog(
+            context: context,
+            builder: (BuildContext context1) {
+              return AlertDialog(
+                // dialog 3
+                title: Text(textList["Fail"]),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(textList["Retry"]),
+                    Text("System: (${e.toString()})"),
+                    const Text("Position: attendance_qr_selfie_gps_verify(2)"),
+                    Text(textList["ScreenShot"]),
+                  ],
+                ),
+                actions: <Widget>[
+                  TextButton(
+                    child: Text(textList["OK"]),
+                    onPressed: () {
+                      Navigator.of(context1).pop();
+                    },
+                  ),
+                ],
+              );
+            }); // end of dialog
+         */
+        errorReport(e);
+      }
+    } // end of processData
+
+    Future<String> qrDataProcess(String? inputText, String? selfieUrl,
+        int tried, String originalScrName) async {
+      String resultOk = empty;
+      String finalQrText = empty;
+      String mock = 'Unknown';
+      dynamic tArray = diamondTextToList(widget.component['text'] ?? []);
+
+      // Platform messages may fail, so we use a try/catch PlatformException.
+      try {
+        int nowTime = 0; // = await ntpTimeSec();
+        Position? position;
+        dynamic p;
+        dynamic q;
+
+        await Future.wait([
+          // getCurrentPosition(desiredAccuracy: LocationAccuracy.high),
+          getLocation(),
+          omLqrReaderP(),
+          osLqrMakerQ(),
+          getRealTime(),
+        ]).then((res) {
+          position = res[0];
+          p = res[1];
+          q = res[2];
+          nowTime = res[3];
+        });
+
+        if (inputText != empty) {
+          //got qr
+          finalQrText = await lqrVerify(p, q, inputText);
+          if (finalQrText == errorString) {
+            resultOk = empty;
+          } else {
+            resultOk = (transactionStore.state.screenTx['#LQR_LIST']
+                        [finalQrText]) !=
+                    null
+                ? transactionStore.state.screenTx['#LQR_LIST'][finalQrText][0]
+                : empty;
+          } // end if (finalQrText != empty && finalQrText != errorString)
+        } else {
+          resultOk = errorString;
+        } // end (inputText != empty)
+
+        if (resultOk != empty && resultOk != errorString) {
+          late String? dialogText1;
+          late String fromLinkOption;
+          List<Placemark> placeMark = [];
+
+          switch (widget.component['actionLast'] ?? "Checkpoint") {
+            case 'clock-out':
+              dialogText1 = tArray[3] ?? "--Bad Text#4--"; // scenario 1
+              fromLinkOption = 'normal-clock-in';
+              break;
+
+            case 'clock-in':
+              if ((widget.component['timeClockOut1'] ?? 0) <= nowTime &&
+                  nowTime <= (widget.component['timeClockOut2'] ?? 0)) {
+                dialogText1 = tArray[4] ?? "--Bad Text#5--"; // scenario 2
+                fromLinkOption = 'normal-clock-out';
+              } else {
+                await showDialog(
+                    // show dialog 34
+                    context: context,
+                    builder: (BuildContext context) {
+                      return AlertDialog(
+                        // dialog 34
+                        title: Text(tArray[15] ?? "--Bad Text#16--"),
+                        content: Text(tArray[16] ?? "--Bad Text#17--"),
+                        actions: <Widget>[
+                          TextButton(
+                            child: Text(
+                                tArray[18] ?? "--Bad Text#19--"), // scenario 4
+                            onPressed: () {
+                              dialogText1 =
+                                  tArray[5] ?? "--Bad Text#6--"; // scenario 4
+                              fromLinkOption = 'clock-out-overtime';
+                              Navigator.of(context).pop();
+                            },
+                          ),
+                          TextButton(
+                            child: Text(tArray[17] ?? "--Bad Text#18--"),
+                            onPressed: () {
+                              dialogText1 =
+                                  tArray[6] ?? "--Bad Text#7--"; // scenario 3
+                              fromLinkOption = 'forgot-clock-out';
+                              Navigator.of(context).pop();
+                            },
+                          ),
+                        ],
+                      );
+                    });
+              }
+              break;
+
+            default: // Checkpoint , scenario 5
+              dialogText1 = tArray[7] ?? "--Bad Text#8--";
+              fromLinkOption = 'checkpoint';
+          } // end of switch
+
+          if (position != null) {
+            mock = position!.isMocked ? 'Mocked location' : 'True location';
+            try {
+              placeMark = await placemarkFromCoordinates(
+                  position!.latitude, position!.longitude);
+            } catch (e) {
+              errorReport(e);
+            }
+            actionLock('qrDataProcess attendance_qr_selfie_gps_verify');
+            // pool.play(scannerBeep);
+            vibrate(duration: 100);
+            /*
+            String content = widget.component['flag'] ?? 'location';
+            txfController[originalScrName]![1] = InputController(
+                1, TextEditingController(text: content), content, content);
+            content = nowTime.toString();
+            txfController[originalScrName]![2] = InputController(
+                2, TextEditingController(text: content), content, content);
+            content = fromLinkOption;
+            txfController[originalScrName]![3] = InputController(
+                3, TextEditingController(text: content), content, content);
+            content = finalQrText == empty ? '' : finalQrText;
+            txfController[originalScrName]![4] = InputController(
+                4, TextEditingController(text: content), content, content);
+            content = position!.latitude.toString();
+            txfController[originalScrName]![5] = InputController(
+                5, TextEditingController(text: content), content, content);
+            content = position!.longitude.toString();
+            txfController[originalScrName]![6] = InputController(
+                6, TextEditingController(text: content), content, content);
+            content = selfieUrl ?? '';
+            txfController[originalScrName]![7] = InputController(
+                7, TextEditingController(text: content), content, content);
+            content = placeMark.isNotEmpty
+                ? placeMark[0].isoCountryCode!
+                : invalidCountry;
+            txfController[originalScrName]![8] = InputController(
+                8, TextEditingController(text: content), content, content);
+            content = placeMark.isNotEmpty ? placeMark[0].postalCode! : "";
+            txfController[originalScrName]![9] = InputController(
+                9, TextEditingController(text: content), content, content);
+            content = cleanupString(
+                placeMark.isNotEmpty ? placeMark[0].administrativeArea! : "");
+            txfController[originalScrName]![10] = InputController(
+                10, TextEditingController(text: content), content, content);
+            content = cleanupString(placeMark.isNotEmpty
+                ? placeMark[0].subAdministrativeArea!
+                : "");
+            txfController[originalScrName]![11] = InputController(
+                11, TextEditingController(text: content), content, content);
+            content = cleanupString(
+                placeMark.isNotEmpty ? placeMark[0].locality! : "");
+            txfController[originalScrName]![12] = InputController(
+                12, TextEditingController(text: content), content, content);
+            content = cleanupString(
+                placeMark.isNotEmpty ? placeMark[0].subLocality! : "");
+            txfController[originalScrName]![13] = InputController(
+                13, TextEditingController(text: content), content, content);
+            content = cleanupString(
+                placeMark.isNotEmpty ? placeMark[0].thoroughfare! : "");
+            txfController[originalScrName]![14] = InputController(
+                14, TextEditingController(text: content), content, content);
+            content = cleanupString(
+                placeMark.isNotEmpty ? placeMark[0].subThoroughfare! : "");
+            txfController[originalScrName]![15] = InputController(
+                15, TextEditingController(text: content), content, content);
+            */
+
+            widget.component['route'] =
+                widget.component['route'] ?? home; //= default route = Home
+            OtqState locSensor = OtqState().getDataFrom(
+                DateTime.fromMillisecondsSinceEpoch(nowTime),
+                position!,
+                placeMark);
+            String locString = getLocationString(
+                finalQrText == empty ? '' : finalQrText,
+                selfieUrl ?? '',
+                fromLinkOption,
+                locSensor);
+            saveData(originalScrName, locString); //= send record to FromLink
+            routeStack.pop();
+            await attendanceSuccessDialog(
+                title: tArray[2] ?? '-- Title --',
+                message1: dialogText1 ?? "Success message1",
+                message2: placeMark.isNotEmpty
+                    ? "${placeMark[0].subThoroughfare} ${placeMark[0].thoroughfare}, ${placeMark[0].administrativeArea} ${placeMark[0].postalCode}"
+                    : "",
+                message3:
+                    '$plusMinus ${position == null ? "-" : position!.accuracy.round()}m',
+                okString: tArray[8]);
+          } else {
+            setDataOK(
+                '1'); // reload pages and display green anyway. So the app will not lock up
+            await attendanceDialog(
+                title: textList['Fail'],
+                message: "Gagal, tidak dapat membaca lokasi GPS.",
+                okString: tArray[8] ?? 'Ok');
+            resultOk = errorString;
+          } // end if position
+        } // end if (resultOk == empty || resultOk == errorString)
+      } catch (e) {
+        // TODO display dialog fail, and play wrong beep
+        errorReport(e);
+        setDataOK(
+            '1'); // reload pages and display green anyway. So the app will not lock up
+        Get.dialog(AlertDialog(
+          // dialog 3
+          title: Text(textList["Fail"]), // Scan again
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(textList["Retry"]),
+              Text("System: (${e.toString()})"),
+              const Text("Position: otq_qr1(1)"),
+              Text(textList["ScreenShot"]),
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: Text(textList["OK"]),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        ));
+        resultOk = errorString;
+      }
+      return resultOk;
+    } // end of qrDataProcess
+
+    Future<void> acquireData(
+        String actionType, List tArray, OtqState? locSensor) async {
+      try {
+        for (var i = 0; i < 10 && locSensor == null; i++) {
+          sleep(Duration(milliseconds: 100 + i * 20));
+        }
+        if ((actionType != 'selfie') &&
+            (actionType != 'back') &&
+            (locSensor == null || !locSensor.gpsOn)) {
+          await attendanceDialog(
+              title: textList['Fail'],
+              message: textList["GpsProblem"],
+              okString: tArray[8] ?? 'Ok');
+          // await showDialog(
+          //     context: context,
+          //     builder: (BuildContext context) {
+          //       return AlertDialog(
+          //         // dialog 3
+          //         title: Text(textList["Fail"]),
+          //         content: Column(
+          //           mainAxisSize: MainAxisSize.min,
+          //           mainAxisAlignment: MainAxisAlignment.start,
+          //           crossAxisAlignment: CrossAxisAlignment.start,
+          //           children: [
+          //             Text(textList["GpsProblem"]),
+          //           ],
+          //         ),
+          //         actions: <Widget>[
+          //           TextButton(
+          //             child: Text(tArray[8] ?? "--Bad GPS_SEND Text#9--"),
+          //             onPressed: () {
+          //               Navigator.of(context).pop();
+          //             },
+          //           ),
+          //         ],
+          //       );
+          //     }); // end of dialog
+          setDataOK('2');
+        } else {
+          bool cameraCancel = false;
+          if (actionType == 'selfie' || actionType == 'back') {
+            String lens = 'front';
+            if (actionType == 'back') {
+              lens = 'back';
+            }
+            try {
+              List<CameraDescription> cams =
+                  transactionStore.state.screenTx['#CAMS'];
+              transactionStore.dispatch(
+                  UpdateScreenTxAction(ScreenTransaction({'#CAMERA': true})));
+              selfieUrl = await getPhotoCameraImage(
+                cams,
+                widget.component['label'] ?? 'Camera',
+                lens,
+                (widget.component['imgWidth'] ?? 540) >
+                        (widget.component['imgHeight'] ?? 540)
+                    ? widget.component['imgWidth'] ?? 540
+                    : widget.component['imgHeight'] ?? 540,
+                widget.component['quality'] ?? 80,
+                widget.component['folder'] ?? 'default',
+                (widget.component['filename'] ?? 'file') +
+                    '_' +
+                    const Uuid().v4().replaceAll('-', ''),
+                h,
+                w,
+              );
+              if (selfieUrl == emptyImageUrl || selfieUrl == emptyString) {
+                cameraCancel = true;
+                setDataOK('2');
+              } else {
+                for (var l = 0;
+                    l < 50 && (locSensor == null || !locSensor.gpsDone);
+                    l++) {
+                  sleep(Duration(milliseconds: 100 + l * 20));
+                } // end while !otqData.gpsDone
+              } // end if selfieUrl == emptyString
+            } catch (e) {
+              errorReport(e);
+              cameraCancel = true;
+              setDataOK('2');
+            }
+            transactionStore.dispatch(
+                UpdateScreenTxAction(ScreenTransaction({'#CAMERA': false})));
+          }
+          if ((actionType == 'selfie' && !cameraCancel) ||
+              actionType != 'selfie') {
+            late String dialogText1;
+            late String fromLinkOption;
+            //**actionLock();
+            switch (widget.component['actionLast'] ?? "Checkpoint") {
+              case 'clock-out':
+                dialogText1 = tArray[3] ?? "--Bad Text#4--"; // scenario 1
+                fromLinkOption = 'normal-clock-in';
+                break;
+
+              case 'clock-in':
+                if ((widget.component['timeClockOut1'] ?? 0) <=
+                        locSensor!.nowTime.millisecondsSinceEpoch &&
+                    locSensor.nowTime.millisecondsSinceEpoch <=
+                        (widget.component['timeClockOut2'] ?? 0)) {
+                  dialogText1 = tArray[4] ?? "--Bad Text#5--"; // scenario 2
+                  fromLinkOption = 'normal-clock-out';
+                } else {
+                  await Get.dialog(AlertDialog(
+                    // dialog 34
+                    title: Text(tArray[15] ?? "--Bad Text#16--"),
+                    content: Text(tArray[16] ?? "--Bad Text#17--"),
+                    actions: <Widget>[
+                      TextButton(
+                        child: Text(tArray[18] ??
+                            "--Bad GPS_SEND Text#19--"), // scenario 4
+                        onPressed: () {
+                          dialogText1 = tArray[5] ??
+                              "--Bad GPS_SEND Text#6--"; // scenario 4
+                          fromLinkOption = 'clock-out-overtime';
+                          Navigator.of(context).pop();
+                        },
+                      ),
+                      TextButton(
+                        child: Text(tArray[17] ?? "--Bad GPS_SEND Text#18--"),
+                        onPressed: () {
+                          dialogText1 = tArray[6] ??
+                              "--Bad GPS_SEND Text#7--"; // scenario 3
+                          fromLinkOption = 'forgot-clock-out';
+                          Navigator.of(context).pop();
+                        },
+                      ),
+                    ],
+                  ));
+
+                  // await showDialog(
+                  //     // show dialog 34
+                  //     context: context,
+                  //     builder: (BuildContext context) {
+                  //       return AlertDialog(
+                  //         // dialog 34
+                  //         title: Text(tArray[15] ?? "--Bad Text#16--"),
+                  //         content: Text(tArray[16] ?? "--Bad Text#17--"),
+                  //         actions: <Widget>[
+                  //           TextButton(
+                  //             child: Text(tArray[18] ??
+                  //                 "--Bad GPS_SEND Text#19--"), // scenario 4
+                  //             onPressed: () {
+                  //               dialogText1 = tArray[5] ??
+                  //                   "--Bad GPS_SEND Text#6--"; // scenario 4
+                  //               fromLinkOption = 'clock-out-overtime';
+                  //               Navigator.of(context).pop();
+                  //             },
+                  //           ),
+                  //           TextButton(
+                  //             child: Text(
+                  //                 tArray[17] ?? "--Bad GPS_SEND Text#18--"),
+                  //             onPressed: () {
+                  //               dialogText1 = tArray[6] ??
+                  //                   "--Bad GPS_SEND Text#7--"; // scenario 3
+                  //               fromLinkOption = 'forgot-clock-out';
+                  //               Navigator.of(context).pop();
+                  //             },
+                  //           ),
+                  //         ],
+                  //       );
+                  //     });
+                } // end if ((widget.component['timeClockOut1'] ?? 0)...
+                break;
+
+              default: // Checkpoint , scenario 5
+                dialogText1 = tArray[7] ?? "--Bad GPS_SEND Text#8--";
+                fromLinkOption = 'checkpoint';
+            } // end of switch widget.component['actionLast']
+            await processData(
+                tArray, dialogText1, selfieUrl, fromLinkOption, locSensor!);
+          } // end if ((actionType == 'selfie' && !cameraCancel)
+        } // end if ((actionType != 'selfie') &&...
+      } on PlatformException catch (err) {
+        // TODO  play wrong beep
+        setDataOK('2'); // display green without do anything
+        errorReport(err);
+        await attendanceDialog(
+            title: textList['Fail'],
+            message: textList["Retry"],
+            okString: tArray[8] ?? 'Ok');
+      } // end of platformException
+    } // end of acquireData
+
+    Future<void> acquireQrSelfie(String scrName, String originalScrName,
+        dynamic component, OtqState locSensor, bool forceSelfie) async {
+      int tried = 1;
+      String? qrText = empty;
+      bool done = false;
+      bool qrPhoto = false;
+      bool qrCancel = false;
+      String selfieUrl = '';
+      String qrResult = '';
+      dynamic tArray = diamondTextToList(widget.component['text'] ?? []);
+      int lastTextIndex = 22;
+      if (tArray.length == lastTextIndex) {
+        tArray.add('Scan QR');
+      }
+      if (widget.component['opMode'] == 'qr-checker-single' ||
+          widget.component['opMode'] == 'qr-checker-continuous') {
+        qrPhoto = true;
+        qrText = await attendanceTakeQR(
+            tArray[22] ?? 'Scan QR', scrName, component, 'loc');
+        qrResult = await qrDataProcess(
+            qrText ?? emptyString, '', tried, originalScrName);
+      } else {
+        while (!done && tried <= qrLoop) {
+          qrText = await attendanceTakeQR(
+              tArray[22] ?? 'Scan QR', scrName, component, 'loc');
+          if (qrText == 'null' || qrText == emptyString) {
+            qrText = emptyString;
+            qrCancel = true;
+            tried = qrLoop + 1;
+          } else {
+            tried++;
+          }
+          qrResult = await qrDataProcess(qrText, '', tried, originalScrName);
+          done = qrResult != errorString &&
+              qrResult != empty &&
+              qrResult != 'null';
+          if (!done && !qrCancel && !qrPhoto) {
+            await Get.dialog(AlertDialog(
+              // dialog 2 & 3
+              title: Text(tried <= qrLoop
+                  ? (tArray[9] ?? "--Bad Text#10--")
+                  : (tArray[forceSelfie ? 12 : 9] ??
+                      "--Bad GPS_SEND Text#13--")), //Text('QR salah'),
+              content: Text(tried <= qrLoop
+                  ? (tArray[10] ?? "--Bad Text#11--")
+                  : (tArray[forceSelfie ? 13 : 9] ?? "--Bad Text#14--")),
+              actions: <Widget>[
+                TextButton(
+                  child: Text(tried <= qrLoop
+                      ? (tArray[11] ?? "--Bad Text#12--")
+                      : (tArray[forceSelfie ? 14 : 8] ?? "--Bad Text#15--")),
+                  onPressed: () {
+                    Get.back();
+                    // Navigator.of(context).pop();
+                  },
+                ),
+              ],
+            ));
+            // await showDialog(
+            //     context: context,
+            //     builder: (BuildContext context) {
+            //       return AlertDialog(
+            //         // dialog 2 & 3
+            //         title: Text(tried <= qrLoop
+            //             ? (tArray[9] ?? "--Bad Text#10--")
+            //             : (tArray[12] ??
+            //                 "--Bad GPS_SEND Text#13--")), //Text('QR salah'),
+            //         content: Text(tried <= qrLoop
+            //             ? (tArray[10] ?? "--Bad Text#11--")
+            //             : (tArray[13] ?? "--Bad Text#14--")),
+            //         actions: <Widget>[
+            //           TextButton(
+            //             child: Text(tried <= qrLoop
+            //                 ? (tArray[11] ?? "--Bad Text#12--")
+            //                 : (tArray[14] ?? "--Bad Text#15--")),
+            //             onPressed: () {
+            //               Navigator.of(context).pop();
+            //             },
+            //           ),
+            //         ],
+            //       );
+            //     }); // ShowDialog
+          } // end if (done)
+        } // end while (!done && tried <= 3)
+      } // end if checker
+
+      if (forceSelfie && !done && !qrCancel) {
+        // qr fail, then call selfie
+        late String dialogText1;
+        late String fromLinkOption;
+        selfieUrl = await takePicture(qrPhoto ? 'back' : 'front');
+
+        switch (widget.component['actionLast'] ?? "Checkpoint") {
+          case 'clock-out':
+            dialogText1 = tArray[3] ?? "--Bad Text#4--"; // scenario 1
+            fromLinkOption = 'normal-clock-in';
+            break;
+
+          case 'clock-in':
+            if ((widget.component['timeClockOut1'] ?? 0) <=
+                    locSensor.nowTime.millisecondsSinceEpoch &&
+                locSensor.nowTime.millisecondsSinceEpoch <=
+                    (widget.component['timeClockOut2'] ?? 0)) {
+              dialogText1 = tArray[4] ?? "--Bad Text#5--"; // scenario 2
+              fromLinkOption = 'normal-clock-out';
+            } else {
+              await showDialog(
+                  // show dialog 34
+                  context: context,
+                  builder: (BuildContext context) {
+                    return AlertDialog(
+                      // dialog 34
+                      title: Text(tArray[15] ?? "--Bad Text#16--"),
+                      content: Text(tArray[16] ?? "--Bad Text#17--"),
+                      actions: <Widget>[
+                        TextButton(
+                          child: Text(tArray[18] ??
+                              "--Bad GPS_SEND Text#19--"), // scenario 4
+                          onPressed: () {
+                            dialogText1 = tArray[5] ??
+                                "--Bad GPS_SEND Text#6--"; // scenario 4
+                            fromLinkOption = 'clock-out-overtime';
+                            Navigator.of(context).pop();
+                          },
+                        ),
+                        TextButton(
+                          child: Text(tArray[17] ?? "--Bad GPS_SEND Text#18--"),
+                          onPressed: () {
+                            dialogText1 = tArray[6] ??
+                                "--Bad GPS_SEND Text#7--"; // scenario 3
+                            fromLinkOption = 'forgot-clock-out';
+                            Navigator.of(context).pop();
+                          },
+                        ),
+                      ],
+                    );
+                  });
+            }
+            break;
+
+          default: // Checkpoint , scenario 5
+            dialogText1 = tArray[7] ?? "--Bad GPS_SEND Text#8--";
+            fromLinkOption = 'checkpoint';
+        } // end of switch widget.component['actionLast']
+        await processData(
+            tArray, dialogText1, selfieUrl, fromLinkOption, locSensor);
+      }
+      if (qrCancel || !forceSelfie) {
+        setDataOK('2');
+      }
+    } // end of acquireQrSelfie
+
+    media = MediaQuery.maybeOf(context);
+    h = media?.size.height - 20;
+    w = media.size.width - 20;
+    const double defaultAspectRatio = 18 / 12;
+    var topPad = 6.0;
+    double fontSize = (widget.component['fontSize'] ?? 14.0).toDouble();
+    var textArray = diamondTextToList(widget.component['text']);
+    Widget button1;
+    if (widget.single) {
+      button1 = Center(
+        child: Column(
+          children: [
+            Container(
+              // display single icon
+              alignment: Alignment.center,
+              width: (widget.component['width'] ?? 90).toDouble(),
+              child: Card(
+                child: InkWell(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: <Widget>[
+                      Container(
+                        height: topPad,
+                      ),
+                      AspectRatio(
+                        aspectRatio: defaultAspectRatio,
+                        child: displayImage(
+                            imageUrl: widget.component['url'] ?? defaultImage,
+                            cached: true),
+                        // child: FadeInImage.memoryNetwork(
+                        //   placeholder: kTransparentImage,
+                        //   image: widget.component['url'] ?? defaultImage,
+                        // ),
+                      ),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          textArray[0],
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: fontSize),
+                        ),
+                      ),
+                    ],
+                  ),
+                  onTap: () async {
+                    if (!tapped) {
+                      setState(() {
+                        tapped = true;
+                      });
+                      if (await dataOk(context)) {
+                        actionLock(
+                            'acquireSelfie attendance_qr_selfie_gps_verify');
+                        // ConnectionData connectionData =
+                        //     await ConnectionData().getConnection(true, true);
+                        // if (true || await internetOk(context)) {
+                        if (true) {
+                          try {
+                            OtqState currentData =
+                                await OtqState().setAllDataAsync();
+                            switch (
+                                widget.component['opMode'] ?? 'gps-single') {
+                              case 'qr-checker-single':
+                                await acquireData('qr-checker-single',
+                                    textArray, currentData);
+                                var locArray =
+                                    widget.component['locList'] ?? [];
+                                bool selfie;
+                                if (locArray.length < 1) {
+                                  // location array =  empty
+                                  selfie = true; // selfie
+                                } else {
+                                  if (await locationVerify(
+                                      locArray,
+                                      widget.component['tolerance'] ?? 50,
+                                      currentData)) {
+                                    selfie = false; // scan qr
+                                  } else {
+                                    selfie = true; // selfie
+                                  }
+                                }
+                                await acquireData(
+                                    'back', textArray, currentData);
+                                String toGo = widget.component['route'] ?? home;
+                                routeStack.push(toGo);
+                                gotoRoute(toGo);
+                                break; // end case 'qr-checker-single'
+
+                              case 'qr-single':
+                                const forceSelfie =
+                                    false; // = true if need selfie
+                                dynamic locArray =
+                                    widget.component['locList'] ?? [];
+                                bool selfie;
+                                if (locArray.length < 1) {
+                                  selfie = true; // selfie
+                                } else {
+                                  if (await locationVerify(
+                                      locArray,
+                                      widget.component['tolerance'] ?? 50,
+                                      currentData)) {
+                                    selfie = false; // scan qr
+                                  } else {
+                                    selfie = true; // selfie
+                                  }
+                                }
+                                if (selfie) {
+                                  await showDialog(
+                                      // show dialog 5
+                                      context: context,
+                                      builder: (BuildContext context) {
+                                        return AlertDialog(
+                                          // dialog 3
+                                          title: Text(
+                                              textArray[forceSelfie ? 19 : 9]),
+                                          content: Text(
+                                              textArray[forceSelfie ? 20 : 9]),
+                                          actions: <Widget>[
+                                            TextButton(
+                                              child: Text(textArray[forceSelfie
+                                                  ? 21
+                                                  : 8]), // selfie
+                                              onPressed: () {
+                                                Navigator.of(context).pop();
+                                              },
+                                            ),
+                                          ],
+                                        );
+                                      });
+                                  if (!forceSelfie) {
+                                    setDataOK('2');
+                                  } else {
+                                    await acquireData(
+                                        'selfie', textArray, currentData);
+                                  } // end if forceSelfie
+                                  String toGo =
+                                      widget.component['route'] ?? home;
+                                  routeStack.push(toGo);
+                                  gotoRoute(toGo);
+                                } else {
+                                  String myPage = '_OtqQR1';
+                                  await acquireQrSelfie(
+                                      myPage,
+                                      widget.scrName,
+                                      widget.component,
+                                      currentData,
+                                      forceSelfie);
+                                }
+                                break;
+
+                              case 'selfie':
+                                await acquireData(
+                                    'selfie', textArray, currentData);
+                                String toGo = widget.component['route'] ?? home;
+                                routeStack.push(toGo);
+                                gotoRoute(toGo);
+                                break;
+
+                              default: // gps-single or other
+                                await acquireData(
+                                    'gps-single', textArray, currentData);
+                                String toGo = widget.component['route'] ?? home;
+                                routeStack.push(toGo);
+                                gotoRoute(toGo);
+                            } // end of switch
+                          } catch (e) {
+                            setDataOK('2');
+                            errorReport(e);
+                          }
+                          setState(() {
+                            tapped = false;
+                          });
+                        } else {
+                          setDataOK('2');
+                          setState(() {
+                            tapped = false;
+                          });
+                        } // end if #Internet
+                      } // end if dataOK
+                    } // end if !tapped
+                  }, // end of onTap
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      // else if (widget.single)
+      button1 = Container(
+        alignment: const Alignment(0.0, 0.0),
+        child: Card(
+          child: InkWell(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: <Widget>[
+                Container(
+                  height: topPad,
+                ),
+                AspectRatio(
+                  aspectRatio: defaultAspectRatio,
+                  child: displayImage(
+                      imageUrl: widget.component['url'] ?? defaultImage,
+                      cached: true),
+                  // child: FadeInImage.memoryNetwork(
+                  //   placeholder: kTransparentImage,
+                  //   image: widget.component['url'] ?? defaultImage,
+                  // ),
+                ),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    textArray[0],
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: fontSize),
+                  ),
+                ),
+              ],
+            ),
+            onTap: () async {
+              if (!tapped) {
+                setState(() {
+                  tapped = true;
+                });
+                if (await dataOk(context)) {
+                  actionLock(
+                      '[1302] acquireSelfie attendance_qr_selfie_gps_verify');
+                  // ConnectionData connectionData =
+                  //     await ConnectionData().getConnection(true, true);
+                  // if (await internetOk(context)) {
+                  if (true) {
+                    try {
+                      OtqState currentData = await OtqState().setAllDataAsync();
+                      switch (widget.component['opMode'] ?? 'gps-single') {
+                        case 'qr-checker-single':
+                          var locArray = widget.component['locList'] ?? [];
+                          bool selfie;
+                          if (locArray.length < 1) {
+                            // location array =  empty
+                            selfie = true; // selfie
+                          } else {
+                            if (await locationVerify(
+                                locArray,
+                                widget.component['tolerance'] ?? 50,
+                                currentData)) {
+                              selfie = false; // scan qr
+                            } else {
+                              selfie = true; // selfie
+                            }
+                          }
+                          if (selfie) {
+                            await showDialog(
+                                // show dialog 5
+                                context: context,
+                                builder: (BuildContext context) {
+                                  return AlertDialog(
+                                    // dialog 3
+                                    title: Text(textArray[19]),
+                                    content: Text(textArray[20]),
+                                    actions: <Widget>[
+                                      TextButton(
+                                        child: Text(textArray[21]),
+                                        onPressed: () {
+                                          Navigator.of(context).pop();
+                                        },
+                                      ),
+                                    ],
+                                  );
+                                });
+                            await acquireData('selfie', textArray, currentData);
+                            String toGo = widget.component['route'] ?? home;
+                            routeStack.push(toGo);
+                            gotoRoute(toGo);
+                          } else {
+                            String myPage = '_OtqQR1';
+                            await acquireQrSelfie(myPage, widget.scrName,
+                                widget.component, currentData, true);
+                            // setDataOK('2');
+                            // routeStack.push(myPage);
+                            // gotoRoute(myPage);
+                          }
+                          break; // end case qr-checker-single
+
+                        case 'qr-single':
+                          dynamic locArray = widget.component['locList'] ?? [];
+                          const forceSelfie = false; // = true if need selfie
+                          bool selfie;
+                          if (locArray.length < 1) {
+                            // location array =  empty
+                            selfie = true; // selfie
+                          } else {
+                            if (await locationVerify(
+                                locArray,
+                                widget.component['tolerance'] ?? 50,
+                                currentData)) {
+                              selfie = false; // scan qr
+                            } else {
+                              selfie = true; // selfie
+                            }
+                          }
+                          if (selfie) {
+                            await showDialog(
+                                // show dialog 5
+                                context: context,
+                                builder: (BuildContext context) {
+                                  return AlertDialog(
+                                    // dialog 3
+                                    title:
+                                        Text(textArray[19]),
+                                    content:
+                                        Text(textArray[20]),
+                                    actions: <Widget>[
+                                      TextButton(
+                                        child: Text(
+                                            textArray[21]),
+                                        onPressed: () {
+                                          Navigator.of(context).pop();
+                                        },
+                                      ),
+                                    ],
+                                  );
+                                });
+                            if (!forceSelfie) {
+                              setDataOK('2');
+                            } else {
+                              await acquireData(
+                                  'selfie', textArray, currentData);
+                            }
+                            String toGo = widget.component['route'] ?? home;
+                            routeStack.push(toGo);
+                            gotoRoute(toGo);
+                          } else {
+                            String myPage = '_OtqQR1';
+                            await acquireQrSelfie(myPage, widget.scrName,
+                                widget.component, currentData, forceSelfie);
+                            // setDataOK('2');
+                            // routeStack.push(myPage);
+                            // gotoRoute(myPage);
+                          }
+                          break;
+
+                        case 'selfie':
+                          await acquireData('selfie', textArray, currentData);
+                          String toGo = widget.component['route'] ?? home;
+                          routeStack.push(toGo);
+                          gotoRoute(toGo);
+                          break;
+
+                        default: // gps-single or other
+                          await acquireData(
+                              'gps-single', textArray, currentData);
+                          String toGo = widget.component['route'] ?? home;
+                          routeStack.push(toGo);
+                          gotoRoute(toGo);
+                      } // end of switch
+                    } catch (e) {
+                      setDataOK('2');
+                      errorReport(e);
+                    } // end of try
+                  } else {
+                    setDataOK('2');
+                  } // end if internetOK
+                } // end if dataOk
+                try {
+                  setState(() {
+                    tapped = false;
+                  });
+                } catch (e) {
+                  errorReport(e);
+                }
+              } // end if ! tapped
+            }, // end of onTap
+          ),
+        ),
+      );
+    } // end if (widget.single)
+    return button1;
+  } // end of class _AttendQrGpsSelfieState build
+
+  @override
+  void dispose() {
+    // Dispose resources here
+    super.dispose();
+  }
+} // end of class _AttendQrGpsSelfieState

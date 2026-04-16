@@ -1,0 +1,463 @@
+// ftz_bluetooth_printer.dart
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart' as pos_utils;
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import '../api.dart';
+import 'dart:io';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:get/get.dart'; // MODIFIED: Added GetX for state management
+import '../global.dart';
+import '../global2.dart';
+import '../template_printer.dart';
+import '../firestore_repository/table_repository.dart';
+
+class FtzBluetoothPrinter extends StatefulWidget {
+  final Map<String, dynamic> component;
+  final String scrName;
+
+  const FtzBluetoothPrinter({
+    super.key,
+    required this.component,
+    required this.scrName,
+  });
+
+  @override
+  State<FtzBluetoothPrinter> createState() => _FtzBluetoothPrinterState();
+}
+
+class _FtzBluetoothPrinterState extends State<FtzBluetoothPrinter> {
+  bool _isConnectingOrPrinting = false;
+  bool _isLoadingData = false;
+  int currentTableVid = consteonVid;
+
+  // Component Properties
+  late final String _buttonText;
+  late final IconData _buttonIcon;
+  late final Color _buttonColor;
+  late final Color _onButtonColor;
+  late final pos_utils.PaperSize _paperSize;
+  late final List<String> _labels;
+  late final String _scrName;
+  late final MainAxisAlignment _alignment;
+  late final int? _position; // MODIFIED: Added position for state management
+
+  // Properties for template printing
+  late final String? _template;
+  late final String? _tableNamesString;
+  final Map<String, List<dynamic>> _tableData = {};
+
+  @override
+  void initState() {
+    super.initState();
+
+    _labels = diamondTextToList(widget.component['text'] ?? '');
+    _buttonText = _labels.isNotEmpty ? _labels[0] : 'Print';
+    _buttonIcon =
+        stringToIconData(widget.component['buttonIcon'] as String? ?? 'print');
+    _buttonColor =
+        stringToColor(widget.component['buttonColor'] as String? ?? 'teal');
+    _onButtonColor =
+        stringToColor(widget.component['onButtonColor'] as String? ?? 'white');
+    _paperSize =
+        (widget.component['paperSize'] as String? ?? 'mm80').toLowerCase() ==
+                'mm58'
+            ? pos_utils.PaperSize.mm58
+            : pos_utils.PaperSize.mm80;
+    _scrName = widget.scrName;
+    _position = widget.component['position'] as int?; // MODIFIED
+
+    final String alignStr = widget.component['alignment'] ?? 'center';
+    switch (alignStr.toLowerCase()) {
+      case 'left':
+        _alignment = MainAxisAlignment.start;
+        break;
+      case 'right':
+        _alignment = MainAxisAlignment.end;
+        break;
+      case 'center':
+      default:
+        _alignment = MainAxisAlignment.center;
+        break;
+    }
+
+    _template = widget.component['template'] as String?;
+    _tableNamesString =
+        normalizeTableName(autheniumDecode(widget.component['table']) ?? '');
+  }
+
+  Future<List<List<dynamic>>> readFromTable(
+      String scrName, String rawTableName) async {
+    dynamic tableArray = rawTableName.split(separator[2]);
+    String tableName =
+        replacePlaceHoldersFromTxfController(scrName, tableArray[0].trim());
+    if (_tableData.containsKey(tableName)) {
+      return [_tableData[tableName] ?? []];
+    } else {
+      late String internalTableCode;
+      if (tableArray.length > 1) {
+        internalTableCode = tableArray[1]
+            .trim();
+      } else {
+        internalTableCode = tableName
+            .substring(tableName.lastIndexOf('/') + 1)
+            .replaceAll('.', '_');
+      }
+      final data = await readFromFirestoreTable(
+          currentTableVid, tableName, internalTableCode);
+      _tableData[internalTableCode] = data ?? [];
+      return [data ?? []];
+    }
+  }
+
+  Future<void> _loadPrintData() async {
+    if (mounted) {
+      setState(() => _isLoadingData = true);
+    }
+
+    _tableData.clear();
+
+    try {
+      if (_tableNamesString == null || _tableNamesString!.isEmpty) {
+        return;
+      }
+
+      final List<String> tablesToLoad = diamondTextToList(_tableNamesString!);
+      if (tablesToLoad.isEmpty) {
+        return;
+      }
+
+      final List<Future<List<List<dynamic>>>> futures =
+          tablesToLoad.map((tableName) {
+        return readFromTable(_scrName, tableName);
+      }).toList();
+
+      await Future.wait(futures);
+      for (int i = 0; i < tablesToLoad.length; i++) {
+        dynamic tableArray = tablesToLoad[i].split(separator[2]);
+        final String originalName = tableArray[0];
+        late String mapKey;
+        if (tableArray.length > 1) {
+          mapKey = tableArray[1].trim();
+        } else {
+          mapKey = originalName
+              .substring(originalName.lastIndexOf('/') + 1)
+              .replaceAll('.', '_');
+        }
+        _tableData[mapKey] = tableContent[mapKey];
+      }
+    } catch (e) {
+      _showSnackBar('Error loading table data: $e', Colors.red);
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingData = false);
+      }
+    }
+  }
+
+  void _showSnackBar(String message, [Color? color]) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color ?? Colors.blueGrey,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<BluetoothDevice?> _showScanResultDialog(
+      List<ScanResult> devices) async {
+    return await _showDeviceSelectionDialog(
+        devices.map((r) => r.device).toList());
+  }
+
+  Future<BluetoothDevice?> _showDeviceSelectionDialog(
+      List<BluetoothDevice> devices) async {
+    return await showDialog<BluetoothDevice>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Select a Printer'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              itemCount: devices.length,
+              shrinkWrap: true,
+              itemBuilder: (context, index) {
+                final device = devices[index];
+                final deviceName = device.platformName.isNotEmpty
+                    ? device.platformName
+                    : 'Unknown Device';
+                return ListTile(
+                  title: Text(deviceName),
+                  subtitle: Text(device.remoteId.toString()),
+                  onTap: () {
+                    Navigator.of(context).pop(device);
+                  },
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(null),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _startPrintProcess() async {
+    if (_isConnectingOrPrinting) return;
+
+    setState(() => _isConnectingOrPrinting = true);
+
+    BluetoothDevice? selectedDevice;
+
+    try {
+      if (Platform.isAndroid) {
+        var scanStatus = await Permission.bluetoothScan.request();
+        var connectStatus = await Permission.bluetoothConnect.request();
+
+        if (scanStatus.isDenied ||
+            connectStatus.isDenied ||
+            scanStatus.isPermanentlyDenied ||
+            connectStatus.isPermanentlyDenied) {
+          _showSnackBar('Bluetooth permissions are required to find printers.',
+              Colors.red);
+          if (scanStatus.isPermanentlyDenied ||
+              connectStatus.isPermanentlyDenied) {
+            await openAppSettings();
+          }
+          return;
+        }
+      }
+      await _loadPrintData();
+      if (_isLoadingData || !mounted) return;
+
+      if (await FlutterBluePlus.adapterState.first !=
+          BluetoothAdapterState.on) {
+        _showSnackBar("Bluetooth is OFF. Please turn it ON.", Colors.red);
+        return;
+      }
+
+      List<BluetoothDevice> bondedDevices = await FlutterBluePlus.bondedDevices;
+
+      if (bondedDevices.length == 1) {
+        selectedDevice = bondedDevices.first;
+      } else if (bondedDevices.length > 1) {
+        if (!mounted) return;
+        selectedDevice = await _showDeviceSelectionDialog(bondedDevices);
+      } else {
+        List<ScanResult> discoveredDevices = [];
+        await FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
+
+        await for (var results in FlutterBluePlus.scanResults) {
+          if (results.isNotEmpty) {
+            discoveredDevices = results;
+            break;
+          }
+        }
+        await FlutterBluePlus.stopScan();
+
+        if (!mounted) return;
+        if (discoveredDevices.isEmpty) {
+          _showSnackBar("No Bluetooth devices found.", Colors.orange);
+          return;
+        }
+
+        selectedDevice = await _showScanResultDialog(discoveredDevices);
+      }
+
+      if (selectedDevice == null) {
+        _showSnackBar("No printer selected.", Colors.grey);
+        return;
+      }
+
+      await selectedDevice.connect(timeout: const Duration(seconds: 15));
+      if (!mounted) return;
+
+      await _performPrint(selectedDevice);
+    } catch (e) {
+      _showSnackBar('Error: $e', Colors.red);
+    } finally {
+      if (selectedDevice != null) {
+        try {
+          await selectedDevice.disconnect();
+        } catch (e) {
+          int i = 8;
+          // Ignore disconnection errors
+        }
+      }
+      if (mounted) {
+        setState(() => _isConnectingOrPrinting = false);
+      }
+    }
+  }
+
+  Future<void> _performPrint(BluetoothDevice connectedDevice) async {
+    BluetoothCharacteristic? writableCharacteristic;
+
+    List<BluetoothService> services = await connectedDevice.discoverServices();
+    for (BluetoothService service in services) {
+      for (BluetoothCharacteristic characteristic in service.characteristics) {
+        if (characteristic.properties.write ||
+            characteristic.properties.writeWithoutResponse) {
+          writableCharacteristic = characteristic;
+          break;
+        }
+      }
+      if (writableCharacteristic != null) break;
+    }
+
+    if (writableCharacteristic == null) {
+      throw Exception("Could not find a writable characteristic.");
+    }
+
+    List<int> bytes = await _generateBytesFromTemplate();
+    final int mtu = await connectedDevice.mtu.first;
+    final int chunkSize = mtu - 5;
+
+    for (int i = 0; i < bytes.length; i += chunkSize) {
+      List<int> chunk = bytes.sublist(
+          i, i + chunkSize > bytes.length ? bytes.length : i + chunkSize);
+      await writableCharacteristic.write(chunk, withoutResponse: true);
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
+  }
+
+  Future<List<int>> _generateBytesFromTemplate() async {
+    if (_template == null || _template!.isEmpty) {
+      throw Exception('Printer template is not defined.');
+    }
+    final templatePrinter = TemplatePrinter(
+      template: _template!,
+      paperSize: _paperSize,
+      tables: _tableData,
+    );
+    return await templatePrinter.getBytes();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_position == null) {
+      return _buildContent(context, true);
+    }
+
+    return GetBuilder<WidgetUpdateController>(
+      id: '${widget.scrName}-$_position',
+      builder: (_) {
+        final controller = txfController[widget.scrName]![_position!]!;
+        final bool isEnabled = controller.isEnabled;
+        return _buildContent(context, isEnabled);
+      },
+    );
+  }
+
+  Widget _buildContent(BuildContext context, bool isEnabled) {
+    if (_labels.isEmpty || _labels.length < 16) {
+      return Card(
+        margin: const EdgeInsets.all(16.0),
+        color: Colors.redAccent,
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Text(
+            'Error: Component text configuration missing or incomplete. Expected at least 16 labels, got ${_labels.length}.',
+            style: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+        ),
+      );
+    }
+
+    final bool isBusy = _isConnectingOrPrinting || _isLoadingData;
+    final String buttonLabel = _isLoadingData
+        ? 'Loading Data...'
+        : (_isConnectingOrPrinting ? 'Processing...' : _buttonText);
+
+    // The core button widget is created here
+    final Widget printerButton = Card(
+      elevation: 8.0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [_buttonColor.withOpacity(0.9), _buttonColor],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: ElevatedButton.icon(
+          onPressed: isBusy || !isEnabled ? null : _startPrintProcess,
+          icon: isBusy
+              ? Container(
+                  width: 24,
+                  height: 24,
+                  padding: const EdgeInsets.all(2.0),
+                  child: CircularProgressIndicator(
+                    color: _onButtonColor,
+                    strokeWidth: 3,
+                  ),
+                )
+              : Icon(_buttonIcon, color: _onButtonColor),
+          label: Text(
+            buttonLabel,
+            style: TextStyle(
+                color: _onButtonColor,
+                fontSize: 18,
+                fontWeight: FontWeight.bold),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            disabledBackgroundColor: Colors.grey.shade300,
+            disabledForegroundColor: Colors.grey.shade500,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8.0)),
+          ),
+        ),
+      ),
+    );
+
+    // MODIFIED: Handle the layout based on the 'width' property
+    final dynamic widthValue =
+        widget.component['width'].toString().toLowerCase();
+
+    if (widthValue == 'full') {
+      // If 'full', the button should expand. The Row acts as a container.
+      return Row(
+        children: [
+          Expanded(child: printerButton),
+        ],
+      );
+    }
+
+    final double? specificWidth = double.tryParse(widthValue?.toString() ?? '');
+
+    if (specificWidth != null) {
+      // If a specific width is provided, use it.
+      return Row(
+        mainAxisAlignment: _alignment,
+        children: [
+          SizedBox(
+            width: specificWidth,
+            child: printerButton,
+          ),
+        ],
+      );
+    }
+
+    // Default behavior if 'width' is null or invalid.
+    return Row(
+      mainAxisAlignment: _alignment,
+      children: [
+        printerButton,
+      ],
+    );
+  }
+}

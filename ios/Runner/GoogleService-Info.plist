@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>721538991284-lqq5e3jsm6g91gdeh2qo24tkjlu4bn0o.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.721538991284-lqq5e3jsm6g91gdeh2qo24tkjlu4bn0o</string>
+	<key>ANDROID_CLIENT_ID</key>
+	<string>721538991284-08a6f71qjhd18hcdp6jog3n2kjaticgh.apps.googleusercontent.com</string>
+	<key>API_KEY</key>
+	<string>AIzaSyAxrMU2CjKHt7FLKDhfU7x35oiUg6qbqzE</string>
+	<key>GCM_SENDER_ID</key>
+	<string>721538991284</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.otonomiq.master1</string>
+	<key>PROJECT_ID</key>
+	<string>otq-01</string>
+	<key>STORAGE_BUCKET</key>
+	<string>otq-01.appspot.com</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:721538991284:ios:ebeaa1fdd0ea94ab2d03e1</string>
+	<key>DATABASE_URL</key>
+	<string>https://otq-01.firebaseio.com</string>
+</dict>
+</plist>

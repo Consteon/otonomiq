@@ -1,0 +1,32 @@
+part of '../../widget/ftz_checker.dart.dart';
+
+extension CTakeQr on FtzCheckerState {
+    Future<String?> checkerTakeQR(String label, String scrName, var component,
+        String caller, String lens) async {
+      // Show dialog box for scanning qr
+      List<String?> qrResult = [];
+      await Get.dialog(AlertDialog(
+        insetPadding: const EdgeInsets.fromLTRB(12, 30, 12, 20),
+        title: Text(
+          label,
+          textAlign: TextAlign.center,
+        ),
+        // content: OtqQr2Page(
+        content: SizedBox(
+          height: h - 20,
+          width: w - 20,
+          child: FtzMobileScanner(
+            screenName: scrName,
+            component: component,
+            caller: caller,
+            tried: 0,
+            result: qrResult,
+            buttonConfiguration: 'checker1',
+            buttonString: textArray[2],
+            lens: lens,
+          ),
+        ),
+      ));
+      return qrResult[0];
+    } // end of checkerTakeQR
+} // end of extension

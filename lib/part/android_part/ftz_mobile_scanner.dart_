@@ -1,0 +1,314 @@
+// ftz_mobile_scanner
+// HH 20220812
+import 'package:flutter/material.dart';
+import 'package:mobile_scanner/mobile_scanner.dart'; // uncomment in android
+// import 'package:barcode_scan2/barcode_scan2.dart'; // uncomment in ios
+import 'package:get/get.dart';
+import '../../api.dart';
+import '../../global.dart';
+
+class FtzMobileScanner extends StatefulWidget {
+  const FtzMobileScanner(
+      {super.key,
+      required this.screenName,
+      required this.component,
+      required this.caller,
+      required this.result,
+      this.buttonConfiguration = 'generic',
+      this.buttonString = 'Ok',
+      this.tried = 0,
+      this.lens = 'back'});
+  final dynamic screenName;
+  final dynamic component;
+  final String caller; // txt = otq_txt; loc = attendance_qr_selfie_gps_verify
+  final int tried;
+  final List<String?> result;
+  final String buttonConfiguration;
+  final String buttonString;
+  final String lens;
+  @override
+  State<FtzMobileScanner> createState() => _FtzMobileScannerState();
+}
+
+class _FtzMobileScannerState extends State<FtzMobileScanner> {
+  late MobileScannerController controller;
+  String? barcode;
+  bool isStarted = true;
+  double h = 0.0;
+  double w = 0.0;
+  bool gotQrAlready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.result.isEmpty) {
+      widget.result.add(emptyString);
+    }
+    controller = MobileScannerController(
+      torchEnabled: false, detectionSpeed: DetectionSpeed.noDuplicates,
+      // formats: [BarcodeFormat.qrCode]
+      facing: widget.lens == 'front' ? CameraFacing.front : CameraFacing.back,
+      autoStart: true,
+    );
+    // controller.stop();
+    // controller.start();
+  } // end of initState
+
+  @override
+  Widget build(BuildContext context) {
+    Widget buttons(String config) {
+      late Widget result;
+      if (config == 'generic') {
+        result = Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            IconButton(
+              // color: Theme.of(context).toggleableActiveColor,
+              color: Theme.of(context).colorScheme.error,
+              icon: isStarted
+                  ? const Icon(Icons.cancel_outlined)
+                  : const Icon(Icons.play_arrow),
+              iconSize: 32.0,
+              onPressed: () => setState(() {
+                controller.stop();
+                Get.back();
+                // Navigator.of(context).pop();
+              }),
+            ),
+            /*
+            IconButton(
+              // color: Colors.white,
+              icon: ValueListenableBuilder(
+                valueListenable: controller.torchState,
+                builder: (context, state, child) {
+                  if (state == null) {
+                    return Icon(
+                      Icons.wb_incandescent,
+                      color: Theme.of(context).colorScheme.secondary,
+                    );
+                  }
+                  switch (state as TorchState) {
+                    case TorchState.off:
+                      return Icon(
+                        Icons.wb_incandescent,
+                        color: Theme.of(context).colorScheme.secondary,
+                      );
+                    case TorchState.on:
+                      return Icon(
+                        Icons.wb_incandescent,
+                        color: Theme.of(context).colorScheme.secondary,
+                      );
+                    case TorchState.auto:
+                    // new in 5.1.1
+                      return Icon(
+                        Icons.wb_incandescent,
+                        color: Theme.of(context).colorScheme.secondary,
+                      );
+                    case TorchState.unavailable:
+                    // new in 5.1.1
+                      return Icon(
+                        Icons.wb_incandescent,
+                        color: Theme.of(context).colorScheme.secondary,
+                      );
+                  }
+                },
+              ),
+              iconSize: 32.0,
+              onPressed: () => controller.toggleTorch(),
+            ),
+            */
+          ],
+        );
+      } else if (config == 'checker1') {
+        result = Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            /*
+            IconButton(
+              // color: Colors.white,
+              icon: ValueListenableBuilder(
+                valueListenable: controller.torchState,
+                builder: (context, state, child) {
+                  if (state == null) {
+                    return Icon(
+                      Icons.wb_incandescent,
+                      color: Theme.of(context).colorScheme.secondary,
+                    );
+                  }
+                  switch (state as TorchState) {
+                    case TorchState.off:
+                      return Icon(
+                        Icons.wb_incandescent,
+                        color: Theme.of(context).colorScheme.secondary,
+                      );
+                    case TorchState.on:
+                      return Icon(
+                        Icons.wb_incandescent,
+                        color: Theme.of(context).colorScheme.secondary,
+                      );
+                    case TorchState.auto:
+                      // new in 5.1.1
+                      return Icon(
+                        Icons.wb_incandescent,
+                        color: Theme.of(context).colorScheme.secondary,
+                      );
+                    case TorchState.unavailable:
+                      // new in 5.1.1
+                      return Icon(
+                        Icons.wb_incandescent,
+                        color: Theme.of(context).colorScheme.secondary,
+                      );
+                  }
+                },
+              ),
+              iconSize: 32.0,
+              onPressed: () => controller.toggleTorch(),
+            ),
+            */
+            TextButton(
+              // color: Theme.of(context).toggleableActiveColor,
+              child: Text(
+                widget.buttonString,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  // color: Colors.white,
+                  // backgroundColor: Theme.of(context).toggleableActiveColor
+                ),
+              ),
+              onPressed: () => setState(() {
+                widget.result[0] = 'Out';
+                controller.stop();
+                Get.back();
+                // Navigator.of(context).pop();
+              }),
+            ),
+          ],
+        );
+      } else {
+        result = Container();
+      }
+      return result;
+    } // end of buttons
+    controller.stop();
+    controller.start();
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: SizedBox(
+            height: 400,
+            child: MobileScanner(
+              controller: controller,
+              fit: BoxFit.contain,
+              // startDelay: false,  // true is not fix blank screen commented in new in 5.1.1
+              // allowDuplicates: true,
+              // controller: MobileScannerController(
+              //   torchEnabled: true,
+              //   facing: CameraFacing.front,
+              // ),
+
+              onDetect: (capture) {
+                if (!gotQrAlready) {
+                  controller.stop();
+                  widget.result[0] =
+                      capture.barcodes[0].rawValue ?? emptyString;
+                  if (widget.caller == 'txt') {
+                    dataProcess(
+                            context,
+                            capture.barcodes[0].rawValue ?? emptyString,
+                            widget.screenName,
+                            widget.component)
+                        .then((value) {
+                      Get.back();
+                      // Navigator.pop(context, value);
+                      return value;
+                    });
+                  } else if (widget.caller == 'loc') {
+                    Get.back();
+                    //Navigator.pop(context, barcode.rawValue ?? emptyString);
+                  } // end if (widget.caller == 'txt')
+                  gotQrAlready = true;
+                } // end if (!gotQrAlready)
+              }, // end onDetect
+            ),
+          ),
+        ),
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: Container(
+            alignment: Alignment.bottomCenter,
+            height: 60,
+            // color: Colors.black.withOpacity(0.4),
+            child: buttons(widget.buttonConfiguration),
+          ),
+        ),
+      ],
+    );
+  } // end of build
+} // end of _FtzMobileScannerState
+
+Future<String?> takeQR(BuildContext context, String label, String scrName,
+    var component, String caller) async {
+  // Show dialog box for scanning qr
+  dynamic media = MediaQuery.maybeOf(context);
+  List<String?> qrResult = [];
+
+  await Get.dialog(AlertDialog(
+      insetPadding: const EdgeInsets.fromLTRB(12, 40, 12, 20),
+      title: Text(
+        label,
+        textAlign: TextAlign.center,
+      ),
+      // content: OtqQr2Page(
+      content: SizedBox(
+        height: media.size.height - 20,
+        width: MediaQuery.of(context).size.width - 20,
+        //          child: AlzQr2(
+        child: FtzMobileScanner(
+          screenName: scrName,
+          component: component,
+          caller: caller,
+          tried: 0,
+          result: qrResult,
+        ),
+      )));
+  //
+  // await showGeneralDialog(
+  //     context: context,
+  //     transitionBuilder: (BuildContext con, a1, a2, widget) {
+  //       return Transform.scale(
+  //         scale: a1.value,
+  //         child: Opacity(
+  //           opacity: a1.value,
+  //           child: AlertDialog(
+  //               insetPadding: const EdgeInsets.fromLTRB(12, 40, 12, 20),
+  //               title: Text(
+  //                 label,
+  //                 textAlign: TextAlign.center,
+  //               ),
+  //               // content: OtqQr2Page(
+  //               content: SizedBox(
+  //                 height: MediaQuery.of(context).size.height - 20,
+  //                 width: MediaQuery.of(context).size.width - 20,
+  //                 //          child: AlzQr2(
+  //                 child: FtzMobileScanner(
+  //                   screenName: scrName,
+  //                   component: component,
+  //                   caller: caller,
+  //                   tried: 0,
+  //                 ),
+  //               )),
+  //         ),
+  //       );
+  //     }, // end of transitionBuilder
+  //     transitionDuration: const Duration(milliseconds: 5),
+  //     barrierDismissible: true,
+  //     barrierLabel: '',
+  //     pageBuilder: (context, animation1, animation2) {
+  //       return Container();
+  //     }).then((value) {
+  //   qrResult = value.toString();
+  // }); // end of showGeneralDialog
+  return qrResult[0];
+} // end of takeQR

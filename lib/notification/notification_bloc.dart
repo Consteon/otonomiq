@@ -1,0 +1,66 @@
+import 'dart:async';
+import 'package:bloc/bloc.dart';
+import './bloc.dart';
+// inspired from https://medium.com/flutter-community/firestore-todos-with-flutter-bloc-7b2d5fadcc80
+
+class NotificationBloc extends Bloc<NotificationEvent, NotificationState> {
+  final NotificationRepository _notificationRepository;
+  StreamSubscription? _notificationSubscription;
+
+  NotificationBloc({required NotificationRepository notificationRepository})
+      : _notificationRepository = notificationRepository, super(NotificationLoading());
+
+  NotificationState get initialState => NotificationLoading();
+
+  @override
+  Stream<NotificationState> mapEventToState(
+    NotificationEvent event,
+  ) async* {
+    if(event is LoadNotification) {
+      yield* _mapLoadNotificationToState();
+    } else if(event is AddNotification) {
+      yield* _mapAddNotificationToState(event);
+    } else if(event is UpdateNotification) {
+      yield* _mapUpdateNotificationToState(event);
+    } else if(event is DeleteNotification) {
+      yield* _mapDeleteNotificationToState(event);
+    } else if(event is NotificationUpdated) {
+      yield* _mapNotificationUpdatedToState(event);
+    }
+  }
+
+  Stream<NotificationState> _mapLoadNotificationToState() async* {
+    yield NotificationLoading();
+    _notificationSubscription?.cancel();
+    _notificationSubscription = _notificationRepository.notifications().listen(
+          (notifications) {
+        add(
+          NotificationUpdated(notifications),
+        );
+      },
+    );
+  }
+
+  Stream<NotificationState> _mapAddNotificationToState(AddNotification event) async* {
+    _notificationRepository.addNewNotification(event.notifications);
+  }
+
+  Stream<NotificationState> _mapUpdateNotificationToState(UpdateNotification event) async* {
+    _notificationRepository.updateNotification(event.notifications);
+  }
+
+  Stream<NotificationState> _mapDeleteNotificationToState(DeleteNotification event) async* {
+    _notificationRepository.deleteNotification(event.notifications);
+  }
+
+  Stream<NotificationState> _mapNotificationUpdatedToState(NotificationUpdated event) async* {
+    int unReadNotification = 0;
+    for (var notif in event.notifications) {
+      unReadNotification += (notif.unRead)!;
+    }
+//    event.notifications.sort((a,b) => a.lastMessageTime.compareTo(b.lastMessageTime));
+    yield NotificationLoaded(event.notifications,unReadNotification);
+  }
+}
+
+

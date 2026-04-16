@@ -1,0 +1,487 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+// import 'package:share_plus/share_plus.dart';
+import 'package:get/get.dart';
+import '../api.dart';
+import '../bloc_timer/timer_bloc.dart';
+import '../bloc_timer/timer_event.dart';
+import '../bloc_timer/timer_state.dart';
+import '../firestore_repository/table_repository.dart';
+import '../global.dart';
+import '../global2.dart';
+import '../login/bloc_authentication/authentication_bloc.dart';
+import '../login/bloc_authentication/authentication_event.dart';
+import '../model/connection_data.dart';
+import '../model/otq_state.dart';
+import '../redux/screen_transaction.dart';
+import 'do_chain.dart';
+
+// display a row of buttons
+
+class FtzRowOfButton extends StatefulWidget {
+  const FtzRowOfButton({
+    required Key key,
+    required this.component,
+    required this.scrName,
+    required this.lPad,
+    required this.tPad,
+    required this.rPad,
+    required this.bPad,
+    this.dialog,
+  }) : super(key: key);
+  final dynamic component;
+  final String scrName;
+  final double lPad;
+  final double tPad;
+  final double rPad;
+  final double bPad;
+  final bool? dialog;
+
+  @override
+  State<FtzRowOfButton> createState() => _FtzRowOfButtonState();
+}
+
+class _FtzRowOfButtonState extends State<FtzRowOfButton>
+    with AutomaticKeepAliveClientMixin<FtzRowOfButton> {
+  dynamic allOtqData;
+
+  @override
+  void initState() {
+    super.initState();
+    // This ensures their controllers are initialized with the correct isEnabled state.
+    if (canInitializePage(widget.scrName)) {
+      final children = widget.component['children'] as List<dynamic>? ?? [];
+      for (final buttonData in children) {
+        final int? position = buttonData['position'] as int?;
+        if (position != null) {
+          txfControllerCheck(widget.scrName, position);
+          final bool isEnabled =
+              (buttonData['isEnabled']?.toString().toLowerCase() ?? 'true') !=
+                  'false';
+          txfController[widget.scrName]![position]!.isEnabled = isEnabled;
+        }
+      }
+    }
+  }
+
+  List<Widget> buildButtonList(List<dynamic> children, String scrName,
+      {bool? dialog}) {
+    List<Widget> bannerComponent = [];
+    var state = transactionStore.state.screenTx;
+    bool hasChain = false;
+
+    void saveData(
+        int timeStamp, String scrName, dynamic component, String locString,
+        {bool send = true}) {
+      TimerBloc timerBloc = transactionStore.state.screenTx['#TIMER_BLOC'];
+      String route = component['route'] ?? scrName;
+      rootThis.setState(() {
+        rootThis.wait = true;
+      });
+      timerBloc.add(
+          const Start(duration: 5)); //  get timerBloc from transactionStore
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#NEXTROUTE': route,
+        '#TIMER_CONTEXT': context,
+        '#TIMER_DURATION': component['delay'] ?? 5,
+      }))); // set state #NEXTROUTE route that will be displayed after waitScreen
+      saveSend(timeStamp, scrName, component, locString, defaultVid(),
+          send: send);
+    } // end of saveData
+
+    Future doSaveProcedure(int i, {bool send = true}) async {
+      await ConnectionData().getConnection(false, false);
+      try {
+        late int timeStamp;
+        late String locString;
+        int gpsPosition = 0;
+        if (children[i]['gpsPosition'] is String) {
+          gpsPosition = int.parse(children[i]['gpsPosition']);
+        } else {
+          gpsPosition = children[i]['gpsPosition'] ?? 0; // 0 = no gps
+        }
+        if (gpsPosition > 0 ||
+            children[i]['action'].toString().trim().toLowerCase() ==
+                'resetvid') {
+          allOtqData = await OtqState().setAllDataAsync();
+          timeStamp = allOtqData.nowTime.millisecondsSinceEpoch;
+          locString = getLocationString('', '', '', allOtqData);
+        } else {
+          timeStamp = await getRealTime();
+          locString = '${separator[1]}$timeStamp';
+          locString +=
+              '${separator[1] * 3}$invalidLocation${separator[1]}$invalidLocation${separator[1] * 10}';
+        }
+        if (children[i]['type'] == null) {
+          children[i]['type'] = 'rbt';
+        }
+        saveData(timeStamp, scrName, children[i], locString, send: send);
+        if (routeExist(children[i]['route'])) {
+          if (children[i]['route'] == scrName) {
+            String pageToGo = children[i]['route'] ?? scrName;
+            gotoRoute(pageToGo);
+          } else {
+            String pageToGo = children[i]['route'] ?? scrName;
+            routeStack.push(pageToGo);
+            gotoRoute(pageToGo);
+          }
+        } // end if routeExist
+      } catch (e) {
+        setDataOK('2');
+        errorReport(e);
+      } // end of try
+    } // end of doSaveProcedure
+
+    for (var i = 0; i < children.length; i++) {
+      final buttonData = children[i];
+      final int? position = buttonData['position'] as int?;
+
+      // This function builds the actual button widget. It's separated so it can be called
+      // either directly (for static buttons) or inside a GetBuilder (for dynamic buttons).
+      Widget buildActualButton(bool isEnabled) {
+        hasChain = buttonData['chain'] != null &&
+            buttonData['chain'].toString().trim().isNotEmpty;
+        try {
+          final buttonColorStr = buttonData['buttonColor'] as String?;
+          final textColorStr = buttonData['textColor'] as String?;
+
+          final buttonColor =
+              buttonColorStr != null && buttonColorStr.isNotEmpty
+                  ? stringToColor(buttonColorStr)
+                  : null;
+          final textColor = textColorStr != null && textColorStr.isNotEmpty
+              ? stringToColor(textColorStr)
+              : null;
+
+          final width = buttonData['width'];
+          final height = buttonData['height'];
+
+          double minWidth = (width is num) ? width.toDouble() : 0;
+          double minHeight = (height is num) ? height.toDouble() : 48;
+
+          final ButtonStyle style = ElevatedButton.styleFrom(
+            backgroundColor: buttonColor,
+            foregroundColor: textColor,
+            disabledBackgroundColor: Colors.grey.shade300,
+            disabledForegroundColor: Colors.grey.shade500,
+            minimumSize: Size(minWidth, minHeight),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8.0),
+            ),
+          );
+
+          return Theme(
+            data: transactionStore.state.screenTx['#THEME'],
+            child: ElevatedButton(
+              style: style,
+              child: Text(
+                buttonData['text'] ?? "",
+              ),
+              onPressed: isEnabled
+                  ? () async {
+                      final String runCommand =
+                          (autheniumDecode(buttonData['run'] as String?) ?? '')
+                              .trim()
+                              .toLowerCase();
+                      if (runCommand.isNotEmpty) {
+                        final commands = runCommand.split('◆');
+                        final List<String> widgetsToUpdate = [];
+
+                        for (final cmd in commands) {
+                          final parts = cmd.split(':');
+                          if (parts.length == 2) {
+                            final int? targetPosition =
+                                int.tryParse(parts[0].trim());
+                            final String action = parts[1].trim().toLowerCase();
+
+                            if (targetPosition != null) {
+                              txfControllerCheck(scrName, targetPosition);
+                              final controller =
+                                  txfController[scrName]?[targetPosition];
+                              if (controller == null) continue;
+                              if (action == 'get_radius') {
+                                allOtqData ??=
+                                    await OtqState().setAllDataAsync();
+                                String content = '${allOtqData.accuracy} m';
+                                controller.finalData = action;
+                                controller.controller.text = content;
+                                controller.finalData = content;
+                                widgetsToUpdate.add('$scrName-$targetPosition');
+                              } else if (action == 'get_address') {
+                                allOtqData ??=
+                                    await OtqState().setAllDataAsync();
+                                String content =
+                                    getAddressFromOtqState(allOtqData);
+                                controller.finalData = action;
+                                controller.controller.text = content;
+                                controller.finalData = content;
+                                widgetsToUpdate.add('$scrName-$targetPosition');
+                              } else if (action == 'get_gps') {
+                                allOtqData ??=
+                                    await OtqState().setAllDataAsync();
+                                String content =
+                                    '${allOtqData.latitude},${allOtqData.longitude}';
+                                controller.finalData = action;
+                                controller.controller.text = content;
+                                controller.finalData = content;
+                                widgetsToUpdate.add('$scrName-$targetPosition');
+                              } else if (action == 'enable') {
+                                controller.isEnabled = true;
+                                widgetsToUpdate.add('$scrName-$targetPosition');
+                                debugPrint(
+                                    "&&&&&&&&&&&& set $scrName-$targetPosition to TRUE");
+                              } else if (action == 'disable') {
+                                controller.isEnabled = false;
+                                widgetsToUpdate.add('$scrName-$targetPosition');
+                                debugPrint(
+                                    "&&&&&&&&&&&& set $scrName-$targetPosition to FALSE");
+                              } else if (action == 'toggle') {
+                                controller.isEnabled = !controller.isEnabled;
+                                widgetsToUpdate.add('$scrName-$targetPosition');
+                              } else if (action == 'generate_number') {
+                                // Find the specific 'generate_number' action in execute1
+                                final execute1Actions = controller.execute1
+                                        ?.where((item) =>
+                                            item != null &&
+                                            item.length >= 2 &&
+                                            item[1].toString().toLowerCase() ==
+                                                'generate_number')
+                                        .toList() ??
+                                    [];
+
+                                for (final actionItem in execute1Actions) {
+                                  if (actionItem!.length >= 3) {
+                                    final String template =
+                                        actionItem[2] as String;
+                                    final generatedString =
+                                        await generateAutoNumber(
+                                            template, scrName);
+                                    addToTxfController(targetPosition, scrName,
+                                        generatedString);
+                                    widgetsToUpdate
+                                        .add('$scrName-$targetPosition');
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                        // Update all affected widgets at once
+                        if (widgetsToUpdate.isNotEmpty) {
+                          Get.find<WidgetUpdateController>()
+                              .update(widgetsToUpdate);
+                        }
+                      } // end of runCommand
+
+                      // await executeWidgets(scrName,
+                      //     (buttonData['exe'] ?? emptyString).toLowerCase());
+
+                      switch ((buttonData['action'] ?? emptyString)
+                          .toString()
+                          .trim()
+                          .toLowerCase()) {
+                        case 'clear':
+                          clearData(scrName);
+                          // historyClear(); // clear history
+                          // Get.defaultDialog(
+                          //   title: "History",
+                          //   content: const Text("History cleared."),
+                          // );
+                          break;
+
+                        case 'clearhistory':
+                          historyClear(); // clear history
+                          Get.defaultDialog(
+                            title: "History",
+                            content: const Text("History cleared."),
+                          );
+                          break;
+
+                        case 'sendhistory':
+                          historySync(
+                              'rbt sendhistory', true); // force send history
+                          Get.defaultDialog(
+                            title: "History",
+                            content: const Text("History synced."),
+                          );
+                          break;
+
+                        case 'archivehistory':
+                          archiveHistory(); // archive history to firestore proxy h2
+                          Get.defaultDialog(
+                            title: "History",
+                            content: const Text("History archived."),
+                          );
+                          break;
+
+                        case 'share':
+                          break;
+
+                        case 'savesend':
+                          {
+                            if (await dataOk(context)) {
+                              actionLock('savesend case ftz_row_of_button');
+                              await doSaveProcedure(i);
+                            } // end if dataOk
+                          } // end of case saveSend
+                          break;
+
+                        case 'resetvid':
+                          {
+                            int resetStatus = -99;
+                            if (await dataOk(context)) {
+                              if (buttonData['reference'] != null &&
+                                  buttonData['reference'] > 0) {
+                                String vid = emptyString;
+                                String invitation = emptyString;
+                                try {
+                                  vid = txfController[widget.scrName]![
+                                          buttonData['reference']]!
+                                      .finalData;
+                                } catch (e) {
+                                  vid = emptyString;
+                                }
+                                if (vid == emptyString) {
+                                  resetStatus = -1;
+                                } else {
+                                  invitation = '';
+                                  try {
+                                    invitation = txfController[widget.scrName]![
+                                            buttonData['invitationReference']]!
+                                        .finalData;
+                                  } catch (e) {
+                                    invitation = '';
+                                  }
+                                  String tc = '';
+                                  try {
+                                    tc = stringCleanUp(txfController[
+                                                    widget.scrName]![
+                                                buttonData[
+                                                    'tableContentReference']]!
+                                            .finalData) ??
+                                        '';
+                                  } catch (e) {
+                                    tc = '';
+                                  }
+                                  resetStatus = await resetVid([
+                                    [vid, invitation, tc]
+                                  ]);
+                                  if (resetStatus > 0) {
+                                    actionLock(
+                                        'resetvid case ftz_row_of_button');
+                                    await doSaveProcedure(i);
+                                  }
+                                }
+                              } else {
+                                resetStatus = -3;
+                              }
+                            }
+                          }
+                          break;
+
+                        case 'reset':
+                          {
+                            if (await dataOk(context)) {
+                              actionLock('reset case ftz_row_of_button');
+                              resetVidUid(state['#FIREBASE_USER'].uid);
+                            }
+                          }
+                          break;
+
+                        case 'signout':
+                          {
+                            await ConnectionData().getConnection(false, false);
+                            if (await dataOk(context)) {
+                              actionLock('signout case ftz_row_of_button');
+                              BlocProvider.of<AuthenticationBloc>(context)
+                                  .add(LoggedOut());
+                              signOut();
+                            }
+                          }
+                          break;
+
+                        default:
+                          {
+                            if (routeExist(buttonData['route'])) {
+                              String pageToGo = buttonData['route'] ?? scrName;
+                              routeStack.push(pageToGo);
+                              gotoRoute(pageToGo);
+                            } // end if routeExist
+                          }
+                      } // end switch
+                      if (hasChain) {
+                        await doChain(context, scrName, buttonData['chain']);
+                      }
+                      if (dialog ?? false) {
+                        Get.back();
+                      }
+                    }
+                  : null, // on pressed
+            ),
+          );
+        } catch (er) {
+          return ElevatedButton(
+            child: Text("--Button-- $er"), // error in button
+            onPressed: () {},
+          );
+        }
+      }
+
+      Widget buttonToShow;
+      if (position != null) {
+        // This is a state-managed button, wrap it in a GetBuilder.
+        buttonToShow = GetBuilder<WidgetUpdateController>(
+          id: '${widget.scrName}-$position',
+          builder: (_) {
+            txfControllerCheck(widget.scrName, position);
+            final controller = txfController[widget.scrName]![position]!;
+            return buildActualButton(controller.isEnabled);
+          },
+        );
+      } else {
+        // This is a static button, build it directly.
+        final bool isEnabled =
+            (buttonData['isEnabled']?.toString().toLowerCase() ?? 'true') ==
+                'true';
+        buttonToShow = buildActualButton(isEnabled);
+      }
+
+      if (buttonData['width'] == 'full') {
+        bannerComponent.add(Expanded(child: buttonToShow));
+      } else {
+        bannerComponent.add(buttonToShow);
+      }
+    } // end for loop
+    return bannerComponent;
+  } // end of buildButtonList
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+
+    return Container(
+      margin: EdgeInsets.only(
+          top: (widget.component['beforeSpacing'] ?? 0.0).toDouble(),
+          bottom: (widget.component['afterSpacing'] ?? 0.0).toDouble()),
+      padding: EdgeInsets.fromLTRB(
+          widget.lPad + (widget.component['leftPadding'] ?? 0.0).toDouble(),
+          widget.tPad,
+          widget.rPad + (widget.component['rightPadding'] ?? 0.0).toDouble(),
+          widget.bPad),
+      child: BlocBuilder<TimerBloc, TimerState>(
+        builder: (context, state) => Row(
+          mainAxisAlignment: mainAlignmentConst(widget.component['alignment']),
+          children: buildButtonList(
+            widget.component['children'],
+            widget.scrName,
+            dialog: widget.dialog,
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  // TODO: implement wantKeepAlive
+  bool get wantKeepAlive => true;
+}

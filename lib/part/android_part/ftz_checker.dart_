@@ -1,0 +1,959 @@
+import 'dart:async';
+import 'dart:math';
+import 'package:get/get.dart';
+import '../../widget/photo_camera.dart';
+import '../bloc_timer/timer_bloc.dart';
+import '../bloc_timer/timer_event.dart';
+import 'package:intl/intl.dart';
+import '../../crypto/auth_crypto.dart';
+import 'package:camera/camera.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/material.dart';
+import '../../global.dart';
+import '../../api.dart';
+import '../../redux/screen_transaction.dart';
+import '../../widget/ftz_mobile_scanner.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
+import '../firestore_repository/table_repository.dart';
+// import 'package:barcode_scan2/barcode_scan2.dart';
+// part '../part/build_part/ftz_checker_part.dart';
+
+/*
+  221111 [HH]
+  attendance widget. Display widget for qr scan and/or photo/selfie. Get gps
+    location, internet status, time from gps / ntp server
+  component:
+    type : location
+    opMode :
+      qr
+      qr-photo
+      photo-with-qr
+      face-recognition
+    url : image url
+    width : displayed image (from url) width (height will be calculated)
+    text : display/dialog text, diamond separated
+    route : next route
+    flag : flag to be written in output
+    imHeight : stored acquired image height (pixels)
+    imWidth : stored acquired image width (pixels)
+    folder : folder in Google Cloud storage to store acquired image
+    filename : acquired image name (without .png)
+    displayMode : single (default) | multi
+    lqr : default 0 = checker no need to scan lqr | 1 =  need to scan lqr
+    duration : default 5 minutes, duration of lqr. after this, checker need to scan lqr again
+
+  primitives:
+    takePicture(lens)
+    takeQr
+    getLocationData
+    lqrVerify
+    attendanceDialog(type)
+    saveData : save aquired data to firebase => proxy event
+    getVidList : get eligible checkee vid put in vidList
+    checkVid
+*/
+class Controller extends GetxController {
+  var count = 10.obs;
+  var message = ''.obs;
+  decrease() => count--;
+}
+
+class FtzChecker extends StatefulWidget {
+  const FtzChecker({
+    required Key key,
+    required this.component,
+    required this.scrName,
+    required this.single,
+  }) : super(key: key);
+  final String scrName;
+  final dynamic component;
+  final bool single;
+
+  @override
+  FtzCheckerState createState() => FtzCheckerState();
+}
+
+class FtzCheckerState extends State<FtzChecker> {
+  bool change = true;
+  final controller = TextEditingController(text: '-');
+  bool tapped = false;
+  Position? position;
+  List<Placemark> placeMark = [];
+  int? lastPositionTime;
+  int timeDiff = 0;
+  List<String> checkerHistory = [];
+  double h = 0.0;
+  double w = 0.0;
+  List<dynamic> textArray = [];
+  int lastSave = 0;
+  int saveDelay = 10000;
+
+  @override
+  void initState() {
+    super.initState();
+    // getCurrentPosition(desiredAccuracy: LocationAccuracy.high),
+    if (widget.component['table'] != null) {
+      subscribeToTable(widget.component['table']);
+      // todo unsubscribe at dispose if desirable (will be need to load again)
+    } // end if (widget.component['table'] != null)
+    timeDiff = transactionStore.state.screenTx['#REF_TIME_START'] -
+        transactionStore.state.screenTx['#DEVICE_TIME_START'];
+    getLocation().then((pos) {
+      lastPositionTime = DateTime.now().millisecondsSinceEpoch;
+      position = pos;
+      placemarkFromCoordinates(position!.latitude, position!.longitude)
+          .then((pm) {
+        placeMark = pm;
+      }); // end of placemarkFromCoordinates
+    });
+    textArray = diamondTextToList(widget.component['text']);
+  } // end of initState
+
+  Future<String?> checkerTakeQR(String label, String scrName, var component,
+      String caller, String lens) async {
+    // Show dialog box for scanning qr
+    List<String?> qrResult = [];
+    await Get.dialog(AlertDialog(
+      insetPadding: const EdgeInsets.fromLTRB(12, 30, 12, 20),
+      title: Text(
+        label,
+        textAlign: TextAlign.center,
+      ),
+      // content: OtqQr2Page(
+      content: SizedBox(
+        height: h - 20,
+        width: w - 20,
+        child: FtzMobileScanner(
+          screenName: scrName,
+          component: component,
+          caller: caller,
+          tried: 0,
+          result: qrResult,
+          buttonConfiguration: 'checker1',
+          buttonString: textArray[2],
+          lens: lens,
+        ),
+      ),
+    ));
+    return qrResult[0];
+  } // end of checkerTakeQR
+
+  @override
+  Widget build(BuildContext context) {
+    String selfieUrl = '';
+
+    Future<dynamic> checkerSuccessDialog(
+        {String title = 'Success',
+        String message = '',
+        String okString = 'Ok'}) async {
+      vibrate(duration: 50);
+      await Get.dialog(AlertDialog(
+        // title: Text(title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message),
+            Container(
+              height: 12,
+            ),
+            Text(placeMark.isNotEmpty
+                ? "${placeMark[0].subThoroughfare} ${placeMark[0].thoroughfare}, ${placeMark[0].administrativeArea} ${placeMark[0].postalCode}"
+                : ""),
+            Container(
+              height: 12,
+            ),
+            Text(
+                "$plusMinus ${position == null ? "-" : position!.accuracy.round()}m"),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            child: Text(okString),
+            onPressed: () {
+              Get.back();
+              //Navigator.of(context).pop();
+            },
+          ),
+        ],
+      ));
+      return 1;
+    } // end of checkerSuccessDialog
+
+    Future<String?> checkerDialog(
+        {String title = '',
+        String message = '',
+        String okString = 'Ok'}) async {
+      return Get.dialog(AlertDialog(
+        // dialog 3
+        // title: Text(title),
+        content: Container(
+          alignment: const Alignment(0.0, 0.0),
+          height: dialogHeight,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(message),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            child: Text(okString),
+            onPressed: () {
+              routeStack.pop();
+              Get.back();
+            },
+          ),
+        ],
+      ));
+    } // end of checkerDialog
+
+    Future<String?> checkerSendDialog(
+        {String title = '',
+        String message1 = '',
+        String message2 = '',
+        int counter = 10,
+        String okString = 'Ok'}) async {
+      var getController = Get.put(Controller());
+      //getController.decrease();
+      getController.count.value = counter;
+      getController.message.value = counter <= 0 ? message2 : message1;
+      Stream timer = Stream.periodic(const Duration(seconds: 1), (_) {
+        int current = DateTime.now().millisecondsSinceEpoch;
+        return current;
+      });
+      StreamSubscription timerSubscription = timer.listen((data) {
+        if (getController.count.value == 0) {
+          getController.message.value = message2;
+        } else if (getController.count.value > 0) {
+          getController.decrease();
+        } // end if (c-- <=0)
+      }); // end timer subscription
+      return Get.dialog(AlertDialog(
+        // dialog 3
+        // title: Text(title),
+        content: Container(
+          alignment: const Alignment(0.0, 0.0),
+          height: dialogHeight,
+          child: Obx(
+            () => Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(child: Text("${getController.message}")),
+                Container(),
+                Center(
+                    child: Text(
+                  "${(getController.count.value > 0) ? getController.count : ''}",
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16),
+                )),
+              ],
+            ),
+          ),
+        ),
+        actions: <Widget>[
+          Obx(
+            () => getController.count.value > 0
+                ? Container()
+                : TextButton(
+                    child: Text(okString),
+                    onPressed: () {
+                      //getController.decrease();
+                      setDataOK('2'); // display green
+                      timerSubscription.cancel();
+                      routeStack.pop();
+                      Get.back();
+                    },
+                  ),
+          )
+        ],
+      ));
+    } // end of checkerSendDialog
+
+    List? checkerVerifyVid(int vid, String tableCode) {
+      // List? result = findData(tableCode, '79713766773060');
+      List? result = findData(tableCode, vid.toString());
+      if (result != null) {
+        result[0] = int.parse(result[0]);
+      }
+      return result;
+    } // end of checkerVerifyVid
+
+    Future<String> checkerTakePicture(String lens, String? title) async {
+      // get selfie, save to firebase, then return url to selfie image
+      List<CameraDescription> cameras =
+          transactionStore.state.screenTx['#CAMS'];
+      int imgSize = (widget.component['imgWidth'] ?? 540) >
+              (widget.component['imgHeight'] ?? 540)
+          ? widget.component['imgWidth'] ?? 540
+          : widget.component['imgHeight'] ?? 540;
+      String folder = widget.component['folder'] ?? 'default';
+      String fileName = widget.component['filename'] ?? UniqueKey().toString();
+      String label = title ?? 'Camera';
+      int quality = widget.component['quality'] ?? 80;
+      List<String> pickedFileUrl = [emptyString];
+
+      try {
+        await Get.dialog(
+          AlertDialog(
+            insetPadding: const EdgeInsets.fromLTRB(12, 20, 12, 20),
+            title: Text(
+              label,
+              textAlign: TextAlign.center,
+            ),
+            content: PhotoCamera(
+              //context: context,
+              cameras: cameras,
+              label: label,
+              direction: getCameraIndex(cameras, lens),
+              maxSize: imgSize,
+              quality: quality,
+              height: h,
+              width: w,
+              imageUrl: pickedFileUrl,
+            ),
+          ),
+        ); // end of Get.dialog
+      } catch (ed) {
+        devPrint(ed);
+      } // end try
+      // dynamic state = transactionStore.state.screenTx;
+      // dynamic storageBucket = state['#STORAGE_BUCKET'];
+      // Reference storageRef = storageBucket.ref().child("$folder/$fileName.jpg");
+      // UploadTask uploadTask2 = storageRef.putFile(File(pickedFileUrl[0]));
+      // TaskSnapshot taskSnapshot = await uploadTask2;
+      // selfieUrl = await taskSnapshot.ref.getDownloadURL();
+      //prepareImageAsLocal
+      // String selfieUrl = await saveImageToCloud(
+      //     imagePath: pickedFileUrl[0], folder: folder, fileName: fileName);
+      String selfieUrl = await prepareImageAsLocal(
+          imagePath: pickedFileUrl[0], folder: folder, fileName: fileName);
+      return selfieUrl;
+    } // end of checkerTakePicture
+
+    void checkerSaveData(
+        String scrName, int timeStamp, String eventContent) async {
+      TimerBloc timerBloc = transactionStore.state.screenTx['#TIMER_BLOC'];
+      //int saveDelay = 10000; // delay between save in milliseconds
+      int nowTimeSave = DateTime.now().millisecondsSinceEpoch;
+      if (lastSave > 0) {
+        devPrint('delay from last save ${nowTimeSave - lastSave}');
+        if ((nowTimeSave - lastSave) < saveDelay) {
+          await Future.delayed(
+              Duration(milliseconds: saveDelay - (nowTimeSave - lastSave)));
+        } // end if ((nowTimeSave - lastSave) < 10000)
+      } // end if (lastSave>0)
+      //lastSave = DateTime.now().millisecondsSinceEpoch;
+      var route = widget.component['route'] ?? widget.scrName;
+      rootThis.setState(() {
+        rootThis.wait = true;
+      });
+      timerBloc.add(
+          const Start(duration: 5)); //  get timerBloc from transactionStore
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#NEXTROUTE': route,
+        '#TIMER_CONTEXT': context,
+        '#TIMER_DURATION': widget.component['delay'] ?? 5,
+      }))); // set state #NEXTROUTE route that will be displayed after waitScreen
+      //saveSend(scrName, widget.component);
+      List<dynamic> row = [timeStamp, scrName, eventContent];
+      appendToSheet(
+          row,
+          defaultVid(),
+          widget.component['flag'] ?? '',
+          widget.component['desc'] ?? '',
+          widget.component['type'] ?? '',
+          widget.component['addToTable'] ?? '');
+    } // end of checkerSaveData
+
+    Future<String> checkerDataProcess(List checkies, String originalScrName,
+        List<dynamic> tArray, int timeStamp, String lqr) async {
+      setDataOK('2'); // checker is stateless event for current user
+      String resultOk = empty;
+      String mock = 'Unknown';
+      dynamic state = transactionStore.state.screenTx;
+      String checkerVid = '';
+      if (checkies.isNotEmpty) {
+        try {
+          checkerVid = state['#VID'].toString().trim();
+          if (position != null) {
+            mock = position!.isMocked ? 'Mocked location' : 'True location';
+            widget.component['route'] =
+                widget.component['route'] ?? home; //= default route = Home
+            String eventContent = '0';
+            eventContent += '${separator[7]}$timeStamp${separator[1]}';
+            eventContent += '$originalScrName${separator[1]}';
+            eventContent +=
+                '${widget.component['flag'] ?? 'location'}${separator[1]}';
+            eventContent +=
+                '${widget.component['category'] ?? 'checkpoint'}${separator[1]}';
+            eventContent += '$lqr${separator[1]}';
+            eventContent += '${position!.latitude.toString()}${separator[1]}';
+            eventContent += '${position!.longitude.toString()}${separator[1]}';
+            eventContent +=
+                '${placeMark.isNotEmpty ? placeMark[0].isoCountryCode! : invalidCountry}${separator[1]}';
+            eventContent +=
+                '${placeMark.isNotEmpty ? placeMark[0].postalCode! : ""}${separator[1]}';
+            eventContent +=
+                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].administrativeArea! : "")}${separator[1]}';
+            eventContent +=
+                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].subAdministrativeArea! : "")}${separator[1]}';
+            eventContent +=
+                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].locality! : "")}${separator[1]}';
+            eventContent +=
+                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].subLocality! : "")}${separator[1]}';
+            eventContent +=
+                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].thoroughfare! : "")}${separator[1]}';
+            eventContent +=
+                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].subThoroughfare! : "")}${separator[1]}';
+            eventContent += mock;
+            for (int i = 0; i < checkies.length; i++) {
+              eventContent += '${separator[7]}${checkies[i][2]}${separator[5]}';
+              eventContent += '${checkies[i][0] ?? ''}${separator[5]}';
+              eventContent += checkies[i][1] ?? '';
+              int d = 1;
+            } // end for checkies
+            eventContent +=
+                '${separator[0]}${widget.component['flag'] ?? 'blank-flag'}';
+            checkerSaveData(originalScrName, timeStamp,
+                eventContent); //= send record to FromLink
+          } else {
+            //checkerDialog(message: tArray[5], okString: tArray[7]);
+            await showDialog(
+                context: context,
+                builder: (BuildContext context) {
+                  return AlertDialog(
+                    // dialog 3
+                    title: Text(tArray[11] ?? 'Fail'),
+                    content: Container(
+                      alignment: const Alignment(0.0, 0.0),
+                      height: dialogHeight,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(textList['GpsReadError']),
+                        ],
+                      ),
+                    ),
+                    actions: <Widget>[
+                      TextButton(
+                        child: Text(tArray[7] ?? "Ok"),
+                        onPressed: () {
+                          routeStack.pop();
+                          Navigator.of(context).pop();
+                        },
+                      ),
+                    ],
+                  );
+                });
+            resultOk = errorString;
+          } // end if position
+        } catch (e) {
+          // TODO display dialog fail, and play wrong beep
+          errorReport(e);
+          setDataOK(
+              '1'); // reload pages and display green anyway. So the app will not lock up
+
+          await showDialog(
+              context: context,
+              builder: (BuildContext context) {
+                return AlertDialog(
+                  // dialog 3
+                  title: Text(textList["Fail"]), // Scan lagi
+                  // title: const Text("Error test1"), // Scan lagi
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(textList["Retry"]),
+                      Text("System: (${e.toString()})"),
+                      const Text("Position: otq_qr1(1)"),
+                      Text(textList["ScreenShot"]),
+                    ],
+                  ),
+                  actions: <Widget>[
+                    TextButton(
+                      child: Text(textList["OK"]),
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                      },
+                    ),
+                  ],
+                );
+              });
+          resultOk = errorString;
+        }
+      } //end if (checkies.length > 0)
+      int nowTime = DateTime.now().millisecondsSinceEpoch;
+      if ((nowTime - (lastPositionTime ?? 0)) > 600000) {
+        // more than 10 minutes
+        getLocation().then((res) {
+          position = res;
+          lastPositionTime = nowTime;
+          placemarkFromCoordinates(position!.latitude, position!.longitude)
+              .then((pm) {
+            placeMark = pm;
+          }); // end of placemarkFromCoordinates
+        }); // end of getLocation
+      } // end if  > 600000
+      return resultOk;
+    } // end of qrDataProcess
+
+    Future<void> checkerAcquireData(String variant, List tArray) async {
+      int lastSend = DateTime.now().millisecondsSinceEpoch;
+      List checkies = [];
+      String lqr = '';
+      bool getData = false;
+      String actionType = variant.toString().trim().toLowerCase();
+      late List<String> newArray;
+      Stream timer = Stream.periodic(const Duration(seconds: 15), (_) {
+        int current = DateTime.now().millisecondsSinceEpoch;
+        return current;
+      });
+      StreamSubscription timerSubscription = timer.listen((data) {
+        int dif = ((data - lastSend) / 1000).round();
+        if (widget.component['interval'] != null &&
+            ((data - lastSend) / 1000).round() >=
+                widget.component['interval']) {
+          if (checkies.isNotEmpty) {
+            List processList = checkies;
+            checkies = [];
+            lastSend = data;
+            checkerDataProcess(
+                processList,
+                widget.scrName,
+                newArray,
+                DateTime.fromMillisecondsSinceEpoch(
+                        DateTime.now().millisecondsSinceEpoch + timeDiff)
+                    .millisecondsSinceEpoch,
+                lqr);
+            int delayCounter = defaultFinalSaveCounter;
+            if (lastSave > 0) {
+              delayCounter = max(
+                  0,
+                  (widget.component['delay'] ?? 10) -
+                      (((DateTime.now().millisecondsSinceEpoch - lastSave) /
+                              1000)
+                          .round()) +
+                      2);
+            } // end if (lastSave > 0)
+            checkerSendDialog(
+                message1: newArray[15],
+                message2: newArray[16],
+                counter: delayCounter,
+                okString: newArray[1]);
+            lastSave = DateTime.now().millisecondsSinceEpoch;
+          } // end if (widget.component['interval']!= null &&
+        } // end if (checkies.isNotEmpty)
+      }); // end timer subscription
+
+      try {
+        // for (var i = 0; i < 10 && locSensor == null; i++) {
+        //   sleep(Duration(milliseconds: 100 + i * 20));
+        // }
+        bool cameraCancel = false;
+        late DateTime qrTime;
+        late String qrDateStr, qrTimeStr;
+        List<dynamic> formatArray = diamondTextToList(
+            ftzDateTimeFormatConverter(
+                (widget.component['dateTimeFormat'] ?? 'd-MMM-yyyy◆H:mm')
+                    .toString()));
+        dynamic dateFormatter = DateFormat((formatArray[0]) ?? 'd-MMM-yyyy');
+        dynamic timeFormatter = DateFormat((formatArray[1]) ?? 'H:mm');
+        bool continueLoop = true,
+            takeQr = false,
+            takePicture = false,
+            takeLqr = false,
+            single = true;
+        String lens = 'back';
+
+        if (actionType.contains('multiple')) {
+          single = false;
+        } // end if (actionType.contains('multiple'))
+        if (actionType.contains('uqr')) {
+          takeQr = true;
+        } // end if (actionType.contains('multiple'))
+        if (actionType.contains('photo')) {
+          takePicture = true;
+        } // end if (actionType.contains('multiple'))
+        if (actionType.contains('front')) {
+          lens = 'front';
+        } // end if (actionType.contains('multiple'))
+        int locationStatus =
+            0; // 1=good; 2=wrong lqr 3=lqr not registered; ; 4=wrong coordinate
+        if (actionType.contains('lqr')) {
+          dynamic p;
+          dynamic q;
+          takeLqr = true;
+          newArray = List<String>.from(tArray);
+          await Future.wait([
+            omLqrReaderP(),
+            osLqrMakerQ(),
+          ]).then((res) {
+            p = res[0];
+            q = res[1];
+          });
+          int d = 0;
+          num finalTolerance = 0;
+          String lqrText = await checkerTakeQR(newArray[4] ?? 'LQR',
+                  widget.scrName, widget.component, 'loc', lens) ??
+              'Error';
+          if (lqrText == empty) {
+            locationStatus = 99; // exit
+            continueLoop = false;
+          } else {
+            lqr = await lqrVerify(p, q, lqrText);
+            if (lqr == errorString) {
+              locationStatus = 2;
+              continueLoop = false;
+            } else {
+              String resultOk =
+                  (transactionStore.state.screenTx['#LQR_LIST'][lqr]) != null
+                      ? transactionStore.state.screenTx['#LQR_LIST'][lqr][0]
+                      : empty;
+              if (resultOk == empty || resultOk == errorString) {
+                locationStatus = 3;
+                continueLoop = false;
+              } else {
+                int tol = (transactionStore.state.screenTx['#LQR_LIST'][lqr][3])
+                    .round();
+                finalTolerance = (position!.accuracy).round() + tol;
+                //throw 'Error Test';
+                d = (distanceM(
+                        position!.latitude,
+                        position!.longitude,
+                        transactionStore.state.screenTx['#LQR_LIST'][lqr][1],
+                        transactionStore.state.screenTx['#LQR_LIST'][lqr][2]))
+                    .round();
+                if (d > finalTolerance) {
+                  locationStatus = 4;
+                  continueLoop = false;
+                } else {
+                  locationStatus = 1;
+                  for (int t = 0; t < newArray.length; t++) {
+                    newArray[t] = newArray[t].replaceAll('<L>', resultOk);
+                  } // end for newArray
+                } // end if (d > finalTolerance)
+              } // end if (resultOk != empty && resultOk != errorString)
+            } // end if (finalQrText != empty && finalQrText != errorString)
+          } // end if (lqrText == empty)
+          if (continueLoop) {
+            await checkerDialog(message: newArray[5], okString: newArray[1]);
+          } else {
+            lqr = '';
+            int msgIndex = 6; // wrong qr code
+            // String displayedMsg = newArray[msgIndex];
+            if (locationStatus == 4) {
+              msgIndex = 8; // wrong gps coordinate
+              // displayedMsg = newArray[msgIndex] +
+              //     ' tolerance=$finalTolerance distance = $d'
+            } else if (locationStatus == 3) {
+              msgIndex = 7; // not listed in op1
+              // displayedMsg = newArray[msgIndex];
+            } // end if (locationStatus == 4)
+            if (locationStatus < 10) {
+              await checkerDialog(
+                  message: newArray[msgIndex], okString: newArray[1]);
+            }
+          } // end if (continueLoop)
+        } // end if (actionType.contains('lqr'))
+
+        while (continueLoop) {
+          try {
+            actionLock('checkerAcquireData');
+            int nowTime = DateTime.now().millisecondsSinceEpoch;
+            if ((nowTime - (lastPositionTime ?? 0)) > 600000) {
+              // more than 10 minutes
+              getLocation().then((res) {
+                position = res;
+                lastPositionTime = nowTime;
+                placemarkFromCoordinates(
+                        position!.latitude, position!.longitude)
+                    .then((pm) {
+                  placeMark = pm;
+                }); // end of placemarkFromCoordinates
+              }); // end of getLocation
+            } // end if  > 600000
+
+            newArray = List<String>.from(tArray);
+            String qrText = await checkerTakeQR(newArray[9] ?? 'QR',
+                    widget.scrName, widget.component, 'loc', lens) ??
+                'Error';
+            qrTime = DateTime.fromMillisecondsSinceEpoch(nowTime + timeDiff);
+            qrDateStr = dateFormatter.format(qrTime);
+            qrTimeStr = timeFormatter.format(qrTime);
+            if (qrText != emptyString &&
+                qrText != 'Error' &&
+                qrText != 'null' &&
+                qrText != 'Out') {
+              int vid = await getVidUQR(qrText);
+              if (vid == -1) {
+                await checkerDialog(
+                    message: newArray[14], okString: newArray[1]);
+              } else {
+                List? vidProfile =
+                    checkerVerifyVid(vid, widget.component['table']);
+                String photoUrl = '';
+                if (vidProfile == null) {
+                  // alert vid not found
+                  await checkerDialog(
+                      message: newArray[13], okString: newArray[1]);
+                } else {
+                  // vid match take photo
+                  vid = vidProfile[0]; // make sure vid match (for dev)
+                  if (takePicture) {
+                    try {
+                      BuildContext pContext = context;
+                      photoUrl =
+                          await checkerTakePicture(lens, newArray[10]) ?? '';
+                    } catch (ep) {
+                      photoUrl = '';
+                    }
+                  } // end if (takePicture)
+                  if (!takePicture || (takePicture && photoUrl != '')) {
+                    // success, send data
+                    // update tArray to replace place holder <D>, <T> and <fieldNumber>
+                    checkies.add([
+                      vid.toString(),
+                      photoUrl,
+                      qrTime.millisecondsSinceEpoch
+                    ]);
+                    getData = true;
+                    for (int t = 0; t < newArray.length; t++) {
+                      newArray[t] = newArray[t].replaceAll('<D>', qrDateStr);
+                      newArray[t] = newArray[t].replaceAll('<T>', qrTimeStr);
+                      for (int i = vidProfile.length - 1; i >= 0; i--) {
+                        newArray[t] = newArray[t].replaceAll(
+                            '<${(i + 1)}>', vidProfile[i + 1].toString());
+                      } // end for vidProfile
+                    } // end for tArray
+                    await checkerSuccessDialog(
+                      //title: newArray[10],
+                      message: newArray[12],
+                      okString: newArray[1],
+                    );
+                    checkerHistory.add(newArray[5]);
+                    if (checkies.length >= (widget.component['buffer'] ?? 20)) {
+                      List processList = checkies;
+                      checkies = [];
+
+                      checkerDataProcess(
+                          processList,
+                          widget.scrName,
+                          newArray,
+                          DateTime.fromMillisecondsSinceEpoch(
+                                  DateTime.now().millisecondsSinceEpoch +
+                                      timeDiff)
+                              .millisecondsSinceEpoch,
+                          lqr);
+                      int delayCounter = defaultFinalSaveCounter;
+                      if (lastSave > 0) {
+                        delayCounter = max(
+                            0,
+                            (widget.component['delay'] ?? 10) -
+                                (((DateTime.now().millisecondsSinceEpoch -
+                                            lastSave) /
+                                        1000)
+                                    .round()) +
+                                2);
+                      } // end if (lastSave > 0)
+                      await checkerSendDialog(
+                          message1: newArray[15],
+                          message2: newArray[16],
+                          counter: delayCounter,
+                          okString: newArray[1]);
+                      lastSave = DateTime.now().millisecondsSinceEpoch;
+                    } // end if (checkies.length >= (widget.component['buffer']??20))
+                  } // end if (!takePicture || (takePicture && photoUrl != ''))
+                } // end if (vidProfile == null)
+              } // end if (vid == -1)
+            } else {
+              if (qrText == 'Out' || qrText == empty) {
+                continueLoop = false;
+              } else {
+                await Future.delayed(const Duration(seconds: 1));
+              } // end if( qrText == 'Out')
+            } // end if (qrText != 'Error' && qrText != 'null')
+            continueLoop = continueLoop ? !single : continueLoop;
+            devPrint('continueLoop=$continueLoop');
+          } catch (eLoop) {
+            await Future.delayed(const Duration(seconds: 1));
+            devPrint(eLoop);
+          }
+        } // end while continueLoop)
+        routeStack.pop();
+        if (checkies.isNotEmpty || getData) {
+          int delayCounter = defaultFinalSaveCounter;
+          if (lastSave > 0) {
+            delayCounter = max(
+                0,
+                (widget.component['delay'] ?? 10) -
+                    (((DateTime.now().millisecondsSinceEpoch - lastSave) / 1000)
+                        .round()) +
+                    2);
+          } // end if (lastSave > 0)
+          checkerSendDialog(
+              message1: newArray[15],
+              message2: newArray[16],
+              counter: delayCounter,
+              okString: newArray[1]);
+          if (checkies.isNotEmpty) {
+            List processList = checkies;
+            checkies = [];
+            checkerDataProcess(
+                processList,
+                widget.scrName,
+                newArray,
+                DateTime.fromMillisecondsSinceEpoch(
+                        DateTime.now().millisecondsSinceEpoch + timeDiff)
+                    .millisecondsSinceEpoch,
+                lqr);
+            lastSave = DateTime.now().millisecondsSinceEpoch;
+          } // end if (checkies.isNotEmpty)
+          //checkerDialog(message: newArray[13], okString: newArray[1]);
+        } else {
+          setDataOK('2'); // display green
+        } // end if (checkies.isNotEmpty)
+      } on PlatformException catch (err) {
+        // TODO  play wrong beep
+        setDataOK('2'); // display green without do anything
+        errorReport(err);
+        await showDialog(
+            context: context,
+            builder: (BuildContext context) {
+              return AlertDialog(
+                // dialog 3
+                title: Text(textList["Fail"]),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(textList["GpsProblem"]),
+                  ],
+                ),
+
+                actions: <Widget>[
+                  TextButton(
+                    child: Text(newArray[3] ?? "--Bad GPS_SEND --"),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                    },
+                  ),
+                ],
+              );
+            }); // end of dialog
+      } // end of platformException
+      timerSubscription.cancel();
+    } // end of checkerAcquireData
+
+    h = MediaQuery.of(context).size.height - 20;
+    w = MediaQuery.of(context).size.width - 20;
+    const double defaultAspectRatio = 18 / 12;
+    var topPad = 6.0;
+    double fontSize = (widget.component['fontSize'] ?? 14.0).toDouble();
+    // textArray = diamondTextToList(widget.component['text']);
+    Widget button1;
+    button1 = Center(
+      child: Column(
+        children: [
+          Container(
+            alignment: Alignment.center,
+            width: (widget.component['width'] ?? 90).toDouble(),
+            child: Card(
+              child: InkWell(
+                child: Column(
+                  // mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: <Widget>[
+                    Container(
+                      height: topPad,
+                    ),
+                    AspectRatio(
+                      aspectRatio: defaultAspectRatio,
+                      child: displayImage(
+                          imageUrl: widget.component['url'] ?? defaultImage,
+                          cached: true),
+                      // child: FadeInImage.memoryNetwork(
+                      //   placeholder: kTransparentImage,
+                      //   image: widget.component['url'] ?? defaultImage,
+                      // ),
+                    ),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        textArray[0],
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: fontSize),
+                      ),
+                    ),
+                  ],
+                ),
+                onTap: () async {
+                  if (!tapped) {
+                    // setState(() {
+                    tapped = true;
+                    // });
+                    String title = '';
+                    String body = '';
+                    bool dataOk = transactionOK();
+                    if (!dataOk) {
+                      title = "AlertTitle";
+                      body = "NeedGreen";
+                      await checkerDialog(
+                          title: textList[title],
+                          message: textList[body],
+                          okString: textArray[1]);
+                      //setDataOK('2');
+                      tapped = false;
+                    } else {
+                      dataOk = dataOk && await internetConnectedCheck();
+                      if (!dataOk) {
+                        //setDataOK('2');
+                        tapped = false;
+                        await checkerDialog(
+                            title: textList['NoInternetTitle'],
+                            message: textList['NoInternet'],
+                            okString: textArray[1]);
+                      } else {
+                        setTransactionNotOK('ftzChecker');
+                        transactionStore.dispatch(UpdateScreenTxAction(
+                            ScreenTransaction({'#DATA_OK': false})));
+                        try {
+                          // OtqState currentData =
+                          //     await OtqState().setAllDataAsync();
+                          String variant =
+                              widget.component['variant'] ?? 'qr-photo-single';
+                          await checkerAcquireData(variant, textArray);
+                          // await checkerAcquireData(
+                          //     variant, textArray, currentData);
+                        } catch (e) {
+                          setDataOK('2');
+                          errorReport(e);
+                        }
+                        tapped = false;
+                      } // end if !dataOK
+                    } // end if (!dataOk)
+                  } // end if !tapped
+                }, // end of onTap
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    return button1;
+  } // end of class _AttendQrGpsSelfieState build
+} // end of class _AttendQrGpsSelfieState

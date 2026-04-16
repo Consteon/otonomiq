@@ -1,0 +1,28 @@
+part of '../../widget/attendance_qr_selfie_gps_verify.dart';
+
+extension TakeQr on AttendQrGpsSelfieState {
+  Future<String?> attendanceTakeQR(
+      String label, String scrName, dynamic component, String caller) async {
+    // Show dialog box for scanning qr
+    List<String?> qrResult = [];
+    await Get.dialog(AlertDialog(
+        insetPadding: const EdgeInsets.fromLTRB(12, 40, 12, 20),
+        title: Text(
+          label,
+          textAlign: TextAlign.center,
+        ),
+        content: SizedBox(
+          height: h,
+          width: w,
+          child: FtzMobileScanner(
+            screenName: scrName,
+            component: component,
+            caller: caller,
+            tried: 0,
+            result: qrResult,
+            lens: 'back',
+          ),
+        )));
+    return qrResult[0];
+  } // end of takeQR
+} // end of extension
