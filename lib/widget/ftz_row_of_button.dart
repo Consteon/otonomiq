@@ -286,6 +286,80 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
             children[i]['action'].toString().trim().toLowerCase() ==
                 'resetvid') {
           allOtqData = await OtqState().setAllDataAsync();
+
+          // Fake GPS check
+          final List<dynamic> addToTableParts =
+              diamondTextToList(children[i]['addToTable'] ?? '');
+          final bool fakeGpsAllowed =
+              children[i]['fakeGpsAllowed'] ?? true;
+          if (!fakeGpsAllowed && allOtqData.mock) {
+            await Get.dialog(AlertDialog(
+              title: Text(addToTableParts.length > 1
+                  ? addToTableParts[1]
+                  : 'Terdeteksi Fake GPS'),
+              content: Text(addToTableParts.length > 2
+                  ? addToTableParts[2]
+                  : 'Lokasi tidak valid, matikan fake GPS'),
+              actions: [
+                TextButton(
+                    child: const Text('OK'),
+                    onPressed: () => Get.back()),
+              ],
+            ));
+            setDataOK('2');
+            return;
+          }
+
+          // OutPosition check
+          final bool outPositionAllowed =
+              children[i]['outPositionAllowed'] ?? true;
+          if (!outPositionAllowed) {
+            final dynamic lqrRef = transactionStore.state.screenTx['#LQR_REF'];
+            final bool hasLqrRef =
+                lqrRef != null && lqrRef is Map && lqrRef.isNotEmpty;
+
+            if (hasLqrRef) {
+              try {
+                // Ambil entry pertama: [name, latitude, longitude, tolerance]
+                final firstEntry = (lqrRef).values.first as List;
+                final double targetLat = (firstEntry[1] as num).toDouble();
+                final double targetLng = (firstEntry[2] as num).toDouble();
+                final double tolerance = (firstEntry[3] as num).toDouble();
+                final double zone2 = tolerance + allOtqData.accuracy * 2;
+                final num distance = distanceM(allOtqData.latitude,
+                    allOtqData.longitude, targetLat, targetLng);
+
+                debugPrint(
+                    '[OutPosition] target=($targetLat,$targetLng) tol=$tolerance '
+                    'zone2=$zone2 current=(${allOtqData.latitude},${allOtqData.longitude}) '
+                    'distance=$distance');
+
+                if (distance > zone2) {
+                  await Get.dialog(AlertDialog(
+                    title: Text(addToTableParts.length > 3
+                        ? addToTableParts[3]
+                        : 'Lokasi tidak valid'),
+                    content: Text(addToTableParts.length > 4
+                        ? addToTableParts[4]
+                        : 'Kamu sedang diluar area absensi'),
+                    actions: [
+                      TextButton(
+                          child: const Text('OK'), onPressed: () => Get.back()),
+                    ],
+                  ));
+                  setDataOK('2');
+                  return;
+                }
+              } catch (eLoc) {
+                debugPrint(
+                    '[OutPosition] parse error: $eLoc — bypass pengecekan');
+              }
+            } else {
+              debugPrint(
+                  '[OutPosition] #LQR_REF kosong/null — bypass pengecekan');
+            }
+          }
+
           timeStamp = allOtqData.nowTime.millisecondsSinceEpoch;
           locString = getLocationString('', '', '', allOtqData);
         } else {
@@ -356,9 +430,6 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
             data: transactionStore.state.screenTx['#THEME'],
             child: ElevatedButton(
               style: style,
-              child: Text(
-                buttonData['text'] ?? "",
-              ),
               onPressed: isEnabled
                   ? () async {
                       final String runCommand =
@@ -773,7 +844,10 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                         Get.back();
                       }
                     }
-                  : null, // on pressed
+                  : null,
+              child: Text(
+                buttonData['text'] ?? "",
+              ), // on pressed
             ),
           );
         } catch (er) {

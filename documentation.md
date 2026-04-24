@@ -277,7 +277,8 @@ Error when executing method get() from document reference. Should be gone when a
         {
           "0l8a2c51ba86a08e0c33bdfaac513b025d0e59136d" : "Bandung Tech Center◆-6.89609◆107.58163◆30"
         {
-
+    '#LQR_REF' = List<String,dynamic>
+         Example : {"0l8a2c51ba86a08e0c33bdfaac513b025d0e59136d" :["Bandung Tech Center",-6.89609,107.58163,30]}
     '#THEME' = Theme used in this app. Set in api.dart => buildTheme
     '#LOCALE' = Device's locale in form 'en_US'
     '#REF_TIME_START' = Ntp / GPS reference time of defice start (ms from epoch)

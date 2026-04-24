@@ -1197,12 +1197,16 @@ String timeOfDayToGSheet(TimeOfDay myTime, bool utc) {
 
 void getLqrList(String? proxySsid) async {
   Map<String, dynamic> lqr = {};
+  Map<String, dynamic> rLoc = {};
   String? lqrString;
   try {
     lqrString = await secureRead(
         key: "lqrList"); //= get documentID of entry in msg_xxxx collection
     if (lqrString != null) {
       lqr = json.decode(lqrString);
+      dynamic lRef = lqr.entries.first;
+      transactionStore.dispatch(
+          UpdateScreenTxAction(ScreenTransaction({'#LQR_REF': lRef})));
       transactionStore.dispatch(
           UpdateScreenTxAction(ScreenTransaction({'#LQR_LIST': lqr})));
     }
@@ -1221,6 +1225,13 @@ void getLqrList(String? proxySsid) async {
         await http.post(Uri.parse(functionBody.url), body: functionBody.body);
     dynamic lqrArray = json.decode(locString.body)[0];
     lqr = {};
+
+    rLoc[lqrArray[0][3]] = [
+      lqrArray[0][2],
+      lqrArray[0][0],
+      lqrArray[0][1],
+      lqrArray[0][4]
+    ];
     for (int i = 0; i < lqrArray.length && lqrArray[i][3] != ""; i++) {
       lqr[lqrArray[i][3]] = [
         lqrArray[i][2],
@@ -1232,6 +1243,8 @@ void getLqrList(String? proxySsid) async {
   } catch (eLoc) {
     errorReport(eLoc);
   }
+  transactionStore
+      .dispatch(UpdateScreenTxAction(ScreenTransaction({'#LQR_REF': rLoc})));
   transactionStore
       .dispatch(UpdateScreenTxAction(ScreenTransaction({'#LQR_LIST': lqr})));
   storage.write(key: "lqrList", value: json.encode(lqr));

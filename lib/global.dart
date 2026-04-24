@@ -165,6 +165,9 @@ import 'global2.dart';
   0.9.78.26 (251212) HH : fix rbt updateTable
   0.9.78.27 (260111) HH : fix android secure storage key change (by android)
                           in debug count 34 (Error 801-34)
+  0.9.78.28 (260424) HH : update attendance_qr_selfie_gps_verify, ftz_row_of_button,
+                          otq_txf, to response to fakeGpsAllowed, outPositionAllowed and addition text
+                          updated by OO
  */
 // ========= Constants ==========================
 const iOSDevPage = false;
@@ -175,7 +178,7 @@ int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
 const String version = '0.9.78';
-const String subVersion = '.27';
+const String subVersion = '.28';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing

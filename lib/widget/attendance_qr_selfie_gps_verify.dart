@@ -1,21 +1,23 @@
 import 'dart:io';
-import 'package:get/get.dart';
-import '../crypto/auth_crypto.dart';
+
 import 'package:camera/camera.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
-// import 'package:vibration/vibration.dart';
-import '../global.dart';
-import '../model/otq_state.dart';
-import '../api.dart';
-import '../redux/screen_transaction.dart';
+import 'package:flutter/services.dart';
 // import '../part/android_part/ftz_mobile_scanner.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:get/get.dart';
 // import 'package:barcode_scan2/barcode_scan2.dart';
 import 'package:uuid/uuid.dart';
+
+import '../api.dart';
+import '../crypto/auth_crypto.dart';
+// import 'package:vibration/vibration.dart';
+import '../global.dart';
+import '../model/otq_state.dart';
+import '../redux/screen_transaction.dart';
 import 'ftz_scanner_screen.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
+
 part '../part/build_part/attend_qr_gps_selfie_state_part.dart';
 
 /*
@@ -385,6 +387,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
         if (inputText != empty) {
           //got qr
           finalQrText = await lqrVerify(p, q, inputText);
+          debugPrint('[qrDataProcess] inputText="$inputText" → finalQrText="$finalQrText"');
+          debugPrint('[qrDataProcess] #LQR_LIST=${transactionStore.state.screenTx['#LQR_LIST']}');
           if (finalQrText == errorString) {
             resultOk = empty;
           } else {
@@ -394,6 +398,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                 ? transactionStore.state.screenTx['#LQR_LIST'][finalQrText][0]
                 : empty;
           } // end if (finalQrText != empty && finalQrText != errorString)
+          debugPrint('[qrDataProcess] resultOk="$resultOk"');
         } else {
           resultOk = errorString;
         } // end (inputText != empty)
@@ -456,6 +461,75 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
 
           if (position != null) {
             mock = position!.isMocked ? 'Mocked location' : 'True location';
+            bool isMock = position!.isMocked;
+            debugPrint('[AttendQrGpsSelfie.qrDataProcess] fake GPS: ${position!.isMocked} | mock: $mock');
+            final bool fakeGpsAllowed = widget.component['fakeGpsAllowed'] ?? true;
+            if (!fakeGpsAllowed && isMock) {
+              await Get.dialog(AlertDialog(
+                title: Text(tArray[22] ?? errorString),
+                content:  Text(tArray[23] ?? errorString),
+                actions: [
+                  TextButton(
+                    child: Text(tArray[8] ?? 'OK'),
+                    onPressed: () => Get.back(),
+                  ),
+                ],
+              ));
+              resultOk = 'gps-blocked';
+            } else {
+            final bool outPositionAllowed =
+                  widget.component['outPositionAllowed'] ?? true;
+              bool outBlocked = false;
+              if (!outPositionAllowed) {
+                final dynamic lqrRef =
+                    transactionStore.state.screenTx['#LQR_REF'];
+                final bool hasLqrRef =
+                    lqrRef != null && lqrRef is Map && lqrRef.isNotEmpty;
+
+                if (hasLqrRef) {
+                  try {
+                    // Ambil entry pertama: [name, latitude, longitude, tolerance]
+                    final firstEntry = (lqrRef).values.first as List;
+                    final double targetLat = (firstEntry[1] as num).toDouble();
+                    final double targetLng = (firstEntry[2] as num).toDouble();
+                    final double tolerance = (firstEntry[3] as num).toDouble();
+                    final double gpsAccuracy = position!.accuracy;
+                    final double zone1 = tolerance;
+                    final double zone2 = tolerance + gpsAccuracy * 2;
+                    final double distance = Geolocator.distanceBetween(
+                      targetLat,
+                      targetLng,
+                      position!.latitude,
+                      position!.longitude,
+                    );
+                    debugPrint(
+                        '[qrDataProcess] geo: distance=${distance.toStringAsFixed(1)}m, '
+                        'zone1=${zone1.toStringAsFixed(1)}m, zone2=${zone2.toStringAsFixed(1)}m');
+
+                    if (distance > zone2) {
+                      outBlocked = true;
+                      await Get.dialog(AlertDialog(
+                        title: Text(tArray[24] ?? errorString),
+                        content: Text(tArray[25] ?? errorString),
+                        actions: [
+                          TextButton(
+                            child: Text(tArray[8] ?? 'OK'),
+                            onPressed: () => Get.back(),
+                          ),
+                        ],
+                      ));
+                      resultOk = 'out-blocked';
+                    }
+                  } catch (eLoc) {
+                    debugPrint(
+                        '[qrDataProcess] parse error: $eLoc — bypass pengecekan');
+                  }
+                } else {
+                  debugPrint(
+                      '[qrDataProcess] #LQR_REF kosong/null — bypass pengecekan');
+                }
+              }
+            if (!outBlocked) {
             try {
               placeMark = await placemarkFromCoordinates(
                   position!.latitude, position!.longitude);
@@ -544,6 +618,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                 message3:
                     '$plusMinus ${position == null ? "-" : position!.accuracy.round()}m',
                 okString: tArray[8]);
+            } // end if (!outBlocked)
+            } // end else (not fake GPS)
           } else {
             setDataOK(
                 '1'); // reload pages and display green anyway. So the app will not lock up
@@ -789,13 +865,13 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
           widget.component['opMode'] == 'qr-checker-continuous') {
         qrPhoto = true;
         qrText = await attendanceTakeQR(
-            tArray[22] ?? 'Scan QR', scrName, component, 'loc');
+            'Scan QR', scrName, component, 'loc');
         qrResult = await qrDataProcess(
             qrText ?? emptyString, '', tried, originalScrName);
       } else {
         while (!done && tried <= qrLoop) {
           qrText = await attendanceTakeQR(
-              tArray[22] ?? 'Scan QR', scrName, component, 'loc');
+              'Scan QR', scrName, component, 'loc');
           if (qrText == 'null' || qrText == emptyString) {
             qrText = emptyString;
             qrCancel = true;
@@ -1018,14 +1094,15 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                               if (locArray.length < 1) {
                                 selfie = true; // selfie
                               } else {
-                                if (await locationVerify(
-                                    locArray,
-                                    widget.component['tolerance'] ?? 50,
-                                    currentData)) {
-                                  selfie = false; // scan qr
-                                } else {
-                                  selfie = true; // selfie
-                                }
+                                // if (await locationVerify(
+                                //     locArray,
+                                //     widget.component['tolerance'] ?? 50,
+                                //     currentData)) {
+                                //   selfie = false; // scan qr
+                                // } else {
+                                //   selfie = true; // selfie
+                                // }
+                                selfie = false; // selfie, because qr-single is for scan qr without location verification. So if location array exist, it will be selfie anyway
                               }
                               if (selfie) {
                                 await showDialog(
@@ -1141,16 +1218,17 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                   tapped = true;
                 });
                 // if (await dataOk(context)) {
-                actionLock(
-                    '[1302] acquireSelfie attendance_qr_selfie_gps_verify');
+                actionLock('acquireSelfie attendance_qr_selfie_gps_verify');
                 // ConnectionData connectionData =
                 //     await ConnectionData().getConnection(true, true);
-                // if (await internetOk(context)) {
+                // if (true || await internetOk(context)) {
                 if (true) {
                   try {
                     OtqState currentData = await OtqState().setAllDataAsync();
                     switch (widget.component['opMode'] ?? 'gps-single') {
                       case 'qr-checker-single':
+                        await acquireData(
+                            'qr-checker-single', textArray, currentData);
                         var locArray = widget.component['locList'] ?? [];
                         bool selfie;
                         if (locArray.length < 1) {
@@ -1166,45 +1244,17 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                             selfie = true; // selfie
                           }
                         }
-                        if (selfie) {
-                          await showDialog(
-                              // show dialog 5
-                              context: context,
-                              builder: (BuildContext context) {
-                                return AlertDialog(
-                                  // dialog 3
-                                  title: Text(textArray[19]),
-                                  content: Text(textArray[20]),
-                                  actions: <Widget>[
-                                    TextButton(
-                                      child: Text(textArray[21]),
-                                      onPressed: () {
-                                        Navigator.of(context).pop();
-                                      },
-                                    ),
-                                  ],
-                                );
-                              });
-                          await acquireData('selfie', textArray, currentData);
-                          String toGo = widget.component['route'] ?? home;
-                          routeStack.push(toGo);
-                          gotoRoute(toGo);
-                        } else {
-                          String myPage = '_OtqQR1';
-                          await acquireQrSelfie(myPage, widget.scrName,
-                              widget.component, currentData, true);
-                          // setDataOK('2');
-                          // routeStack.push(myPage);
-                          // gotoRoute(myPage);
-                        }
-                        break; // end case qr-checker-single
+                        await acquireData('back', textArray, currentData);
+                        String toGo = widget.component['route'] ?? home;
+                        routeStack.push(toGo);
+                        gotoRoute(toGo);
+                        break; // end case 'qr-checker-single'
 
                       case 'qr-single':
-                        dynamic locArray = widget.component['locList'] ?? [];
                         const forceSelfie = false; // = true if need selfie
+                        dynamic locArray = widget.component['locList'] ?? [];
                         bool selfie;
                         if (locArray.length < 1) {
-                          // location array =  empty
                           selfie = true; // selfie
                         } else {
                           if (await locationVerify(
@@ -1223,11 +1273,13 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                               builder: (BuildContext context) {
                                 return AlertDialog(
                                   // dialog 3
-                                  title: Text(textArray[19]),
-                                  content: Text(textArray[20]),
+                                  title: Text(textArray[forceSelfie ? 19 : 9]),
+                                  content:
+                                      Text(textArray[forceSelfie ? 20 : 9]),
                                   actions: <Widget>[
                                     TextButton(
-                                      child: Text(textArray[21]),
+                                      child: Text(textArray[
+                                          forceSelfie ? 21 : 8]), // selfie
                                       onPressed: () {
                                         Navigator.of(context).pop();
                                       },
@@ -1239,7 +1291,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                             setDataOK('2');
                           } else {
                             await acquireData('selfie', textArray, currentData);
-                          }
+                          } // end if forceSelfie
                           String toGo = widget.component['route'] ?? home;
                           routeStack.push(toGo);
                           gotoRoute(toGo);
@@ -1247,9 +1299,6 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                           String myPage = '_OtqQR1';
                           await acquireQrSelfie(myPage, widget.scrName,
                               widget.component, currentData, forceSelfie);
-                          // setDataOK('2');
-                          // routeStack.push(myPage);
-                          // gotoRoute(myPage);
                         }
                         break;
 
@@ -1269,19 +1318,18 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                   } catch (e) {
                     setDataOK('2');
                     errorReport(e);
-                  } // end of try
-                } else {
-                  setDataOK('2');
-                } // end if internetOK
-                // } // end if dataOk
-                try {
+                  }
                   setState(() {
                     tapped = false;
                   });
-                } catch (e) {
-                  errorReport(e);
-                }
-              } // end if ! tapped
+                } else {
+                  setDataOK('2');
+                  setState(() {
+                    tapped = false;
+                  });
+                } // end if #Internet
+                // } // end if dataOK
+              } // end if !tapped
             }, // end of onTap
           ),
         ),
