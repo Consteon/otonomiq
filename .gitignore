@@ -61,3 +61,5 @@ app.*.map.json
 
 .claude/
 .idea/
+
+lib/start.sct
