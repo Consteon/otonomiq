@@ -66,12 +66,12 @@ android {
     signingConfigs {
         release {
             //noinspection GroovyAssignabilityCheck
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-            //noinspection GroovyAssignabilityCheck
-            storeFile file(keystoreProperties['storeFile'])
-            //noinspection GroovyAssignabilityCheck
-            storePassword keystoreProperties['storePassword']
+            // keyAlias keystoreProperties['keyAlias']
+            // keyPassword keystoreProperties['keyPassword']
+            // //noinspection GroovyAssignabilityCheck
+            // storeFile file(keystoreProperties['storeFile'])
+            // //noinspection GroovyAssignabilityCheck
+            // storePassword keystoreProperties['storePassword']
         }
 
     }
@@ -87,7 +87,7 @@ android {
         }
         debug {
             ext.enableCrashlytics = false
-            signingConfig signingConfigs.release
+            signingConfig signingConfigs.debug
         }
     }
 

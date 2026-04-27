@@ -1,9 +1,12 @@
+import 'dart:convert'; // Added for jsonDecode/jsonEncode
+
+import 'package:cloud_firestore/cloud_firestore.dart'; // Required for DocumentReference
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:geolocator/geolocator.dart';
 // import 'package:share_plus/share_plus.dart';
 import 'package:get/get.dart';
-import 'dart:convert'; // Added for jsonDecode/jsonEncode
-import 'package:cloud_firestore/cloud_firestore.dart'; // Required for DocumentReference
+
 import '../api.dart';
 import '../bloc_timer/timer_bloc.dart';
 import '../bloc_timer/timer_event.dart';
@@ -223,9 +226,11 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                               if (arrayIndex >= 0 &&
                                   arrayIndex < contentList.length) {
                                 String fieldName = targetIndexRaw.toString();
-                                contentList[arrayIndex] = newValue; // update table content
+                                contentList[arrayIndex] =
+                                    newValue; // update table content
                                 if (data.containsKey(fieldName)) {
-                                  updateData[fieldName] = newValue; // update extra field if exists
+                                  updateData[fieldName] =
+                                      newValue; // update extra field if exists
                                 }
                               } else {
                                 debugPrint(
@@ -286,80 +291,6 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
             children[i]['action'].toString().trim().toLowerCase() ==
                 'resetvid') {
           allOtqData = await OtqState().setAllDataAsync();
-
-          // Fake GPS check
-          final List<dynamic> addToTableParts =
-              diamondTextToList(children[i]['addToTable'] ?? '');
-          final bool fakeGpsAllowed =
-              children[i]['fakeGpsAllowed'] ?? true;
-          if (!fakeGpsAllowed && allOtqData.mock) {
-            await Get.dialog(AlertDialog(
-              title: Text(addToTableParts.length > 1
-                  ? addToTableParts[1]
-                  : 'Terdeteksi Fake GPS'),
-              content: Text(addToTableParts.length > 2
-                  ? addToTableParts[2]
-                  : 'Lokasi tidak valid, matikan fake GPS'),
-              actions: [
-                TextButton(
-                    child: const Text('OK'),
-                    onPressed: () => Get.back()),
-              ],
-            ));
-            setDataOK('2');
-            return;
-          }
-
-          // OutPosition check
-          final bool outPositionAllowed =
-              children[i]['outPositionAllowed'] ?? true;
-          if (!outPositionAllowed) {
-            final dynamic lqrRef = transactionStore.state.screenTx['#LQR_REF'];
-            final bool hasLqrRef =
-                lqrRef != null && lqrRef is Map && lqrRef.isNotEmpty;
-
-            if (hasLqrRef) {
-              try {
-                // Ambil entry pertama: [name, latitude, longitude, tolerance]
-                final firstEntry = (lqrRef).values.first as List;
-                final double targetLat = (firstEntry[1] as num).toDouble();
-                final double targetLng = (firstEntry[2] as num).toDouble();
-                final double tolerance = (firstEntry[3] as num).toDouble();
-                final double zone2 = tolerance + allOtqData.accuracy * 2;
-                final num distance = distanceM(allOtqData.latitude,
-                    allOtqData.longitude, targetLat, targetLng);
-
-                debugPrint(
-                    '[OutPosition] target=($targetLat,$targetLng) tol=$tolerance '
-                    'zone2=$zone2 current=(${allOtqData.latitude},${allOtqData.longitude}) '
-                    'distance=$distance');
-
-                if (distance > zone2) {
-                  await Get.dialog(AlertDialog(
-                    title: Text(addToTableParts.length > 3
-                        ? addToTableParts[3]
-                        : 'Lokasi tidak valid'),
-                    content: Text(addToTableParts.length > 4
-                        ? addToTableParts[4]
-                        : 'Kamu sedang diluar area absensi'),
-                    actions: [
-                      TextButton(
-                          child: const Text('OK'), onPressed: () => Get.back()),
-                    ],
-                  ));
-                  setDataOK('2');
-                  return;
-                }
-              } catch (eLoc) {
-                debugPrint(
-                    '[OutPosition] parse error: $eLoc — bypass pengecekan');
-              }
-            } else {
-              debugPrint(
-                  '[OutPosition] #LQR_REF kosong/null — bypass pengecekan');
-            }
-          }
-
           timeStamp = allOtqData.nowTime.millisecondsSinceEpoch;
           locString = getLocationString('', '', '', allOtqData);
         } else {
@@ -573,6 +504,110 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                         case 'savesend':
                           {
                             if (await dataOk(context)) {
+                              final List<String> btnTextArray =
+                                  (buttonData['text'] ?? '')
+                                      .toString()
+                                      .split(separator[1]);
+                              final bool fakeGpsAllowed =
+                                  (buttonData['fakeGpsAllowed']
+                                              ?.toString()
+                                              .toLowerCase() ??
+                                          'true') !=
+                                      'false';
+                              if (!fakeGpsAllowed) {
+                                allOtqData ??=
+                                    await OtqState().setAllDataAsync();
+                                if (allOtqData.mock) {
+                                  if (mounted) {
+                                    await showDialog(
+                                        context: context,
+                                        builder: (BuildContext ctx) {
+                                          return AlertDialog(
+                                            title: Text(btnTextArray.length > 1
+                                                ? btnTextArray[1]
+                                                : 'Lokasi tidak valid'),
+                                            content: Text(
+                                                btnTextArray.length > 2
+                                                    ? btnTextArray[2]
+                                                    : 'Nonaktifkan Fake GPS'),
+                                            actions: [
+                                              TextButton(
+                                                child: const Text('OK'),
+                                                onPressed: () =>
+                                                    Navigator.of(ctx).pop(),
+                                              ),
+                                            ],
+                                          );
+                                        });
+                                  }
+                                  return;
+                                }
+                              }
+                              final bool outPositionAllowed =
+                                  (buttonData['outPositionAllowed']
+                                              ?.toString()
+                                              .toUpperCase() ??
+                                          'TRUE') !=
+                                      'FALSE';
+                              bool outBlocked = false;
+                              if (!outPositionAllowed) {
+                                allOtqData ??=
+                                    await OtqState().setAllDataAsync();
+                                final dynamic lqrRef =
+                                    transactionStore.state.screenTx['#LQR_REF'];
+                                final bool hasLqrRef = lqrRef != null &&
+                                    lqrRef is Map &&
+                                    lqrRef.isNotEmpty;
+                                if (hasLqrRef) {
+                                  try {
+                                    final firstEntry =
+                                        lqrRef.values.first as List;
+                                    final double targetLat =
+                                        (firstEntry[1] as num).toDouble();
+                                    final double targetLng =
+                                        (firstEntry[2] as num).toDouble();
+                                    final double tolerance =
+                                        (firstEntry[3] as num).toDouble();
+                                    final double zone2 =
+                                        tolerance + allOtqData.accuracy * 2;
+                                    final double distance =
+                                        Geolocator.distanceBetween(
+                                      targetLat,
+                                      targetLng,
+                                      allOtqData.latitude,
+                                      allOtqData.longitude,
+                                    );
+                                    debugPrint(
+                                        '[savesend/ftz_row_of_button] distance=${distance.toStringAsFixed(1)}m, zone2=${zone2.toStringAsFixed(1)}m');
+                                    if (distance > zone2) {
+                                      outBlocked = true;
+                                      if (mounted) {
+                                        await Get.dialog(AlertDialog(
+                                          title: Text(btnTextArray.length > 3
+                                              ? btnTextArray[3]
+                                              : 'Diluar Area Absensi'),
+                                          content: Text(btnTextArray.length > 4
+                                              ? btnTextArray[4]
+                                              : 'Silahkan menuju lokasi yang ditentukan'),
+                                          actions: [
+                                            TextButton(
+                                              child: const Text('OK'),
+                                              onPressed: () => Get.back(),
+                                            ),
+                                          ],
+                                        ));
+                                      }
+                                    }
+                                  } catch (eLoc) {
+                                    debugPrint(
+                                        '[savesend/ftz_row_of_button] parse error: $eLoc — bypass pengecekan');
+                                  }
+                                } else {
+                                  debugPrint(
+                                      '[savesend/ftz_row_of_button] #LQR_REF kosong/null — bypass pengecekan');
+                                }
+                              }
+                              if (outBlocked) return;
                               actionLock('savesend case ftz_row_of_button');
                               await doSaveProcedure(i);
                             } // end if dataOk
@@ -846,7 +881,7 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                     }
                   : null,
               child: Text(
-                buttonData['text'] ?? "",
+                (buttonData['text'] ?? "").toString().split(separator[1])[0],
               ), // on pressed
             ),
           );

@@ -1204,7 +1204,7 @@ void getLqrList(String? proxySsid) async {
         key: "lqrList"); //= get documentID of entry in msg_xxxx collection
     if (lqrString != null) {
       lqr = json.decode(lqrString);
-      dynamic lRef = lqr.entries.first;
+      Map<String, dynamic> lRef = {lqr.entries.first.key: lqr.entries.first.value};
       transactionStore.dispatch(
           UpdateScreenTxAction(ScreenTransaction({'#LQR_REF': lRef})));
       transactionStore.dispatch(
