@@ -346,12 +346,14 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
           double minWidth = (width is num) ? width.toDouble() : 0;
           double minHeight = (height is num) ? height.toDouble() : 48;
 
+          final double screenWidth = MediaQuery.of(context).size.width;
           final ButtonStyle style = ElevatedButton.styleFrom(
             backgroundColor: buttonColor,
             foregroundColor: textColor,
             disabledBackgroundColor: Colors.grey.shade300,
             disabledForegroundColor: Colors.grey.shade500,
             minimumSize: Size(minWidth, minHeight),
+            maximumSize: Size(screenWidth, double.infinity),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8.0),
             ),
@@ -505,8 +507,7 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                           {
                             if (await dataOk(context)) {
                               final List<String> btnTextArray =
-                                  (buttonData['text'] ?? '')
-                                      .toString()
+                                  (autheniumDecode(buttonData['text']?.toString()) ?? '')
                                       .split(separator[1]);
                               final bool fakeGpsAllowed =
                                   (buttonData['fakeGpsAllowed']
@@ -881,7 +882,9 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                     }
                   : null,
               child: Text(
-                (buttonData['text'] ?? "").toString().split(separator[1])[0],
+                (autheniumDecode(buttonData['text']?.toString()) ?? "").split(separator[1])[0],
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ), // on pressed
             ),
           );
@@ -913,13 +916,32 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
       }
 
       if (buttonData['width'] == 'full') {
-        bannerComponent.add(Expanded(child: buttonToShow));
+        bannerComponent
+            .add(SizedBox(width: double.infinity, child: buttonToShow));
       } else {
         bannerComponent.add(buttonToShow);
       }
     } // end for loop
     return bannerComponent;
   } // end of buildButtonList
+
+  WrapAlignment _toWrapAlignment(String? alignment) {
+    switch ((alignment ?? 'start').toLowerCase()) {
+      case 'end':
+        return WrapAlignment.end;
+      case 'center':
+      case 'centre':
+        return WrapAlignment.center;
+      case 'spacebetween':
+        return WrapAlignment.spaceBetween;
+      case 'spaceevenly':
+        return WrapAlignment.spaceEvenly;
+      case 'spacearound':
+        return WrapAlignment.spaceAround;
+      default:
+        return WrapAlignment.start;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -935,8 +957,8 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
           widget.rPad + (widget.component['rightPadding'] ?? 0.0).toDouble(),
           widget.bPad),
       child: BlocBuilder<TimerBloc, TimerState>(
-        builder: (context, state) => Row(
-          mainAxisAlignment: mainAlignmentConst(widget.component['alignment']),
+        builder: (context, state) => Wrap(
+          alignment: _toWrapAlignment(widget.component['alignment']),
           children: buildButtonList(
             widget.component['children'],
             widget.scrName,
