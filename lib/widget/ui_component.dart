@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import '../widget/all_widget.dart';
+
+import '../api.dart';
 import '../global.dart';
 import '../global2.dart';
 import '../page/any_page.dart';
-import '../api.dart';
-import '../redux/screen_transaction.dart';
 import '../page/home_page.dart';
+import '../redux/screen_transaction.dart';
+import '../widget/all_widget.dart';
 
 void constructPageElements(String scrName) {
   // initiate txfController and linkElement of a page (scrName)

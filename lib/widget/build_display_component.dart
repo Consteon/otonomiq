@@ -1,20 +1,27 @@
 import 'package:flutter/material.dart';
-import '../model/ftz_scanned_code.dart';
-import '../widget/qr_gps.dart';
-import '../widget/radio_text.dart';
-import '../widget/ui_component.dart';
-// import 'package:share_plus/share_plus.dart';
-import '../init_values.dart';
-import '../widget/all_widget.dart';
+import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
+import 'package:otonomiq/widget/choice_button_group.dart';
+import 'package:otonomiq/widget/location_detector.dart';
+import 'package:otonomiq/widget/progress_bar.dart';
+import 'package:otonomiq/widget/tasklist.dart';
+import 'package:otonomiq/widget/time_presence.dart';
+
 import '../api.dart';
 import '../crypto/auth_crypto.dart';
 import '../global.dart';
 import '../global2.dart';
+// import 'package:share_plus/share_plus.dart';
+import '../init_values.dart';
 import '../login/api/user_repository.dart';
 import '../login/page/login/login_widget.dart';
 import '../login/page/tos_page.dart';
+import '../model/ftz_scanned_code.dart';
 import '../model/input_controller.dart';
 import '../redux/screen_transaction.dart';
+import '../widget/all_widget.dart';
+import '../widget/qr_gps.dart';
+import '../widget/radio_text.dart';
+import '../widget/ui_component.dart';
 import 'ctx.dart';
 import 'display_qr.dart';
 import 'ftz_bluetooth_printer.dart';
@@ -23,7 +30,6 @@ import 'goto.dart';
 import 'gps_send.dart';
 import 'image_upload.dart';
 import 'otq_checkbox.dart';
-import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 
 Widget buildDisplayComponent(
     dynamic component, String scrName, UserRepository userRepository,
@@ -46,7 +52,7 @@ Widget buildDisplayComponent(
     txfController[scrName]![getPosition(component['position'])]!
         .initialIsEnabled = isEnabled;
     if (scrName.toLowerCase() == 'vertikateknolokaciptareportpatrol' &&
-        component['position'] == 5 ) {
+        component['position'] == 5) {
       int d = 1;
     }
     // if (canInitializePage(scrName)) {
@@ -705,6 +711,94 @@ Widget buildDisplayComponent(
                 component, // imageType, folder, filename, route, position
             scrName: scrName,
             single: true,
+          );
+        },
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    } // end of try
+  } else if (tip == 'time_presence') {
+    try {
+      Key iKey = GlobalKey();
+      result = Builder(
+        builder: (BuildContext context) {
+          return TimePresence(
+            key: iKey,
+            component:
+                component, // imageType, folder, filename, route, position
+            scrName: scrName,
+            single: true,
+          );
+        },
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    } // end of try
+  } else if (tip == 'location_detector') {
+    try {
+      Key iKey = GlobalKey();
+      result = Builder(
+        builder: (BuildContext context) {
+          return LocationDetector(
+            key: iKey,
+            component:
+                component, // imageType, folder, filename, route, position
+            scrName: scrName,
+            single: true,
+          );
+        },
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    } // end of try
+  } else if (tip == 'progress_bar') {
+    try {
+      Key iKey = GlobalKey();
+      result = Builder(
+        builder: (BuildContext context) {
+          return ProgressBar(
+            key: iKey,
+            component:
+                component, // imageType, folder, filename, route, position
+            scrName: scrName,
+            single: true,
+          );
+        },
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    } // end of try
+  } else if (tip == 'tasklist') {
+    try {
+      Key iKey = GlobalKey();
+      result = Builder(
+        builder: (BuildContext context) {
+          return Tasklist(
+            key: iKey,
+            component:
+                component, // imageType, folder, filename, route, position
+            scrName: scrName,
+            single: true,
+          );
+        },
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    } // end of try
+  } else if (tip == 'choice_button_group') {
+    try {
+      Key iKey = GlobalKey();
+      result = Builder(
+        builder: (BuildContext context) {
+          return ChoiceButtonGroup(
+            key: iKey,
+            component:
+                component, // imageType, folder, filename, route, position
+            scrName: scrName,
+            lPad: lPad,
+            tPad: tPad,
+            rPad: rPad,
+            bPad: bPad,
           );
         },
       );

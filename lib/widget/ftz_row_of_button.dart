@@ -507,7 +507,9 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                           {
                             if (await dataOk(context)) {
                               final List<String> btnTextArray =
-                                  (autheniumDecode(buttonData['text']?.toString()) ?? '')
+                                  (autheniumDecode(
+                                              buttonData['text']?.toString()) ??
+                                          '')
                                       .split(separator[1]);
                               final bool fakeGpsAllowed =
                                   (buttonData['fakeGpsAllowed']
@@ -882,7 +884,8 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                     }
                   : null,
               child: Text(
-                (autheniumDecode(buttonData['text']?.toString()) ?? "").split(separator[1])[0],
+                (autheniumDecode(buttonData['text']?.toString()) ?? "")
+                    .split(separator[1])[0],
                 overflow: TextOverflow.ellipsis,
                 maxLines: 1,
               ), // on pressed
