@@ -168,6 +168,13 @@ import 'global2.dart';
   0.9.78.28 (260424) HH : update attendance_qr_selfie_gps_verify, ftz_row_of_button,
                           otq_txf, to response to fakeGpsAllowed, outPositionAllowed and addition text
                           updated by OO
+  0.9.78.29 (260428) OO : add time_presence, progress_bar, location_detector, tasklist, button_choice
+                          update to otq_rdo_new, otq_txf_new.
+  0.9.78.30 (260507) OO : update dart files: api, table_repository, mobile_table_controller
+                          attendance_qr_selfie_gps_verify, ftz_row_of_button_2, otq_rdo_2,
+                          otq_txf_2, progress_bar, location_detector, tasklist,
+                          ftz_chechker, build_display_component
+
  */
 // ========= Constants ==========================
 const iOSDevPage = false;
@@ -178,7 +185,7 @@ int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
 const String version = '0.9.78';
-const String subVersion = '.28';
+const String subVersion = '.30';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing

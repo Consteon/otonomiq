@@ -2,9 +2,11 @@
 export 'otq_dropdown.dart';
 export 'otq_get_images.dart';
 export 'otq_rdo.dart';
+// export 'otq_rdo_new.dart';
 export 'otq_switch.dart';
 export 'otq_txt.dart';
-export 'otq_txf.dart';
+// export 'otq_txf.dart';
+// export 'otq_txf_new.dart';
 export 'display_card.dart';
 export 'display_list.dart';
 export 'ftz_checker.dart';

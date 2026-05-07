@@ -1,50 +1,51 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:convert';
-import 'different_code/different_code.dart';
-import 'part/build_part/channel.dart';
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:camera/camera.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:get/get.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:googleapis_auth/auth_io.dart' as auth;
 import "package:http/http.dart" as http;
 import 'package:http/io_client.dart'; // part of dart.http package
-import 'package:googleapis_auth/auth_io.dart' as auth;
-import 'model/otq_state.dart';
-import 'widget/build_theme.dart';
-import 'widget/ftz_webview.dart';
+import 'package:intl/intl.dart';
+import 'package:ntp/ntp.dart';
+// import 'package:mobile_number/mobile_number.dart'; // android only
+import 'package:permission_handler/permission_handler.dart';
+import 'package:pointycastle/export.dart';
 import 'package:transparent_image/transparent_image.dart';
+
+import 'bloc_submit/bloc.dart';
+import 'bloc_timer/bloc.dart';
 import 'crypto/auth_crypto.dart';
+import 'different_code/different_code.dart';
+import 'firebase_notification_handler.dart';
 import 'firestore_repository/firestore_generic_repository.dart';
 import 'firestore_repository/proxy_repository.dart';
 import 'firestore_repository/table_repository.dart';
 import 'ftz_secret.dart';
 import 'global.dart';
 import 'global2.dart';
-import 'redux/screen_transaction.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:ntp/ntp.dart';
-import 'firebase_notification_handler.dart';
-import 'widget/ui_component.dart';
-import 'bloc_timer/bloc.dart';
-import 'model/function_body.dart';
 import 'login/api/user_repository.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:geolocator/geolocator.dart';
-import 'bloc_submit/bloc.dart';
-// import 'package:mobile_number/mobile_number.dart'; // android only
-import 'package:permission_handler/permission_handler.dart';
-import 'package:pointycastle/export.dart';
-import 'widget/photo_camera.dart';
-import 'package:camera/camera.dart';
-import 'package:intl/intl.dart';
+import 'model/function_body.dart';
 import 'model/general_get_controller.dart';
-import 'package:geocoding/geocoding.dart';
+import 'model/otq_state.dart';
+import 'part/build_part/channel.dart';
+import 'redux/screen_transaction.dart';
+import 'widget/build_theme.dart';
+import 'widget/ftz_webview.dart';
+import 'widget/photo_camera.dart';
+import 'widget/ui_component.dart';
 
 Future apiTest() async {
   bool testNow = true;
@@ -87,7 +88,7 @@ Future<void> callEventFunction() async {
   if (internetConnected()) {
     const String functionName = 'callEventFunction';
     String? currentSsid =
-        await waitUntilNotNullScreenTx(functionName, '#INTERFACE_KEY', 20);
+    await waitUntilNotNullScreenTx(functionName, '#INTERFACE_KEY', 20);
     if (currentSsid != loginSsid) {
       Timer(const Duration(seconds: 3), () async {
         if (currentSsid != null) {
@@ -136,9 +137,9 @@ Future scheduleSendImagesInImageMap() async {
 bool isGpsUpdated(int delay) {
   // true if gpsTime and current time difference is less than delay (in ms)
   return (DateTime.now().millisecondsSinceEpoch +
-              time2GpsOffset -
-              gpsTime.value)
-          .abs() <
+      time2GpsOffset -
+      gpsTime.value)
+      .abs() <
       delay;
 } // end of isGpsUpdated
 
@@ -168,8 +169,8 @@ Future<void> startGettingGpsData() async {
     gpsPermission = await Geolocator.requestPermission();
   }
   if (gpsEnabled &
-      ((gpsPermission == LocationPermission.always) |
-          (gpsPermission == LocationPermission.whileInUse))) {
+  ((gpsPermission == LocationPermission.always) |
+  (gpsPermission == LocationPermission.whileInUse))) {
     positionStream =
         Geolocator.getPositionStream(locationSettings: locationSettings);
     positionStreamSubs = positionStream.listen((Position position) {
@@ -204,9 +205,9 @@ Future<dynamic> getAppGps() async {
   //    'gpsTime= ${gpsTime.value}, lat=${gpsData.latitude}, alt=${gpsData.altitude}');
   if (gpsTime.value <= 0) {
     await gpsTime.stream.firstWhere((value) => value > 0).timeout(
-          const Duration(seconds: getGpsDataWaitTime),
-          onTimeout: () => 0, // Do nothing on timeout
-        ); // wait until get location for max 5 seconds
+      const Duration(seconds: getGpsDataWaitTime),
+      onTimeout: () => 0, // Do nothing on timeout
+    ); // wait until get location for max 5 seconds
   }
   if (isGpsUpdated(acceptableGpsTime)) {
     // save data when gps data have meaningfully value
@@ -214,7 +215,7 @@ Future<dynamic> getAppGps() async {
       // devPrint('--get placemark from gps');
       try {
         List<Placemark> temp =
-            await placemarkFromCoordinates(gpsData.latitude, gpsData.longitude);
+        await placemarkFromCoordinates(gpsData.latitude, gpsData.longitude);
         gpsPlaceMark = placeMarkCopy(temp[0]);
       } catch (e) {
         gpsPlaceMark = placeMarkCopy(null);
@@ -262,8 +263,8 @@ Future<dynamic> getAppGps() async {
     // Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high).then((Position position) {
     await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
-      accuracy: LocationAccuracy.high,
-    )).then((Position position) async {
+          accuracy: LocationAccuracy.high,
+        )).then((Position position) async {
       try {
         gpsData = positionCopy(position);
         gpsTime.value = gpsData.timestamp.millisecondsSinceEpoch;
@@ -505,8 +506,8 @@ Future<String> replaceLocalImageToUrl(String input) async {
 
 Future<String> prepareImageAsLocal(
     {required String imagePath,
-    required String folder,
-    required String fileName}) async {
+      required String folder,
+      required String fileName}) async {
   // prepare image as local file, rename it with local name standard
   String result = emptyString;
   String finalImagePath = await renamePath(
@@ -520,7 +521,7 @@ Future saveImagePutInImageMap(String url) async {
   // put url entry in tableContent[imageMapName]
   // if connected to internet then try to send the image to cloud
   String localPath =
-      url.replaceAll(localImagePrefix, '').replaceAll((localImagePostfix), '');
+  url.replaceAll(localImagePrefix, '').replaceAll((localImagePostfix), '');
   dynamic imageMapEntry = imageMapGet(localPath);
   if (imageMapEntry == null) {
     imageMapEntry = [
@@ -569,8 +570,8 @@ Future replaceAumImageInHistoryUnUsed(
 
 Future<List<String>> saveImageToCloud(
     {required String imagePath,
-    required String folder,
-    required String rawFileName}) async {
+      required String folder,
+      required String rawFileName}) async {
   String fileName = rawFileName.replaceAll('.jpg', '');
   List<String> result = [emptyString, emptyString];
   String finalImagePath = await renamePath(
@@ -580,7 +581,7 @@ Future<List<String>> saveImageToCloud(
     if (await internetConnectedCheck()) {
       if (File(finalImagePath).existsSync()) {
         String tempResult =
-            await uploadToCloudStorage(finalImagePath, "$folder/$fileName.jpg");
+        await uploadToCloudStorage(finalImagePath, "$folder/$fileName.jpg");
         if (isValidImageUrl(tempResult)) {
           result = [finalImagePath, tempResult];
           await imageMapUpdateUrl(finalImagePath, tempResult);
@@ -609,22 +610,22 @@ Future<List<String>> saveImageToCloud(
 
 Future<String> renamePath(
     {required String originalImagePath,
-    required String folder,
-    required String fileName}) async {
+      required String folder,
+      required String fileName}) async {
   String tempImagePath = originalImagePath.replaceFirst(localImagePrefix, "");
   tempImagePath = tempImagePath.endsWith(localImagePostfix)
       ? tempImagePath.substring(
-          0, tempImagePath.length - localImagePostfix.length)
+      0, tempImagePath.length - localImagePostfix.length)
       : tempImagePath;
   String finalImagePath = tempImagePath;
   bool originalPath =
-      tempImagePath.contains(localImageArtifact); // original path from camera
+  tempImagePath.contains(localImageArtifact); // original path from camera
   if (originalPath) {
     String finalFolder = folder.isEmpty || folder.endsWith('/')
         ? folder.substring(0, folder.length - 1)
         : folder; // delete '/' at the end of folder
     finalImagePath =
-        '${tempImagePath.split(localImageArtifact)[0]}$localImageBeginningFolderDivider%2F${Uri.encodeComponent(finalFolder)}$localImageFolderSeparator${Uri.encodeComponent(fileName)}.jpg';
+    '${tempImagePath.split(localImageArtifact)[0]}$localImageBeginningFolderDivider%2F${Uri.encodeComponent(finalFolder)}$localImageFolderSeparator${Uri.encodeComponent(fileName)}.jpg';
     try {
       await File(tempImagePath).rename(finalImagePath);
     } catch (e) {
@@ -654,10 +655,10 @@ Widget displayImage({String imageUrl = defaultImage, bool cached = true}) {
         result = CachedNetworkImage(
             imageUrl: defaultImage,
             placeholder: (context, url) => Container(
-                  color: Colors.transparent, // Set transparency
-                  width: double.infinity, // Match image size
-                  height: double.infinity, // Match image size
-                )); // default image
+              color: Colors.transparent, // Set transparency
+              width: double.infinity, // Match image size
+              height: double.infinity, // Match image size
+            )); // default image
       } else {
         result = Image.file(localFile, fit: BoxFit.contain);
       } // end if (!localFile.existsSync())
@@ -671,9 +672,9 @@ Widget displayImage({String imageUrl = defaultImage, bool cached = true}) {
             height: double.infinity, // Match image size
           ), // Placeholder while loading
           errorWidget: (context, url, error) =>
-              const Icon(Icons.error), // Error widget
+          const Icon(Icons.error), // Error widget
           fadeInDuration:
-              const Duration(milliseconds: duration), // Fade-in effect
+          const Duration(milliseconds: duration), // Fade-in effect
         );
       } else {
         result = FadeInImage.memoryNetwork(
@@ -691,7 +692,7 @@ Widget displayImage({String imageUrl = defaultImage, bool cached = true}) {
         height: double.infinity, // Match image size
       ), // Placeholder while loading
       errorWidget: (context, url, error) =>
-          const Icon(Icons.error), // Error widget
+      const Icon(Icons.error), // Error widget
       fadeInDuration: const Duration(milliseconds: duration), // Fade-in effect
     );
   } // end try
@@ -740,11 +741,11 @@ String myCountryCode() {
 
 String phoneWithoutCC(String inp) {
   String result =
-      inp.replaceAllMapped(RegExp(r'( |\.|-|\+|\(|\)|\[|\])'), (match) {
+  inp.replaceAllMapped(RegExp(r'( |\.|-|\+|\(|\)|\[|\])'), (match) {
     return '';
   });
   String result1 =
-      result.replaceAllMapped(RegExp(r'^' + myCountryCode()), (match) {
+  result.replaceAllMapped(RegExp(r'^' + myCountryCode()), (match) {
     return '';
   });
   String result2 = result1.replaceAllMapped(RegExp(r'^0'), (match) {
@@ -776,7 +777,7 @@ Future<String> getQRContent(
      99 = generic error
   */
   String tableString =
-      normalizeTableName(autheniumDecode(rawTableString) ?? '');
+  normalizeTableName(autheniumDecode(rawTableString) ?? '');
   final String errString = textList["ErrorPrefix"];
   dynamic result = '${errString}99';
   dynamic refTable;
@@ -790,12 +791,12 @@ Future<String> getQRContent(
   List<String> negativeTableCodeArray =
       negativeTableString?.split(separator[1]) ?? [];
   String? negativeTableCode =
-      negativeTableCodeArray.isNotEmpty ? negativeTableCodeArray[0] : null;
+  negativeTableCodeArray.isNotEmpty ? negativeTableCodeArray[0] : null;
   int negativeTableColumn = max(
       0,
       ((negativeTableCodeArray.length > 1)
-              ? int.tryParse(negativeTableCodeArray[1]) ?? 1
-              : 1) -
+          ? int.tryParse(negativeTableCodeArray[1]) ?? 1
+          : 1) -
           1);
   try {
     if (qrType == 'L') {
@@ -826,7 +827,7 @@ Future<String> getQRContent(
           num finalTolerance =
               (position == null ? 0 : (position.accuracy ?? 0).round()) + tol;
           num d = (distanceM(position!.latitude, position.longitude,
-                  refTable[lqr][1], refTable[lqr][2]))
+              refTable[lqr][1], refTable[lqr][2]))
               .round();
           if (d > finalTolerance) {
             result = '${errString}01';
@@ -856,8 +857,7 @@ Future<String> getQRContent(
       }
     } else if (qrType == 'A') {
       // A for Asset
-      String universalCode =
-          await assetVerify(rawText, 9); // Todo use component
+      String universalCode = assetVerify(rawText, 9); // Todo use component
       if (universalCode == errorString) {
         result = '${errString}98';
       } else {
@@ -875,9 +875,9 @@ Future<String> getQRContent(
             result = universalCode;
           } else {
             dynamic negativeList =
-                transactionStore.state.screenTx['#TABLE$negativeTableCode'];
+            transactionStore.state.screenTx['#TABLE$negativeTableCode'];
             resultOk =
-                (negativeList[universalCode]) != null ? universalCode : empty;
+            (negativeList[universalCode]) != null ? universalCode : empty;
             if (resultOk == empty || resultOk == errorString) {
               result = universalCode; // not in negative list
             } else {
@@ -976,7 +976,7 @@ Future<List> proxyRead(dynamic ranges) async {
     FunctionBody functionBody = getFunctionBody(
         transactionStore.state.screenTx['#INTERFACE_KEY'], ranges);
     dynamic response =
-        await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+    await http.post(Uri.parse(functionBody.url), body: functionBody.body);
     result = jsonDecode(response.body);
     int d = 1;
   } catch (e) {
@@ -1066,8 +1066,8 @@ Future<String> dataProcess(BuildContext context, String inputText,
           resultOk = empty;
         } else {
           resultOk = (transactionStore.state.screenTx['#LQR_LIST']
-                      [finalQrText]) !=
-                  null
+          [finalQrText]) !=
+              null
               ? transactionStore.state.screenTx['#LQR_LIST'][finalQrText][0]
               : empty;
         } // end if (transactionStore.state.screenTx['#LQR_LIST'] == null)
@@ -1082,9 +1082,9 @@ Future<String> dataProcess(BuildContext context, String inputText,
     actionLock('dataProcess api');
     switch (resultOk) {
       case empty: // valid qr but not listed in proxy
-        // await Vibration.vibrate(duration: 50);
-        // await Future.delayed(const Duration(milliseconds: 100));
-        // Vibration.vibrate(duration: 50);
+      // await Vibration.vibrate(duration: 50);
+      // await Future.delayed(const Duration(milliseconds: 100));
+      // Vibration.vibrate(duration: 50);
         if (component['position'] != null) {
           txfController[screenName]![getPosition(component['position'])]!
               .controller
@@ -1095,11 +1095,11 @@ Future<String> dataProcess(BuildContext context, String inputText,
         break;
 
       case errorString:
-        // await Vibration.vibrate(duration: 50);
-        // await Future.delayed(const Duration(milliseconds: 100));
-        // await Vibration.vibrate(duration: 50);
-        // await Future.delayed(const Duration(milliseconds: 100));
-        // Vibration.vibrate(duration: 50);
+      // await Vibration.vibrate(duration: 50);
+      // await Future.delayed(const Duration(milliseconds: 100));
+      // await Vibration.vibrate(duration: 50);
+      // await Future.delayed(const Duration(milliseconds: 100));
+      // Vibration.vibrate(duration: 50);
         if (component['position'] != null) {
           txfController[screenName]![getPosition(component['position'])]!
               .controller
@@ -1110,7 +1110,7 @@ Future<String> dataProcess(BuildContext context, String inputText,
         break;
 
       default: // valid location qr
-        // Vibration.vibrate(duration: 100);
+      // Vibration.vibrate(duration: 100);
         if (component['position'] != null) {
           txfController[screenName]![getPosition(component['position'])]!
               .controller
@@ -1181,17 +1181,17 @@ String dateTimeToGSheet(DateTime myDate, bool utc) {
   result = utc
       ? NumberFormat("##0").format(myDate.millisecondsSinceEpoch)
       : NumberFormat("##0").format(
-          myDate.millisecondsSinceEpoch + myDate.timeZoneOffset.inMilliseconds);
+      myDate.millisecondsSinceEpoch + myDate.timeZoneOffset.inMilliseconds);
   return result;
 } // end of dateTimeToGSheet
 
 String timeOfDayToGSheet(TimeOfDay myTime, bool utc) {
   String result = utc
       ? NumberFormat("##0").format(myTime.hour * 3600000 +
-          myTime.minute * 60000 -
-          DateTime.now().timeZoneOffset.inMilliseconds)
+      myTime.minute * 60000 -
+      DateTime.now().timeZoneOffset.inMilliseconds)
       : NumberFormat("##0")
-          .format(myTime.hour * 3600000 + myTime.minute * 60000);
+      .format(myTime.hour * 3600000 + myTime.minute * 60000);
   return result;
 } // end of dateTimeToGSheet
 
@@ -1204,7 +1204,9 @@ void getLqrList(String? proxySsid) async {
         key: "lqrList"); //= get documentID of entry in msg_xxxx collection
     if (lqrString != null) {
       lqr = json.decode(lqrString);
-      dynamic lRef = lqr.entries.first;
+      Map<String, dynamic> lRef = {
+        lqr.entries.first.key: lqr.entries.first.value
+      };
       transactionStore.dispatch(
           UpdateScreenTxAction(ScreenTransaction({'#LQR_REF': lRef})));
       transactionStore.dispatch(
@@ -1222,7 +1224,7 @@ void getLqrList(String? proxySsid) async {
     }
     FunctionBody functionBody = getFunctionBody(proxySsid!, [locRange]);
     dynamic locString =
-        await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+    await http.post(Uri.parse(functionBody.url), body: functionBody.body);
     dynamic lqrArray = json.decode(locString.body)[0];
     lqr = {};
 
@@ -1312,7 +1314,7 @@ Future sendMessage(mTo, mFrom, mDisplay, mData, mIn, mStatus) async {
     var val = toVid[i];
     var sendCollection = "$fsMsgCollection/$val/io/$mFrom";
     var messageCollection =
-        FirebaseFirestore.instance.collection("$sendCollection/msg");
+    FirebaseFirestore.instance.collection("$sendCollection/msg");
     var msg = {
       "to": val,
       "fr": mFrom,
@@ -1337,7 +1339,7 @@ Future sendMessage(mTo, mFrom, mDisplay, mData, mIn, mStatus) async {
 
     try {
       DocumentSnapshot docSnap =
-          await FirebaseFirestore.instance.doc(sendCollection).get();
+      await FirebaseFirestore.instance.doc(sendCollection).get();
       final postRef = FirebaseFirestore.instance.doc(sendCollection);
       await FirebaseFirestore.instance.runTransaction((Transaction tx) async {
         final docSnapshot = await tx.get<Map<String, dynamic>>(postRef);
@@ -1604,7 +1606,7 @@ Future setDataOK(String iNumber) async {
 
     case '4':
       desc =
-          '4=>reload without reading from spreadsheet (called by subscribeToProxy)';
+      '4=>reload without reading from spreadsheet (called by subscribeToProxy)';
       String newRoute = transactionStore.state.screenTx['#CURRENT_ROUTE'];
       List<Widget> newElementList = reloadPage(newRoute);
       if (rootThis != null) {
@@ -1634,7 +1636,7 @@ Future<dynamic> getDataFromCloud() async {
     try {
       dynamic qParams = {"app": appsCode};
       dynamic uri =
-          Uri.https(autsorzFunctionDomain, appSettingFunctionName, qParams);
+      Uri.https(autsorzFunctionDomain, appSettingFunctionName, qParams);
       dynamic rawReturnValue = await Future.wait([
         http.post(uri),
 //      getServiceAccountCredential(), //= TODO uncomment this
@@ -1721,7 +1723,7 @@ Future<bool> newUpdateApp() async {
   return (lastVersion != null && lastVersion != '$version$subVersion');
 } // end of newUpdateApp
 
-readSettingsStart(String? lifKey, int opt) async {
+Future<void> readSettingsStart(String? lifKey, int opt) async {
   // opt 1 = regular startup, load only home.
   // opt 2 = fastened setup, load as second loader in asyncAppStartup2
   debugPrint('start readSettingsStart opt=$opt');
@@ -1770,7 +1772,7 @@ readSettingsStart(String? lifKey, int opt) async {
           guestIndex = 59; // get info page
         }
         guestRange =
-            "JSON!B$guestIndex:E$guestIndex"; // get dedicated sign in page from appSettings. #GUEST_INDEX was defined in serverSetup()
+        "JSON!B$guestIndex:E$guestIndex"; // get dedicated sign in page from appSettings. #GUEST_INDEX was defined in serverSetup()
         debugCount = 529;
       } else {
         if (needUpgrade != empty) {
@@ -1780,7 +1782,7 @@ readSettingsStart(String? lifKey, int opt) async {
             guestRange = res['screenRange']; // load all pages
           } else {
             guestRange =
-                "JSON!B$guestIndex:E$guestIndex"; // get dedicated sign in page from appSettings. #GUEST_INDEX was defined in serverSetup()
+            "JSON!B$guestIndex:E$guestIndex"; // get dedicated sign in page from appSettings. #GUEST_INDEX was defined in serverSetup()
           }
           debugCount = 5210;
         }
@@ -1811,10 +1813,10 @@ readSettingsStart(String? lifKey, int opt) async {
         trace(debugCount);
         //systemUIComponent.clear();
         for (var i = 0;
-            i < getResult[0].length &&
-                getResult[0][i].length > 0 &&
-                getResult[0][i][0].length > 0;
-            i++) {
+        i < getResult[0].length &&
+            getResult[0][i].length > 0 &&
+            getResult[0][i][0].length > 0;
+        i++) {
           var combination = combineJson(getResult[0][i]);
           systemUIComponent[getResult[0][i][0]] = json.decode(combination);
         }
@@ -1838,13 +1840,13 @@ readSettingsStart(String? lifKey, int opt) async {
         if (signInProcess) {
           asHome = getResult[1][0][0];
           screenUIComponent[home] = screenUIComponent[
-              asHome]; // if in sign in process, copy this page as home
+          asHome]; // if in sign in process, copy this page as home
           debugCount = 5219;
           trace(debugCount);
         } else if (needUpgrade != empty) {
           asHome = getResult[1][0][0];
           screenUIComponent[home] = screenUIComponent[
-              asHome]; // if in sign in process, copy this page as home
+          asHome]; // if in sign in process, copy this page as home
           debugCount = 5220;
           trace(debugCount);
         }
@@ -1935,11 +1937,11 @@ readSettingsStart(String? lifKey, int opt) async {
   debugPrint('end readSettingsStart');
 } // end of readSettingsStart
 
-readUIPages(String lifKey, int guestIndex) async {
+Future<void> readUIPages(String lifKey, int guestIndex) async {
   // read json part of lif and put them in screenUIComponent
   FunctionBody functionBody = getFunctionBody(settingKey, [screenJsonRange]);
   var response =
-      await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+  await http.post(Uri.parse(functionBody.url), body: functionBody.body);
   var entryList = jsonDecode(response.body);
   entryList[0].forEach((scr) {
     var combination = combineJson(scr);
@@ -1952,14 +1954,14 @@ readUIPages(String lifKey, int guestIndex) async {
   if (guestIndex > 0) {
     // this is sign in process
     screenUIComponent[home] = screenUIComponent[entryList[0][guestIndex - 51]
-        [0]]; // change home with dedicated signin page
+    [0]]; // change home with dedicated signin page
   }
   // await prefs.setString('@systemUI', jsonEncode(systemUIComponent));
   // await prefs.setString('@screenUI', jsonEncode(screenUIComponent));
   // constructAllPageElements();
 } // end of readUIPages
 
-readSettings(String lifKey, int opt) async {
+Future<void> readSettings(String lifKey, int opt) async {
   // opt 1 = Load as usual from JSON etc; 2 = load from JSON2 only
   // then constructPageElement of the respective screen
 
@@ -1997,7 +1999,7 @@ readSettings(String lifKey, int opt) async {
       functionBody = getFunctionBody(settingKey, [screenJsonRange]);
     }
     response =
-        await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+    await http.post(Uri.parse(functionBody.url), body: functionBody.body);
   } catch (e) {
     errorReport(e);
   }
@@ -2005,10 +2007,10 @@ readSettings(String lifKey, int opt) async {
   if (opt == 1) {
     // systemUIComponent.clear();
     for (var i = 0;
-        i < getResult[0].length &&
-            getResult[0][i].length > 0 &&
-            getResult[0][i][0].length > 0;
-        i++) {
+    i < getResult[0].length &&
+        getResult[0][i].length > 0 &&
+        getResult[0][i][0].length > 0;
+    i++) {
       var combination = combineJson(getResult[0][i]);
       systemUIComponent[getResult[0][i][0]] = json.decode(combination);
     }
@@ -2032,7 +2034,7 @@ readSettings(String lifKey, int opt) async {
         screenUIComponent[home] = screenUIComponent[getResult[1][index][0]];
       } else {
         screenUIComponent[home] =
-            screenUIComponent[myState['#GUEST_UPGRADE_INDEX']]; // row 59
+        screenUIComponent[myState['#GUEST_UPGRADE_INDEX']]; // row 59
       }
     } else if (needUpgrade != empty) {
       screenUIComponent[home] = screenUIComponent[needUpgrade];
@@ -2091,7 +2093,8 @@ readSettings(String lifKey, int opt) async {
   // await prefs.setString('@screenUI', json.encode(screenUIComponent));
 } // end of readSettings
 
-readSettingsContext(BuildContext context, String lifKey, int opt) async {
+Future<void> readSettingsContext(
+    BuildContext context, String lifKey, int opt) async {
   // opt 1 = Load as usual from JSON etc; 2 = load from JSON2 only
   // then constructPageElement of the respective screen
 
@@ -2129,7 +2132,7 @@ readSettingsContext(BuildContext context, String lifKey, int opt) async {
       functionBody = getFunctionBody(settingKey, [screenJsonRange]);
     }
     response =
-        await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+    await http.post(Uri.parse(functionBody.url), body: functionBody.body);
   } catch (e) {
     errorReport(e);
     showAlert(
@@ -2142,10 +2145,10 @@ readSettingsContext(BuildContext context, String lifKey, int opt) async {
       if (opt == 1) {
         // systemUIComponent.clear();
         for (var i = 0;
-            i < getResult[0].length &&
-                getResult[0][i].length > 0 &&
-                getResult[0][i][0].length > 0;
-            i++) {
+        i < getResult[0].length &&
+            getResult[0][i].length > 0 &&
+            getResult[0][i][0].length > 0;
+        i++) {
           var combination = combineJson(getResult[0][i]);
           systemUIComponent[getResult[0][i][0]] = json.decode(combination);
         }
@@ -2174,7 +2177,7 @@ readSettingsContext(BuildContext context, String lifKey, int opt) async {
             screenUIComponent[home] = screenUIComponent[getResult[1][index][0]];
           } else {
             screenUIComponent[home] =
-                screenUIComponent[myState['#GUEST_UPGRADE_INDEX']]; // row 59
+            screenUIComponent[myState['#GUEST_UPGRADE_INDEX']]; // row 59
           }
         } else if (needUpgrade != empty) {
           screenUIComponent[home] = screenUIComponent[needUpgrade];
@@ -2276,8 +2279,8 @@ Future getServiceAccountCredential() async {
   return auth.obtainAccessCredentialsViaServiceAccount(
       auth.ServiceAccountCredentials.fromJson(
           await rootBundle.loadStructuredData("start.sct", (jsonStr) async {
-        return json.decode(jsonStr);
-      })),
+            return json.decode(jsonStr);
+          })),
       scopes,
       client);
 }
@@ -2330,7 +2333,7 @@ Future<String> appendToSheetOld(dynamic val) async {
   var state = transactionStore.state.screenTx;
   try {
     FunctionBody functionBody =
-        appendSSA1(state['#INTERFACE_KEY'], [val], defaultCluster);
+    appendSSA1(state['#INTERFACE_KEY'], [val], defaultCluster);
     await http
         .post(Uri.parse(functionBody.url), body: functionBody.body)
         .timeout(const Duration(seconds: 10));
@@ -2404,7 +2407,7 @@ Future getVidData() async {
       '#FS_IO': firestoreIO,
     })));
     fsMsgCollection =
-        "$msgPrefix$myCluster"; //= set singleton for whole project
+    "$msgPrefix$myCluster"; //= set singleton for whole project
     var myVid = transactionStore.state.screenTx['#VID'].toString();
 
     var futures = <Future>[];
@@ -2462,7 +2465,7 @@ Future getGPSLoc() async {
   }
   // });
   transactionStore.dispatch(
-      // UpdateScreenTxAction(ScreenTransaction({'#LOCATION': latLang})));
+    // UpdateScreenTxAction(ScreenTransaction({'#LOCATION': latLang})));
       UpdateScreenTxAction(ScreenTransaction({'#LOCATION': geoPos})));
   //devPrint('Latitude:${latLang.lat}, Longitude : ${latLang.lng}');
   return geoPos;
@@ -2615,9 +2618,9 @@ Future<int> userIntegrityCheck() async {
             if (myPinHash == null) {
               sheetApi.spreadsheets.values
                   .batchGet(settingKey, // read from Link Interface
-                      ranges: ['Settings!G10'],
-                      dateTimeRenderOption: "SERIAL_NUMBER",
-                      valueRenderOption: "UNFORMATTED_VALUE")
+                  ranges: ['Settings!G10'],
+                  dateTimeRenderOption: "SERIAL_NUMBER",
+                  valueRenderOption: "UNFORMATTED_VALUE")
                   .then((entryList) {
                 if (entryList.valueRanges![0].values == null) {
                   transactionStore.dispatch(UpdateScreenTxAction(
@@ -2639,9 +2642,9 @@ Future<int> userIntegrityCheck() async {
           }).catchError((_) {
             sheetApi.spreadsheets.values
                 .batchGet(settingKey, // read from Link Interface
-                    ranges: ['Settings!G10'],
-                    dateTimeRenderOption: "SERIAL_NUMBER",
-                    valueRenderOption: "UNFORMATTED_VALUE")
+                ranges: ['Settings!G10'],
+                dateTimeRenderOption: "SERIAL_NUMBER",
+                valueRenderOption: "UNFORMATTED_VALUE")
                 .then((entryList) {
               var lifHash = entryList.valueRanges![0].values![0][0];
               if (lifHash == null) {
@@ -2674,9 +2677,9 @@ Future<int> userIntegrityCheck() async {
 Future getLifProfileData(String lifKey) async {
   Map<String, dynamic> profileData = {};
   FunctionBody functionBody =
-      getFunctionBody(lifKey, [lifSetting, lifSetting2]);
+  getFunctionBody(lifKey, [lifSetting, lifSetting2]);
   var response =
-      await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+  await http.post(Uri.parse(functionBody.url), body: functionBody.body);
   var getResult = jsonDecode(response.body);
 
 //  var getResult = await sheetApi.spreadsheets.values
@@ -2728,7 +2731,7 @@ Future<int> launchCheck() async {
           updateData["ph1"] = empty;
           result = 994;
           FunctionBody functionBody =
-              getFunctionBody(settingKey, ['Settings!G10']);
+          getFunctionBody(settingKey, ['Settings!G10']);
           result = 995;
           var response = await http.post(Uri.parse(functionBody.url),
               body: functionBody.body);
@@ -2754,7 +2757,7 @@ Future<int> launchCheck() async {
           result = 9910;
           updateData["ph1"] = myPinHash;
           FunctionBody functionBody =
-              getFunctionBody(settingKey, ['Settings!G10']);
+          getFunctionBody(settingKey, ['Settings!G10']);
           result = 9911;
           var response = await http.post(Uri.parse(functionBody.url),
               body: functionBody.body);
@@ -2771,7 +2774,7 @@ Future<int> launchCheck() async {
             storage.write(
                 key: 'pinHash',
                 value:
-                    '--'); //= delete storage.pinhash if pinhash in lif = null
+                '--'); //= delete storage.pinhash if pinhash in lif = null
             transactionStore.dispatch(UpdateScreenTxAction(
                 ScreenTransaction({'#NEED_PINHASH': true})));
             result = 9914;
@@ -2792,7 +2795,7 @@ Future<int> launchCheck() async {
         result = 9917;
         //  retry read pinhash in LIF
         FunctionBody functionBody =
-            getFunctionBody(settingKey, ['Settings!G10']);
+        getFunctionBody(settingKey, ['Settings!G10']);
         result = 9918;
         var response = await http.post(Uri.parse(functionBody.url),
             body: functionBody.body);
@@ -2953,7 +2956,7 @@ Future getFirestoreUserData(
   bool needToRegisterInvLogin = false;
   var uidUser = await FirebaseFirestore.instance
       .collection(
-          topCollection) // search data in firebase with corresponding uid
+      topCollection) // search data in firebase with corresponding uid
       .where('u', isEqualTo: myUid)
       .get();
   var recFound = uidUser.docs.length;
@@ -2961,7 +2964,7 @@ Future getFirestoreUserData(
     // Uid not found in firebase
     uidUser = await FirebaseFirestore.instance
         .collection(
-            topCollection) // search data in firebase with corresponding uid
+        topCollection) // search data in firebase with corresponding uid
         .where('e', isEqualTo: myEmail)
         .where('u', isEqualTo: 'TBD')
         .get();
@@ -2978,9 +2981,9 @@ Future getFirestoreUserData(
       uidUser = await FirebaseFirestore.instance
           .collection(topCollection) // search data in firebase with invitation
           .where('i',
-              isEqualTo: inv == "" ? "OtonomiqInvitationNotExist..." : inv)
-          // .where('e', isEqualTo: "-") // Find invitation that is not used
-          // .where('x', isGreaterThan: nowTime)
+          isEqualTo: inv == "" ? "OtonomiqInvitationNotExist..." : inv)
+      // .where('e', isEqualTo: "-") // Find invitation that is not used
+      // .where('x', isGreaterThan: nowTime)
           .get();
       recFound = uidUser.docs.length;
       if (recFound <= 0) {
@@ -3005,7 +3008,7 @@ Future getFirestoreUserData(
         } else {
           recFound = 0;
           invitationStatus =
-              7; // Invitation has been used by another user with different email
+          7; // Invitation has been used by another user with different email
         }
       } else {
         // Found more than 1,
@@ -3023,7 +3026,7 @@ Future getFirestoreUserData(
         } else {
           recFound = 0;
           invitationStatus =
-              7; // Invitation has been used by another user with different email
+          7; // Invitation has been used by another user with different email
         } // end if e = "-"
       } // end if recFound == 0
     } // end if recFound >= 1
@@ -3188,7 +3191,7 @@ Future getFirestoreMessageRef(String myVid) async {
     try {
       messageDocument = await FirebaseFirestore.instance //= try to get anyway
           .collection(
-              fsMsgCollection) //= search data in firebase with corresponding uid
+          fsMsgCollection) //= search data in firebase with corresponding uid
           .where('v', isEqualTo: myVid)
           .limit(1)
           .get();
@@ -3227,7 +3230,7 @@ Future createNewMessageDocument(String myVid, String myUid) async {
     "v": myVid,
   };
   var newDoc =
-      await FirebaseFirestore.instance.collection(fsMsgCollection).add(data);
+  await FirebaseFirestore.instance.collection(fsMsgCollection).add(data);
   return newDoc;
 } // end of createNewMessageDocument
 
@@ -3402,7 +3405,7 @@ void clearData(String scrName) {
       widgetsToUpdate.add(wId);
 
       dynamic theController =
-          GeneralGetXController.to.getController(scrName, input.position);
+      GeneralGetXController.to.getController(scrName, input.position);
       if (theController is TextEditingController) {
         theController.text = input.initialValue;
         devPrint(
@@ -3529,7 +3532,7 @@ void saveSend(
     if (component['type'].toString().trim().toLowerCase() == 'checker') {
       //separator[5] = white diamond
       row[4] =
-          '${separator[5]}${component['checker']}${separator[5]}${component['checkie']}';
+      '${separator[5]}${component['checker']}${separator[5]}${component['checkie']}';
     } else {
       row[4] = '';
     } // end (component['type'].toString().trim().toLowerCase() == 'checker')
@@ -3541,13 +3544,13 @@ void saveSend(
             // if table is not null or empty
             input.table!.forEach((documentName, content) {
               String finalName =
-                  replacePlaceHoldersFromTxfController(scrName, documentName);
+              replacePlaceHoldersFromTxfController(scrName, documentName);
               writeToStaticTable(currentTableVid, finalName, content);
             });
           } // end if (input.table != null && input.table != emptyString)
           int pos = input.position + sheetSystemLength - 1;
           maxPosition =
-              input.position > maxPosition ? input.position : maxPosition;
+          input.position > maxPosition ? input.position : maxPosition;
           if (pos >= row.length) {
             int dif = pos - row.length;
             for (var ii = 0; ii < dif; ii++) {
@@ -3555,16 +3558,16 @@ void saveSend(
             }
             row.add(input.finalData == emptyString
                 ? (stringCleanUp(input.controller.text) ?? "")
-                    .replaceAll("\n", "\\n")
+                .replaceAll("\n", "\\n")
                 : (stringCleanUp(input.finalData) ?? '')
-                    .replaceAll("\n", "\\n")); // get data from txf controller
+                .replaceAll("\n", "\\n")); // get data from txf controller
             int d = 1;
           } else {
             row[pos] = input.finalData == emptyString
                 ? (stringCleanUp(input.controller.text) ?? '')
-                    .replaceAll("\n", "\\n")
+                .replaceAll("\n", "\\n")
                 : (stringCleanUp(input.finalData) ?? '')
-                    .replaceAll("\n", "\\n"); // get data from txf controller
+                .replaceAll("\n", "\\n"); // get data from txf controller
           } // end if if (pos >= row.length)
         } // end if input.position > 0
       } catch (eEach) {
@@ -3584,14 +3587,45 @@ void saveSend(
       // "${component['addToTable'] ?? ''}";
       tableString = autheniumDecode(tableString) ?? '';
       tableString = tableString
-          .replaceAll("◼A⭘", "◼A⭘tableVid◼${currentTableVid}⭘")
-          .replaceAll("◼D⭘", "◼D⭘tableVid◼${currentTableVid}⭘")
-          .replaceAll("◼S⭘", "◼S⭘tableVid◼${currentTableVid}⭘");
+          .replaceAll("◼A⭘", "◼A⭘tableVid◼$currentTableVid⭘")
+          .replaceAll("◼D⭘", "◼D⭘tableVid◼$currentTableVid⭘")
+          .replaceAll("◼S⭘", "◼S⭘tableVid◼$currentTableVid⭘");
       tableString = replacePlaceholders(tableString, ref);
       int d = 1;
     } catch (e) {
       // tableString = null;
     } // end try
+
+    String updateString = '';
+    try {
+      String raw = component['updateTableRow'] ?? '';
+      if (raw.isNotEmpty) {
+        updateString = autheniumDecode(raw) ?? '';
+        updateString =
+            updateString.replaceAll("◼D⭘", "◼D⭘tableVid◼$currentTableVid⭘");
+        updateString = replacePlaceholders(updateString, ref);
+      }
+    } catch (e) {
+      updateString = '';
+    }
+
+    String deleteString = '';
+    try {
+      String raw = component['deleteFromTable'] ?? '';
+      if (raw.isNotEmpty) {
+        deleteString = autheniumDecode(raw) ?? '';
+        deleteString =
+            deleteString.replaceAll("◼D⭘", "◼D⭘tableVid◼$currentTableVid⭘");
+        deleteString = replacePlaceholders(deleteString, ref);
+      }
+    } catch (e) {
+      deleteString = '';
+    }
+
+    if (updateString.isNotEmpty || deleteString.isNotEmpty) {
+      tableString =
+      '${tableString ?? ''}${separator[0]}$updateString${separator[0]}$deleteString';
+    }
 
     if (routeExist(component['route'])) {
       devPrint('start clearing txfController');
@@ -3816,7 +3850,7 @@ Future locationVerify(var locArray, var tolerance, OtqState? otqData) async {
   return found;
 } // end of locationVerify
 
-distanceM(var lat1, var lon1, var lat2, var lon2) {
+num distanceM(var lat1, var lon1, var lat2, var lon2) {
   // inspired by https://www.movable-type.co.uk/scripts/latlong.html
   const R = 6371000;
   const piRad = 0.0174532925199433; // pi/180
@@ -3831,16 +3865,16 @@ distanceM(var lat1, var lon1, var lat2, var lon2) {
 } //end of distanceM
 
 Future<String> getPhotoCameraImage(
-  List<CameraDescription> cameras,
-  String title,
-  String lens,
-  int maxsize,
-  int quality,
-  String folder,
-  String fileName,
-  double? height,
-  double? width,
-) async {
+    List<CameraDescription> cameras,
+    String title,
+    String lens,
+    int maxsize,
+    int quality,
+    String folder,
+    String fileName,
+    double? height,
+    double? width,
+    ) async {
   final String pickedFileUrl = await acquireCamera(
       cameras, title, lens, maxsize, quality, height, width);
   // String url = await saveImageToCloud(
@@ -3916,15 +3950,15 @@ List totp(String keycode, int len, int sec) {
   int position =
       int.parse(hmac2.substring(hmac2.length - 1, hmac2.length), radix: 16) * 2;
   String s1 =
-      (BigInt.parse((hmac2.substring(position, position + 8)), radix: 16) &
-              BigInt.from(2147483647))
-          .toString();
+  (BigInt.parse((hmac2.substring(position, position + 8)), radix: 16) &
+  BigInt.from(2147483647))
+      .toString();
   s1 = len < s1.length ? s1.substring(s1.length - len, s1.length) : s1;
   retArray.add(s1); // older number goes first
   position =
       int.parse(hmac1.substring(hmac1.length - 1, hmac1.length), radix: 16) * 2;
   s1 = (BigInt.parse((hmac1.substring(position, position + 8)), radix: 16) &
-          BigInt.from(2147483647))
+  BigInt.from(2147483647))
       .toString();
   s1 = len < s1.length ? s1.substring(s1.length - len, s1.length) : s1;
   retArray.add(s1); // latest number goes second
@@ -3933,8 +3967,8 @@ List totp(String keycode, int len, int sec) {
 
 Uint8List hmacSha1(Uint8List hmacKey, Uint8List data) {
   final hmac =
-      HMac(SHA1Digest(), 64) // for HMAC SHA-256, block length must be 64
-        ..init(KeyParameter(hmacKey));
+  HMac(SHA1Digest(), 64) // for HMAC SHA-256, block length must be 64
+    ..init(KeyParameter(hmacKey));
   return hmac.process(data);
 }
 
@@ -3987,7 +4021,7 @@ Future asyncAppStartup2() async {
   // debugPrint('start asyncAppStartup2');
   actionUnLock('asyncAppStartup2');
   String? myLif =
-      await waitUntilNotNullScreenTx('asyncAppStartup2', '#INTERFACE_KEY', 20);
+  await waitUntilNotNullScreenTx('asyncAppStartup2', '#INTERFACE_KEY', 20);
   if (myLif != null) {
     await readSettingsStart(myLif, 2);
   } else {

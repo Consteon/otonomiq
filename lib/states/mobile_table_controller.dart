@@ -52,7 +52,7 @@ class MobileTableController extends GetxController {
     String applicationName = '$mainCollectionName/$applicationTableVid';
     String upperCollectionName = '$applicationName/$tableCollectionName';
     CollectionReference mainCollectionRef =
-        firestoreDb.collection(mainCollectionName);
+    firestoreDb.collection(mainCollectionName);
     DocumentSnapshot applicationSnapshot;
     String appVid = applicationTableVid.toString();
     try {
@@ -64,14 +64,14 @@ class MobileTableController extends GetxController {
         applicationSnapshot = await mainCollectionRef.doc(appVid).get();
       } // end if (!applicationSnapshot.exists)
       CollectionReference upperCollectionRef =
-          firestoreDb.collection(upperCollectionName);
+      firestoreDb.collection(upperCollectionName);
       DocumentSnapshot tableSnapshot;
       try {
         tableSnapshot = await upperCollectionRef.doc(tableName).get();
         int nowMilli = getNowMillisecondFromEpoch();
         String checksum =
-            getIntChecksum(sha3_256('${nowMilli.toString()}$docContent'))
-                .toString();
+        getIntChecksum(sha3_256('${nowMilli.toString()}$docContent'))
+            .toString();
         String sep = separator[6]; // white star
         String sep2 = separator[1]; // black diamond
         List<dynamic> fields = jsonDecode(docContent);
@@ -147,4 +147,183 @@ class MobileTableController extends GetxController {
     } // end try applicationSnapshot
     return returnValue;
   } // end of addContent
+
+  Future<String> updateContent(
+      String tableName,
+      String searchField,
+      dynamic searchValue,
+      Map<int, String> partialFields, {
+        Map<String, dynamic>? indexFieldUpdates,
+      }) async {
+    // Update existing row(s) in dynamic table by query.
+    // - searchField: field name on the content doc (e.g. '3')
+    // - searchValue: typed value (auto-detected: bool/num/string)
+    // - partialFields: sparse 0-based map of column index → new value
+    // - indexFieldUpdates: optional field updates for indexed columns whose
+    //   values changed (only for columns that user explicitly patched).
+    String returnValue = 'Error';
+    String applicationName = '$mainCollectionName/$applicationTableVid';
+    String upperCollectionName = '$applicationName/$tableCollectionName';
+    try {
+      CollectionReference upperCollectionRef =
+      firestoreDb.collection(upperCollectionName);
+      DocumentSnapshot tableSnapshot =
+      await upperCollectionRef.doc(tableName).get();
+      if (!tableSnapshot.exists) {
+        return 'Error: table not found';
+      }
+      Map<String, dynamic> tableData =
+      tableSnapshot.data() as Map<String, dynamic>;
+      if (tableData['tt'] != 'D') {
+        return 'Error: update only supported for dynamic tables (tt=${tableData['tt']})';
+      }
+
+      String contentCollPath =
+          '$upperCollectionName/$tableName/$contentCollectionName';
+      QuerySnapshot matches = await firestoreDb
+          .collection(contentCollPath)
+          .where(searchField, isEqualTo: searchValue)
+          .get();
+
+      if (matches.docs.isEmpty) {
+        return 'Error: no match for $searchField=$searchValue';
+      }
+
+      int nowMilli = getNowMillisecondFromEpoch();
+      int updatedCount = 0;
+
+      for (DocumentSnapshot doc in matches.docs) {
+        try {
+          Map<String, dynamic> existing = doc.data() as Map<String, dynamic>;
+          List<dynamic> currentRow = jsonDecode(existing['c'] ?? '[]');
+
+          partialFields.forEach((idx, newValue) {
+            if (idx < 0) return;
+            while (currentRow.length <= idx) {
+              currentRow.add('');
+            }
+            currentRow[idx] = newValue;
+          });
+
+          Map<String, dynamic> rowUpdate = {
+            'c': jsonEncode(currentRow),
+            't': nowMilli,
+          };
+          if (indexFieldUpdates != null && indexFieldUpdates.isNotEmpty) {
+            rowUpdate.addAll(indexFieldUpdates);
+          }
+          partialFields.forEach((idx, newValue) {
+            String colKey = (idx + 1).toString();
+            if (rowUpdate.containsKey(colKey)) return;
+            if (!existing.containsKey(colKey)) return;
+            dynamic existingVal = existing[colKey];
+            if (existingVal is bool) {
+              rowUpdate[colKey] = newValue.toLowerCase() == 'true';
+            } else if (existingVal is num) {
+              rowUpdate[colKey] = num.tryParse(newValue);
+            } else {
+              rowUpdate[colKey] = newValue;
+            }
+          });
+          await doc.reference.update(rowUpdate);
+          updatedCount++;
+        } catch (eRow) {
+          returnValue += ' rowErr:${eRow.toString()}';
+        }
+      }
+
+      String oldHeader = (tableData['hd'] ?? '') as String;
+      String newChecksum =
+      getIntChecksum(sha3_256('${nowMilli.toString()}u$updatedCount'))
+          .toString();
+      String newHeader = _shiftHeaderChecksum(oldHeader, newChecksum);
+
+      await tableSnapshot.reference.update({
+        'cr': nowMilli,
+        'hd': newHeader,
+      });
+
+      update();
+      returnValue = 'OK $updatedCount updated';
+    } catch (e) {
+      returnValue += ' ${e.toString()}';
+    }
+    return returnValue;
+  } // end of updateContent
+
+  Future<String> deleteContent(
+      String tableName,
+      String searchField,
+      dynamic searchValue,
+      ) async {
+    // Delete row(s) in dynamic table by query.
+    String returnValue = 'Error';
+    String applicationName = '$mainCollectionName/$applicationTableVid';
+    String upperCollectionName = '$applicationName/$tableCollectionName';
+    try {
+      CollectionReference upperCollectionRef =
+      firestoreDb.collection(upperCollectionName);
+      DocumentSnapshot tableSnapshot =
+      await upperCollectionRef.doc(tableName).get();
+      if (!tableSnapshot.exists) {
+        return 'Error: table not found';
+      }
+      Map<String, dynamic> tableData =
+      tableSnapshot.data() as Map<String, dynamic>;
+      if (tableData['tt'] != 'D') {
+        return 'Error: delete only supported for dynamic tables (tt=${tableData['tt']})';
+      }
+
+      String contentCollPath =
+          '$upperCollectionName/$tableName/$contentCollectionName';
+      QuerySnapshot matches = await firestoreDb
+          .collection(contentCollPath)
+          .where(searchField, isEqualTo: searchValue)
+          .get();
+
+      if (matches.docs.isEmpty) {
+        return 'Error: no match for $searchField=$searchValue';
+      }
+
+      int deletedCount = 0;
+      for (DocumentSnapshot doc in matches.docs) {
+        try {
+          await doc.reference.delete();
+          deletedCount++;
+        } catch (eRow) {
+          returnValue += ' rowErr:${eRow.toString()}';
+        }
+      }
+
+      int nowMilli = getNowMillisecondFromEpoch();
+      String oldHeader = (tableData['hd'] ?? '') as String;
+      String newChecksum =
+      getIntChecksum(sha3_256('${nowMilli.toString()}d$deletedCount'))
+          .toString();
+      String newHeader = _shiftHeaderChecksum(oldHeader, newChecksum);
+
+      await tableSnapshot.reference.update({
+        'cr': nowMilli,
+        'hd': newHeader,
+      });
+
+      update();
+      returnValue = 'OK $deletedCount deleted';
+    } catch (e) {
+      returnValue += ' ${e.toString()}';
+    }
+    return returnValue;
+  } // end of deleteContent
+
+  String _shiftHeaderChecksum(String oldHeader, String newChecksum) {
+    final String sep = separator[6]; // ☆ white star
+    if (oldHeader.isEmpty) return newChecksum;
+    List<String> parts = oldHeader.split(sep);
+    if (parts.length < 2) {
+      return '$newChecksum$sep${parts.isNotEmpty ? parts[0] : ''}';
+    }
+    parts[1] = parts[0];
+    parts[0] = newChecksum;
+    return parts.join(sep);
+  } // end of _shiftHeaderChecksum
 } // end of class MobileTableController

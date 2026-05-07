@@ -1,29 +1,39 @@
 import 'package:flutter/material.dart';
-import '../model/ftz_scanned_code.dart';
-import '../widget/qr_gps.dart';
-import '../widget/radio_text.dart';
-import '../widget/ui_component.dart';
-// import 'package:share_plus/share_plus.dart';
-import '../init_values.dart';
-import '../widget/all_widget.dart';
+import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
+
 import '../api.dart';
 import '../crypto/auth_crypto.dart';
 import '../global.dart';
 import '../global2.dart';
+// import 'package:share_plus/share_plus.dart';
+import '../init_values.dart';
 import '../login/api/user_repository.dart';
 import '../login/page/login/login_widget.dart';
 import '../login/page/tos_page.dart';
+import '../model/ftz_scanned_code.dart';
 import '../model/input_controller.dart';
 import '../redux/screen_transaction.dart';
+import '../widget/all_widget.dart';
+import '../widget/qr_gps.dart';
+import '../widget/radio_text.dart';
+import '../widget/ui_component.dart';
+import 'choice_button_group.dart';
 import 'ctx.dart';
 import 'display_qr.dart';
 import 'ftz_bluetooth_printer.dart';
-import 'ftz_row_of_button.dart';
+import 'ftz_row_of_button_2.dart';
 import 'goto.dart';
 import 'gps_send.dart';
 import 'image_upload.dart';
+import 'location_detector.dart';
 import 'otq_checkbox.dart';
-import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
+import 'otq_dropdown_2.dart';
+import 'otq_get_images_2.dart';
+import 'otq_rdo_2.dart';
+import 'otq_txf_2.dart';
+import 'progress_bar.dart';
+import 'tasklist.dart';
+import 'time_presence.dart';
 
 Widget buildDisplayComponent(
     dynamic component, String scrName, UserRepository userRepository,
@@ -46,7 +56,7 @@ Widget buildDisplayComponent(
     txfController[scrName]![getPosition(component['position'])]!
         .initialIsEnabled = isEnabled;
     if (scrName.toLowerCase() == 'vertikateknolokaciptareportpatrol' &&
-        component['position'] == 5 ) {
+        component['position'] == 5) {
       int d = 1;
     }
     // if (canInitializePage(scrName)) {
@@ -64,7 +74,7 @@ Widget buildDisplayComponent(
               childComponent['position']); // build txfController if necessary
           final bool isEnabled =
               (childComponent['isEnabled']?.toString().toLowerCase() ??
-                      'true') !=
+                  'true') !=
                   'false';
           txfController[scrName]![getPosition(childComponent['position'])]!
               .isEnabled = isEnabled;
@@ -158,7 +168,7 @@ Widget buildDisplayComponent(
     try {
       // txfController[scrName]![getPosition(component['position'])]!.stateObject =
       //     OtqGetImagesStateObject();
-      result = OtqGetImages(
+      result = OtqGetImages2(
         key: txfKey,
         wKey: txfKey,
         component: component,
@@ -243,7 +253,7 @@ Widget buildDisplayComponent(
               maxCrossAxisExtent: (component['width'] ?? 0.0).toDouble(),
               childAspectRatio: bannerAspectRatio),
           children:
-              buildBannerList(component['children'], bannerImageAspectRatio),
+          buildBannerList(component['children'], bannerImageAspectRatio),
         ),
       );
     } catch (e) {
@@ -288,7 +298,7 @@ Widget buildDisplayComponent(
       result = Text('--${component['type']}-- Error: $e');
     } // end of try
   } else if (tip == 'txf') {
-    result = OtqTxf(
+    result = OtqTxf2(
       key: txfKey,
       scrName: scrName,
       component: component,
@@ -343,41 +353,41 @@ Widget buildDisplayComponent(
             tPad, rPad + (component['rightPadding'] ?? 0.0), bPad),
         child: component['left'].toString().trim().toLowerCase() == 'true'
             ? Row(
-                children: <Widget>[
-                  GestureDetector(
-                    child: Swc(
-                      key: ctxKey,
-                      scrName: scrName,
-                      component: component,
-                    ),
-                  ),
-                  Container(width: 8),
-                  Flexible(
-                    child: GestureDetector(
-                      child: Text(
-                        component['label'] ?? "",
-                      ),
-                    ),
-                  ),
-                ],
-              )
-            : Row(
-                children: <Widget>[
-                  Flexible(
-                    child: GestureDetector(
-                      child: Text(component['label'] ?? ""),
-                    ),
-                  ),
-                  Container(width: 8),
-                  GestureDetector(
-                    child: Swc(
-                      key: ctxKey,
-                      scrName: scrName,
-                      component: component,
-                    ),
-                  ),
-                ],
+          children: <Widget>[
+            GestureDetector(
+              child: Swc(
+                key: ctxKey,
+                scrName: scrName,
+                component: component,
               ),
+            ),
+            Container(width: 8),
+            Flexible(
+              child: GestureDetector(
+                child: Text(
+                  component['label'] ?? "",
+                ),
+              ),
+            ),
+          ],
+        )
+            : Row(
+          children: <Widget>[
+            Flexible(
+              child: GestureDetector(
+                child: Text(component['label'] ?? ""),
+              ),
+            ),
+            Container(width: 8),
+            GestureDetector(
+              child: Swc(
+                key: ctxKey,
+                scrName: scrName,
+                component: component,
+              ),
+            ),
+          ],
+        ),
       );
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
@@ -389,7 +399,7 @@ Widget buildDisplayComponent(
       if (component['position'] != null) {
         final position = getPosition(component['position']);
         final initValue =
-            getInitialValue(scrName, component); // This is the display value
+        getInitialValue(scrName, component); // This is the display value
         String finalDataValue = initValue; // Default to display value
 
         // Replicate logic from OtqDropdown to find the actual data value
@@ -412,7 +422,7 @@ Widget buildDisplayComponent(
           controller.initialValue = initValue; // The display value for the UI
         }
       } // end if (_component['position'] != null)
-      result = OtqDropdown(
+      result = OtqDropdown2(
         key: txfKey,
         scrName: scrName,
         component: component,
@@ -427,7 +437,7 @@ Widget buildDisplayComponent(
   } else if (tip == 'rbt') {
     // Row of button
     try {
-      result = FtzRowOfButton(
+      result = FtzRowOfButton2(
         key: txfKey,
         component: component,
         scrName: scrName,
@@ -627,7 +637,7 @@ Widget buildDisplayComponent(
   } else if (tip == 'rdo' || tip == 'rad') {
     // rad = deprecated
     // radio button
-    result = OtqRdo(
+    result = OtqRdo2(
       key: txfKey,
       scrName: scrName,
       component: component,
@@ -667,7 +677,7 @@ Widget buildDisplayComponent(
             child: ImageUpload(
               key: iKey,
               component:
-                  component, // imageType, folder, filename, route, position
+              component, // imageType, folder, filename, route, position
               scrName: scrName,
             ),
           );
@@ -685,7 +695,7 @@ Widget buildDisplayComponent(
           return QrGps(
             key: iKey,
             component:
-                component, // imageType, folder, filename, route, position
+            component, // imageType, folder, filename, route, position
             scrName: scrName,
           );
         },
@@ -702,9 +712,97 @@ Widget buildDisplayComponent(
           return FtzChecker(
             key: iKey,
             component:
-                component, // imageType, folder, filename, route, position
+            component, // imageType, folder, filename, route, position
             scrName: scrName,
             single: true,
+          );
+        },
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    } // end of try
+  } else if (tip == 'time_presence') {
+    try {
+      Key iKey = GlobalKey();
+      result = Builder(
+        builder: (BuildContext context) {
+          return TimePresence(
+            key: iKey,
+            component:
+            component, // imageType, folder, filename, route, position
+            scrName: scrName,
+            single: true,
+          );
+        },
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    } // end of try
+  } else if (tip == 'location_detector') {
+    try {
+      Key iKey = GlobalKey();
+      result = Builder(
+        builder: (BuildContext context) {
+          return LocationDetector(
+            key: iKey,
+            component:
+            component, // imageType, folder, filename, route, position
+            scrName: scrName,
+            single: true,
+          );
+        },
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    } // end of try
+  } else if (tip == 'progress_bar') {
+    try {
+      Key iKey = GlobalKey();
+      result = Builder(
+        builder: (BuildContext context) {
+          return ProgressBar(
+            key: iKey,
+            component:
+            component, // imageType, folder, filename, route, position
+            scrName: scrName,
+            single: true,
+          );
+        },
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    } // end of try
+  } else if (tip == 'tasklist') {
+    try {
+      Key iKey = GlobalKey();
+      result = Builder(
+        builder: (BuildContext context) {
+          return Tasklist(
+            key: iKey,
+            component:
+            component, // imageType, folder, filename, route, position
+            scrName: scrName,
+            single: true,
+          );
+        },
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    } // end of try
+  } else if (tip == 'choice_button_group') {
+    try {
+      Key iKey = GlobalKey();
+      result = Builder(
+        builder: (BuildContext context) {
+          return ChoiceButtonGroup(
+            key: iKey,
+            component:
+            component, // imageType, folder, filename, route, position
+            scrName: scrName,
+            lPad: lPad,
+            tPad: tPad,
+            rPad: rPad,
+            bPad: bPad,
           );
         },
       );
@@ -720,7 +818,7 @@ Widget buildDisplayComponent(
           return AttendQrGpsSelfie(
             key: iKey,
             component:
-                component, // imageType, folder, filename, route, position
+            component, // imageType, folder, filename, route, position
             scrName: scrName,
             single: true,
           );
@@ -754,7 +852,7 @@ Widget buildDisplayComponent(
           return GpsSend(
             key: iKey,
             component:
-                component, // imageType, folder, filename, route, position
+            component, // imageType, folder, filename, route, position
             scrName: scrName,
             single: true,
           );
@@ -782,14 +880,14 @@ Widget buildDisplayComponent(
             break;
 
           case 'share':
-            // disabled because of share_plus incompatibility with ios18
-            // Share.share(component['children'][i]['message'] ?? '--',
-            //     subject: component['children'][i]['subject'] ?? '');
-            // if (routeExist(component['children'][i]['route'])) {
-            //   String pageToGo = component['children'][i]['route'] ?? scrName;
-            //   routeStack.push(pageToGo);
-            //   gotoRoute(pageToGo);
-            // }
+          // disabled because of share_plus incompatibility with ios18
+          // Share.share(component['children'][i]['message'] ?? '--',
+          //     subject: component['children'][i]['subject'] ?? '');
+          // if (routeExist(component['children'][i]['route'])) {
+          //   String pageToGo = component['children'][i]['route'] ?? scrName;
+          //   routeStack.push(pageToGo);
+          //   gotoRoute(pageToGo);
+          // }
             break;
 
           case 'location':
@@ -845,7 +943,7 @@ Widget buildDisplayComponent(
             controller: ScrollController(),
             gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
               maxCrossAxisExtent:
-                  ((component['width'] + 30) ?? 130.0).toDouble(),
+              ((component['width'] + 30) ?? 130.0).toDouble(),
               crossAxisSpacing: 1.0,
               // mainAxisSpacing: 1.0,
             ),
@@ -863,7 +961,7 @@ Widget buildDisplayComponent(
           return Goto(
             key: iKey,
             component:
-                component, // imageType, folder, filename, route, position
+            component, // imageType, folder, filename, route, position
             scrName: scrName,
             single: true,
           );

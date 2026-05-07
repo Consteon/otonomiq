@@ -3,34 +3,33 @@ import 'dart:math';
 
 import 'package:flutter/cupertino.dart' hide RadioGroup;
 import 'package:flutter/material.dart' hide RadioGroup;
-import 'package:flutter_bloc/flutter_bloc.dart';
-// import 'package:fluttercontactpicker/fluttercontactpicker.dart';
-import 'package:group_radio_button/group_radio_button.dart';
-import '../global.dart';
-import '../global2.dart';
-import 'package:intl/intl.dart';
 // import 'package:qr_code_scanner/qr_code_scanner.dart';
 import 'package:flutter/services.dart';
-import '../otq_icons.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_multi_formatter/flutter_multi_formatter.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:get/get.dart';
+// import 'package:fluttercontactpicker/fluttercontactpicker.dart';
+import 'package:group_radio_button/group_radio_button.dart';
+import 'package:intl/intl.dart';
+
 import '../api.dart';
-import '../crypto/auth_crypto.dart';
 import '../bloc_timer/timer_bloc.dart';
 import '../bloc_timer/timer_event.dart';
+// import '../part/android_part/ftz_mobile_scanner.dart';
+import '../firestore_repository/table_repository.dart';
+import '../global.dart';
+import '../global2.dart';
 import '../init_values.dart';
 import '../main_bloc/main_bloc.dart';
 import '../main_bloc/main_event.dart';
-import 'package:flutter_multi_formatter/flutter_multi_formatter.dart';
-import 'package:get/get.dart';
 import '../model/general_get_controller.dart';
+import '../otq_icons.dart';
 import '../redux/screen_transaction.dart';
 import 'ftz_array_search.dart';
 import 'ftz_contact_picker.dart';
-// import '../part/android_part/ftz_mobile_scanner.dart';
-import '../firestore_repository/table_repository.dart';
-import 'package:geocoding/geocoding.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import 'ftz_scanner_screen.dart';
+
 // import 'package:flutter_native_contact_picker/flutter_native_contact_picker.dart';
 // import 'package:barcode_scan2/barcode_scan2.dart';
 part '../part/build_part/otq_txf_part.dart';
@@ -442,7 +441,7 @@ class OtqTxfState extends State<OtqTxf>
                 : valueArray[1];
         }
 
-        if (widget.component['position'] != null) { 
+        if (widget.component['position'] != null) {
           txfControllerCheck(widget.scrName,
               widget.component['position']); // build txfController if necessary
           if (canInitializePage(widget.scrName)) {
@@ -1616,6 +1615,111 @@ class OtqTxfState extends State<OtqTxf>
                                               null) {
                                         lastValue = myController.text;
                                       }
+                                      final bool fakeGpsAllowed =
+                                          (component['fakeGpsAllowed']
+                                                      ?.toString()
+                                                      .toLowerCase() ??
+                                                  'true') !=
+                                              'false';
+                                      if (!fakeGpsAllowed &&
+                                          (gpsPosition?.isMocked ?? false)) {
+                                        if (context.mounted) {
+                                          await showDialog(
+                                              context: context,
+                                              builder: (BuildContext ctx) {
+                                                return AlertDialog(
+                                                  title: Text(textArray.length >
+                                                          12
+                                                      ? textArray[12]
+                                                      : 'Lokasi tidak valid'),
+                                                  content: Text(textArray
+                                                              .length >
+                                                          13
+                                                      ? textArray[13]
+                                                      : 'Nonaktifkan Fake GPS'),
+                                                  actions: [
+                                                    TextButton(
+                                                      child: const Text('OK'),
+                                                      onPressed: () =>
+                                                          Navigator.of(ctx)
+                                                              .pop(),
+                                                    ),
+                                                  ],
+                                                );
+                                              });
+                                        }
+                                        return;
+                                      }
+                                      final bool outPositionAllowed =
+                                          (component['outPositionAllowed']
+                                                      ?.toString()
+                                                      .toUpperCase() ??
+                                                  'TRUE') !=
+                                              'FALSE';
+                                      bool outBlocked = false;
+                                      if (!outPositionAllowed) {
+                                        final dynamic lqrRef = transactionStore
+                                            .state.screenTx['#LQR_REF'];
+                                        final bool hasLqrRef = lqrRef != null &&
+                                            lqrRef is Map &&
+                                            lqrRef.isNotEmpty;
+                                        if (hasLqrRef) {
+                                          try {
+                                            final firstEntry =
+                                                lqrRef.values.first as List;
+                                            final double targetLat =
+                                                (firstEntry[1] as num)
+                                                    .toDouble();
+                                            final double targetLng =
+                                                (firstEntry[2] as num)
+                                                    .toDouble();
+                                            final double tolerance =
+                                                (firstEntry[3] as num)
+                                                    .toDouble();
+                                            final double zone2 = tolerance +
+                                                gpsPosition!.accuracy * 2;
+                                            final double distance =
+                                                Geolocator.distanceBetween(
+                                              targetLat,
+                                              targetLng,
+                                              gpsPosition!.latitude,
+                                              gpsPosition!.longitude,
+                                            );
+                                            debugPrint(
+                                                '[qrScan/otq_txf] distance=${distance.toStringAsFixed(1)}m, zone2=${zone2.toStringAsFixed(1)}m');
+                                            if (distance > zone2) {
+                                              outBlocked = true;
+                                              if (context.mounted) {
+                                                await Get.dialog(AlertDialog(
+                                                  title: Text(textArray.length >
+                                                          14
+                                                      ? textArray[14]
+                                                      : 'Diluar Area Absensi'),
+                                                  content: Text(textArray
+                                                              .length >
+                                                          15
+                                                      ? textArray[15]
+                                                      : 'Silahkan menuju lokasi yang ditentukan'),
+                                                  actions: [
+                                                    TextButton(
+                                                      child: const Text('OK'),
+                                                      onPressed: () =>
+                                                          Get.back(),
+                                                    ),
+                                                  ],
+                                                ));
+                                              }
+                                            }
+                                          } catch (eLoc) {
+                                            debugPrint(
+                                                '[qrScan/otq_txf] parse error: $eLoc — bypass pengecekan');
+                                          }
+                                        } else {
+                                          debugPrint(
+                                              '[qrScan/otq_txf] #LQR_REF kosong/null — bypass pengecekan');
+                                        }
+                                      }
+                                      if (outBlocked) return;
                                       actionLock('qrScan otq_txf');
                                       String? rawQRText = await takeQR(
                                           context,
@@ -1628,21 +1732,6 @@ class OtqTxfState extends State<OtqTxf>
                                       if (rawQRText != null &&
                                           rawQRText != emptyString &&
                                           rawQRText != 'null') {
-                                        final bool fakeGpsAllowed =
-                                            component['fakeGpsAllowed'] ?? true;
-                                        if (gpsPosition != null &&
-                                            !fakeGpsAllowed &&
-                                            gpsPosition!.isMocked) {
-                                          setState(() {
-                                            myController.text =
-                                                textArray.length > 12
-                                                    ? textArray[12]
-                                                    : '';
-                                            txfController[widget.scrName]![
-                                                    component['position']]!
-                                                .finalData = '';
-                                          });
-                                        } else {
                                         String qrResult = (await getQRContent(
                                                 qrType,
                                                 rawQRText,
@@ -1749,148 +1838,11 @@ class OtqTxfState extends State<OtqTxf>
                                               .finalData = '';
                                           switch (qrResult.substring(6, 8)) {
                                             case '01': //out of range
-                                              {
-                                                final bool outPositionAllowed =
-                                                    component[
-                                                            'outPositionAllowed'] ??
-                                                        true;
-                                                bool inZone2 = false;
-                                                if (!outPositionAllowed &&
-                                                    gpsPosition != null) {
-                                                  try {
-                                                    final dynamic lqrRef =
-                                                        transactionStore
-                                                                .state
-                                                                .screenTx[
-                                                            '#LQR_REF'];
-                                                    if (lqrRef != null &&
-                                                        lqrRef is Map &&
-                                                        lqrRef.isNotEmpty) {
-                                                      final firstEntry =
-                                                          (lqrRef).values.first
-                                                              as List;
-                                                      final double targetLat =
-                                                          (firstEntry[1] as num)
-                                                              .toDouble();
-                                                      final double targetLng =
-                                                          (firstEntry[2] as num)
-                                                              .toDouble();
-                                                      final double tolerance =
-                                                          (firstEntry[3] as num)
-                                                              .toDouble();
-                                                      final double zone2 =
-                                                          tolerance +
-                                                              gpsPosition!
-                                                                      .accuracy *
-                                                                  2;
-                                                      final double distance =
-                                                          Geolocator
-                                                              .distanceBetween(
-                                                        targetLat,
-                                                        targetLng,
-                                                        gpsPosition!.latitude,
-                                                        gpsPosition!.longitude,
-                                                      );
-                                                      if (distance <= zone2) {
-                                                        inZone2 = true;
-                                                      }
-                                                    }
-                                                  } catch (_) {}
-                                                }
-                                                if (outPositionAllowed ||
-                                                    inZone2) {
-                                                  try {
-                                                    final dynamic p2 =
-                                                        await omLqrReaderP();
-                                                    final dynamic q2 =
-                                                        await osLqrMakerQ();
-                                                    final String bypassLqr =
-                                                        await lqrVerify(
-                                                            p2, q2, rawQRText);
-                                                    String addressText =
-                                                        textArray.length > 13
-                                                            ? textArray[13]
-                                                            : textList[
-                                                                'GPSOutOfRange'];
-                                                    if (gpsPosition != null) {
-                                                      try {
-                                                        final List<Placemark>
-                                                            placemarks =
-                                                            await placemarkFromCoordinates(
-                                                                gpsPosition!
-                                                                    .latitude,
-                                                                gpsPosition!
-                                                                    .longitude);
-                                                        if (placemarks
-                                                            .isNotEmpty) {
-                                                          final pm =
-                                                              placemarks[0];
-                                                          final parts = [
-                                                            pm.subLocality ?? '',
-                                                            pm.locality ?? '',
-                                                            pm.administrativeArea ??
-                                                                '',
-                                                            pm.postalCode ?? '',
-                                                          ]
-                                                              .where((s) =>
-                                                                  s.isNotEmpty)
-                                                              .toList();
-                                                          if (parts.isNotEmpty) {
-                                                            addressText =
-                                                                parts.join(', ');
-                                                          }
-                                                        }
-                                                      } catch (_) {}
-                                                    }
-                                                    setState(() {
-                                                      myController.text =
-                                                          addressText;
-                                                      txfController[widget
-                                                                  .scrName]![
-                                                              component[
-                                                                  'position']]!
-                                                          .finalData =
-                                                          bypassLqr !=
-                                                                  errorString
-                                                              ? bypassLqr
-                                                              : '';
-                                                      if (component[
-                                                                  'locationNamePosition'] !=
-                                                              null &&
-                                                          component[
-                                                                  'locationNamePosition']
-                                                              .toString()
-                                                              .trim()
-                                                              .isNotEmpty) {
-                                                        try {
-                                                          txfControllerCheck(
-                                                              widget.scrName,
-                                                              widget.component[
-                                                                  'locationNamePosition']);
-                                                          txfController[widget
-                                                                      .scrName]![
-                                                                  component[
-                                                                      'locationNamePosition']]!
-                                                              .finalData =
-                                                              addressText;
-                                                        } catch (_) {}
-                                                      }
-                                                    });
-                                                  } catch (_) {
-                                                    myController.text =
-                                                        textArray.length > 13
-                                                            ? textArray[13]
-                                                            : textList[
-                                                                'GPSOutOfRange'];
-                                                  }
-                                                } else {
-                                                  myController.text =
-                                                      textArray.length > 13
-                                                          ? textArray[13]
-                                                          : textList[
-                                                              'GPSOutOfRange'];
-                                                }
-                                              }
+                                              myController.text = textArray
+                                                          .length >
+                                                      14
+                                                  ? textArray[14]
+                                                  : textList['GPSOutOfRange'];
                                               break;
 
                                             case '02': // no qr result
@@ -1920,7 +1872,6 @@ class OtqTxfState extends State<OtqTxf>
                                                   textList['GeneralError'];
                                           } // end switch (q
                                         } // end if (qrResult.substring(0,6) != '#Error')
-                                        } // end else (not fake GPS)
                                       }
                                       setDataOK(
                                           '2'); // reload pages and display green status.

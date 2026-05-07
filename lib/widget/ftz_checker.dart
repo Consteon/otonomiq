@@ -120,8 +120,8 @@ class FtzCheckerState extends State<FtzChecker> {
 
     Future<dynamic> checkerSuccessDialog(
         {String title = 'Success',
-        String message = '',
-        String okString = 'Ok'}) async {
+          String message = '',
+          String okString = 'Ok'}) async {
       vibrate(duration: 50);
       await Get.dialog(AlertDialog(
         // title: Text(title),
@@ -159,8 +159,8 @@ class FtzCheckerState extends State<FtzChecker> {
 
     Future<String?> checkerDialog(
         {String title = '',
-        String message = '',
-        String okString = 'Ok'}) async {
+          String message = '',
+          String okString = 'Ok'}) async {
       return Get.dialog(AlertDialog(
         // dialog 3
         // title: Text(title),
@@ -190,10 +190,10 @@ class FtzCheckerState extends State<FtzChecker> {
 
     Future<String?> checkerSendDialog(
         {String title = '',
-        String message1 = '',
-        String message2 = '',
-        int counter = 10,
-        String okString = 'Ok'}) async {
+          String message1 = '',
+          String message2 = '',
+          int counter = 10,
+          String okString = 'Ok'}) async {
       var getController = Get.put(Controller());
       //getController.decrease();
       getController.count.value = counter;
@@ -216,7 +216,7 @@ class FtzCheckerState extends State<FtzChecker> {
           alignment: const Alignment(0.0, 0.0),
           height: dialogHeight,
           child: Obx(
-            () => Column(
+                () => Column(
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.start,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -225,28 +225,28 @@ class FtzCheckerState extends State<FtzChecker> {
                 Container(),
                 Center(
                     child: Text(
-                  "${(getController.count.value > 0) ? getController.count : ''}",
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 16),
-                )),
+                      "${(getController.count.value > 0) ? getController.count : ''}",
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16),
+                    )),
               ],
             ),
           ),
         ),
         actions: <Widget>[
           Obx(
-            () => getController.count.value > 0
+                () => getController.count.value > 0
                 ? Container()
                 : TextButton(
-                    child: Text(okString),
-                    onPressed: () {
-                      //getController.decrease();
-                      setDataOK('2'); // display green
-                      timerSubscription.cancel();
-                      routeStack.pop();
-                      Get.back();
-                    },
-                  ),
+              child: Text(okString),
+              onPressed: () {
+                //getController.decrease();
+                setDataOK('2'); // display green
+                timerSubscription.cancel();
+                routeStack.pop();
+                Get.back();
+              },
+            ),
           )
         ],
       ));
@@ -264,9 +264,9 @@ class FtzCheckerState extends State<FtzChecker> {
     Future<String> checkerTakePicture(String lens, String? title) async {
       // get selfie, save to firebase, then return url to selfie image
       List<CameraDescription> cameras =
-          transactionStore.state.screenTx['#CAMS'];
+      transactionStore.state.screenTx['#CAMS'];
       int imgSize = (widget.component['imgWidth'] ?? 540) >
-              (widget.component['imgHeight'] ?? 540)
+          (widget.component['imgHeight'] ?? 540)
           ? widget.component['imgWidth'] ?? 540
           : widget.component['imgHeight'] ?? 540;
       String folder = widget.component['folder'] ?? 'default';
@@ -339,13 +339,20 @@ class FtzCheckerState extends State<FtzChecker> {
       }))); // set state #NEXTROUTE route that will be displayed after waitScreen
       //saveSend(scrName, widget.component);
       List<dynamic> row = [timeStamp, scrName, eventContent];
+      String checkerTableString = widget.component['addToTable'] ?? '';
+      String updateRaw = widget.component['updateTableRow'] ?? '';
+      String deleteRaw = widget.component['deleteFromTable'] ?? '';
+      if (updateRaw.isNotEmpty || deleteRaw.isNotEmpty) {
+        checkerTableString =
+        '$checkerTableString${separator[0]}$updateRaw${separator[0]}$deleteRaw';
+      }
       appendToSheet(
           row,
           defaultVid(),
           widget.component['flag'] ?? '',
           widget.component['desc'] ?? '',
           widget.component['type'] ?? '',
-          widget.component['addToTable'] ?? '');
+          checkerTableString);
     } // end of checkerSaveData
 
     Future<String> checkerDataProcess(List checkies, String originalScrName,
@@ -366,28 +373,28 @@ class FtzCheckerState extends State<FtzChecker> {
             eventContent += '${separator[7]}$timeStamp${separator[1]}';
             eventContent += '$originalScrName${separator[1]}';
             eventContent +=
-                '${widget.component['flag'] ?? 'location'}${separator[1]}';
+            '${widget.component['flag'] ?? 'location'}${separator[1]}';
             eventContent +=
-                '${widget.component['category'] ?? 'checkpoint'}${separator[1]}';
+            '${widget.component['category'] ?? 'checkpoint'}${separator[1]}';
             eventContent += '$lqr${separator[1]}';
             eventContent += '${position!.latitude.toString()}${separator[1]}';
             eventContent += '${position!.longitude.toString()}${separator[1]}';
             eventContent +=
-                '${placeMark.isNotEmpty ? placeMark[0].isoCountryCode! : invalidCountry}${separator[1]}';
+            '${placeMark.isNotEmpty ? placeMark[0].isoCountryCode! : invalidCountry}${separator[1]}';
             eventContent +=
-                '${placeMark.isNotEmpty ? placeMark[0].postalCode! : ""}${separator[1]}';
+            '${placeMark.isNotEmpty ? placeMark[0].postalCode! : ""}${separator[1]}';
             eventContent +=
-                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].administrativeArea! : "")}${separator[1]}';
+            '${cleanupString(placeMark.isNotEmpty ? placeMark[0].administrativeArea! : "")}${separator[1]}';
             eventContent +=
-                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].subAdministrativeArea! : "")}${separator[1]}';
+            '${cleanupString(placeMark.isNotEmpty ? placeMark[0].subAdministrativeArea! : "")}${separator[1]}';
             eventContent +=
-                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].locality! : "")}${separator[1]}';
+            '${cleanupString(placeMark.isNotEmpty ? placeMark[0].locality! : "")}${separator[1]}';
             eventContent +=
-                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].subLocality! : "")}${separator[1]}';
+            '${cleanupString(placeMark.isNotEmpty ? placeMark[0].subLocality! : "")}${separator[1]}';
             eventContent +=
-                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].thoroughfare! : "")}${separator[1]}';
+            '${cleanupString(placeMark.isNotEmpty ? placeMark[0].thoroughfare! : "")}${separator[1]}';
             eventContent +=
-                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].subThoroughfare! : "")}${separator[1]}';
+            '${cleanupString(placeMark.isNotEmpty ? placeMark[0].subThoroughfare! : "")}${separator[1]}';
             eventContent += mock;
             for (int i = 0; i < checkies.length; i++) {
               eventContent += '${separator[7]}${checkies[i][2]}${separator[5]}';
@@ -396,7 +403,7 @@ class FtzCheckerState extends State<FtzChecker> {
               int d = 1;
             } // end for checkies
             eventContent +=
-                '${separator[0]}${widget.component['flag'] ?? 'blank-flag'}';
+            '${separator[0]}${widget.component['flag'] ?? 'blank-flag'}';
             checkerSaveData(originalScrName, timeStamp,
                 eventContent); //= send record to FromLink
           } else {
@@ -509,7 +516,7 @@ class FtzCheckerState extends State<FtzChecker> {
                 widget.scrName,
                 newArray,
                 DateTime.fromMillisecondsSinceEpoch(
-                        DateTime.now().millisecondsSinceEpoch + timeDiff)
+                    DateTime.now().millisecondsSinceEpoch + timeDiff)
                     .millisecondsSinceEpoch,
                 lqr);
             int delayCounter = defaultFinalSaveCounter;
@@ -518,7 +525,7 @@ class FtzCheckerState extends State<FtzChecker> {
                   0,
                   (widget.component['delay'] ?? 10) -
                       (((DateTime.now().millisecondsSinceEpoch - lastSave) /
-                              1000)
+                          1000)
                           .round()) +
                       2);
             } // end if (lastSave > 0)
@@ -565,7 +572,7 @@ class FtzCheckerState extends State<FtzChecker> {
           lens = 'front';
         } // end if (actionType.contains('multiple'))
         int locationStatus =
-            0; // 1=good; 2=wrong lqr 3=lqr not registered; ; 4=wrong coordinate
+        0; // 1=good; 2=wrong lqr 3=lqr not registered; ; 4=wrong coordinate
         if (actionType.contains('lqr')) {
           dynamic p;
           dynamic q;
@@ -581,7 +588,7 @@ class FtzCheckerState extends State<FtzChecker> {
           int d = 0;
           num finalTolerance = 0;
           String lqrText = await checkerTakeQR(newArray[4] ?? 'LQR',
-                  widget.scrName, widget.component, 'loc', lens) ??
+              widget.scrName, widget.component, 'loc', lens) ??
               'Error';
           if (lqrText == empty) {
             locationStatus = 99; // exit
@@ -593,9 +600,9 @@ class FtzCheckerState extends State<FtzChecker> {
               continueLoop = false;
             } else {
               String resultOk =
-                  (transactionStore.state.screenTx['#LQR_LIST'][lqr]) != null
-                      ? transactionStore.state.screenTx['#LQR_LIST'][lqr][0]
-                      : empty;
+              (transactionStore.state.screenTx['#LQR_LIST'][lqr]) != null
+                  ? transactionStore.state.screenTx['#LQR_LIST'][lqr][0]
+                  : empty;
               if (resultOk == empty || resultOk == errorString) {
                 locationStatus = 3;
                 continueLoop = false;
@@ -605,10 +612,10 @@ class FtzCheckerState extends State<FtzChecker> {
                 finalTolerance = (position!.accuracy).round() + tol;
                 //throw 'Error Test';
                 d = (distanceM(
-                        position!.latitude,
-                        position!.longitude,
-                        transactionStore.state.screenTx['#LQR_LIST'][lqr][1],
-                        transactionStore.state.screenTx['#LQR_LIST'][lqr][2]))
+                    position!.latitude,
+                    position!.longitude,
+                    transactionStore.state.screenTx['#LQR_LIST'][lqr][1],
+                    transactionStore.state.screenTx['#LQR_LIST'][lqr][2]))
                     .round();
                 if (d > finalTolerance) {
                   locationStatus = 4;
@@ -653,7 +660,7 @@ class FtzCheckerState extends State<FtzChecker> {
                 position = res;
                 lastPositionTime = nowTime;
                 placemarkFromCoordinates(
-                        position!.latitude, position!.longitude)
+                    position!.latitude, position!.longitude)
                     .then((pm) {
                   placeMark = pm;
                 }); // end of placemarkFromCoordinates
@@ -662,7 +669,7 @@ class FtzCheckerState extends State<FtzChecker> {
 
             newArray = List<String>.from(tArray);
             String qrText = await checkerTakeQR(newArray[9] ?? 'QR',
-                    widget.scrName, widget.component, 'loc', lens) ??
+                widget.scrName, widget.component, 'loc', lens) ??
                 'Error';
             qrTime = DateTime.fromMillisecondsSinceEpoch(nowTime + timeDiff);
             qrDateStr = dateFormatter.format(qrTime);
@@ -677,7 +684,7 @@ class FtzCheckerState extends State<FtzChecker> {
                     message: newArray[14], okString: newArray[1]);
               } else {
                 List? vidProfile =
-                    checkerVerifyVid(vid, widget.component['table']);
+                checkerVerifyVid(vid, widget.component['table']);
                 String photoUrl = '';
                 if (vidProfile == null) {
                   // alert vid not found
@@ -727,8 +734,8 @@ class FtzCheckerState extends State<FtzChecker> {
                           widget.scrName,
                           newArray,
                           DateTime.fromMillisecondsSinceEpoch(
-                                  DateTime.now().millisecondsSinceEpoch +
-                                      timeDiff)
+                              DateTime.now().millisecondsSinceEpoch +
+                                  timeDiff)
                               .millisecondsSinceEpoch,
                           lqr);
                       int delayCounter = defaultFinalSaveCounter;
@@ -737,8 +744,8 @@ class FtzCheckerState extends State<FtzChecker> {
                             0,
                             (widget.component['delay'] ?? 10) -
                                 (((DateTime.now().millisecondsSinceEpoch -
-                                            lastSave) /
-                                        1000)
+                                    lastSave) /
+                                    1000)
                                     .round()) +
                                 2);
                       } // end if (lastSave > 0)
@@ -790,7 +797,7 @@ class FtzCheckerState extends State<FtzChecker> {
                 widget.scrName,
                 newArray,
                 DateTime.fromMillisecondsSinceEpoch(
-                        DateTime.now().millisecondsSinceEpoch + timeDiff)
+                    DateTime.now().millisecondsSinceEpoch + timeDiff)
                     .millisecondsSinceEpoch,
                 lqr);
             lastSave = DateTime.now().millisecondsSinceEpoch;
