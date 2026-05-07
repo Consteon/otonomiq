@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../api.dart';
 import '../global.dart';
+import '../global2.dart';
 import 'task_progress_store.dart';
 
 class Tasklist extends StatefulWidget {
@@ -25,6 +27,7 @@ class _TasklistState extends State<Tasklist> {
   late List<double> _margin;
   late String _category;
   late int _position;
+  late String _pendingLabel;
   String _status = 'pending';
   DateTime? _completedAt;
 
@@ -44,11 +47,24 @@ class _TasklistState extends State<Tasklist> {
     _margin = marginArray(widget.component['margin'] as String?);
     _category = widget.component['category'] as String? ?? '';
     _position = (widget.component['position'] as num?)?.toInt() ?? 0;
+    _pendingLabel =
+        (widget.component['pendingLabel'] as String?)?.trim().isNotEmpty == true
+            ? widget.component['pendingLabel'] as String
+            : 'belum';
     if (_position > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted)
+        if (mounted) {
           TaskProgressStore.instance.register(widget.scrName, _position);
+        }
       });
+      txfControllerCheck(widget.scrName, _position);
+      if (canInitializePage(widget.scrName)) {
+        final initial = _serialize(_pendingLabel);
+        final input = txfController[widget.scrName]![_position]!;
+        input.controller.text = initial;
+        input.finalData = initial;
+        input.initialValue = initial;
+      }
     }
 
     final rawOptions = widget.component['options'] as String? ?? '';
@@ -63,9 +79,49 @@ class _TasklistState extends State<Tasklist> {
     }
   }
 
+  String _serialize(String label) {
+    final title = _texts.isNotEmpty ? _texts[0] : '';
+    return '$title:$label';
+  }
+
   void _updateStore(String status) {
     if (_position > 0) {
       TaskProgressStore.instance.update(widget.scrName, _position, status);
+      final label = status == 'pending'
+          ? _pendingLabel
+          : _statusConfigForKey(status).label;
+      final value = _serialize(label);
+      txfControllerCheck(widget.scrName, _position);
+      final input = txfController[widget.scrName]![_position]!;
+      input.controller.text = value;
+      input.finalData = value;
+    }
+  }
+
+  _StatusConfig _statusConfigForKey(String key) {
+    switch (key) {
+      case 'done':
+        return _StatusConfig(
+          color: const Color(0xFF22C55E),
+          label: _options.isNotEmpty ? _options[0].label : 'Done',
+        );
+      case 'not_available':
+        return _StatusConfig(
+          color: const Color(0xFF9CA3AF),
+          label: _options.length > 1 ? _options[1].label : 'Not Available',
+        );
+      case 'skipped':
+        return _StatusConfig(
+          color: const Color(0xFFF59E0B),
+          label: _options.length > 2 ? _options[2].label : 'Skipped',
+        );
+      case 'issue':
+        return _StatusConfig(
+          color: const Color(0xFFEF4444),
+          label: _options.length > 3 ? _options[3].label : 'Issue',
+        );
+      default:
+        return const _StatusConfig(color: Color(0xFFD1D5DB), label: '');
     }
   }
 
@@ -108,32 +164,7 @@ class _TasklistState extends State<Tasklist> {
     );
   }
 
-  _StatusConfig _statusConfig() {
-    switch (_status) {
-      case 'done':
-        return _StatusConfig(
-          color: const Color(0xFF22C55E),
-          label: _options.isNotEmpty ? _options[0].label : 'Done',
-        );
-      case 'not_available':
-        return _StatusConfig(
-          color: const Color(0xFF9CA3AF),
-          label: _options.length > 1 ? _options[1].label : 'Not Available',
-        );
-      case 'skipped':
-        return _StatusConfig(
-          color: const Color(0xFFF59E0B),
-          label: _options.length > 2 ? _options[2].label : 'Skipped',
-        );
-      case 'issue':
-        return _StatusConfig(
-          color: const Color(0xFFEF4444),
-          label: _options.length > 3 ? _options[3].label : 'Issue',
-        );
-      default:
-        return const _StatusConfig(color: Color(0xFFD1D5DB), label: '');
-    }
-  }
+  _StatusConfig _statusConfig() => _statusConfigForKey(_status);
 
   String get _completedAtLabel {
     if (_completedAt == null) return '';

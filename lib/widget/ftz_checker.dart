@@ -339,13 +339,20 @@ class FtzCheckerState extends State<FtzChecker> {
       }))); // set state #NEXTROUTE route that will be displayed after waitScreen
       //saveSend(scrName, widget.component);
       List<dynamic> row = [timeStamp, scrName, eventContent];
+      String checkerTableString = widget.component['addToTable'] ?? '';
+      String updateRaw = widget.component['updateTableRow'] ?? '';
+      String deleteRaw = widget.component['deleteFromTable'] ?? '';
+      if (updateRaw.isNotEmpty || deleteRaw.isNotEmpty) {
+        checkerTableString =
+            '$checkerTableString${separator[0]}$updateRaw${separator[0]}$deleteRaw';
+      }
       appendToSheet(
           row,
           defaultVid(),
           widget.component['flag'] ?? '',
           widget.component['desc'] ?? '',
           widget.component['type'] ?? '',
-          widget.component['addToTable'] ?? '');
+          checkerTableString);
     } // end of checkerSaveData
 
     Future<String> checkerDataProcess(List checkies, String originalScrName,

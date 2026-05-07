@@ -1658,36 +1658,50 @@ class OtqTxfState extends State<OtqTxf>
                                               'FALSE';
                                       bool outBlocked = false;
                                       if (!outPositionAllowed) {
-                                        final dynamic lqrRef = transactionStore
-                                            .state.screenTx['#LQR_REF'];
-                                        final bool hasLqrRef = lqrRef != null &&
-                                            lqrRef is Map &&
-                                            lqrRef.isNotEmpty;
-                                        if (hasLqrRef) {
+                                        final dynamic lqrList = transactionStore
+                                            .state.screenTx['#LQR_LIST'];
+                                        final bool hasLqrList = lqrList !=
+                                                null &&
+                                            lqrList is Map &&
+                                            lqrList.isNotEmpty;
+                                        if (hasLqrList) {
                                           try {
-                                            final firstEntry =
-                                                lqrRef.values.first as List;
-                                            final double targetLat =
-                                                (firstEntry[1] as num)
-                                                    .toDouble();
-                                            final double targetLng =
-                                                (firstEntry[2] as num)
-                                                    .toDouble();
-                                            final double tolerance =
-                                                (firstEntry[3] as num)
-                                                    .toDouble();
-                                            final double zone2 = tolerance +
-                                                gpsPosition!.accuracy * 2;
-                                            final double distance =
-                                                Geolocator.distanceBetween(
-                                              targetLat,
-                                              targetLng,
-                                              gpsPosition!.latitude,
-                                              gpsPosition!.longitude,
-                                            );
+                                            final double gpsAccuracy =
+                                                gpsPosition!.accuracy;
+                                            bool insideAny = false;
+                                            double minDistance =
+                                                double.infinity;
+                                            double matchZone2 = 0;
+                                            for (final entry
+                                                in lqrList.values) {
+                                              final List data = entry as List;
+                                              final double targetLat =
+                                                  (data[1] as num).toDouble();
+                                              final double targetLng =
+                                                  (data[2] as num).toDouble();
+                                              final double tolerance =
+                                                  (data[3] as num).toDouble();
+                                              final double zone2 =
+                                                  tolerance + gpsAccuracy * 2;
+                                              final double distance =
+                                                  Geolocator.distanceBetween(
+                                                targetLat,
+                                                targetLng,
+                                                gpsPosition!.latitude,
+                                                gpsPosition!.longitude,
+                                              );
+                                              if (distance < minDistance) {
+                                                minDistance = distance;
+                                                matchZone2 = zone2;
+                                              }
+                                              if (distance <= zone2) {
+                                                insideAny = true;
+                                                break;
+                                              }
+                                            }
                                             debugPrint(
-                                                '[qrScan/otq_txf] distance=${distance.toStringAsFixed(1)}m, zone2=${zone2.toStringAsFixed(1)}m');
-                                            if (distance > zone2) {
+                                                '[qrScan/otq_txf] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m');
+                                            if (!insideAny) {
                                               outBlocked = true;
                                               if (context.mounted) {
                                                 await Get.dialog(AlertDialog(
@@ -1715,8 +1729,33 @@ class OtqTxfState extends State<OtqTxf>
                                                 '[qrScan/otq_txf] parse error: $eLoc — bypass pengecekan');
                                           }
                                         } else {
-                                          debugPrint(
-                                              '[qrScan/otq_txf] #LQR_REF kosong/null — bypass pengecekan');
+                                          if (!internetConnected()) {
+                                            debugPrint(
+                                                '[qrScan/otq_txf] offline & #LQR_LIST kosong/null — block absensi');
+                                            outBlocked = true;
+                                            if (context.mounted) {
+                                              await Get.dialog(AlertDialog(
+                                                title: Text(textArray.length >
+                                                        14
+                                                    ? textArray[14]
+                                                    : 'Diluar Area Absensi'),
+                                                content: Text(textArray.length >
+                                                        15
+                                                    ? textArray[15]
+                                                    : 'Silahkan menuju lokasi yang ditentukan'),
+                                                actions: [
+                                                  TextButton(
+                                                    child: const Text('OK'),
+                                                    onPressed: () =>
+                                                        Get.back(),
+                                                  ),
+                                                ],
+                                              ));
+                                            }
+                                          } else {
+                                            debugPrint(
+                                                '[qrScan/otq_txf] online & #LQR_LIST kosong/null — bypass pengecekan');
+                                          }
                                         }
                                       }
                                       if (outBlocked) return;

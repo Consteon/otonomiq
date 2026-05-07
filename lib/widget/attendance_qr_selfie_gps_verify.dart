@@ -211,10 +211,10 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
     } // end of saveData
 
     String? locationNameFromLqrRef(double lat, double lng, double accuracy) {
-      final dynamic lqrRef = transactionStore.state.screenTx['#LQR_REF'];
-      if (lqrRef == null || lqrRef is! Map || lqrRef.isEmpty) return null;
+      final dynamic lqrList = transactionStore.state.screenTx['#LQR_LIST'];
+      if (lqrList == null || lqrList is! Map || lqrList.isEmpty) return null;
       try {
-        for (final entry in lqrRef.entries) {
+        for (final entry in lqrList.entries) {
           final List data = entry.value as List;
           final double targetLat = (data[1] as num).toDouble();
           final double targetLng = (data[2] as num).toDouble();
@@ -1047,35 +1047,47 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                   'FALSE';
                               bool outBlocked = false;
                               if (!outPositionAllowed) {
-                                final dynamic lqrRef =
-                                    transactionStore.state.screenTx['#LQR_REF'];
-                                final bool hasLqrRef = lqrRef != null &&
-                                    lqrRef is Map &&
-                                    lqrRef.isNotEmpty;
-                                if (hasLqrRef) {
+                                final dynamic lqrList = transactionStore
+                                    .state.screenTx['#LQR_LIST'];
+                                final bool hasLqrList = lqrList != null &&
+                                    lqrList is Map &&
+                                    lqrList.isNotEmpty;
+                                if (hasLqrList) {
                                   try {
-                                    final firstEntry =
-                                        (lqrRef).values.first as List;
-                                    final double targetLat =
-                                        (firstEntry[1] as num).toDouble();
-                                    final double targetLng =
-                                        (firstEntry[2] as num).toDouble();
-                                    final double tolerance =
-                                        (firstEntry[3] as num).toDouble();
                                     final double gpsAccuracy =
                                         currentData.accuracy;
-                                    final double zone2 =
-                                        tolerance + gpsAccuracy * 2;
-                                    final double distance =
-                                        Geolocator.distanceBetween(
-                                      targetLat,
-                                      targetLng,
-                                      currentData.latitude,
-                                      currentData.longitude,
-                                    );
+                                    bool insideAny = false;
+                                    double minDistance = double.infinity;
+                                    double matchZone2 = 0;
+                                    for (final entry in lqrList.values) {
+                                      final List data = entry as List;
+                                      final double targetLat =
+                                          (data[1] as num).toDouble();
+                                      final double targetLng =
+                                          (data[2] as num).toDouble();
+                                      final double tolerance =
+                                          (data[3] as num).toDouble();
+                                      final double zone2 =
+                                          tolerance + gpsAccuracy * 2;
+                                      final double distance =
+                                          Geolocator.distanceBetween(
+                                        targetLat,
+                                        targetLng,
+                                        currentData.latitude,
+                                        currentData.longitude,
+                                      );
+                                      if (distance < minDistance) {
+                                        minDistance = distance;
+                                        matchZone2 = zone2;
+                                      }
+                                      if (distance <= zone2) {
+                                        insideAny = true;
+                                        break;
+                                      }
+                                    }
                                     debugPrint(
-                                        '[qr-single/single] distance=${distance.toStringAsFixed(1)}m, zone2=${zone2.toStringAsFixed(1)}m');
-                                    if (distance > zone2) {
+                                        '[qr-single/single] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m');
+                                    if (!insideAny) {
                                       outBlocked = true;
                                       if (context.mounted) {
                                         await Get.dialog(AlertDialog(
@@ -1095,8 +1107,26 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                         '[qr-single/single] parse error: $eLoc — bypass pengecekan');
                                   }
                                 } else {
-                                  debugPrint(
-                                      '[qr-single/single] #LQR_REF kosong/null — bypass pengecekan');
+                                  if (!internetConnected()) {
+                                    debugPrint(
+                                        '[qr-single/single] offline & #LQR_LIST kosong/null — block absensi');
+                                    outBlocked = true;
+                                    if (context.mounted) {
+                                      await Get.dialog(AlertDialog(
+                                        title: Text(textArray[24]),
+                                        content: Text(textArray[25]),
+                                        actions: [
+                                          TextButton(
+                                            child: Text(textArray[8]),
+                                            onPressed: () => Get.back(),
+                                          ),
+                                        ],
+                                      ));
+                                    }
+                                  } else {
+                                    debugPrint(
+                                        '[qr-single/single] online & #LQR_LIST kosong/null — bypass pengecekan');
+                                  }
                                 }
                               }
                               if (outBlocked) {
@@ -1144,35 +1174,47 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                   'FALSE';
                               bool outBlockedSelfie = false;
                               if (!outPositionAllowedSelfie) {
-                                final dynamic lqrRef =
-                                    transactionStore.state.screenTx['#LQR_REF'];
-                                final bool hasLqrRef = lqrRef != null &&
-                                    lqrRef is Map &&
-                                    lqrRef.isNotEmpty;
-                                if (hasLqrRef) {
+                                final dynamic lqrList = transactionStore
+                                    .state.screenTx['#LQR_LIST'];
+                                final bool hasLqrList = lqrList != null &&
+                                    lqrList is Map &&
+                                    lqrList.isNotEmpty;
+                                if (hasLqrList) {
                                   try {
-                                    final firstEntry =
-                                        (lqrRef).values.first as List;
-                                    final double targetLat =
-                                        (firstEntry[1] as num).toDouble();
-                                    final double targetLng =
-                                        (firstEntry[2] as num).toDouble();
-                                    final double tolerance =
-                                        (firstEntry[3] as num).toDouble();
                                     final double gpsAccuracy =
                                         currentData.accuracy;
-                                    final double zone2 =
-                                        tolerance + gpsAccuracy * 2;
-                                    final double distance =
-                                        Geolocator.distanceBetween(
-                                      targetLat,
-                                      targetLng,
-                                      currentData.latitude,
-                                      currentData.longitude,
-                                    );
+                                    bool insideAny = false;
+                                    double minDistance = double.infinity;
+                                    double matchZone2 = 0;
+                                    for (final entry in lqrList.values) {
+                                      final List data = entry as List;
+                                      final double targetLat =
+                                          (data[1] as num).toDouble();
+                                      final double targetLng =
+                                          (data[2] as num).toDouble();
+                                      final double tolerance =
+                                          (data[3] as num).toDouble();
+                                      final double zone2 =
+                                          tolerance + gpsAccuracy * 2;
+                                      final double distance =
+                                          Geolocator.distanceBetween(
+                                        targetLat,
+                                        targetLng,
+                                        currentData.latitude,
+                                        currentData.longitude,
+                                      );
+                                      if (distance < minDistance) {
+                                        minDistance = distance;
+                                        matchZone2 = zone2;
+                                      }
+                                      if (distance <= zone2) {
+                                        insideAny = true;
+                                        break;
+                                      }
+                                    }
                                     debugPrint(
-                                        '[selfie/single] distance=${distance.toStringAsFixed(1)}m, zone2=${zone2.toStringAsFixed(1)}m');
-                                    if (distance > zone2) {
+                                        '[selfie/single] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m');
+                                    if (!insideAny) {
                                       outBlockedSelfie = true;
                                       if (context.mounted) {
                                         await Get.dialog(AlertDialog(
@@ -1192,8 +1234,26 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                         '[selfie/single] parse error: $eLoc — bypass pengecekan');
                                   }
                                 } else {
-                                  debugPrint(
-                                      '[selfie/single] #LQR_REF kosong/null — bypass pengecekan');
+                                  if (!internetConnected()) {
+                                    debugPrint(
+                                        '[selfie/single] offline & #LQR_LIST kosong/null — block absensi');
+                                    outBlockedSelfie = true;
+                                    if (context.mounted) {
+                                      await Get.dialog(AlertDialog(
+                                        title: Text(textArray[24]),
+                                        content: Text(textArray[25]),
+                                        actions: [
+                                          TextButton(
+                                            child: Text(textArray[8]),
+                                            onPressed: () => Get.back(),
+                                          ),
+                                        ],
+                                      ));
+                                    }
+                                  } else {
+                                    debugPrint(
+                                        '[selfie/single] online & #LQR_LIST kosong/null — bypass pengecekan');
+                                  }
                                 }
                               }
                               if (outBlockedSelfie) {
@@ -1243,35 +1303,47 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                   'FALSE';
                               bool outBlockedGps = false;
                               if (!outPositionAllowedGps) {
-                                final dynamic lqrRef =
-                                    transactionStore.state.screenTx['#LQR_REF'];
-                                final bool hasLqrRef = lqrRef != null &&
-                                    lqrRef is Map &&
-                                    lqrRef.isNotEmpty;
-                                if (hasLqrRef) {
+                                final dynamic lqrList = transactionStore
+                                    .state.screenTx['#LQR_LIST'];
+                                final bool hasLqrList = lqrList != null &&
+                                    lqrList is Map &&
+                                    lqrList.isNotEmpty;
+                                if (hasLqrList) {
                                   try {
-                                    final firstEntry =
-                                        (lqrRef).values.first as List;
-                                    final double targetLat =
-                                        (firstEntry[1] as num).toDouble();
-                                    final double targetLng =
-                                        (firstEntry[2] as num).toDouble();
-                                    final double tolerance =
-                                        (firstEntry[3] as num).toDouble();
                                     final double gpsAccuracy =
                                         currentData.accuracy;
-                                    final double zone2 =
-                                        tolerance + gpsAccuracy * 2;
-                                    final double distance =
-                                        Geolocator.distanceBetween(
-                                      targetLat,
-                                      targetLng,
-                                      currentData.latitude,
-                                      currentData.longitude,
-                                    );
+                                    bool insideAny = false;
+                                    double minDistance = double.infinity;
+                                    double matchZone2 = 0;
+                                    for (final entry in lqrList.values) {
+                                      final List data = entry as List;
+                                      final double targetLat =
+                                          (data[1] as num).toDouble();
+                                      final double targetLng =
+                                          (data[2] as num).toDouble();
+                                      final double tolerance =
+                                          (data[3] as num).toDouble();
+                                      final double zone2 =
+                                          tolerance + gpsAccuracy * 2;
+                                      final double distance =
+                                          Geolocator.distanceBetween(
+                                        targetLat,
+                                        targetLng,
+                                        currentData.latitude,
+                                        currentData.longitude,
+                                      );
+                                      if (distance < minDistance) {
+                                        minDistance = distance;
+                                        matchZone2 = zone2;
+                                      }
+                                      if (distance <= zone2) {
+                                        insideAny = true;
+                                        break;
+                                      }
+                                    }
                                     debugPrint(
-                                        '[gps-single/single] distance=${distance.toStringAsFixed(1)}m, zone2=${zone2.toStringAsFixed(1)}m');
-                                    if (distance > zone2) {
+                                        '[gps-single/single] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m');
+                                    if (!insideAny) {
                                       outBlockedGps = true;
                                       if (context.mounted) {
                                         await Get.dialog(AlertDialog(
@@ -1291,8 +1363,26 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                         '[gps-single/single] parse error: $eLoc — bypass pengecekan');
                                   }
                                 } else {
-                                  debugPrint(
-                                      '[gps-single/single] #LQR_REF kosong/null — bypass pengecekan');
+                                  if (!internetConnected()) {
+                                    debugPrint(
+                                        '[gps-single/single] offline & #LQR_LIST kosong/null — block absensi');
+                                    outBlockedGps = true;
+                                    if (context.mounted) {
+                                      await Get.dialog(AlertDialog(
+                                        title: Text(textArray[24]),
+                                        content: Text(textArray[25]),
+                                        actions: [
+                                          TextButton(
+                                            child: Text(textArray[8]),
+                                            onPressed: () => Get.back(),
+                                          ),
+                                        ],
+                                      ));
+                                    }
+                                  } else {
+                                    debugPrint(
+                                        '[gps-single/single] online & #LQR_LIST kosong/null — bypass pengecekan');
+                                  }
                                 }
                               }
                               if (outBlockedGps) {
@@ -1453,32 +1543,46 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                             'FALSE';
                         bool outBlocked = false;
                         if (!outPositionAllowed) {
-                          final dynamic lqrRef =
-                              transactionStore.state.screenTx['#LQR_REF'];
-                          final bool hasLqrRef = lqrRef != null &&
-                              lqrRef is Map &&
-                              lqrRef.isNotEmpty;
-                          if (hasLqrRef) {
+                          final dynamic lqrList =
+                              transactionStore.state.screenTx['#LQR_LIST'];
+                          final bool hasLqrList = lqrList != null &&
+                              lqrList is Map &&
+                              lqrList.isNotEmpty;
+                          if (hasLqrList) {
                             try {
-                              final firstEntry = (lqrRef).values.first as List;
-                              final double targetLat =
-                                  (firstEntry[1] as num).toDouble();
-                              final double targetLng =
-                                  (firstEntry[2] as num).toDouble();
-                              final double tolerance =
-                                  (firstEntry[3] as num).toDouble();
                               final double gpsAccuracy = currentData.accuracy;
-                              final double zone2 = tolerance + gpsAccuracy * 2;
-                              final double distance =
-                                  Geolocator.distanceBetween(
-                                targetLat,
-                                targetLng,
-                                currentData.latitude,
-                                currentData.longitude,
-                              );
+                              bool insideAny = false;
+                              double minDistance = double.infinity;
+                              double matchZone2 = 0;
+                              for (final entry in lqrList.values) {
+                                final List data = entry as List;
+                                final double targetLat =
+                                    (data[1] as num).toDouble();
+                                final double targetLng =
+                                    (data[2] as num).toDouble();
+                                final double tolerance =
+                                    (data[3] as num).toDouble();
+                                final double zone2 =
+                                    tolerance + gpsAccuracy * 2;
+                                final double distance =
+                                    Geolocator.distanceBetween(
+                                  targetLat,
+                                  targetLng,
+                                  currentData.latitude,
+                                  currentData.longitude,
+                                );
+                                if (distance < minDistance) {
+                                  minDistance = distance;
+                                  matchZone2 = zone2;
+                                }
+                                if (distance <= zone2) {
+                                  insideAny = true;
+                                  break;
+                                }
+                              }
                               debugPrint(
-                                  '[qr-single/multi] distance=${distance.toStringAsFixed(1)}m, zone2=${zone2.toStringAsFixed(1)}m');
-                              if (distance > zone2) {
+                                  '[qr-single/multi] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m');
+                              if (!insideAny) {
                                 outBlocked = true;
                                 if (context.mounted) {
                                   await Get.dialog(AlertDialog(
@@ -1498,8 +1602,26 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                   '[qr-single/multi] parse error: $eLoc — bypass pengecekan');
                             }
                           } else {
-                            debugPrint(
-                                '[qr-single/multi] #LQR_REF kosong/null — bypass pengecekan');
+                            if (!internetConnected()) {
+                              debugPrint(
+                                  '[qr-single/multi] offline & #LQR_LIST kosong/null — block absensi');
+                              outBlocked = true;
+                              if (context.mounted) {
+                                await Get.dialog(AlertDialog(
+                                  title: Text(textArray[24]),
+                                  content: Text(textArray[25]),
+                                  actions: [
+                                    TextButton(
+                                      child: Text(textArray[8]),
+                                      onPressed: () => Get.back(),
+                                    ),
+                                  ],
+                                ));
+                              }
+                            } else {
+                              debugPrint(
+                                  '[qr-single/multi] online & #LQR_LIST kosong/null — bypass pengecekan');
+                            }
                           }
                         }
                         if (outBlocked) {
@@ -1547,32 +1669,46 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                             'FALSE';
                         bool outBlockedSelfie = false;
                         if (!outPositionAllowedSelfie) {
-                          final dynamic lqrRef =
-                              transactionStore.state.screenTx['#LQR_REF'];
-                          final bool hasLqrRef = lqrRef != null &&
-                              lqrRef is Map &&
-                              lqrRef.isNotEmpty;
-                          if (hasLqrRef) {
+                          final dynamic lqrList =
+                              transactionStore.state.screenTx['#LQR_LIST'];
+                          final bool hasLqrList = lqrList != null &&
+                              lqrList is Map &&
+                              lqrList.isNotEmpty;
+                          if (hasLqrList) {
                             try {
-                              final firstEntry = (lqrRef).values.first as List;
-                              final double targetLat =
-                                  (firstEntry[1] as num).toDouble();
-                              final double targetLng =
-                                  (firstEntry[2] as num).toDouble();
-                              final double tolerance =
-                                  (firstEntry[3] as num).toDouble();
                               final double gpsAccuracy = currentData.accuracy;
-                              final double zone2 = tolerance + gpsAccuracy * 2;
-                              final double distance =
-                                  Geolocator.distanceBetween(
-                                targetLat,
-                                targetLng,
-                                currentData.latitude,
-                                currentData.longitude,
-                              );
+                              bool insideAny = false;
+                              double minDistance = double.infinity;
+                              double matchZone2 = 0;
+                              for (final entry in lqrList.values) {
+                                final List data = entry as List;
+                                final double targetLat =
+                                    (data[1] as num).toDouble();
+                                final double targetLng =
+                                    (data[2] as num).toDouble();
+                                final double tolerance =
+                                    (data[3] as num).toDouble();
+                                final double zone2 =
+                                    tolerance + gpsAccuracy * 2;
+                                final double distance =
+                                    Geolocator.distanceBetween(
+                                  targetLat,
+                                  targetLng,
+                                  currentData.latitude,
+                                  currentData.longitude,
+                                );
+                                if (distance < minDistance) {
+                                  minDistance = distance;
+                                  matchZone2 = zone2;
+                                }
+                                if (distance <= zone2) {
+                                  insideAny = true;
+                                  break;
+                                }
+                              }
                               debugPrint(
-                                  '[selfie/multi] distance=${distance.toStringAsFixed(1)}m, zone2=${zone2.toStringAsFixed(1)}m');
-                              if (distance > zone2) {
+                                  '[selfie/multi] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m');
+                              if (!insideAny) {
                                 outBlockedSelfie = true;
                                 if (context.mounted) {
                                   await Get.dialog(AlertDialog(
@@ -1592,8 +1728,26 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                   '[selfie/multi] parse error: $eLoc — bypass pengecekan');
                             }
                           } else {
-                            debugPrint(
-                                '[selfie/multi] #LQR_REF kosong/null — bypass pengecekan');
+                            if (!internetConnected()) {
+                              debugPrint(
+                                  '[selfie/multi] offline & #LQR_LIST kosong/null — block absensi');
+                              outBlockedSelfie = true;
+                              if (context.mounted) {
+                                await Get.dialog(AlertDialog(
+                                  title: Text(textArray[24]),
+                                  content: Text(textArray[25]),
+                                  actions: [
+                                    TextButton(
+                                      child: Text(textArray[8]),
+                                      onPressed: () => Get.back(),
+                                    ),
+                                  ],
+                                ));
+                              }
+                            } else {
+                              debugPrint(
+                                  '[selfie/multi] online & #LQR_LIST kosong/null — bypass pengecekan');
+                            }
                           }
                         }
                         if (outBlockedSelfie) {
@@ -1642,32 +1796,46 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                             'FALSE';
                         bool outBlockedGps = false;
                         if (!outPositionAllowedGps) {
-                          final dynamic lqrRef =
-                              transactionStore.state.screenTx['#LQR_REF'];
-                          final bool hasLqrRef = lqrRef != null &&
-                              lqrRef is Map &&
-                              lqrRef.isNotEmpty;
-                          if (hasLqrRef) {
+                          final dynamic lqrList =
+                              transactionStore.state.screenTx['#LQR_LIST'];
+                          final bool hasLqrList = lqrList != null &&
+                              lqrList is Map &&
+                              lqrList.isNotEmpty;
+                          if (hasLqrList) {
                             try {
-                              final firstEntry = (lqrRef).values.first as List;
-                              final double targetLat =
-                                  (firstEntry[1] as num).toDouble();
-                              final double targetLng =
-                                  (firstEntry[2] as num).toDouble();
-                              final double tolerance =
-                                  (firstEntry[3] as num).toDouble();
                               final double gpsAccuracy = currentData.accuracy;
-                              final double zone2 = tolerance + gpsAccuracy * 2;
-                              final double distance =
-                                  Geolocator.distanceBetween(
-                                targetLat,
-                                targetLng,
-                                currentData.latitude,
-                                currentData.longitude,
-                              );
+                              bool insideAny = false;
+                              double minDistance = double.infinity;
+                              double matchZone2 = 0;
+                              for (final entry in lqrList.values) {
+                                final List data = entry as List;
+                                final double targetLat =
+                                    (data[1] as num).toDouble();
+                                final double targetLng =
+                                    (data[2] as num).toDouble();
+                                final double tolerance =
+                                    (data[3] as num).toDouble();
+                                final double zone2 =
+                                    tolerance + gpsAccuracy * 2;
+                                final double distance =
+                                    Geolocator.distanceBetween(
+                                  targetLat,
+                                  targetLng,
+                                  currentData.latitude,
+                                  currentData.longitude,
+                                );
+                                if (distance < minDistance) {
+                                  minDistance = distance;
+                                  matchZone2 = zone2;
+                                }
+                                if (distance <= zone2) {
+                                  insideAny = true;
+                                  break;
+                                }
+                              }
                               debugPrint(
-                                  '[gps-single/multi] distance=${distance.toStringAsFixed(1)}m, zone2=${zone2.toStringAsFixed(1)}m');
-                              if (distance > zone2) {
+                                  '[gps-single/multi] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m');
+                              if (!insideAny) {
                                 outBlockedGps = true;
                                 if (context.mounted) {
                                   await Get.dialog(AlertDialog(
@@ -1687,8 +1855,26 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                   '[gps-single/multi] parse error: $eLoc — bypass pengecekan');
                             }
                           } else {
-                            debugPrint(
-                                '[gps-single/multi] #LQR_REF kosong/null — bypass pengecekan');
+                            if (!internetConnected()) {
+                              debugPrint(
+                                  '[gps-single/multi] offline & #LQR_LIST kosong/null — block absensi');
+                              outBlockedGps = true;
+                              if (context.mounted) {
+                                await Get.dialog(AlertDialog(
+                                  title: Text(textArray[24]),
+                                  content: Text(textArray[25]),
+                                  actions: [
+                                    TextButton(
+                                      child: Text(textArray[8]),
+                                      onPressed: () => Get.back(),
+                                    ),
+                                  ],
+                                ));
+                              }
+                            } else {
+                              debugPrint(
+                                  '[gps-single/multi] online & #LQR_LIST kosong/null — bypass pengecekan');
+                            }
                           }
                         }
                         if (outBlockedGps) {

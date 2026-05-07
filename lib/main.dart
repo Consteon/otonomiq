@@ -1,36 +1,36 @@
-import 'package:flutter/material.dart';
-import 'dart:async';
-import 'package:flutter_localizations/flutter_localizations.dart';
+import 'dart:convert';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 // import 'package:geolocator/geolocator.dart';
 import 'package:get/get_navigation/src/root/get_material_app.dart';
-import 'widget/build_theme.dart';
+
 import 'api.dart';
+import 'bloc_submit/bloc.dart';
+import 'bloc_timer/bloc.dart';
 import 'firebase_options.dart';
 import 'firestore_repository/firestore_generic_repository.dart';
 import 'firestore_repository/proxy_repository.dart';
 import 'firestore_repository/table_repository.dart';
 import 'global.dart';
-import 'page/vertriz_app.dart';
-import 'redux/screen_transaction.dart';
-import 'widget/ui_component.dart';
 import 'login/api/user_repository.dart';
 import 'login/bloc_authentication/bloc.dart';
-import 'login/page/tos_page.dart';
-import 'login/page/splash_screen.dart';
-import 'login/page/simple_bloc_delegate.dart';
-import 'page/test_page.dart';
-import 'bloc_timer/bloc.dart';
 import 'login/bloc_login/bloc.dart';
-import 'ticker.dart';
+import 'login/page/simple_bloc_delegate.dart';
+import 'login/page/splash_screen.dart';
+import 'login/page/tos_page.dart';
 import 'notification/bloc.dart';
-import 'bloc_submit/bloc.dart';
+import 'page/test_page.dart';
+import 'page/vertriz_app.dart';
 import 'part/build_part/channel.dart';
+import 'redux/screen_transaction.dart';
+import 'ticker.dart';
+import 'widget/build_theme.dart';
+import 'widget/ui_component.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
 // Sets a platform override for desktop to avoid exceptions. See
@@ -157,10 +157,7 @@ void main() async {
     if (myLif == null) {
       try {
         // Attempt 1: Normal write
-        await storage.write(
-            key: 'myLif',
-            value: defaultLifKey
-        );
+        await storage.write(key: 'myLif', value: defaultLifKey);
       } on PlatformException catch (e) {
         // Detect the specific "NullPointerException" or general platform failure
         devPrint("Storage corrupted. Resetting... Error: $e");
@@ -170,10 +167,7 @@ void main() async {
         await storage.deleteAll();
 
         // 2. Retry the write immediately after the wipe
-        await storage.write(
-            key: 'myLif',
-            value: defaultLifKey
-        );
+        await storage.write(key: 'myLif', value: defaultLifKey);
       } catch (e) {
         // Fallback for other non-platform errors
         devPrint("Unexpected error writing to storage: $e");

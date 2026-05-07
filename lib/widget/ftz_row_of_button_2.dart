@@ -23,8 +23,8 @@ import 'do_chain.dart';
 
 // display a row of buttons
 
-class FtzRowOfButton extends StatefulWidget {
-  const FtzRowOfButton({
+class FtzRowOfButton2 extends StatefulWidget {
+  const FtzRowOfButton2({
     required Key key,
     required this.component,
     required this.scrName,
@@ -43,11 +43,11 @@ class FtzRowOfButton extends StatefulWidget {
   final bool? dialog;
 
   @override
-  State<FtzRowOfButton> createState() => _FtzRowOfButtonState();
+  State<FtzRowOfButton2> createState() => _FtzRowOfButton2State();
 }
 
-class _FtzRowOfButtonState extends State<FtzRowOfButton>
-    with AutomaticKeepAliveClientMixin<FtzRowOfButton> {
+class _FtzRowOfButton2State extends State<FtzRowOfButton2>
+    with AutomaticKeepAliveClientMixin<FtzRowOfButton2> {
   dynamic allOtqData;
 
   @override
@@ -425,6 +425,7 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                                 controller.isEnabled = !controller.isEnabled;
                                 widgetsToUpdate.add('$scrName-$targetPosition');
                               } else if (action == 'generate_number') {
+                                // Find the specific 'generate_number' action in execute1
                                 final execute1Actions = controller.execute1
                                         ?.where((item) =>
                                             item != null &&
@@ -594,7 +595,7 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                                       }
                                     }
                                     debugPrint(
-                                        '[savesend/ftz_row_of_button] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m');
+                                        '[savesend/ftz_row_of_button_2] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m');
                                     if (!insideAny) {
                                       outBlocked = true;
                                       if (mounted) {
@@ -616,12 +617,12 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                                     }
                                   } catch (eLoc) {
                                     debugPrint(
-                                        '[savesend/ftz_row_of_button] parse error: $eLoc — bypass pengecekan');
+                                        '[savesend/ftz_row_of_button_2] parse error: $eLoc — bypass pengecekan');
                                   }
                                 } else {
                                   if (!internetConnected()) {
                                     debugPrint(
-                                        '[savesend/ftz_row_of_button] offline & #LQR_LIST kosong/null — block absensi');
+                                        '[savesend/ftz_row_of_button_2] offline & #LQR_LIST kosong/null — block absensi');
                                     outBlocked = true;
                                     if (mounted) {
                                       await Get.dialog(AlertDialog(
@@ -641,7 +642,7 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                                     }
                                   } else {
                                     debugPrint(
-                                        '[savesend/ftz_row_of_button] online & #LQR_LIST kosong/null — bypass pengecekan');
+                                        '[savesend/ftz_row_of_button_2] online & #LQR_LIST kosong/null — bypass pengecekan');
                                   }
                                 }
                               }
@@ -953,11 +954,13 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
         buttonToShow = buildActualButton(isEnabled);
       }
 
-      if (buttonData['width'] == 'full') {
+      if (buttonData['width'] is num) {
+        bannerComponent.add(buttonToShow);
+      } else if (children.length > 1) {
+        bannerComponent.add(Expanded(child: buttonToShow));
+      } else {
         bannerComponent
             .add(SizedBox(width: double.infinity, child: buttonToShow));
-      } else {
-        bannerComponent.add(buttonToShow);
       }
     } // end for loop
     return bannerComponent;
@@ -995,14 +998,26 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
           widget.rPad + (widget.component['rightPadding'] ?? 0.0).toDouble(),
           widget.bPad),
       child: BlocBuilder<TimerBloc, TimerState>(
-        builder: (context, state) => Wrap(
-          alignment: _toWrapAlignment(widget.component['alignment']),
-          children: buildButtonList(
-            widget.component['children'],
+        builder: (context, state) {
+          final List<dynamic> btns = widget.component['children'] ?? [];
+          final bool useRow = btns.length > 1 &&
+              btns.every((b) => b['width'] is! num);
+          final buttonWidgets = buildButtonList(
+            btns,
             widget.scrName,
             dialog: widget.dialog,
-          ),
-        ),
+          );
+          if (useRow) {
+            return Row(
+              spacing: 8,
+              children: buttonWidgets,
+            );
+          }
+          return Wrap(
+            alignment: _toWrapAlignment(widget.component['alignment']),
+            children: buttonWidgets,
+          );
+        },
       ),
     );
   }

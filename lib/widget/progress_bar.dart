@@ -80,7 +80,7 @@ class ProgressBar extends StatelessWidget {
                 offset: const Offset(0, 2),
               ),
             ],
-            border: Border.all(color: Color(0xffE2E8F0)),
+            border: Border.all(color: const Color(0xffE2E8F0)),
           ),
           padding: const EdgeInsets.all(16),
           child: Column(

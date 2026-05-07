@@ -5,8 +5,8 @@ import '../global.dart';
 import '../global2.dart';
 import '../otq_icons.dart';
 
-class OtqRdoNew extends StatefulWidget {
-  const OtqRdoNew({
+class OtqRdo2 extends StatefulWidget {
+  const OtqRdo2({
     required Key key,
     required this.component,
     required this.scrName,
@@ -23,11 +23,11 @@ class OtqRdoNew extends StatefulWidget {
   final double bPad;
 
   @override
-  _OtqRdoNewState createState() => _OtqRdoNewState();
+  _OtqRdo2State createState() => _OtqRdo2State();
 }
 
-class _OtqRdoNewState extends State<OtqRdoNew>
-    with AutomaticKeepAliveClientMixin<OtqRdoNew> {
+class _OtqRdo2State extends State<OtqRdo2>
+    with AutomaticKeepAliveClientMixin<OtqRdo2> {
   String? _picked;
   List<double> margin = [];
   List<String> menu = [];
@@ -89,8 +89,7 @@ class _OtqRdoNewState extends State<OtqRdoNew>
     super.build(context);
     try {
       final component = widget.component;
-      final List<String> items =
-          List<String>.from(component['menu'] ?? ['--']);
+      final List<String> items = List<String>.from(component['menu'] ?? ['--']);
       final String iconKey = component['icon']?.toString() ?? '';
       final String labelText =
           (component['label'] ?? '').toString().toUpperCase();
@@ -102,7 +101,8 @@ class _OtqRdoNewState extends State<OtqRdoNew>
           left: widget.lPad + margin[2],
           right: widget.rPad + margin[3],
         ),
-        padding: EdgeInsets.fromLTRB(16, widget.tPad + 12, 16, widget.bPad + 12),
+        padding:
+            EdgeInsets.fromLTRB(16, widget.tPad + 12, 16, widget.bPad + 12),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
@@ -166,8 +166,8 @@ class _OtqRdoNewState extends State<OtqRdoNew>
                   margin: isLast
                       ? EdgeInsets.zero
                       : const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 14),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(12),
@@ -217,7 +217,7 @@ class _OtqRdoNewState extends State<OtqRdoNew>
                               style: const TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
-                                color: Color(0xFF1E293B),
+                                color: Color(0xFF64748B),
                               ),
                             ),
                             if (subtitle != null) ...[

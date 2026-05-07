@@ -871,6 +871,209 @@ Future<List<String>> writeToTable(String? inp, String eventRowString) async {
   return result;
 } // end of writeToTable
 
+/// Auto-detect type of a raw search value string.
+/// Order: bool ('true'/'false') → num → string fallback.
+dynamic _parseSearchValue(String raw) {
+  final trimmed = raw.trim();
+  final lower = trimmed.toLowerCase();
+  if (lower == 'true') return true;
+  if (lower == 'false') return false;
+  return num.tryParse(trimmed) ?? raw;
+}
+
+/// Update existing row(s) in dynamic table, partial column patch.
+/// Input format mirrors addToTable but with a `search` directive identifying
+/// the row to update. Only columns explicitly listed in input get patched;
+/// other columns retain their current value in Firestore.
+Future<List<String>> updateTableRow(
+    String? inp, String eventRowString) async {
+  debugPrint('updateTableRow inp = $inp');
+  int vid = appCodeController.applicationTableVid;
+  int tableVid = vid;
+  List<String> result = [];
+  try {
+    if (inp == null || inp.isEmpty) {
+      return result;
+    }
+    List<dynamic> eventRow = jsonDecode(eventRowString);
+    List<dynamic> ref = parseEventString(eventRow);
+    String decodedInp = autheniumDecode(inp) ?? '';
+    List<dynamic> splitInput = splitTableInput(decodedInp);
+
+    for (int i = 0; i < splitInput.length; i++) {
+      String tempResult = '';
+      try {
+        // Pull tablevid override if present (mirrors writeToTable).
+        for (dynamic element in splitInput[i]) {
+          if (element.length > 1 &&
+              element[0].toString().trim().toLowerCase() == 'tablevid') {
+            try {
+              tableVid = int.parse(element[1].toString().trim());
+            } catch (_) {
+              tableVid = appCodeController.applicationTableVid;
+            }
+          }
+        }
+
+        // Run full parseTableInput to get substituted values + indexContent.
+        List<dynamic> stringResult = await parseTableInput(
+            splitInput[i],
+            ref,
+            tableVid,
+            appCodeController.applicationTableVid,
+            eventRow[0],
+            eventRow[1]);
+        stringResult[0] = getDocumentName(stringResult[0]);
+        String tableName = stringResult[0];
+        List<dynamic> contentArray = jsonDecode(stringResult[4]);
+        Map<String, dynamic> indexContent =
+            (stringResult[5] as Map<String, dynamic>);
+
+        // Identify positions explicitly listed by user (no padded slots).
+        Set<int> explicitPositions = {};
+        String? searchField;
+        dynamic searchValue;
+        for (int j = 1; j < splitInput[i].length; j++) {
+          if (splitInput[i][j].length < 2) continue;
+          String key = splitInput[i][j][0].toString().trim();
+          if (key.toLowerCase() == 'search') {
+            List<String> parts =
+                splitInput[i][j][1].toString().split(separator[3]);
+            if (parts.length >= 2) {
+              searchField = parts[0].trim();
+              String rawValue =
+                  parts.sublist(1).join(separator[3]).trim();
+              searchValue = _parseSearchValue(rawValue);
+            }
+            continue;
+          }
+          int openIdx = key.indexOf('<');
+          int closeIdx = key.indexOf('>');
+          if (openIdx >= 0 && closeIdx > openIdx) {
+            try {
+              int colNum =
+                  int.parse(key.substring(openIdx + 1, closeIdx));
+              explicitPositions.add(colNum - 1);
+            } catch (_) {}
+          }
+        }
+
+        if (searchField == null) {
+          tempResult = 'Error: missing search';
+          result.add(tempResult);
+          continue;
+        }
+
+        Map<int, String> partialFields = {};
+        for (int idx in explicitPositions) {
+          if (idx >= 0 && idx < contentArray.length) {
+            partialFields[idx] = contentArray[idx].toString();
+          } else {
+            partialFields[idx] = '';
+          }
+        }
+
+        // Filter index updates to only columns the user actually patched.
+        Map<String, dynamic> indexFieldUpdates = {};
+        indexContent.forEach((colKey, val) {
+          int idx0 = (int.tryParse(colKey) ?? 0) - 1;
+          if (explicitPositions.contains(idx0)) {
+            indexFieldUpdates[colKey] = val;
+          }
+        });
+
+        MobileTableController mtc = MobileTableController();
+        mtc.setApplicationTableVid(tableVid);
+        String opResult = await mtc.updateContent(
+          tableName,
+          searchField,
+          searchValue,
+          partialFields,
+          indexFieldUpdates: indexFieldUpdates.isEmpty
+              ? null
+              : indexFieldUpdates,
+        );
+        mtc.dispose();
+        result.add(opResult);
+      } catch (e) {
+        tempResult = e.toString();
+        result.add(tempResult);
+        devPrint('error in updateTableRow loop: $e');
+      }
+    }
+  } catch (e) {
+    devPrint('error in updateTableRow outer try: $e');
+  }
+  return result;
+} // end of updateTableRow
+
+/// Delete row(s) in dynamic table by query.
+/// Input format mirrors addToTable header but only requires `tablevid` and
+/// a `search` directive identifying the row(s) to delete.
+Future<List<String>> deleteFromTable(
+    String? inp, String eventRowString) async {
+  debugPrint('deleteFromTable inp = $inp');
+  int vid = appCodeController.applicationTableVid;
+  int tableVid = vid;
+  List<String> result = [];
+  try {
+    if (inp == null || inp.isEmpty) {
+      return result;
+    }
+    List<dynamic> eventRow = jsonDecode(eventRowString);
+    parseEventString(eventRow); // validate format, ref unused for delete
+    String decodedInp = autheniumDecode(inp) ?? '';
+    List<dynamic> splitInput = splitTableInput(decodedInp);
+
+    for (int i = 0; i < splitInput.length; i++) {
+      try {
+        String tableName = getDocumentName(
+            splitInput[i][0][0].toString().trim());
+        String? searchField;
+        dynamic searchValue;
+        for (int j = 1; j < splitInput[i].length; j++) {
+          if (splitInput[i][j].length < 2) continue;
+          String key = splitInput[i][j][0].toString().trim().toLowerCase();
+          if (key == 'tablevid') {
+            try {
+              tableVid = int.parse(splitInput[i][j][1].toString().trim());
+            } catch (_) {
+              tableVid = appCodeController.applicationTableVid;
+            }
+          } else if (key == 'search') {
+            List<String> parts =
+                splitInput[i][j][1].toString().split(separator[3]);
+            if (parts.length >= 2) {
+              searchField = parts[0].trim();
+              String rawValue =
+                  parts.sublist(1).join(separator[3]).trim();
+              searchValue = _parseSearchValue(rawValue);
+            }
+          }
+        }
+
+        if (searchField == null) {
+          result.add('Error: missing search');
+          continue;
+        }
+
+        MobileTableController mtc = MobileTableController();
+        mtc.setApplicationTableVid(tableVid);
+        String opResult =
+            await mtc.deleteContent(tableName, searchField, searchValue);
+        mtc.dispose();
+        result.add(opResult);
+      } catch (e) {
+        result.add(e.toString());
+        devPrint('error in deleteFromTable loop: $e');
+      }
+    }
+  } catch (e) {
+    devPrint('error in deleteFromTable outer try: $e');
+  }
+  return result;
+} // end of deleteFromTable
+
 List<dynamic> parseEventString(dynamic inp) {
   final mainSeparator = forbiddenCharacter[3]; // black big circle
   final subSeparator1 = forbiddenCharacter[0]; // black diamond
@@ -969,6 +1172,7 @@ Future<List<dynamic>> parseTableInput(List<dynamic> inpArray, List<dynamic> ref,
           tableContent['detailArray'] = detailArray;
           break;
         case 'tablevid':
+        case 'search':
           // skip, do nothing here
           break;
         default:
@@ -2236,17 +2440,31 @@ Future historySync(String source, bool forceSend) async {
                     devPrint(
                         '*** internet connected, send history and writeToTable.');
                     if (eventHistory.length > 14) {
-                      //skip if no table definition
-                      writeToTable(
-                          eventHistory[14],
-                          jsonEncode([
-                            eventHistory[0],
-                            eventHistory[1],
-                            eventHistory[2]
-                          ]));
+                      final String rawTb =
+                          (eventHistory[14] ?? '').toString();
+                      final List<String> tbParts = rawTb.split(separator[0]);
+                      final String addStr = tbParts[0];
+                      final String updateStr =
+                          tbParts.length > 1 ? tbParts[1] : '';
+                      final String deleteStr =
+                          tbParts.length > 2 ? tbParts[2] : '';
+                      final String eventRowString = jsonEncode([
+                        eventHistory[0],
+                        eventHistory[1],
+                        eventHistory[2]
+                      ]);
+                      if (addStr.isNotEmpty) {
+                        writeToTable(addStr, eventRowString);
+                      }
+                      if (updateStr.isNotEmpty) {
+                        updateTableRow(updateStr, eventRowString);
+                      }
+                      if (deleteStr.isNotEmpty) {
+                        deleteFromTable(deleteStr, eventRowString);
+                      }
                     } else {
                       devPrint(
-                          'writeToTable skipped, no table definition in history.'); // end if (eventHistory.length > 14)
+                          'writeToTable skipped, no table definition in history.');
                     }
                     await docReference.set(dataSent).then((value) async {
                       debugPrint(

@@ -1,50 +1,51 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:convert';
-import 'different_code/different_code.dart';
-import 'part/build_part/channel.dart';
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:camera/camera.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:get/get.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:googleapis_auth/auth_io.dart' as auth;
 import "package:http/http.dart" as http;
 import 'package:http/io_client.dart'; // part of dart.http package
-import 'package:googleapis_auth/auth_io.dart' as auth;
-import 'model/otq_state.dart';
-import 'widget/build_theme.dart';
-import 'widget/ftz_webview.dart';
+import 'package:intl/intl.dart';
+import 'package:ntp/ntp.dart';
+// import 'package:mobile_number/mobile_number.dart'; // android only
+import 'package:permission_handler/permission_handler.dart';
+import 'package:pointycastle/export.dart';
 import 'package:transparent_image/transparent_image.dart';
+
+import 'bloc_submit/bloc.dart';
+import 'bloc_timer/bloc.dart';
 import 'crypto/auth_crypto.dart';
+import 'different_code/different_code.dart';
+import 'firebase_notification_handler.dart';
 import 'firestore_repository/firestore_generic_repository.dart';
 import 'firestore_repository/proxy_repository.dart';
 import 'firestore_repository/table_repository.dart';
 import 'ftz_secret.dart';
 import 'global.dart';
 import 'global2.dart';
-import 'redux/screen_transaction.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:ntp/ntp.dart';
-import 'firebase_notification_handler.dart';
-import 'widget/ui_component.dart';
-import 'bloc_timer/bloc.dart';
-import 'model/function_body.dart';
 import 'login/api/user_repository.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:geolocator/geolocator.dart';
-import 'bloc_submit/bloc.dart';
-// import 'package:mobile_number/mobile_number.dart'; // android only
-import 'package:permission_handler/permission_handler.dart';
-import 'package:pointycastle/export.dart';
-import 'widget/photo_camera.dart';
-import 'package:camera/camera.dart';
-import 'package:intl/intl.dart';
+import 'model/function_body.dart';
 import 'model/general_get_controller.dart';
-import 'package:geocoding/geocoding.dart';
+import 'model/otq_state.dart';
+import 'part/build_part/channel.dart';
+import 'redux/screen_transaction.dart';
+import 'widget/build_theme.dart';
+import 'widget/ftz_webview.dart';
+import 'widget/photo_camera.dart';
+import 'widget/ui_component.dart';
 
 Future apiTest() async {
   bool testNow = true;
@@ -856,8 +857,7 @@ Future<String> getQRContent(
       }
     } else if (qrType == 'A') {
       // A for Asset
-      String universalCode =
-          await assetVerify(rawText, 9); // Todo use component
+      String universalCode = assetVerify(rawText, 9); // Todo use component
       if (universalCode == errorString) {
         result = '${errString}98';
       } else {
@@ -1204,7 +1204,9 @@ void getLqrList(String? proxySsid) async {
         key: "lqrList"); //= get documentID of entry in msg_xxxx collection
     if (lqrString != null) {
       lqr = json.decode(lqrString);
-      Map<String, dynamic> lRef = {lqr.entries.first.key: lqr.entries.first.value};
+      Map<String, dynamic> lRef = {
+        lqr.entries.first.key: lqr.entries.first.value
+      };
       transactionStore.dispatch(
           UpdateScreenTxAction(ScreenTransaction({'#LQR_REF': lRef})));
       transactionStore.dispatch(
@@ -1721,7 +1723,7 @@ Future<bool> newUpdateApp() async {
   return (lastVersion != null && lastVersion != '$version$subVersion');
 } // end of newUpdateApp
 
-readSettingsStart(String? lifKey, int opt) async {
+Future<void> readSettingsStart(String? lifKey, int opt) async {
   // opt 1 = regular startup, load only home.
   // opt 2 = fastened setup, load as second loader in asyncAppStartup2
   debugPrint('start readSettingsStart opt=$opt');
@@ -1935,7 +1937,7 @@ readSettingsStart(String? lifKey, int opt) async {
   debugPrint('end readSettingsStart');
 } // end of readSettingsStart
 
-readUIPages(String lifKey, int guestIndex) async {
+Future<void> readUIPages(String lifKey, int guestIndex) async {
   // read json part of lif and put them in screenUIComponent
   FunctionBody functionBody = getFunctionBody(settingKey, [screenJsonRange]);
   var response =
@@ -1959,7 +1961,7 @@ readUIPages(String lifKey, int guestIndex) async {
   // constructAllPageElements();
 } // end of readUIPages
 
-readSettings(String lifKey, int opt) async {
+Future<void> readSettings(String lifKey, int opt) async {
   // opt 1 = Load as usual from JSON etc; 2 = load from JSON2 only
   // then constructPageElement of the respective screen
 
@@ -2091,7 +2093,8 @@ readSettings(String lifKey, int opt) async {
   // await prefs.setString('@screenUI', json.encode(screenUIComponent));
 } // end of readSettings
 
-readSettingsContext(BuildContext context, String lifKey, int opt) async {
+Future<void> readSettingsContext(
+    BuildContext context, String lifKey, int opt) async {
   // opt 1 = Load as usual from JSON etc; 2 = load from JSON2 only
   // then constructPageElement of the respective screen
 
@@ -3584,14 +3587,45 @@ void saveSend(
       // "${component['addToTable'] ?? ''}";
       tableString = autheniumDecode(tableString) ?? '';
       tableString = tableString
-          .replaceAll("◼A⭘", "◼A⭘tableVid◼${currentTableVid}⭘")
-          .replaceAll("◼D⭘", "◼D⭘tableVid◼${currentTableVid}⭘")
-          .replaceAll("◼S⭘", "◼S⭘tableVid◼${currentTableVid}⭘");
+          .replaceAll("◼A⭘", "◼A⭘tableVid◼$currentTableVid⭘")
+          .replaceAll("◼D⭘", "◼D⭘tableVid◼$currentTableVid⭘")
+          .replaceAll("◼S⭘", "◼S⭘tableVid◼$currentTableVid⭘");
       tableString = replacePlaceholders(tableString, ref);
       int d = 1;
     } catch (e) {
       // tableString = null;
     } // end try
+
+    String updateString = '';
+    try {
+      String raw = component['updateTableRow'] ?? '';
+      if (raw.isNotEmpty) {
+        updateString = autheniumDecode(raw) ?? '';
+        updateString =
+            updateString.replaceAll("◼D⭘", "◼D⭘tableVid◼$currentTableVid⭘");
+        updateString = replacePlaceholders(updateString, ref);
+      }
+    } catch (e) {
+      updateString = '';
+    }
+
+    String deleteString = '';
+    try {
+      String raw = component['deleteFromTable'] ?? '';
+      if (raw.isNotEmpty) {
+        deleteString = autheniumDecode(raw) ?? '';
+        deleteString =
+            deleteString.replaceAll("◼D⭘", "◼D⭘tableVid◼$currentTableVid⭘");
+        deleteString = replacePlaceholders(deleteString, ref);
+      }
+    } catch (e) {
+      deleteString = '';
+    }
+
+    if (updateString.isNotEmpty || deleteString.isNotEmpty) {
+      tableString =
+          '${tableString ?? ''}${separator[0]}$updateString${separator[0]}$deleteString';
+    }
 
     if (routeExist(component['route'])) {
       devPrint('start clearing txfController');
@@ -3816,7 +3850,7 @@ Future locationVerify(var locArray, var tolerance, OtqState? otqData) async {
   return found;
 } // end of locationVerify
 
-distanceM(var lat1, var lon1, var lat2, var lon2) {
+num distanceM(var lat1, var lon1, var lat2, var lon2) {
   // inspired by https://www.movable-type.co.uk/scripts/latlong.html
   const R = 6371000;
   const piRad = 0.0174532925199433; // pi/180

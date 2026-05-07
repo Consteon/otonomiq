@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:otonomiq/page/map_page.dart';
 
 import '../global.dart';
+import '../page/map_page.dart';
 
 class LocationDetector extends StatefulWidget {
   const LocationDetector({
@@ -122,9 +122,9 @@ class _LocationDetectorState extends State<LocationDetector> {
 
   String? _getInsideLocationName(dynamic position) {
     try {
-      final dynamic lqrRef = transactionStore.state.screenTx['#LQR_REF'];
-      if (lqrRef == null || lqrRef is! Map || lqrRef.isEmpty) return null;
-      for (final entry in lqrRef.values) {
+      final dynamic lqrList = transactionStore.state.screenTx['#LQR_LIST'];
+      if (lqrList == null || lqrList is! Map || lqrList.isEmpty) return null;
+      for (final entry in lqrList.values) {
         final e = entry as List;
         final double targetLat = (e[1] as num).toDouble();
         final double targetLng = (e[2] as num).toDouble();
@@ -146,11 +146,11 @@ class _LocationDetectorState extends State<LocationDetector> {
 
   String _deriveGpsStatus(dynamic position) {
     try {
-      final dynamic lqrRef = transactionStore.state.screenTx['#LQR_REF'];
-      if (lqrRef == null || lqrRef is! Map || lqrRef.isEmpty) {
+      final dynamic lqrList = transactionStore.state.screenTx['#LQR_LIST'];
+      if (lqrList == null || lqrList is! Map || lqrList.isEmpty) {
         return _gps['status'] as String? ?? 'last_known';
       }
-      for (final entry in lqrRef.values) {
+      for (final entry in lqrList.values) {
         final e = entry as List;
         final double targetLat = (e[1] as num).toDouble();
         final double targetLng = (e[2] as num).toDouble();

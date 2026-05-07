@@ -1,10 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
-import 'package:otonomiq/widget/choice_button_group.dart';
-import 'package:otonomiq/widget/location_detector.dart';
-import 'package:otonomiq/widget/progress_bar.dart';
-import 'package:otonomiq/widget/tasklist.dart';
-import 'package:otonomiq/widget/time_presence.dart';
 
 import '../api.dart';
 import '../crypto/auth_crypto.dart';
@@ -22,14 +17,23 @@ import '../widget/all_widget.dart';
 import '../widget/qr_gps.dart';
 import '../widget/radio_text.dart';
 import '../widget/ui_component.dart';
+import 'choice_button_group.dart';
 import 'ctx.dart';
 import 'display_qr.dart';
 import 'ftz_bluetooth_printer.dart';
-import 'ftz_row_of_button.dart';
+import 'ftz_row_of_button_2.dart';
 import 'goto.dart';
 import 'gps_send.dart';
 import 'image_upload.dart';
+import 'location_detector.dart';
 import 'otq_checkbox.dart';
+import 'otq_dropdown_2.dart';
+import 'otq_get_images_2.dart';
+import 'otq_rdo_2.dart';
+import 'otq_txf_2.dart';
+import 'progress_bar.dart';
+import 'tasklist.dart';
+import 'time_presence.dart';
 
 Widget buildDisplayComponent(
     dynamic component, String scrName, UserRepository userRepository,
@@ -164,7 +168,7 @@ Widget buildDisplayComponent(
     try {
       // txfController[scrName]![getPosition(component['position'])]!.stateObject =
       //     OtqGetImagesStateObject();
-      result = OtqGetImages(
+      result = OtqGetImages2(
         key: txfKey,
         wKey: txfKey,
         component: component,
@@ -294,7 +298,7 @@ Widget buildDisplayComponent(
       result = Text('--${component['type']}-- Error: $e');
     } // end of try
   } else if (tip == 'txf') {
-    result = OtqTxf(
+    result = OtqTxf2(
       key: txfKey,
       scrName: scrName,
       component: component,
@@ -418,7 +422,7 @@ Widget buildDisplayComponent(
           controller.initialValue = initValue; // The display value for the UI
         }
       } // end if (_component['position'] != null)
-      result = OtqDropdown(
+      result = OtqDropdown2(
         key: txfKey,
         scrName: scrName,
         component: component,
@@ -433,7 +437,7 @@ Widget buildDisplayComponent(
   } else if (tip == 'rbt') {
     // Row of button
     try {
-      result = FtzRowOfButton(
+      result = FtzRowOfButton2(
         key: txfKey,
         component: component,
         scrName: scrName,
@@ -633,7 +637,7 @@ Widget buildDisplayComponent(
   } else if (tip == 'rdo' || tip == 'rad') {
     // rad = deprecated
     // radio button
-    result = OtqRdo(
+    result = OtqRdo2(
       key: txfKey,
       scrName: scrName,
       component: component,

@@ -12,7 +12,6 @@ import 'package:get/get.dart';
 // import 'package:fluttercontactpicker/fluttercontactpicker.dart';
 import 'package:group_radio_button/group_radio_button.dart';
 import 'package:intl/intl.dart';
-import 'package:otonomiq/widget/otq_txf.dart';
 
 import '../api.dart';
 import '../bloc_timer/timer_bloc.dart';
@@ -29,6 +28,7 @@ import '../otq_icons.dart';
 import '../redux/screen_transaction.dart';
 import 'ftz_array_search.dart';
 import 'ftz_contact_picker.dart';
+import 'otq_txf.dart';
 
 // import 'package:flutter_native_contact_picker/flutter_native_contact_picker.dart';
 // import 'package:barcode_scan2/barcode_scan2.dart';
@@ -42,11 +42,11 @@ import 'ftz_contact_picker.dart';
 // multi formatter :
 // https://pub.dev/packages/flutter_multi_formatter/example
 
-class OtqTxfNew extends StatefulWidget {
+class OtqTxf2 extends StatefulWidget {
   /*
     Full blown txf widget
   */
-  const OtqTxfNew({
+  const OtqTxf2({
     required Key key,
     required this.scrName,
     required this.component,
@@ -65,11 +65,11 @@ class OtqTxfNew extends StatefulWidget {
   final TextEditingController? cnt; //external controller, used by parent widget
   // null indicate that this is a stand-alone widget
   @override
-  OtqTxfNewState createState() => OtqTxfNewState();
+  OtqTxf2State createState() => OtqTxf2State();
 }
 
-class OtqTxfNewState extends State<OtqTxfNew>
-    with AutomaticKeepAliveClientMixin<OtqTxfNew> {
+class OtqTxf2State extends State<OtqTxf2>
+    with AutomaticKeepAliveClientMixin<OtqTxf2> {
   // with AutomaticKeepAliveClientMixin<TxfFull> will keep this widget when scroll
   var selectedDate = DateTime.now();
   late TextEditingController myController;
@@ -1220,25 +1220,36 @@ class OtqTxfNewState extends State<OtqTxfNew>
                   txf =
                       Text("-- TXF -- $scrName, $txfKey : ${eTxf.toString()}");
                 }
+                bool showTitle = (component['label'] != null &&
+                        component['label'].toString().trim().isNotEmpty) ||
+                    (textArray.isNotEmpty &&
+                        textArray[0].toString().trim().isNotEmpty);
+                String iconKey = (component['icon'] ?? '').toString().trim();
+                bool hasIcon =
+                    iconKey.isNotEmpty && (otqIcons[iconKey] != null);
                 Container pillWrap(Widget child) => Container(
-                      margin: EdgeInsets.only(
-                        top: margin[0],
-                        bottom: margin[1],
-                        left: widget.lPad + margin[2],
-                        right: widget.rPad + margin[3],
-                      ),
+                      margin: (showTitle || hasIcon)
+                          ? const EdgeInsets.fromLTRB(12, 0, 12, 12)
+                          : EdgeInsets.only(
+                              top: margin[0],
+                              bottom: margin[1],
+                              left: widget.lPad + margin[2],
+                              right: widget.rPad + margin[3],
+                            ),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
                             color: const Color(0xFFE5E7EB), width: 1.2),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.05),
-                            blurRadius: 10,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
+                        boxShadow: (showTitle || hasIcon)
+                            ? []
+                            : [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.05),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
                       ),
                       child: child,
                     );
@@ -1672,36 +1683,50 @@ class OtqTxfNewState extends State<OtqTxfNew>
                                               'FALSE';
                                       bool outBlocked = false;
                                       if (!outPositionAllowed) {
-                                        final dynamic lqrRef = transactionStore
-                                            .state.screenTx['#LQR_REF'];
-                                        final bool hasLqrRef = lqrRef != null &&
-                                            lqrRef is Map &&
-                                            lqrRef.isNotEmpty;
-                                        if (hasLqrRef) {
+                                        final dynamic lqrList = transactionStore
+                                            .state.screenTx['#LQR_LIST'];
+                                        final bool hasLqrList = lqrList !=
+                                                null &&
+                                            lqrList is Map &&
+                                            lqrList.isNotEmpty;
+                                        if (hasLqrList) {
                                           try {
-                                            final firstEntry =
-                                                lqrRef.values.first as List;
-                                            final double targetLat =
-                                                (firstEntry[1] as num)
-                                                    .toDouble();
-                                            final double targetLng =
-                                                (firstEntry[2] as num)
-                                                    .toDouble();
-                                            final double tolerance =
-                                                (firstEntry[3] as num)
-                                                    .toDouble();
-                                            final double zone2 = tolerance +
-                                                gpsPosition!.accuracy * 2;
-                                            final double distance =
-                                                Geolocator.distanceBetween(
-                                              targetLat,
-                                              targetLng,
-                                              gpsPosition!.latitude,
-                                              gpsPosition!.longitude,
-                                            );
+                                            final double gpsAccuracy =
+                                                gpsPosition!.accuracy;
+                                            bool insideAny = false;
+                                            double minDistance =
+                                                double.infinity;
+                                            double matchZone2 = 0;
+                                            for (final entry
+                                                in lqrList.values) {
+                                              final List data = entry as List;
+                                              final double targetLat =
+                                                  (data[1] as num).toDouble();
+                                              final double targetLng =
+                                                  (data[2] as num).toDouble();
+                                              final double tolerance =
+                                                  (data[3] as num).toDouble();
+                                              final double zone2 =
+                                                  tolerance + gpsAccuracy * 2;
+                                              final double distance =
+                                                  Geolocator.distanceBetween(
+                                                targetLat,
+                                                targetLng,
+                                                gpsPosition!.latitude,
+                                                gpsPosition!.longitude,
+                                              );
+                                              if (distance < minDistance) {
+                                                minDistance = distance;
+                                                matchZone2 = zone2;
+                                              }
+                                              if (distance <= zone2) {
+                                                insideAny = true;
+                                                break;
+                                              }
+                                            }
                                             debugPrint(
-                                                '[qrScan/otq_txf] distance=${distance.toStringAsFixed(1)}m, zone2=${zone2.toStringAsFixed(1)}m');
-                                            if (distance > zone2) {
+                                                '[qrScan/otq_txf_2] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m');
+                                            if (!insideAny) {
                                               outBlocked = true;
                                               if (context.mounted) {
                                                 await Get.dialog(AlertDialog(
@@ -1726,11 +1751,36 @@ class OtqTxfNewState extends State<OtqTxfNew>
                                             }
                                           } catch (eLoc) {
                                             debugPrint(
-                                                '[qrScan/otq_txf] parse error: $eLoc — bypass pengecekan');
+                                                '[qrScan/otq_txf_2] parse error: $eLoc — bypass pengecekan');
                                           }
                                         } else {
-                                          debugPrint(
-                                              '[qrScan/otq_txf] #LQR_REF kosong/null — bypass pengecekan');
+                                          if (!internetConnected()) {
+                                            debugPrint(
+                                                '[qrScan/otq_txf_2] offline & #LQR_LIST kosong/null — block absensi');
+                                            outBlocked = true;
+                                            if (context.mounted) {
+                                              await Get.dialog(AlertDialog(
+                                                title: Text(textArray.length >
+                                                        14
+                                                    ? textArray[14]
+                                                    : 'Diluar Area Absensi'),
+                                                content: Text(textArray.length >
+                                                        15
+                                                    ? textArray[15]
+                                                    : 'Silahkan menuju lokasi yang ditentukan'),
+                                                actions: [
+                                                  TextButton(
+                                                    child: const Text('OK'),
+                                                    onPressed: () =>
+                                                        Get.back(),
+                                                  ),
+                                                ],
+                                              ));
+                                            }
+                                          } else {
+                                            debugPrint(
+                                                '[qrScan/otq_txf_2] online & #LQR_LIST kosong/null — bypass pengecekan');
+                                          }
                                         }
                                       }
                                       if (outBlocked) return;
@@ -1921,6 +1971,67 @@ class OtqTxfNewState extends State<OtqTxfNew>
                       element = pillWrap(txf);
                     }
                 } // end switch (component['variant'].toString().toLowerCase())
+
+                if (showTitle || hasIcon) {
+                  element = Container(
+                    margin: EdgeInsets.only(
+                      top: margin[0],
+                      bottom: margin[1],
+                      left: widget.lPad + margin[2],
+                      right: widget.rPad + margin[3],
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: const Color(0xFFE5E7EB), width: 1.2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                          child: Row(
+                            children: [
+                              if (hasIcon) ...[
+                                Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF1F5F9),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Icon(
+                                    otqIcons[iconKey],
+                                    size: 14,
+                                    color: const Color(0xFF64748B),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                              Text(
+                                labelStr.toUpperCase(),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF374151),
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        element,
+                      ],
+                    ),
+                  );
+                }
                 return element;
               }, // end of builder
             );

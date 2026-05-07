@@ -9,8 +9,8 @@ import '../global2.dart';
 import '../init_values.dart';
 import '../model/general_get_controller.dart';
 
-class OtqGetImagesNew extends StatefulWidget {
-  const OtqGetImagesNew({
+class OtqGetImages2 extends StatefulWidget {
+  const OtqGetImages2({
     required Key key,
     required this.wKey,
     required this.component,
@@ -29,11 +29,11 @@ class OtqGetImagesNew extends StatefulWidget {
   final double bPad;
 
   @override
-  OtqGetImagesNewState createState() => OtqGetImagesNewState();
+  OtqGetImages2State createState() => OtqGetImages2State();
 }
 
-class OtqGetImagesNewState extends State<OtqGetImagesNew>
-    with AutomaticKeepAliveClientMixin<OtqGetImagesNew> {
+class OtqGetImages2State extends State<OtqGetImages2>
+    with AutomaticKeepAliveClientMixin<OtqGetImages2> {
   int maxImages = 99999;
   List<double> margin = [];
   double h = 0;
@@ -187,9 +187,8 @@ class OtqGetImagesNewState extends State<OtqGetImagesNew>
 
     final List<String> texts =
         diamondTextToList(widget.component['text']?.toString() ?? '');
-    final String emptyTitle =
-        texts.isNotEmpty ? texts[0] : 'Belum ada foto';
-    final String emptySubtitle = texts.length > 1 ? texts[1] : '';
+    final String emptyTitle = 'Belum ada foto';
+    final String emptySubtitle = 'Ambil foto untuk melengkapi data';
     final String fotoLabel = texts.length > 2 ? texts[2] : 'foto';
     final String addLabel = texts.length > 3 ? texts[3] : 'Tambah Foto';
 
@@ -199,177 +198,177 @@ class OtqGetImagesNewState extends State<OtqGetImagesNew>
     final double thumbSize =
         (widget.component['previewSize'] ?? 90.0).toDouble();
 
-    return Container(
-      width: double.infinity,
-      margin: EdgeInsets.only(
-        top: margin[0],
-        bottom: margin[1],
-        left: widget.lPad + margin[2],
-        right: widget.rPad + margin[3],
-      ),
-      padding: EdgeInsets.fromLTRB(16, widget.tPad + 14, 16, widget.bPad + 14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Header
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(7),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEEF2F8),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(
-                  Icons.camera_alt_outlined,
-                  size: 16,
-                  color: Color(0xFF334155),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  headerLabel,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF334155),
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ),
-              Text(
-                '${imageUrls.length} / $maxImages $fotoLabel',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: Color(0xFF94A3B8),
-                  fontWeight: FontWeight.w500,
-                ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Container(
+          width: constraints.maxWidth,
+          margin: EdgeInsets.only(top: margin[0], bottom: margin[1]),
+          padding:
+              EdgeInsets.fromLTRB(16, widget.tPad + 14, 16, widget.bPad + 14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          // Photo zone
-          if (imageWidgets.isEmpty)
-            GestureDetector(
-              onTap: canAddMore && isEnabled
-                  ? () => buttonPressed(widget.component, isEnabled)
-                  : null,
-              child: CustomPaint(
-                painter: _DashedBorderPainter(
-                  color: const Color(0xFFBFDBFE),
-                ),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 32),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEEF2F8),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(
-                            Icons.camera_alt_outlined,
-                            size: 26,
-                            color: Color(0xFF94A3B8),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          emptyTitle,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1E293B),
-                          ),
-                        ),
-                        if (emptySubtitle.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            emptySubtitle,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: Color(0xFF94A3B8),
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Header
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(7),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEEF2F8),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.camera_alt_outlined,
+                      size: 16,
+                      color: Color(0xFF334155),
                     ),
                   ),
-                ),
-              ),
-            )
-          else
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  height: thumbSize,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: imageWidgets.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
-                    itemBuilder: (_, i) => SizedBox(
-                      width: thumbSize,
-                      height: thumbSize,
-                      child: imageWidgets[i],
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      headerLabel,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF334155),
+                        letterSpacing: 1.2,
+                      ),
                     ),
                   ),
-                ),
-                if (canAddMore && isEnabled) ...[
-                  const SizedBox(height: 10),
-                  GestureDetector(
-                    onTap: () => buttonPressed(widget.component, isEnabled),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 9),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEEF2F8),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFBFDBFE)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.add_a_photo_outlined,
-                              size: 15, color: Color(0xFF3B82F6)),
-                          const SizedBox(width: 6),
-                          Text(
-                            addLabel,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: Color(0xFF3B82F6),
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
+                  Text(
+                    '${imageUrls.length} / $maxImages $fotoLabel',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF94A3B8),
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
-              ],
-            ),
-        ],
-      ),
+              ),
+              const SizedBox(height: 12),
+              // Photo zone
+              if (imageWidgets.isEmpty)
+                GestureDetector(
+                  onTap: canAddMore && isEnabled
+                      ? () => buttonPressed(widget.component, isEnabled)
+                      : null,
+                  child: CustomPaint(
+                    painter: _DashedBorderPainter(
+                      color: const Color(0xFFBFDBFE),
+                    ),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 32),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFEEF2F8),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(
+                                Icons.camera_alt_outlined,
+                                size: 26,
+                                color: Color(0xFF94A3B8),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              emptyTitle,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1E293B),
+                              ),
+                            ),
+                            if (emptySubtitle.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                emptySubtitle,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: Color(0xFF94A3B8),
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+              else
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      height: thumbSize,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: imageWidgets.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (_, i) => SizedBox(
+                          width: thumbSize,
+                          height: thumbSize,
+                          child: imageWidgets[i],
+                        ),
+                      ),
+                    ),
+                    if (canAddMore && isEnabled) ...[
+                      const SizedBox(height: 10),
+                      GestureDetector(
+                        onTap: () => buttonPressed(widget.component, isEnabled),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 9),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEEF2F8),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFBFDBFE)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.add_a_photo_outlined,
+                                  size: 15, color: Color(0xFF3B82F6)),
+                              const SizedBox(width: 6),
+                              Text(
+                                addLabel,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: Color(0xFF3B82F6),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -469,8 +468,8 @@ class _DashedBorderPainter extends CustomPainter {
 
     final path = Path()
       ..addRRect(RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-            _stroke / 2, _stroke / 2, size.width - _stroke, size.height - _stroke),
+        Rect.fromLTWH(_stroke / 2, _stroke / 2, size.width - _stroke,
+            size.height - _stroke),
         const Radius.circular(_radius),
       ));
 
