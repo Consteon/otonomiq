@@ -11,9 +11,9 @@ class AppleLoginButton extends StatelessWidget {
 
   const AppleLoginButton(
       {required Key key,
-      var component,
-      required String country,
-      required String inv})
+        var component,
+        required String country,
+        required String inv})
       : _component = component,
         _country = country,
         _inv = inv,
@@ -22,13 +22,17 @@ class AppleLoginButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 200,
-      child: ElevatedButton.icon(
+      width: double.infinity,
+      height: 52,
+      child: ElevatedButton(
         style: ElevatedButton.styleFrom(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.0)), backgroundColor: Colors.teal,
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          elevation: 0,
         ),
-        icon: const Icon(FontAwesomeIcons.apple, color: Colors.white),
         onPressed: () {
           rootThis.setState(() {
             rootThis.wait = true;
@@ -38,9 +42,20 @@ class AppleLoginButton extends StatelessWidget {
             LoginWithApplePressed(country: _country, inv: _inv),
           );
         },
-        label: Text(_component['apple'] ?? 'Masuk menggunakan Apple ID',
-            style: const TextStyle(color: Colors.white)),
-//      color: Colors.redAccent,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(FontAwesomeIcons.apple, size: 20),
+            const SizedBox(width: 12),
+            Text(
+              _component['apple'] ?? 'Masuk dengan Apple',
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

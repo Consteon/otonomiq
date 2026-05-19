@@ -214,6 +214,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
       final dynamic lqrList = transactionStore.state.screenTx['#LQR_LIST'];
       if (lqrList == null || lqrList is! Map || lqrList.isEmpty) return null;
       try {
+        String? nearestName;
+        double minDistance = double.infinity;
         for (final entry in lqrList.entries) {
           final List data = entry.value as List;
           final double targetLat = (data[1] as num).toDouble();
@@ -222,8 +224,12 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
           final double zone2 = tolerance + accuracy * 2;
           final double distance =
           Geolocator.distanceBetween(lat, lng, targetLat, targetLng);
-          if (distance <= zone2) return data[0].toString();
+          if (distance <= zone2 && distance < minDistance) {
+            minDistance = distance;
+            nearestName = data[0].toString();
+          }
         }
+        return nearestName;
       } catch (_) {}
       return null;
     }

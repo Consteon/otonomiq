@@ -1,13 +1,12 @@
 // from https://medium.com/flutter-community/firebase-login-with-flutter-bloc-47455e6047b0
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import '../../../login/api/user_repository.dart';
-import '../../../login/page/login/login.dart';
-import '../../../login/bloc_authentication/bloc.dart';
+
 import '../../../global.dart';
+import '../../../login/api/user_repository.dart';
+import '../../../login/bloc_authentication/bloc.dart';
+import '../../../login/page/login/login.dart';
 
 class LoginForm extends StatefulWidget {
   final UserRepository _userRepository;
@@ -19,12 +18,12 @@ class LoginForm extends StatefulWidget {
 
   const LoginForm(
       {required Key key,
-      required UserRepository userRepository,
-      this.tosText,
-      this.tosRoute,
-      this.parentContext,
-      this.component,
-      this.route})
+        required UserRepository userRepository,
+        this.tosText,
+        this.tosRoute,
+        this.parentContext,
+        this.component,
+        this.route})
       : assert(component != null),
         _userRepository = userRepository,
         super(key: key);
@@ -44,13 +43,14 @@ class _LoginFormState extends State<LoginForm> {
 
   LoginBloc? _loginBloc;
   bool _tosOk = false;
+  bool _isLoadingDialogShown = false;
   String tText = 'a';
   UserRepository get _userRepository => widget._userRepository;
   final bool _wait = false;
 
   bool get isPopulated =>
 //      _emailController.text.isNotEmpty && _passwordController.text.isNotEmpty;
-      _phoneController.text.isNotEmpty;
+  _phoneController.text.isNotEmpty;
 
   bool isLoginButtonEnabled(LoginState state) {
     return state.isFormValid &&
@@ -98,6 +98,70 @@ class _LoginFormState extends State<LoginForm> {
     return BlocListener(
       bloc: _loginBloc,
       listener: (BuildContext context, LoginState state) {
+        if (isLoginProcessing(state) && !_isLoadingDialogShown) {
+          _isLoadingDialogShown = true;
+          final primary = Theme.of(context).primaryColor;
+          final accent = HSLColor.fromColor(primary)
+              .withLightness(0.45)
+              .withSaturation(0.7)
+              .toColor();
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            barrierColor: Colors.black.withValues(alpha: 0.3),
+            builder: (BuildContext ctx) {
+              return PopScope(
+                canPop: false,
+                child: Center(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 60),
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 32, horizontal: 40),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.12),
+                          blurRadius: 24,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 3,
+                            valueColor:
+                            AlwaysStoppedAnimation<Color>(accent),
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        Text(
+                          widget.component['loading'] ?? 'Memproses...',
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: Colors.grey.shade600,
+                            fontWeight: FontWeight.w500,
+                            decoration: TextDecoration.none,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        } else if (!isLoginProcessing(state) && _isLoadingDialogShown) {
+          _isLoadingDialogShown = false;
+          Navigator.of(context, rootNavigator: true).pop();
+        }
+
         if (state.isFailure) {
           _userRepository.systemSignOut();
           if (state.loginStatus == 2) {
@@ -107,7 +171,7 @@ class _LoginFormState extends State<LoginForm> {
                 return AlertDialog(
                   title: Text(textList['AnotherUserLogin']),
                   content:
-                      Text(textList['AnotherUserLoginMessage']), // show dialog
+                  Text(textList['AnotherUserLoginMessage']), // show dialog
                   actions: <Widget>[
                     TextButton(
                       child: Text(textList["OK"]),
@@ -303,114 +367,280 @@ class _LoginFormState extends State<LoginForm> {
         bloc: _loginBloc,
         builder: (BuildContext context, LoginState state) {
           isLoginProcessing(state);
-          return Padding(
-            padding: const EdgeInsets.all(0.0),
-            child: Form(
-//            child: ListView(
-              child: Stack(
-                children: <Widget>[
-                  Column(
-                    children: <Widget>[
-                      !state.isWaitingSmsCode
-                          ? Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 5.0),
-                              child: Row(
-                                children: <Widget>[
-                                  GestureDetector(
-                                    onTap: _onTosOKTabbed,
-                                    child: Checkbox(
-                                      value: _tosOk,
-                                      onChanged: (bool? value) {
-                                        _onTosOKTabbed();
-                                      },
-//                                  onChanged: (_)=>_onTosOKTabbed, // onChanged handled by GestureDetector
-                                    ),
-                                  ),
-                                  Flexible(
-                                    child: GestureDetector(
-                                      onTap: () {
-                                        gotoRoute(widget.tosRoute!);
-                                      },
-                                      child: Text(widget.tosText!),
-                                    ),
-                                  ),
-                                ],
-                              ))
-                          : Container(),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: <Widget>[
-                            isOtherProviderEnabled(state)
-                                ? Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: <Widget>[
-                                      TextField(
-                                        textAlign: TextAlign.center,
-                                        controller: _invController,
-                                        keyboardType: TextInputType.phone,
-                                        inputFormatters: [
-                                          FilteringTextInputFormatter.allow(
-                                              RegExp('[0-9]+'))
-                                        ],
-                                        decoration: InputDecoration(
-                                          labelText: widget.component['text3'],
-                                          border: const OutlineInputBorder(
-                                            borderRadius: BorderRadius.all(
-                                                Radius.circular(10.0)),
-                                          ),
-                                          hintText: widget.component['text4'],
-                                        ),
-                                      ),
-                                      Container(
-                                        height: 10.0,
-                                      ),
-                                      sinner
-                                          ? AppleLoginButton(
-                                              key: GlobalKey(),
-                                              component: widget.component,
-                                              country: _countryController.text,
-                                              inv: _invController.text,
-                                            )
-                                          : Container(
-                                              height: 0,
-                                            ),
-                                      Container(),
-                                      GoogleLoginButton(
-                                        key: GlobalKey(),
-                                        component: widget.component,
-                                        country: _countryController.text,
-                                        inv: _invController.text,
-                                      )
-                                    ],
-                                  )
-                                : Container(),
-                          ],
-                        ),
-                      ),
+          final primary = Theme.of(context).primaryColor;
+          final darkPrimary = HSLColor.fromColor(primary)
+              .withLightness(0.15)
+              .withSaturation(0.6)
+              .toColor();
+          final accentColor = HSLColor.fromColor(primary)
+              .withLightness(0.45)
+              .withSaturation(0.7)
+              .toColor();
+
+          return Stack(
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      darkPrimary,
+                      HSLColor.fromColor(primary).withLightness(0.08).toColor(),
                     ],
                   ),
-                  isLoginProcessing(state)
-                      ? Stack(
-                          children: <Widget>[
-                            Center(
-                              child: Container(
-                                width: double.infinity,
-                                height: 300,
-                                color: Colors.white.withOpacity(0.5),
-                                child: const Center(
-                                    child: CircularProgressIndicator()),
-                              ),
-                            ),
-                          ],
-                        )
-                      : Container(),
-                ],
+                ),
               ),
-            ),
+
+              // Decorative circles
+              Positioned(
+                top: -60,
+                right: -40,
+                child: Container(
+                  width: 200,
+                  height: 200,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withValues(alpha: 0.04),
+                  ),
+                ),
+              ),
+              Positioned(
+                bottom: 80,
+                left: -60,
+                child: Container(
+                  width: 160,
+                  height: 160,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withValues(alpha: 0.03),
+                  ),
+                ),
+              ),
+
+              SafeArea(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Form(
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 8),
+
+                        Text(
+                          widget.component['subtitle'] ?? 'Masuk ke akun Anda',
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: darkPrimary.withValues(alpha: 0.5),
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        // Login card
+                        Container(
+                          padding: const EdgeInsets.all(24),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.15),
+                                blurRadius: 30,
+                                offset: const Offset(0, 12),
+                                spreadRadius: -4,
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              // Invitation / phone input
+                              TextField(
+                                textAlign: TextAlign.center,
+                                controller: _invController,
+                                keyboardType: TextInputType.phone,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.allow(
+                                      RegExp('[0-9]+'))
+                                ],
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  letterSpacing: 2.0,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                decoration: InputDecoration(
+                                  labelText: widget.component['text3'],
+                                  hintText: widget.component['text4'],
+                                  filled: true,
+                                  fillColor: Colors.grey.shade50,
+                                  prefixIcon: Icon(
+                                    Icons.phone_android_rounded,
+                                    color: Colors.grey.shade400,
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    borderSide:
+                                    BorderSide(color: Colors.grey.shade200),
+                                  ),
+                                  enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    borderSide:
+                                    BorderSide(color: Colors.grey.shade200),
+                                  ),
+                                  focusedBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                    borderSide: BorderSide(
+                                        color: accentColor, width: 1.5),
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      vertical: 16, horizontal: 16),
+                                ),
+                              ),
+
+                              // TOS checkbox below input
+                              if (!state.isWaitingSmsCode) ...[
+                                const SizedBox(height: 16),
+                                GestureDetector(
+                                  onTap: _onTosOKTabbed,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 12, horizontal: 12),
+                                    decoration: BoxDecoration(
+                                      color: _tosOk
+                                          ? accentColor.withValues(alpha: 0.08)
+                                          : Colors.grey.shade50,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: _tosOk
+                                            ? accentColor.withValues(alpha: 0.3)
+                                            : Colors.grey.shade200,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 22,
+                                          height: 22,
+                                          decoration: BoxDecoration(
+                                            color: _tosOk
+                                                ? accentColor
+                                                : Colors.transparent,
+                                            borderRadius:
+                                            BorderRadius.circular(6),
+                                            border: Border.all(
+                                              color: _tosOk
+                                                  ? accentColor
+                                                  : Colors.grey.shade300,
+                                              width: 2,
+                                            ),
+                                          ),
+                                          child: _tosOk
+                                              ? const Icon(Icons.check,
+                                              size: 16, color: Colors.white)
+                                              : null,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Flexible(
+                                          child: GestureDetector(
+                                            onTap: () {
+                                              gotoRoute(widget.tosRoute!);
+                                            },
+                                            child: Text(
+                                              widget.tosText!,
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                color: Colors.grey.shade700,
+                                                height: 1.4,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+
+                              const SizedBox(height: 20),
+
+                              // Divider
+                              Row(
+                                children: [
+                                  Expanded(
+                                      child:
+                                      Divider(color: Colors.grey.shade200)),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 16),
+                                    child: Text(
+                                      widget.component['divider'] ??
+                                          'Masuk dengan',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade400,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                  Expanded(
+                                      child:
+                                      Divider(color: Colors.grey.shade200)),
+                                ],
+                              ),
+                              const SizedBox(height: 20),
+
+                              // Social buttons — enabled only when TOS checked & phone filled
+                              if (sinner)
+                                AbsorbPointer(
+                                  absorbing: !_isLoginReady(),
+                                  child: Opacity(
+                                    opacity: _isLoginReady() ? 1.0 : 0.4,
+                                    child: AppleLoginButton(
+                                      key: GlobalKey(),
+                                      component: widget.component,
+                                      country: _countryController.text,
+                                      inv: _invController.text,
+                                    ),
+                                  ),
+                                ),
+                              if (sinner) const SizedBox(height: 12),
+                              AbsorbPointer(
+                                absorbing: !_isLoginReady(),
+                                child: Opacity(
+                                  opacity: _isLoginReady() ? 1.0 : 0.4,
+                                  child: GoogleLoginButton(
+                                    key: GlobalKey(),
+                                    component: widget.component,
+                                    country: _countryController.text,
+                                    inv: _invController.text,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 32),
+
+                        // Footer
+                        Text(
+                          widget.component['footer'] ??
+                              '© ${DateTime.now().year} $thisAppName',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.white.withValues(alpha: 0.35),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
+            ],
           );
         },
       ),
@@ -459,6 +689,10 @@ class _LoginFormState extends State<LoginForm> {
   void _onTosOKTabbed() {
     _tosOk = !_tosOk;
     _loginBloc!.add(TosOKTabbed(tosOk: _tosOk));
+  }
+
+  bool _isLoginReady() {
+    return _tosOk && _invController.text.isNotEmpty;
   }
 
   String phoneInternationalize(String phone) {

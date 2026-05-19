@@ -1,12 +1,14 @@
 import 'dart:io';
 import 'dart:typed_data';
+
 import 'package:camera/camera.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:image/image.dart' as img;
 import 'package:image_watermark/image_watermark.dart';
 import 'package:intl/intl.dart';
+
 import '../global.dart';
-import 'package:flutter/material.dart';
-import 'package:image/image.dart' as img;
 
 String inputPath = emptyString; // temporary path variable
 
@@ -78,7 +80,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
 
   CameraController? controller; //To control the camera
   late Future<void>
-      _initializeControllerFuture; //Future to wait until camera initializes
+  _initializeControllerFuture; //Future to wait until camera initializes
   int selectedCamera = 0;
   int flashIndex = 0;
   late bool gotPicture;
@@ -91,7 +93,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
   List<File> capturedImages = [];
   File? currentImage;
 
-  initializeCamera(int cameraIndex, int flashIndex) async {
+  Future<void> initializeCamera(int cameraIndex, int flashIndex) async {
     controller = CameraController(
       // Get a specific camera from the list of available cameras.
       widget.cameras[cameraIndex],
@@ -208,53 +210,48 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     media = MediaQuery.maybeOf(context);
-    double? w = media?.size.width;
     double currentWidth = (media?.size.width ?? widget.width) ?? controlHeight;
     double currentHeight =
         (media?.size.height ?? widget.height) ?? controlHeight;
-    dynamic pictureHeight = currentHeight - controlHeight;
+    double pictureHeight = currentHeight - controlHeight;
     int d = 1;
 
     return Stack(
       children: [
         gotPicture
             ? Container(
-                height: pictureHeight,
-                alignment: Alignment.center,
-                // width: MediaQuery.of(context).size.width * picFactor,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.blue),
-                  borderRadius: BorderRadius.circular(4),
-                  image: DecorationImage(
-                      // image: FileImage(capturedImages.last),
-                      image: FileImage(currentImage!),
-                      fit: BoxFit.cover),
-                ),
-              )
+          height: pictureHeight,
+          alignment: Alignment.center,
+          // width: MediaQuery.of(context).size.width * picFactor,
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.blue),
+            borderRadius: BorderRadius.circular(4),
+            image: DecorationImage(
+              // image: FileImage(capturedImages.last),
+                image: FileImage(currentImage!),
+                fit: BoxFit.cover),
+          ),
+        )
             : FutureBuilder<void>(
-                future: _initializeControllerFuture,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.done) {
-                    // If the Future is complete, display the preview.
-                    return Container(
-                        //width: pictureWidth,
-                        height: pictureHeight,
-                        //width: MediaQuery.of(context).size.width * picFactor,
-                        alignment: Alignment.center,
-                        child: CameraPreview(controller!));
-                  } else {
-                    // Otherwise, display a loading indicator.
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                },
-              ),
+          future: _initializeControllerFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.done) {
+              // If the Future is complete, display the preview.
+              return Container(
+                //width: pictureWidth,
+                  height: pictureHeight,
+                  //width: MediaQuery.of(context).size.width * picFactor,
+                  alignment: Alignment.center,
+                  child: CameraPreview(controller!));
+            } else {
+              // Otherwise, display a loading indicator.
+              return const Center(child: CircularProgressIndicator());
+            }
+          },
+        ),
         SizedBox(
           height: currentHeight,
           width: currentWidth,
-          // decoration: BoxDecoration(
-          //   border: Border.all(color: Colors.blue),
-          //   borderRadius: BorderRadius.circular(4),
-          // ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -342,7 +339,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                                 "${xFile.path.split("/CAP")[0]}/$localImageArtifact${globalRandom.nextInt(999999999).toString()}.jpg";
                             final now = DateTime.now();
                             final String formattedDateTime =
-                                DateFormat(dateTimeFormat).format(now);
+                            DateFormat(dateTimeFormat).format(now);
                             dynamic image = img.decodeImage(
                                 File(xFile.path).readAsBytesSync());
                             try {
@@ -369,7 +366,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                             dynamic watermarkedImage = imageBytes;
                             try {
                               watermarkedImage =
-                                  await ImageWatermark.addTextWatermark(
+                              await ImageWatermark.addTextWatermark(
                                 imgBytes: imageBytes,
 
                                 ///image bytes
@@ -389,7 +386,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                             }
                             try {
                               watermarkedImage =
-                                  await ImageWatermark.addTextWatermark(
+                              await ImageWatermark.addTextWatermark(
                                 imgBytes: watermarkedImage,
 
                                 ///image bytes
@@ -445,10 +442,10 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                               }
                             }
                             Future.delayed(const Duration(milliseconds: 1200),
-                                () {
-                              // wait until the camera is stable
-                              tapDetector = false;
-                            });
+                                    () {
+                                  // wait until the camera is stable
+                                  tapDetector = false;
+                                });
                           }
                         },
                         icon: Icon(
@@ -520,15 +517,17 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
 }
 
 Future<String> acquireCamera(
-  List<CameraDescription> cameras,
-  String label,
-  String direction,
-  int maxSize,
-  int quality,
-  double? height,
-  double? width,
-) async {
+    List<CameraDescription> cameras,
+    String label,
+    String direction,
+    int maxSize,
+    int quality,
+    double? height,
+    double? width,
+    ) async {
   // inputPath = emptyString;
+  FocusManager.instance.primaryFocus?.unfocus();
+  await Future.delayed(const Duration(milliseconds: 300));
   List<String> result = [emptyString];
   await Get.dialog(AlertDialog(
     insetPadding: const EdgeInsets.fromLTRB(12, 40, 12, 20),
@@ -554,9 +553,9 @@ int getCameraIndex(List<CameraDescription> cameras, String lensFacing) {
   int result = 0;
   bool found = false;
   CameraLensDirection direction =
-      lensFacing.toString().trim().toLowerCase() == 'front'
-          ? CameraLensDirection.front
-          : CameraLensDirection.back;
+  lensFacing.toString().trim().toLowerCase() == 'front'
+      ? CameraLensDirection.front
+      : CameraLensDirection.back;
   for (int i = 0; i < cameras.length && !found; i++) {
     if (cameras[i].lensDirection == direction) {
       result = i;
@@ -565,3 +564,4 @@ int getCameraIndex(List<CameraDescription> cameras, String lensFacing) {
   } // end for i
   return result;
 } //getCameraIndex
+

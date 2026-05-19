@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
+import 'package:get/get.dart';
 
 import '../api.dart';
 import '../crypto/auth_crypto.dart';
@@ -14,6 +15,7 @@ import '../model/ftz_scanned_code.dart';
 import '../model/input_controller.dart';
 import '../redux/screen_transaction.dart';
 import '../widget/all_widget.dart';
+import '../widget/approver_sticky_bar.dart';
 import '../widget/qr_gps.dart';
 import '../widget/radio_text.dart';
 import '../widget/ui_component.dart';
@@ -32,6 +34,7 @@ import 'otq_get_images_2.dart';
 import 'otq_rdo_2.dart';
 import 'otq_txf_2.dart';
 import 'progress_bar.dart';
+import 'selectable_btn.dart';
 import 'tasklist.dart';
 import 'time_presence.dart';
 
@@ -298,15 +301,20 @@ Widget buildDisplayComponent(
       result = Text('--${component['type']}-- Error: $e');
     } // end of try
   } else if (tip == 'txf') {
-    result = OtqTxf2(
-      key: txfKey,
-      scrName: scrName,
-      component: component,
-      lPad: lPad,
-      tPad: tPad,
-      rPad: rPad,
-      bPad: bPad,
-    );
+    String variant = (component['variant'] ?? '').toString().toLowerCase();
+    if (variant == 'commentbox') {
+      result = const SizedBox.shrink();
+    } else {
+      result = OtqTxf2(
+        key: txfKey,
+        scrName: scrName,
+        component: component,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    }
   } else if (tip == 'html') {
     //Html display
     try {
@@ -437,16 +445,57 @@ Widget buildDisplayComponent(
   } else if (tip == 'rbt') {
     // Row of button
     try {
-      result = FtzRowOfButton2(
-        key: txfKey,
-        component: component,
-        scrName: scrName,
-        dialog: dialog,
-        lPad: lPad,
-        tPad: tPad,
-        rPad: rPad,
-        bPad: bPad,
-      );
+      bool isApprovalRbt = (component['children'] as List<dynamic>? ?? [])
+          .any((btn) => btn is Map && btn.containsKey('actions'));
+      if (isApprovalRbt) {
+        final rbtComponent = component;
+        final rbtScrName = scrName;
+        final rbtDialog = dialog;
+        final rbtLPad = lPad;
+        final rbtTPad = tPad;
+        final rbtRPad = rPad;
+        final rbtBPad = bPad;
+        final rbtKey = txfKey;
+        List<String> tabs = [];
+        var screenTx = transactionStore.state.screenTx;
+        if (screenTx['approval_tabs'] is List) {
+          tabs = (screenTx['approval_tabs'] as List)
+              .map((e) => e.toString())
+              .toList();
+        }
+        final String defaultStatus =
+        tabs.isNotEmpty ? tabs[0].toUpperCase() : 'PENDING';
+        result = ApproverStickyBar(
+          scrName: scrName,
+          builder: () => Obx(() {
+            String s = ApprovalDetail.currentStatus.value;
+            if (s.isNotEmpty && s != defaultStatus) {
+              return const SizedBox.shrink();
+            }
+            return FtzRowOfButton2(
+              key: rbtKey,
+              component: rbtComponent,
+              scrName: rbtScrName,
+              dialog: rbtDialog,
+              lPad: rbtLPad,
+              tPad: rbtTPad,
+              rPad: rbtRPad,
+              bPad: rbtBPad,
+            );
+          }),
+        );
+      } else {
+        result = FtzRowOfButton2(
+          key: txfKey,
+          component: component,
+          scrName: scrName,
+          dialog: dialog,
+          lPad: lPad,
+          tPad: tPad,
+          rPad: rPad,
+          bPad: bPad,
+        );
+      }
       // result = Container(
       //   margin: EdgeInsets.only(
       //       top: (component['beforeSpacing'] ?? 0.0).toDouble(),
@@ -766,6 +815,8 @@ Widget buildDisplayComponent(
             component, // imageType, folder, filename, route, position
             scrName: scrName,
             single: true,
+            lPad: lPad,
+            rPad: rPad,
           );
         },
       );
@@ -783,6 +834,8 @@ Widget buildDisplayComponent(
             component, // imageType, folder, filename, route, position
             scrName: scrName,
             single: true,
+            lPad: lPad,
+            rPad: rPad,
           );
         },
       );
@@ -809,6 +862,25 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     } // end of try
+  } else if (tip == 'selectable_btn') {
+    try {
+      Key iKey = GlobalKey();
+      result = Builder(
+        builder: (BuildContext context) {
+          return SelectableBtn(
+            key: iKey,
+            component: component,
+            scrName: scrName,
+            lPad: lPad,
+            tPad: tPad,
+            rPad: rPad,
+            bPad: bPad,
+          );
+        },
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
   } else if (tip == 'location') {
     // Location QR with location verification and selfie
     try {
@@ -1038,6 +1110,62 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     } // end of try
+  } else if (tip == 'approval') {
+    try {
+      result = Approval(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'worker_card_detail') {
+    try {
+      result = WorkerCardDetail(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'approval_detail') {
+    try {
+      result = ApprovalDetail(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'comment_detail') {
+    try {
+      result = CommentDetail(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
   } else if (tip == 'new') {
     // new component placeholder
     try {

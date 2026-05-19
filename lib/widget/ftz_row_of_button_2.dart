@@ -69,6 +69,133 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
     }
   }
 
+  Future<void> _updateApprovalChain(
+      String actionsStr, Map<dynamic, dynamic> screenTx, String scrName) async {
+    try {
+      List<String> tabs = [];
+      if (screenTx['approval_tabs'] is List) {
+        tabs = (screenTx['approval_tabs'] as List)
+            .map((e) => e.toString())
+            .toList();
+      }
+      int myApprovalLevel =
+          int.tryParse((screenTx['approval_level'] ?? '').toString()) ?? -1;
+      int statusFieldIndex =
+          int.tryParse((screenTx['approval_status_field'] ?? '').toString()) ??
+              2;
+      String tableRaw = (screenTx['approval_table'] ?? '').toString();
+      String vid = (screenTx['approval_vidtable'] ?? '').toString();
+      String requestDocT = (screenTx['request_doc_t'] ?? '').toString();
+
+      String decodedTable = autheniumDecode(tableRaw) ?? tableRaw;
+      String tableCode = normalizeTableName(decodedTable);
+      List<dynamic> allData = List.from(tableContent[tableCode] ?? []);
+
+      List<dynamic>? row;
+      for (var r in allData) {
+        if (r.isNotEmpty && r[0].toString() == requestDocT) {
+          row = r;
+          break;
+        }
+      }
+      if (row == null) {
+        debugPrint('[FtzRowOfButton2] approval row not found for docT=$requestDocT');
+        return;
+      }
+
+      int chainColIdx = -1;
+      String chainStr = '';
+      for (int i = 0; i < row.length; i++) {
+        String s = row[i].toString().trim();
+        if (s.startsWith('[[') && s.contains(',')) {
+          chainColIdx = i;
+          chainStr = s;
+          break;
+        }
+      }
+      if (chainColIdx < 0) {
+        debugPrint('[FtzRowOfButton2] no chain field found in row');
+        return;
+      }
+
+      String inner = chainStr.substring(1, chainStr.length - 1);
+      List<List<String>> steps = [];
+      for (var stepStr in inner.split(RegExp(r'\]\s*,\s*\['))) {
+        stepStr = stepStr.replaceAll('[', '').replaceAll(']', '').trim();
+        steps.add(stepStr.split(',').map((e) => e.trim()).toList());
+      }
+
+      String defaultStatus =
+      tabs.isNotEmpty ? tabs[0].toUpperCase() : 'PENDING';
+      int targetIdx = steps
+          .indexWhere((s) => s.length > 1 && s[1].toUpperCase() == defaultStatus);
+      if (targetIdx < 0) {
+        debugPrint('[FtzRowOfButton2] no $defaultStatus step found in chain');
+        return;
+      }
+
+      List<String> newStep = List<String>.from(steps[targetIdx]);
+      for (var part in actionsStr.split('⭘')) {
+        List<String> kv = part.split('◼');
+        if (kv.length < 2) continue;
+        String key = kv[0].trim();
+        String value = kv.sublist(1).join('◼').trim();
+        if (key.startsWith('<') && key.endsWith('>')) {
+          try {
+            int pos = int.parse(key.substring(1, key.length - 1)) - 1;
+            while (newStep.length <= pos) {
+              newStep.add('');
+            }
+            newStep[pos] = value;
+          } catch (_) {}
+        }
+      }
+      steps[targetIdx] = newStep;
+
+      String newChainStr =
+          '[${steps.map((s) => '[${s.join(', ')}]').join(', ')}]';
+
+      String actionStatus =
+      newStep.length > 1 ? newStep[1].trim().toUpperCase() : '';
+      String continueStatus =
+      tabs.length > 1 ? tabs[1].toUpperCase() : '';
+      bool isLastLevel =
+          myApprovalLevel > 0 && myApprovalLevel == steps.length;
+      bool updateOverallStatus =
+          isLastLevel || actionStatus != continueStatus;
+
+      debugPrint(
+          '[FtzRowOfButton2] actionStatus=$actionStatus | myLevel=$myApprovalLevel | totalSteps=${steps.length} | isLastLevel=$isLastLevel | updateOverall=$updateOverallStatus');
+
+      String noRequest = row.length > 1 ? row[1].toString() : '';
+      String input =
+          '$tableRaw⭘tablevid◼$vid⭘search◼1${separator[3]}$noRequest⭘<$chainColIdx>◼$newChainStr';
+      if (updateOverallStatus) {
+        input += '⭘<$statusFieldIndex>◼$actionStatus';
+      }
+
+      int nowMs = DateTime.now().millisecondsSinceEpoch;
+      List<String> contentParts = [
+        '${separator[7]}$nowMs',
+        scrName,
+        row.length > 1 ? row[1].toString() : '',
+        row.length > 2 ? row[2].toString() : '',
+        '$nowMs',
+      ];
+      for (int i = 3; i < row.length; i++) {
+        contentParts.add(row[i].toString());
+      }
+      String eventContent = '0${contentParts.join(separator[1])}';
+      String eventRowString = jsonEncode([nowMs, scrName, eventContent]);
+
+      debugPrint('[FtzRowOfButton2] approval input: $input');
+      List<String> result = await updateTableRow(input, eventRowString);
+      debugPrint('[FtzRowOfButton2] approval chain update result: $result');
+    } catch (e) {
+      debugPrint('[FtzRowOfButton2] approval chain update error: $e');
+    }
+  }
+
   List<Widget> buildButtonList(List<dynamic> children, String scrName,
       {bool? dialog}) {
     List<Widget> bannerComponent = [];
@@ -911,6 +1038,16 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
                       } // end if routeExist
                     }
                 } // end switch
+                var approvalScreenTx = transactionStore.state.screenTx;
+                String approvalRole = (approvalScreenTx['approval_role'] ?? '').toString().toUpperCase();
+                if (approvalRole == 'APPROVER' || approvalRole == 'MAKER') {
+                  String rawActions = (buttonData['actions'] ?? '').toString();
+                  String actionsStr = autheniumDecode(rawActions) ?? rawActions;
+                  if (actionsStr.isNotEmpty) {
+                    await _updateApprovalChain(actionsStr, approvalScreenTx, scrName);
+                  }
+                }
+
                 if (hasChain) {
                   await doChain(context, scrName, buttonData['chain']);
                 }

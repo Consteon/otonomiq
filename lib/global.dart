@@ -173,7 +173,16 @@ import 'global2.dart';
   0.9.78.30 (260507) OO : update dart files: api, table_repository, mobile_table_controller
                           attendance_qr_selfie_gps_verify, ftz_row_of_button_2, otq_rdo_2,
                           otq_txf_2, progress_bar, location_detector, tasklist,
-                          ftz_chechker, build_display_component
+                          ftz_checker, build_display_component
+  0.9.78.31 (260519) OO : pubspec yaml : file_picker: ^8.1.7.
+                          add: worker_card_detail, otq_bottom_nav_bar, approver_sticky_bar,
+                          approval, approval_detail
+                          edit : tasklist, selectable_btn, photo_camera,
+                          otq_txf2, otq_get_image_2, location_detector,
+                          ftz_row_of_button2, ftz_autonumber, comment_detail,
+                          attendance_qr_selfie_gps_verify, stl_page, main_page,
+                          home_page, any_page, login_form, google_login_button,
+                          apple_login_button
 
  */
 // ========= Constants ==========================
@@ -185,7 +194,7 @@ int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
 const String version = '0.9.78';
-const String subVersion = '.30';
+const String subVersion = '.31';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing
@@ -1108,6 +1117,7 @@ String? autheniumDecode(String? inp) {
     result = result.replaceAll('_u2B58_', '\u{2B58}');
     result = result.replaceAll('_u2B2A_', '\u{2B2A}');
     result = result.replaceAll('_u25C6_', '\u{25C6}');
+    result = result.replaceAll('_u25C7_', '\u{25C7}'); // hollow diamond
     result = result.replaceAll('_25FC_', '\u{25FC}'); // this is buggy character
     // result = result.replaceAll('_25C0_', '\u{25C0}');
     // result = result.replaceAll('_25B6_', '\u{25B6}');

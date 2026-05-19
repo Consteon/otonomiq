@@ -19,9 +19,10 @@ import '../main_bloc/bloc.dart';
 import '../notification/bloc.dart';
 import '../widget/link_widget.dart';
 import '../model/connection_data.dart';
-import '../otq_icons.dart';
 import '../different_code/different_code.dart';
+import '../otq_icons.dart';
 import '../widget/build_theme.dart';
+import '../widget/otq_bottom_nav_bar.dart';
 import 'package:get/get.dart';
 
 class MainPage extends StatefulWidget {
@@ -40,7 +41,7 @@ class MainPageState extends State<MainPage> {
   // List<Widget> pageElements = linkElement[
   //     home]!; // page elements to display. Got this from Link Interface load home for start
   List<Widget> pageElements =
-      List<Widget>.of(linkElement[home]!.map((widget) => widget));
+  List<Widget>.of(linkElement[home]!.map((widget) => widget));
   bool wait = false; // if true, display wait screen (circular or other)
   ScrollController scrollController = ScrollController();
   bool touch = false;
@@ -52,8 +53,9 @@ class MainPageState extends State<MainPage> {
   int lastNum = 0;
   dynamic notificationList;
   int byPass =
-      0; // 0 = no by pass, 1 = NotificationList, 2 = NotificationDetail
+  0; // 0 = no by pass, 1 = NotificationList, 2 = NotificationDetail
   late Widget byPassWidget;
+  int _selectedNavIndex = 0;
   // final Connectivity _connectivity = Connectivity();
   // late StreamSubscription<ConnectivityResult> _connectivitySubscription;
   String gpsTime = separator[0];
@@ -159,8 +161,6 @@ class MainPageState extends State<MainPage> {
 
   @override
   Widget build(BuildContext context) {
-    double hPad = 8; // TODO get parameter from mobile sheet
-    double vPad = 4;
     double lPad = (systemUIComponent['Mobile']['leftPad'] ?? 0.0).toDouble();
     double tPad = (systemUIComponent['Mobile']['topPad'] ?? 0.0).toDouble();
     double rPad = (systemUIComponent['Mobile']['rightPad'] ?? 0.0).toDouble();
@@ -180,162 +180,94 @@ class MainPageState extends State<MainPage> {
       errorReport(e);
     }
 
-    List<Widget> buildBottomIcon() {
-      var bottomIcon = [
-        IconButton(
-          icon: Icon(
-              otqIcons[
-                  systemUIComponent[mobile]['bottomBar'][0]['icon'].toString()],
-              size: 32),
-          onPressed: () {
-            bool changePage = true;
-            if (byPass != 0) {
-              changePage = false;
-            }
-            var pgName = systemUIComponent[mobile]['bottomBar'][0]['route'];
-            if (pgName != pageName) {
-              var state = transactionStore.state.screenTx;
-              if (state['#REFRESH']) {
-                oldSettingUpShouldBeDeleted().then((aRes) {
-                  var state = transactionStore.state;
-                  var lifKey = state.screenTx['#INTERFACE_KEY'];
-                  readSettings(lifKey, 1).then((_) {
-                    transactionStore.dispatch(UpdateScreenTxAction(
-                        ScreenTransaction(
-                            {'#REFRESH': false, '#CURRENT_ROUTE': pgName})));
-                    List<Widget> newElementList = reloadPage(pgName);
-                    setState(() {
-                      byPass = 0;
-                      pageName = pgName;
-                      pageElements = newElementList;
-                    });
-                  });
-                });
-              } else {
+    void handleNavTap(int i) {
+      if (i == 0) {
+        bool changePage = true;
+        if (byPass != 0) {
+          changePage = false;
+        }
+        var pgName = systemUIComponent[mobile]['bottomBar'][0]['route'];
+        if (pgName != pageName) {
+          var state = transactionStore.state.screenTx;
+          if (state['#REFRESH']) {
+            oldSettingUpShouldBeDeleted().then((aRes) {
+              var state = transactionStore.state;
+              var lifKey = state.screenTx['#INTERFACE_KEY'];
+              readSettings(lifKey, 1).then((_) {
+                transactionStore.dispatch(UpdateScreenTxAction(
+                    ScreenTransaction(
+                        {'#REFRESH': false, '#CURRENT_ROUTE': pgName})));
                 List<Widget> newElementList = reloadPage(pgName);
                 setState(() {
+                  _selectedNavIndex = i;
+                  byPass = 0;
                   pageName = pgName;
                   pageElements = newElementList;
-                  byPass = 0;
                 });
-              }
-              if (changePage) {
-                routeStack.push(pgName); // only push when not byPassed
-              }
-            }
+              });
+            });
+          } else {
+            List<Widget> newElementList = reloadPage(pgName);
             setState(() {
+              _selectedNavIndex = i;
+              pageName = pgName;
+              pageElements = newElementList;
               byPass = 0;
             });
-          },
-        )
-      ];
-      for (var i = 1; i < systemUIComponent[mobile]['bottomBar'].length; i++) {
-        var displayDot = true; // TODO put message # from firestore
-        const dotDiameter = 12.0;
-        var numTest = 0;
-        bottomIcon.add(IconButton(
-          icon: BlocBuilder<NotificationBloc, NotificationState>(
-              builder: (context, state) {
-            Widget iconResult;
-            if (state is NotificationLoaded) {
-              numTest = state.unReadNumber;
-              if (numTest > 0) {
-                displayDot = true;
-                if (lastNum < numTest) {
-                  // pool.play(scannerBeep);
-                }
-              } else {
-                displayDot = false;
-              }
-              lastNum = numTest;
-            }
-            if (i == 1 && displayDot) {
-              iconResult = Stack(
-                children: <Widget>[
-                  Icon(
-                    otqIcons[systemUIComponent[mobile]['bottomBar'][i]['icon']
-                        .toString()],
-                    // IconData(systemUIComponent[mobile]['bottomBar'][i]['icon'],
-                    //     fontFamily: 'MaterialIcons'),
-                    size: 32,
-                  ),
-                  Positioned(
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(1),
-                      decoration: BoxDecoration(
-                        color: Colors.red,
-                        borderRadius: BorderRadius.circular(dotDiameter / 2),
-                      ),
-                      constraints: const BoxConstraints(
-                        minWidth: dotDiameter,
-                        minHeight: dotDiameter,
-                      ),
-                      child: Center(
-                        child: Text(
-                          '$lastNum',
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 10),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            } else {
-              iconResult = Icon(
-                  otqIcons[systemUIComponent[mobile]['bottomBar'][i]['icon']
-                      .toString()],
-                  size: 32);
-            }
-            return iconResult;
-          }),
-          onPressed: () {
-            if (needUpgrade == empty) {
-              if (i == 1) {
-                // Notification screen
-                setState(() {
-                  byPassWidget = const NotificationList();
-                  byPass = 1;
+          }
+          if (changePage) {
+            routeStack.push(pgName);
+          }
+        }
+        setState(() {
+          _selectedNavIndex = i;
+          byPass = 0;
+        });
+      } else if (needUpgrade == empty) {
+        if (i == 1) {
+          setState(() {
+            _selectedNavIndex = i;
+            byPassWidget = const NotificationList();
+            byPass = 1;
+          });
+        } else {
+          var pgName = systemUIComponent[mobile]['bottomBar'][i]['route'];
+          if (pgName != pageName) {
+            var state = transactionStore.state.screenTx;
+            if (state['#REFRESH']) {
+              oldSettingUpShouldBeDeleted().then((aRes) {
+                var state = transactionStore.state;
+                var lifKey = state.screenTx['#INTERFACE_KEY'];
+                readSettings(lifKey, 1).then((_) {
+                  transactionStore.dispatch(UpdateScreenTxAction(
+                      ScreenTransaction({
+                        '#REFRESH': false,
+                        '#CURRENT_ROUTE': pgName
+                      })));
+                  List<Widget> newElementList = reloadPage(pgName);
+                  setState(() {
+                    _selectedNavIndex = i;
+                    pageName = pgName;
+                    pageElements = newElementList;
+                    byPass = 0;
+                  });
                 });
-              } else {
-                var pgName = systemUIComponent[mobile]['bottomBar'][i]['route'];
-                if (pgName != pageName) {
-                  var state = transactionStore.state.screenTx;
-                  if (state['#REFRESH']) {
-                    oldSettingUpShouldBeDeleted().then((aRes) {
-                      var state = transactionStore.state;
-                      var lifKey = state.screenTx['#INTERFACE_KEY'];
-                      readSettings(lifKey, 1).then((_) {
-                        transactionStore.dispatch(UpdateScreenTxAction(
-                            ScreenTransaction({
-                          '#REFRESH': false,
-                          '#CURRENT_ROUTE': pgName
-                        })));
-                        List<Widget> newElementList = reloadPage(pgName);
-                        setState(() {
-                          pageName = pgName;
-                          pageElements = newElementList;
-                          byPass = 0;
-                        });
-                      });
-                    });
-                  } else {
-                    List<Widget> newElementList = reloadPage(pgName);
-                    setState(() {
-                      pageName = pgName;
-                      pageElements = newElementList;
-                    });
-                  }
-                  routeStack.push(pgName);
-                }
-              } // end if i == 1
-            } // end if needUpgrade
-          },
-        )); // end add
+              });
+            } else {
+              List<Widget> newElementList = reloadPage(pgName);
+              setState(() {
+                _selectedNavIndex = i;
+                pageName = pgName;
+                pageElements = newElementList;
+              });
+            }
+            routeStack.push(pgName);
+          }
+          setState(() {
+            _selectedNavIndex = i;
+          });
+        }
       }
-      return bottomIcon;
     }
 
     void onWillPop(canPop) async {
@@ -346,7 +278,7 @@ class MainPageState extends State<MainPage> {
               {
                 var pgName = routeStack.get(); // get current page
                 List<Widget> newElementList =
-                    reloadPage(pgName); // reload current page
+                reloadPage(pgName); // reload current page
                 setState(() {
                   byPass = 0;
                   pageName = pgName;
@@ -412,7 +344,7 @@ class MainPageState extends State<MainPage> {
                 : Scaffold(
 //                  endDrawer: ReduxDevTools<ScreenTransaction>(transactionStore),
 //                  key: key,
-                    key: mainScaffoldKey,
+              key: mainScaffoldKey,
 //            floatingActionButton: FloatingActionButton(
 //              onPressed: () {
 //                if (this.toggle) {
@@ -437,552 +369,604 @@ class MainPageState extends State<MainPage> {
 //              tooltip: 'Reset',
 //              child: Icon(Icons.cancel),
 //            ), // This trailing comma makes auto-formatting nicer for build methods.
-                    appBar: AppBar(
-                      backgroundColor: Theme.of(context).primaryColor,
-                      leading: pageName == home
-                          ? null
-                          : IconButton(
-                              icon: const Icon(
-                                Icons.arrow_back,
-                                color: Colors.white,
-                              ), //= back icon
-                              onPressed: () {
-                                // BlocProvider.of<MainBloc>(context)
-                                //     .add(ResetAll());
-                                var dotColor = dataColor;
-                                if (routeStack.get() == '_OtqQR1') {
-                                  dotColor = readyColor;
-                                  setDataOK('2');
-                                }
-                                var pgName = routeStack.pop();
+              appBar: AppBar(
+                backgroundColor: Theme.of(context).primaryColor,
+                leading: pageName == home
+                    ? null
+                    : IconButton(
+                  icon: const Icon(
+                    Icons.arrow_back,
+                    color: Colors.white,
+                  ), //= back icon
+                  onPressed: () {
+                    // BlocProvider.of<MainBloc>(context)
+                    //     .add(ResetAll());
+                    var dotColor = dataColor;
+                    if (routeStack.get() == '_OtqQR1') {
+                      dotColor = readyColor;
+                      setDataOK('2');
+                    }
+                    var pgName = routeStack.pop();
+                    List<Widget> newElementList =
+                    reloadPage(pgName);
+                    setState(() {
+                      byPass = 0;
+                      wait = false;
+                      pageName = pgName;
+                      pageElements = newElementList;
+                      dataColor = dotColor;
+                    });
+                  },
+                ),
+                title: pageName == home
+                    ? Text(
+                  '$title $versionShown',
+                  style: const TextStyle(color: Colors.white),
+                )
+                    : Text(
+                  title,
+                  style: const TextStyle(color: Colors.white),
+                ),
+                actions: <Widget>[
+                  // IconButton( // archive history for debugging
+                  //     onPressed: (() async {
+                  //       archiveHistory(); // // archive history to firestore proxy h2
+                  //       Get.defaultDialog(
+                  //         title: "History",
+                  //         content: const Text("History archived."),
+                  //       );
+                  //     }),
+                  //     icon: const Icon(
+                  //       Icons.send,
+                  //       color: Colors.redAccent,
+                  //     )),
+                  // IconButton( // sync history for debugging
+                  //     onPressed: (() async {
+                  //       historySync('Connection Data',true);
+                  //       Get.defaultDialog(
+                  //         title: "History",
+                  //         content: const Text("History synced."),
+                  //       );
+                  //       // historyClear();
+                  //     }),
+                  //     icon: const Icon(
+                  //       Icons.history_toggle_off,
+                  //       color: Colors.redAccent,
+                  //     )),
+                  // IconButton( // archive history for debugging
+                  //     onPressed: (() async {
+                  //       historyClear(); // clear history
+                  //       Get.defaultDialog(
+                  //         title: "History",
+                  //         content: const Text("History cleared."),
+                  //       );
+                  //     }),
+                  //     icon: const Icon(
+                  //       Icons.phonelink_erase,
+                  //       color: Colors.redAccent,
+                  //     )),
+                  // IconButton(
+                  //   icon: const Icon(
+                  //     Icons.info_outline,
+                  //     color: Colors.white,
+                  //   ), //= refresh icon
+                  //   onPressed: () async {
+                  //     // need to run  flutter pub run flutter_oss_licenses:generate.dart
+                  //     showLicensePage(context: context);
+                  //   }, // end of onPressed
+                  // ),
+                  Obx(() => Icon(
+                    Icons.fiber_manual_record,
+                    color: transactionOKFlag.value
+                        ? readyColor
+                        : notReadyColor,
+                  )),
+                  IconButton(
+                    icon: const Icon(
+                      Icons.refresh,
+                      color: Colors.white,
+                    ), //= refresh icon
+                    onPressed: () async {
+                      if (!(transactionStore.state.screenTx['#CAMERA'] ??
+                          false)) {
+                        await ConnectionData().getConnection(true, true);
+                        if (internetConnected()) {
+                          setTransactionNotOK('refresh icon');
+                          transactionStore.dispatch(UpdateScreenTxAction(
+                              ScreenTransaction({'#DATA_OK': false})));
+                          // transactionStore.dispatch(UpdateScreenTxAction(
+                          //     ScreenTransaction({'#DATA_OK': true})));
+                          setState(() {
+                            wait = true;
+                            touch = !touch;
+                            scrollController.jumpTo(0.0);
+                            dataColor = notReadyColor;
+                            // dataColor = readyColor;
+                          });
+                          // refresh current page
+                          try {
+                            oldSettingUpShouldBeDeleted().then((aRes) {
+                              var state = transactionStore.state;
+                              var lifKey =
+                              state.screenTx['#INTERFACE_KEY'];
+                              // readSettings(lifKey, 1).then((_) {
+                              readSettingsContext(context, lifKey, 1)
+                                  .then((_) {
+                                transactionStore.dispatch(
+                                    UpdateScreenTxAction(
+                                        ScreenTransaction(
+                                            {'#REFRESH': false})));
                                 List<Widget> newElementList =
-                                    reloadPage(pgName);
+                                reloadPage(pageName);
+                                setTransactionOK('refresh icon');
+                                transactionStore.dispatch(
+                                    UpdateScreenTxAction(
+                                        ScreenTransaction(
+                                            {'#DATA_OK': true})));
                                 setState(() {
-                                  byPass = 0;
-                                  wait = false;
-                                  pageName = pgName;
                                   pageElements = newElementList;
-                                  dataColor = dotColor;
-                                });
-                              },
-                            ),
-                      title: pageName == home
-                          ? Text(
-                              '$title $versionShown',
-                              style: const TextStyle(color: Colors.white),
-                            )
-                          : Text(
-                              title,
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                      actions: <Widget>[
-                        // IconButton( // archive history for debugging
-                        //     onPressed: (() async {
-                        //       archiveHistory(); // // archive history to firestore proxy h2
-                        //       Get.defaultDialog(
-                        //         title: "History",
-                        //         content: const Text("History archived."),
-                        //       );
-                        //     }),
-                        //     icon: const Icon(
-                        //       Icons.send,
-                        //       color: Colors.redAccent,
-                        //     )),
-                        // IconButton( // sync history for debugging
-                        //     onPressed: (() async {
-                        //       historySync('Connection Data',true);
-                        //       Get.defaultDialog(
-                        //         title: "History",
-                        //         content: const Text("History synced."),
-                        //       );
-                        //       // historyClear();
-                        //     }),
-                        //     icon: const Icon(
-                        //       Icons.history_toggle_off,
-                        //       color: Colors.redAccent,
-                        //     )),
-                        // IconButton( // archive history for debugging
-                        //     onPressed: (() async {
-                        //       historyClear(); // clear history
-                        //       Get.defaultDialog(
-                        //         title: "History",
-                        //         content: const Text("History cleared."),
-                        //       );
-                        //     }),
-                        //     icon: const Icon(
-                        //       Icons.phonelink_erase,
-                        //       color: Colors.redAccent,
-                        //     )),
-                        // IconButton(
-                        //   icon: const Icon(
-                        //     Icons.info_outline,
-                        //     color: Colors.white,
-                        //   ), //= refresh icon
-                        //   onPressed: () async {
-                        //     // need to run  flutter pub run flutter_oss_licenses:generate.dart
-                        //     showLicensePage(context: context);
-                        //   }, // end of onPressed
-                        // ),
-                        Obx(() => Icon(
-                              Icons.fiber_manual_record,
-                              color: transactionOKFlag.value
-                                  ? readyColor
-                                  : notReadyColor,
-                            )),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.refresh,
-                            color: Colors.white,
-                          ), //= refresh icon
-                          onPressed: () async {
-                            if (!(transactionStore.state.screenTx['#CAMERA'] ??
-                                false)) {
-                              await ConnectionData().getConnection(true, true);
-                              if (internetConnected()) {
-                                setTransactionNotOK('refresh icon');
-                                transactionStore.dispatch(UpdateScreenTxAction(
-                                    ScreenTransaction({'#DATA_OK': false})));
-                                // transactionStore.dispatch(UpdateScreenTxAction(
-                                //     ScreenTransaction({'#DATA_OK': true})));
-                                setState(() {
-                                  wait = true;
+                                  wait = false;
                                   touch = !touch;
-                                  scrollController.jumpTo(0.0);
-                                  dataColor = notReadyColor;
-                                  // dataColor = readyColor;
+                                  dataColor = readyColor;
+                                  // dataColor = Colors.lightGreenAccent;
                                 });
-                                // refresh current page
-                                try {
-                                  oldSettingUpShouldBeDeleted().then((aRes) {
-                                    var state = transactionStore.state;
-                                    var lifKey =
-                                        state.screenTx['#INTERFACE_KEY'];
-                                    // readSettings(lifKey, 1).then((_) {
-                                    readSettingsContext(context, lifKey, 1)
-                                        .then((_) {
-                                      transactionStore.dispatch(
-                                          UpdateScreenTxAction(
-                                              ScreenTransaction(
-                                                  {'#REFRESH': false})));
-                                      List<Widget> newElementList =
-                                          reloadPage(pageName);
-                                      setTransactionOK('refresh icon');
-                                      transactionStore.dispatch(
-                                          UpdateScreenTxAction(
-                                              ScreenTransaction(
-                                                  {'#DATA_OK': true})));
+                              });
+                            });
+                          } catch (e) {
+                            setTransactionOK('refresh icon catch');
+                            transactionStore.dispatch(
+                                UpdateScreenTxAction(ScreenTransaction(
+                                    {'#DATA_OK': true})));
+                            setState(() {
+                              wait = false;
+                              touch = !touch;
+                              dataColor = readyColor;
+                              // dataColor = Colors.lightGreenAccent;
+                            });
+                            showAlert(context, textList["ErrorLoading"]);
+                          }
+                        } else {
+                          await showDialog(
+                              context: context,
+                              builder: (BuildContext context) {
+                                return AlertDialog(
+                                  // display dialog that data is not ready
+                                  title:
+                                  Text(textList["NoInternetTitle"]),
+                                  content: Container(
+                                    alignment: const Alignment(0.0, 0.0),
+                                    height: 100,
+                                    child: Text(textList["NoInternet"]),
+                                  ),
+                                  actions: <Widget>[
+                                    TextButton(
+                                      child: Text(textList["OK"]),
+                                      onPressed: () {
+                                        Navigator.of(context).pop();
+                                      },
+                                    ),
+                                  ],
+                                );
+                              });
+                        } // end if transactionOK
+                      } // end if #CAMERA
+                    }, // end of onPressed
+                  ),
+                ],
+              ),
+              bottomNavigationBar:
+              BlocBuilder<AuthenticationBloc, AuthenticationState>(
+                builder: (context, authState) {
+                  if (authState is Unauthenticated) {
+                    return const SizedBox.shrink();
+                  }
+                  if (screenUIComponent[pageName]?['hideBottomBar'] ==
+                      true) {
+                    return const SizedBox.shrink();
+                  }
+                  return BlocBuilder<NotificationBloc, NotificationState>(
+                    builder: (context, notifState) {
+                      int unread = 0;
+                      if (notifState is NotificationLoaded) {
+                        unread = notifState.unReadNumber;
+                        if (unread > lastNum) {
+                          lastNum = unread;
+                        }
+                        lastNum = unread;
+                      }
+                      final barItems =
+                      systemUIComponent[mobile]['bottomBar'] as List;
+                      final navItems =
+                      List<OtqNavItem>.generate(barItems.length, (i) {
+                        final iconKey = barItems[i]['icon'].toString();
+                        final route =
+                            barItems[i]['route']?.toString() ?? '';
+                        final label = barItems[i]['label']?.toString() ??
+                            route.replaceAll('_', ' ');
+                        return OtqNavItem(
+                          icon:
+                          otqIcons[iconKey] ?? Icons.circle_outlined,
+                          label: label,
+                          badgeCount: i == 1 ? unread : null,
+                        );
+                      });
+                      return OtqBottomNavBar(
+                        selectedIndex: _selectedNavIndex,
+                        items: navItems,
+                        onTap: handleNavTap,
+                      );
+                    },
+                  );
+                },
+              ),
+              body: byPass == 1
+                  ? const NotificationList()
+                  : Stack(
+                children: <Widget>[
+                  // Text(gpsTime),
+                  // Text(displayRefresher.toString()),
+                  BlocBuilder<AuthenticationBloc,
+                      AuthenticationState>(
+                    builder: (context, authState) {
+                      if (authState is Unauthenticated) {
+                        return Container(
+                          padding: EdgeInsets.fromLTRB(
+                              lPad, tPad, rPad, bPad),
+                          child: Center(
+                            child: SingleChildScrollView(
+                              controller: scrollController,
+                              child: Column(
+                                mainAxisAlignment:
+                                MainAxisAlignment.center,
+                                children: pageElements,
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+                      return Container(
+                        padding: EdgeInsets.fromLTRB(
+                            lPad, tPad, rPad, bPad),
+                        child: Builder(
+                          builder: (context) => ListView.builder(
+                            controller: scrollController,
+                            itemCount: pageElements.length,
+                            itemBuilder: (context, position) {
+                              return pageElements[position];
+                            },
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  //------ Login bloc listener---------
+                  BlocListener(
+                    bloc: _loginBloc,
+                    listener: (BuildContext contextLogin,
+                        LoginState loginState) {
+                      if (loginState.isFailure) {
+                        if (loginState.loginStatus == 2) {
+                          showDialog(
+                            context: context,
+                            builder: (BuildContext context) {
+                              return AlertDialog(
+                                title: const Text(
+                                    "Other user logged in"),
+                                content: const Text(
+                                    "Ada pemakai lain yang sedang memakai invitasi ini. Silahkan pergunakan nomor invitasi lain"), // show dialog
+                                actions: <Widget>[
+                                  TextButton(
+                                    child: const Text("OK"),
+                                    onPressed: () {
                                       setState(() {
-                                        pageElements = newElementList;
+                                        wait = false;
+                                      });
+                                      Navigator.of(context).pop();
+                                    },
+                                  )
+                                ],
+                              );
+                            },
+                          );
+                        } else if (loginState.loginStatus == 3) {
+                          showDialog(
+                            context: context,
+                            builder: (BuildContext context) {
+                              return AlertDialog(
+                                title: const Text(
+                                    "Invitation Code Not Match"),
+                                content: const Text(
+                                    "Kode Undangan tidak ada."),
+                                actions: <Widget>[
+                                  TextButton(
+                                    child: const Text("OK"),
+                                    onPressed: () {
+                                      BlocProvider.of<LoginBloc>(
+                                          context)
+                                          .add(
+                                        const TosOKTabbed(
+                                            tosOk: true),
+                                      );
+                                      setState(() {
                                         wait = false;
                                         touch = !touch;
-                                        dataColor = readyColor;
-                                        // dataColor = Colors.lightGreenAccent;
                                       });
-                                    });
-                                  });
-                                } catch (e) {
-                                  setTransactionOK('refresh icon catch');
-                                  transactionStore.dispatch(
-                                      UpdateScreenTxAction(ScreenTransaction(
-                                          {'#DATA_OK': true})));
-                                  setState(() {
-                                    wait = false;
-                                    touch = !touch;
-                                    dataColor = readyColor;
-                                    // dataColor = Colors.lightGreenAccent;
-                                  });
-                                  showAlert(context, textList["ErrorLoading"]);
-                                }
-                              } else {
-                                await showDialog(
-                                    context: context,
-                                    builder: (BuildContext context) {
-                                      return AlertDialog(
-                                        // display dialog that data is not ready
-                                        title:
-                                            Text(textList["NoInternetTitle"]),
-                                        content: Container(
-                                          alignment: const Alignment(0.0, 0.0),
-                                          height: 100,
-                                          child: Text(textList["NoInternet"]),
-                                        ),
-                                        actions: <Widget>[
-                                          TextButton(
-                                            child: Text(textList["OK"]),
-                                            onPressed: () {
-                                              Navigator.of(context).pop();
-                                            },
-                                          ),
-                                        ],
-                                      );
-                                    });
-                              } // end if transactionOK
-                            } // end if #CAMERA
-                          }, // end of onPressed
-                        ),
-                      ],
-                    ),
-                    bottomNavigationBar: BottomAppBar(
-                      // color: Theme.of(context).bottomAppBarColor, // secondaryHeaderColor
-                      color: HSLColor.fromColor(Theme.of(context).primaryColor)
-                          // .withSaturation(0.4)
-                          .withLightness(0.9) // Adjust 0.8 for desired darkness
-                          .toColor(),
-                      child: Container(
-                        padding: EdgeInsets.fromLTRB(hPad, vPad, hPad, vPad),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: buildBottomIcon(),
-                        ),
-                      ),
-                    ),
-                    body: byPass == 1
-                        ? const NotificationList()
-                        : Stack(
-                            children: <Widget>[
-                              // Text(gpsTime),
-                              // Text(displayRefresher.toString()),
-                              Container(
-                                padding:
-                                    EdgeInsets.fromLTRB(lPad, tPad, rPad, bPad),
-                                child: Builder(
-                                  builder: (context) => ListView.builder(
-                                    controller: scrollController,
-                                    itemCount: pageElements.length,
-                                    itemBuilder: (context, position) {
-                                      return pageElements[position];
+                                      Navigator.of(context).pop();
                                     },
-                                  ),
-                                ),
-                              ),
-                              //------ Login bloc listener---------
-                              BlocListener(
-                                bloc: _loginBloc,
-                                listener: (BuildContext contextLogin,
-                                    LoginState loginState) {
-                                  if (loginState.isFailure) {
-                                    if (loginState.loginStatus == 2) {
-                                      showDialog(
-                                        context: context,
-                                        builder: (BuildContext context) {
-                                          return AlertDialog(
-                                            title: const Text(
-                                                "Other user logged in"),
-                                            content: const Text(
-                                                "Ada pemakai lain yang sedang memakai invitasi ini. Silahkan pergunakan nomor invitasi lain"), // show dialog
-                                            actions: <Widget>[
-                                              TextButton(
-                                                child: const Text("OK"),
-                                                onPressed: () {
-                                                  setState(() {
-                                                    wait = false;
-                                                  });
-                                                  Navigator.of(context).pop();
-                                                },
-                                              )
-                                            ],
-                                          );
-                                        },
-                                      );
-                                    } else if (loginState.loginStatus == 3) {
-                                      showDialog(
-                                        context: context,
-                                        builder: (BuildContext context) {
-                                          return AlertDialog(
-                                            title: const Text(
-                                                "Invitation Code Not Match"),
-                                            content: const Text(
-                                                "Kode Undangan tidak ada."),
-                                            actions: <Widget>[
-                                              TextButton(
-                                                child: const Text("OK"),
-                                                onPressed: () {
-                                                  BlocProvider.of<LoginBloc>(
-                                                          context)
-                                                      .add(
-                                                    const TosOKTabbed(
-                                                        tosOk: true),
-                                                  );
-                                                  setState(() {
-                                                    wait = false;
-                                                    touch = !touch;
-                                                  });
-                                                  Navigator.of(context).pop();
-                                                },
-                                              )
-                                            ],
-                                          );
-                                        },
-                                      );
-                                    } else if (loginState.loginStatus == 7) {
-                                      showDialog(
-                                        context: context,
-                                        builder: (BuildContext context) {
-                                          return AlertDialog(
-                                            title: const Text(
-                                                "Invitation Code has been used before"),
-                                            content: const Text(
-                                                "Kode undangan telah dipakai oleh pengguna lain. Silahkan hubungi bagian administrasi."),
-                                            actions: <Widget>[
-                                              TextButton(
-                                                child: const Text("OK"),
-                                                onPressed: () {
-                                                  setState(() {
-                                                    wait = false;
-                                                  });
-                                                  Navigator.of(context).pop();
-                                                },
-                                              )
-                                            ],
-                                          );
-                                        },
-                                      );
-                                    } else if (loginState.loginStatus == 1) {
-                                      showDialog(
-                                        context: context,
-                                        builder: (BuildContext context) {
-                                          return AlertDialog(
-                                            title: const Text("Full !"),
-                                            content: const Text(
-                                                "Wah!, banyak sekali yang mendaftar. Sementara ini tidak dapat menambah pemakai baru. Kami sedang terus menambah kapasitas, silahkan coba beberapa jam lagi"), // show dialog
-                                            actions: <Widget>[
-                                              TextButton(
-                                                child: const Text("OK"),
-                                                onPressed: () {
-                                                  setState(() {
-                                                    wait = false;
-                                                  });
-                                                  Navigator.of(context).pop();
-                                                },
-                                              )
-                                            ],
-                                          );
-                                        },
-                                      );
-                                    } else if (loginState.loginStatus == 4) {
-                                      showDialog(
-                                        context: context,
-                                        builder: (BuildContext context) {
-                                          return AlertDialog(
-                                            title: const Text("Sign in error"),
-                                            content: const Text(
-                                                "Terjadi kesalahan pada saat sign in, silahkan coba beberapa jam lagi"), // show dialog
-                                            actions: <Widget>[
-                                              TextButton(
-                                                child: const Text("OK"),
-                                                onPressed: () {
-                                                  setState(() {
-                                                    wait = false;
-                                                  });
-                                                  Navigator.of(context).pop();
-                                                },
-                                              )
-                                            ],
-                                          );
-                                        },
-                                      );
-                                    } else if (loginState.loginStatus == 5) {
-                                      showDialog(
-                                        context: context,
-                                        builder: (BuildContext context) {
-                                          return AlertDialog(
-                                            title: const Text("Sign in error"),
-                                            content: const Text(
-                                                "Terjadi kesalahan pada saat autorisasi akun Google, silahkan coba lagi"),
-                                            actions: <Widget>[
-                                              TextButton(
-                                                child: const Text("OK"),
-                                                onPressed: () {
-                                                  setState(() {
-                                                    wait = false;
-                                                  });
-                                                  Navigator.of(context).pop();
-                                                },
-                                              )
-                                            ],
-                                          );
-                                        },
-                                      );
-                                    } else {
-                                      showDialog(
-                                        context: context,
-                                        builder: (BuildContext context) {
-                                          return AlertDialog(
-                                            title: const Text("Login failed"),
-                                            content: const Text(
-                                                "Login anda gagal. Kemungkinan karena koneksi internet anda terganggu. Silahkan coba beberapa saat lagi"), // show dialog
-                                            actions: <Widget>[
-                                              TextButton(
-                                                child: const Text("OK"),
-                                                onPressed: () {
-                                                  setState(() {
-                                                    wait = false;
-                                                  });
-                                                  Navigator.of(context).pop();
-                                                },
-                                              )
-                                            ],
-                                          );
-                                        },
-                                      );
-                                    }
-                                  } else if (loginState.isSuccess) {
-                                    BlocProvider.of<AuthenticationBloc>(context)
-                                        .add(LoggedIn());
-                                    BlocProvider.of<NotificationBloc>(context)
-                                        .add(LoadNotification());
-                                    // } else if (loginState.inLoginProcess) {
-                                    //   return LoginWaitScreen();
-                                  } // end if loginState.isFailure
-                                },
-                                child: BlocBuilder<TimerBloc, TimerState>(
-                                  buildWhen: (previousState, currentState) =>
-                                      currentState.runtimeType !=
-                                      previousState.runtimeType,
-                                  builder: (context, state) {
-                                    Widget ret;
-                                    if (state is Finished) {
-                                      wait = false;
-                                    }
-                                    if ((state is Running &&
-                                        state.duration > 0)) {
-                                      // || this.wait) {
-                                      ret = const WaitScreen();
-                                    } else {
-                                      if (state is Finished) {
-                                        oldSettingUpShouldBeDeleted()
-                                            .then((aRes) {
-                                          var state =
-                                              transactionStore.state.screenTx;
-                                          var lifKey = state['#INTERFACE_KEY'];
-                                          readSettings(lifKey, 1).then((_) {
-                                            var nxPage = state['#NEXTROUTE'];
-                                            routeStack.push(nxPage); //?
-                                            transactionStore.add(
-                                                UpdateScreenTxAction(
-                                                    ScreenTransaction(
-                                                        {'#REFRESH': false})));
-                                            List<Widget> newElementList =
-                                                reloadPage(nxPage);
-                                            setState(() {
-                                              pageName = nxPage;
-                                              pageElements = newElementList;
-                                              wait = false;
-                                            });
+                                  )
+                                ],
+                              );
+                            },
+                          );
+                        } else if (loginState.loginStatus == 7) {
+                          showDialog(
+                            context: context,
+                            builder: (BuildContext context) {
+                              return AlertDialog(
+                                title: const Text(
+                                    "Invitation Code has been used before"),
+                                content: const Text(
+                                    "Kode undangan telah dipakai oleh pengguna lain. Silahkan hubungi bagian administrasi."),
+                                actions: <Widget>[
+                                  TextButton(
+                                    child: const Text("OK"),
+                                    onPressed: () {
+                                      setState(() {
+                                        wait = false;
+                                      });
+                                      Navigator.of(context).pop();
+                                    },
+                                  )
+                                ],
+                              );
+                            },
+                          );
+                        } else if (loginState.loginStatus == 1) {
+                          showDialog(
+                            context: context,
+                            builder: (BuildContext context) {
+                              return AlertDialog(
+                                title: const Text("Full !"),
+                                content: const Text(
+                                    "Wah!, banyak sekali yang mendaftar. Sementara ini tidak dapat menambah pemakai baru. Kami sedang terus menambah kapasitas, silahkan coba beberapa jam lagi"), // show dialog
+                                actions: <Widget>[
+                                  TextButton(
+                                    child: const Text("OK"),
+                                    onPressed: () {
+                                      setState(() {
+                                        wait = false;
+                                      });
+                                      Navigator.of(context).pop();
+                                    },
+                                  )
+                                ],
+                              );
+                            },
+                          );
+                        } else if (loginState.loginStatus == 4) {
+                          showDialog(
+                            context: context,
+                            builder: (BuildContext context) {
+                              return AlertDialog(
+                                title: const Text("Sign in error"),
+                                content: const Text(
+                                    "Terjadi kesalahan pada saat sign in, silahkan coba beberapa jam lagi"), // show dialog
+                                actions: <Widget>[
+                                  TextButton(
+                                    child: const Text("OK"),
+                                    onPressed: () {
+                                      setState(() {
+                                        wait = false;
+                                      });
+                                      Navigator.of(context).pop();
+                                    },
+                                  )
+                                ],
+                              );
+                            },
+                          );
+                        } else if (loginState.loginStatus == 5) {
+                          showDialog(
+                            context: context,
+                            builder: (BuildContext context) {
+                              return AlertDialog(
+                                title: const Text("Sign in error"),
+                                content: const Text(
+                                    "Terjadi kesalahan pada saat autorisasi akun Google, silahkan coba lagi"),
+                                actions: <Widget>[
+                                  TextButton(
+                                    child: const Text("OK"),
+                                    onPressed: () {
+                                      setState(() {
+                                        wait = false;
+                                      });
+                                      Navigator.of(context).pop();
+                                    },
+                                  )
+                                ],
+                              );
+                            },
+                          );
+                        } else {
+                          showDialog(
+                            context: context,
+                            builder: (BuildContext context) {
+                              return AlertDialog(
+                                title: const Text("Login failed"),
+                                content: const Text(
+                                    "Login anda gagal. Kemungkinan karena koneksi internet anda terganggu. Silahkan coba beberapa saat lagi"), // show dialog
+                                actions: <Widget>[
+                                  TextButton(
+                                    child: const Text("OK"),
+                                    onPressed: () {
+                                      setState(() {
+                                        wait = false;
+                                      });
+                                      Navigator.of(context).pop();
+                                    },
+                                  )
+                                ],
+                              );
+                            },
+                          );
+                        }
+                      } else if (loginState.isSuccess) {
+                        BlocProvider.of<AuthenticationBloc>(context)
+                            .add(LoggedIn());
+                        BlocProvider.of<NotificationBloc>(context)
+                            .add(LoadNotification());
+                        // } else if (loginState.inLoginProcess) {
+                        //   return LoginWaitScreen();
+                      } // end if loginState.isFailure
+                    },
+                    child: BlocBuilder<TimerBloc, TimerState>(
+                      buildWhen: (previousState, currentState) =>
+                      currentState.runtimeType !=
+                          previousState.runtimeType,
+                      builder: (context, state) {
+                        Widget ret;
+                        if (state is Finished) {
+                          wait = false;
+                        }
+                        if ((state is Running &&
+                            state.duration > 0)) {
+                          // || this.wait) {
+                          ret = const WaitScreen();
+                        } else {
+                          if (state is Finished) {
+                            oldSettingUpShouldBeDeleted()
+                                .then((aRes) {
+                              var state =
+                                  transactionStore.state.screenTx;
+                              var lifKey = state['#INTERFACE_KEY'];
+                              readSettings(lifKey, 1).then((_) {
+                                var nxPage = state['#NEXTROUTE'];
+                                routeStack.push(nxPage); //?
+                                transactionStore.add(
+                                    UpdateScreenTxAction(
+                                        ScreenTransaction(
+                                            {'#REFRESH': false})));
+                                List<Widget> newElementList =
+                                reloadPage(nxPage);
+                                setState(() {
+                                  pageName = nxPage;
+                                  pageElements = newElementList;
+                                  wait = false;
+                                });
 
-                                            transactionStore.dispatch(
-                                                UpdateScreenTxAction(
-                                                    ScreenTransaction({
-                                              '#CURRENT_ROUTE': nxPage
-                                            }))); // set state #CURRENT_ROUTE
-                                            try {
-                                              scrollController.jumpTo(0.0);
-                                            } catch (e) {
-                                              errorReport(e);
-                                            }
-                                            state['#TIMER_BLOC'].dispatch(
-                                                Reset()); // reset timer state to Ready
-                                          });
-                                        });
-                                      }
-                                      ret = const SizedBox(
-                                        width: 0.0,
-                                        height: 0.0,
-                                      );
-                                    }
-                                    return ret;
-                                  },
-                                ),
-                              ),
+                                transactionStore.dispatch(
+                                    UpdateScreenTxAction(
+                                        ScreenTransaction({
+                                          '#CURRENT_ROUTE': nxPage
+                                        }))); // set state #CURRENT_ROUTE
+                                try {
+                                  scrollController.jumpTo(0.0);
+                                } catch (e) {
+                                  errorReport(e);
+                                }
+                                state['#TIMER_BLOC'].dispatch(
+                                    Reset()); // reset timer state to Ready
+                              });
+                            });
+                          }
+                          ret = const SizedBox(
+                            width: 0.0,
+                            height: 0.0,
+                          );
+                        }
+                        return ret;
+                      },
+                    ),
+                  ),
 
-                              //======== MainBloc Listener & Builder ===========
-                              BlocListener<MainBloc, MainState>(
-                                listener: (context, mState) {
-                                  switch (mState.mainState) {
-                                    case -1: // wrong pin
-                                      {
-                                        showDialog(
-                                          context: context,
-                                          builder: (BuildContext context) {
-                                            return AlertDialog(
-                                              title: Text(mState.str1),
-                                              content: Text(
-                                                  mState.str2), // show dialog
-                                              actions: <Widget>[
-                                                TextButton(
-                                                  child: const Text("OK"),
-                                                  onPressed: () {
-                                                    Navigator.of(context).pop();
-                                                  },
-                                                )
-                                              ],
-                                            );
-                                          },
-                                        );
-                                      }
-                                      break;
-                                  }
-                                },
-                                child: BlocBuilder<MainBloc, MainState>(
-                                  builder: (context, mState) {
-                                    Widget displayScreen;
-                                    switch (mState.mainState) {
-                                      case 900: // need pin hash
-                                        {
+                  //======== MainBloc Listener & Builder ===========
+                  BlocListener<MainBloc, MainState>(
+                    listener: (context, mState) {
+                      switch (mState.mainState) {
+                        case -1: // wrong pin
+                          {
+                            showDialog(
+                              context: context,
+                              builder: (BuildContext context) {
+                                return AlertDialog(
+                                  title: Text(mState.str1),
+                                  content: Text(
+                                      mState.str2), // show dialog
+                                  actions: <Widget>[
+                                    TextButton(
+                                      child: const Text("OK"),
+                                      onPressed: () {
+                                        Navigator.of(context).pop();
+                                      },
+                                    )
+                                  ],
+                                );
+                              },
+                            );
+                          }
+                          break;
+                      }
+                    },
+                    child: BlocBuilder<MainBloc, MainState>(
+                      builder: (context, mState) {
+                        Widget displayScreen;
+                        switch (mState.mainState) {
+                          case 900: // need pin hash
+                            {
 //                                        displayScreen = Container(
 //                                          height: 200,
 //                                          width: 200,
 //                                          color: Colors.green,
 //                                        );
-                                          var np = linkElement['_NewPin'];
-                                          var len = np!.length;
-                                          displayScreen = Container(
-                                            color: Colors.white,
-                                            child: ListView.builder(
-                                              controller: scrollController,
-                                              itemCount: len,
-                                              itemBuilder: (context, position) {
-                                                return linkElement['_NewPin']![
-                                                    position];
-                                              },
-                                            ),
-                                          );
-                                        }
-                                        break;
-
-                                      default:
-                                        {
-                                          displayScreen = const SizedBox(
-                                            width: 0.0,
-                                            height: 0.0,
-                                          ); // default
-                                        }
-                                    }
-                                    return displayScreen;
+                              var np = linkElement['_NewPin'];
+                              var len = np!.length;
+                              displayScreen = Container(
+                                color: Colors.white,
+                                child: ListView.builder(
+                                  controller: scrollController,
+                                  itemCount: len,
+                                  itemBuilder: (context, position) {
+                                    return linkElement['_NewPin']![
+                                    position];
                                   },
                                 ),
-                              ),
-                              // WaitScreen(),
-                              BlocBuilder<LoginBloc, LoginState>(
-                                // buildWhen: (previousState, currentState) =>
-                                //     currentState.inLoginProcess !=
-                                //     previousState.inLoginProcess,
-                                builder: (context, state) {
-                                  // if (state.inLoginProcess) {
-                                  // }
-                                  Widget retVal = state.inLoginProcess
-                                      ? const LoginWaitScreen()
-                                      : Container();
-                                  return retVal;
-                                },
-                              ),
-                            ],
-                          ), // Stack closure=========
+                              );
+                            }
+                            break;
+
+                          default:
+                            {
+                              displayScreen = const SizedBox(
+                                width: 0.0,
+                                height: 0.0,
+                              ); // default
+                            }
+                        }
+                        return displayScreen;
+                      },
+                    ),
                   ),
+                  // WaitScreen(),
+                  BlocBuilder<LoginBloc, LoginState>(
+                    // buildWhen: (previousState, currentState) =>
+                    //     currentState.inLoginProcess !=
+                    //     previousState.inLoginProcess,
+                    builder: (context, state) {
+                      // if (state.inLoginProcess) {
+                      // }
+                      Widget retVal = state.inLoginProcess
+                          ? const LoginWaitScreen()
+                          : Container();
+                      return retVal;
+                    },
+                  ),
+                ],
+              ), // Stack closure=========
+            ),
           );
           return v;
         } // end of builder,
-        );
+    );
   } // end of build
 
   Future subscribeToProxy(String? ssid) async {
@@ -1122,12 +1106,12 @@ class MainPageState extends State<MainPage> {
                   storage.write(
                       key: 'ui_pages',
                       value:
-                          jsonEncode(newItem)); // store pages in secure storage
+                      jsonEncode(newItem)); // store pages in secure storage
                   devPrint("Proxy listener call constructAllPageElements");
                   constructAllPageElements();
                   if (ssid == state['#SIGNUP_KEY']) {
                     screenUIComponent[home] =
-                        screenUIComponent[defaultGuestHome];
+                    screenUIComponent[defaultGuestHome];
                     pageName = defaultGuestHome;
                   }
                   rePaintScreen('Page Listener, all pages');
@@ -1149,7 +1133,7 @@ class MainPageState extends State<MainPage> {
       // no ssid and unsubscribe from current proxy
       if (state['#PROXY_LISTENER'] != null) {
         dynamic tableListener =
-            transactionStore.state.screenTx['#PROXY_LISTENER'];
+        transactionStore.state.screenTx['#PROXY_LISTENER'];
         tableListener?.cancel();
         tableListener = null;
         transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(

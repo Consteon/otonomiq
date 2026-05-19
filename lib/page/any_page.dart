@@ -3,6 +3,7 @@ import 'package:flutter_redux/flutter_redux.dart';
 import '../global.dart';
 import '../api.dart';
 import '../otq_icons.dart';
+import '../widget/otq_bottom_nav_bar.dart';
 import '../widget/ui_component.dart';
 import '../redux/screen_transaction.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -45,8 +46,6 @@ class AnyPageState extends State<AnyPage> {
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
     double gridWith = 25;
-    double hPad = 8; // TODO get parameter from mobile sheet
-    double vPad = 4;
     double mainVerticalSpacing = 1;
     double gridSize = 120;
     double gridRow = 2;
@@ -87,42 +86,17 @@ class AnyPageState extends State<AnyPage> {
       }
     }
 
-    List<Widget> buildBottomIcon() {
-      var bottomIcon = [
-        IconButton(
-          icon: Icon(otqIcons[systemUIComponent[mobile]['bottomBar'][0]['icon'].toString()]),
-          onPressed: () {
-            appRefresh();
-            var pgName = systemUIComponent[mobile]['bottomBar'][0]['route'];
-            if (pgName == home) {
-              transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-                  {'#CURRENT_ROUTE': pgName}))); // set state #CURRENT_ROUTE
-              Navigator.popUntil(
-                  context, ModalRoute.withName(Navigator.defaultRouteName));
-            } else {
-              gotoRoute(pgName);
-            }
-          },
-        )
-      ];
-      for (var i = 1; i < systemUIComponent[mobile]['bottomBar'].length; i++) {
-        bottomIcon.add(IconButton(
-          icon: Icon(otqIcons[systemUIComponent[mobile]['bottomBar'][i]['icon'].toString()]),
-          onPressed: () {
-            appRefresh();
-            var pgName = systemUIComponent[mobile]['bottomBar'][i]['route'];
-            if (pgName == home) {
-              transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-                  {'#CURRENT_ROUTE': pgName}))); // set state #CURRENT_ROUTE
-              Navigator.popUntil(
-                  context, ModalRoute.withName(Navigator.defaultRouteName));
-            } else {
-              gotoRoute(pgName);
-            }
-          },
-        ));
+    void handleNavTap(int i) {
+      appRefresh();
+      var pgName = systemUIComponent[mobile]['bottomBar'][i]['route'];
+      if (pgName == home) {
+        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
+            {'#CURRENT_ROUTE': pgName})));
+        Navigator.popUntil(
+            context, ModalRoute.withName(Navigator.defaultRouteName));
+      } else {
+        gotoRoute(pgName);
       }
-      return bottomIcon;
     }
 
     doNothing() {}
@@ -166,14 +140,20 @@ class AnyPageState extends State<AnyPage> {
               ),
             ],
           ),
-          bottomNavigationBar: BottomAppBar(
-            child: Container(
-              padding: EdgeInsets.fromLTRB(hPad, vPad, hPad, vPad),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: buildBottomIcon(),
-              ),
-            ),
+          bottomNavigationBar: OtqBottomNavBar(
+            selectedIndex: 0,
+            items: (systemUIComponent[mobile]['bottomBar'] as List)
+                .map<OtqNavItem>((item) {
+              final iconKey = item['icon'].toString();
+              final route = item['route']?.toString() ?? '';
+              final label = item['label']?.toString() ??
+                  route.replaceAll('_', ' ');
+              return OtqNavItem(
+                icon: otqIcons[iconKey] ?? Icons.circle_outlined,
+                label: label,
+              );
+            }).toList(),
+            onTap: handleNavTap,
           ),
           body: Stack(
             children: <Widget>[
@@ -191,7 +171,7 @@ class AnyPageState extends State<AnyPage> {
               ),
               BlocBuilder<TimerBloc, TimerState>(
                 buildWhen: (previousState, currentState) =>
-                    currentState.runtimeType != previousState.runtimeType,
+                currentState.runtimeType != previousState.runtimeType,
                 builder: (context, state) {
                   Widget ret;
                   if (state is Running) {
@@ -207,8 +187,8 @@ class AnyPageState extends State<AnyPage> {
                           dynamic nxPage = state0['#NEXTROUTE'];
                           transactionStore.dispatch(UpdateScreenTxAction(
                               ScreenTransaction({
-                            '#CURRENT_ROUTE': nxPage
-                          }))); // set state #CURRENT_ROUTE
+                                '#CURRENT_ROUTE': nxPage
+                              }))); // set state #CURRENT_ROUTE
                           page = buildPage(
                               screenUIComponent[nxPage]['children'], nxPage, clear:false);
                           title = screenUIComponent[nxPage]['title'];

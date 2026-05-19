@@ -1553,9 +1553,13 @@ class OtqTxf2State extends State<OtqTxf2>
                           !tableSearchFound
                               ? Container()
                               : Container(
-                            margin: EdgeInsets.only(
+                            margin: (showTitle || hasIcon)
+                                ? const EdgeInsets.fromLTRB(12, 0, 12, 12)
+                                : EdgeInsets.only(
                                 top: margin[0], bottom: margin[1]),
-                            padding: EdgeInsets.fromLTRB(
+                            padding: (showTitle || hasIcon)
+                                ? const EdgeInsets.fromLTRB(4, 8, 4, 8)
+                                : EdgeInsets.fromLTRB(
                                 widget.lPad + margin[2],
                                 widget.tPad,
                                 widget.rPad + margin[3],
@@ -1685,10 +1689,10 @@ class OtqTxf2State extends State<OtqTxf2>
                                 if (!outPositionAllowed) {
                                   final dynamic lqrList = transactionStore
                                       .state.screenTx['#LQR_LIST'];
-                                  final bool hasLqrList = lqrList !=
-                                      null &&
-                                      lqrList is Map &&
-                                      lqrList.isNotEmpty;
+                                  final bool hasLqrList =
+                                      lqrList != null &&
+                                          lqrList is Map &&
+                                          lqrList.isNotEmpty;
                                   if (hasLqrList) {
                                     try {
                                       final double gpsAccuracy =
@@ -1771,8 +1775,7 @@ class OtqTxf2State extends State<OtqTxf2>
                                           actions: [
                                             TextButton(
                                               child: const Text('OK'),
-                                              onPressed: () =>
-                                                  Get.back(),
+                                              onPressed: () => Get.back(),
                                             ),
                                           ],
                                         ));
