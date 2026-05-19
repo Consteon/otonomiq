@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../api.dart';
 import '../global.dart';
 import '../page/map_page.dart';
 
@@ -56,22 +57,8 @@ class _LocationDetectorState extends State<LocationDetector> {
     if (!mounted) return;
     setState(() => _isLoading = true);
     try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) throw Exception('Location service disabled');
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
-        throw Exception('Location permission denied');
-      }
-
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings:
-            const LocationSettings(accuracy: LocationAccuracy.high),
-      );
+      final position = await getLocation();
+      if (position == null) throw Exception('Location not available');
       final lat = position.latitude;
       final lng = position.longitude;
       final status = _deriveGpsStatus(position);
@@ -87,7 +74,7 @@ class _LocationDetectorState extends State<LocationDetector> {
             final parts = [
               p.subLocality ?? '',
               (p.locality ?? '').replaceFirst(RegExp(r'^[Kk]ecamatan\s+'), ''),
-              p.administrativeArea ?? '',
+              (p.subAdministrativeArea ?? '').replaceFirst(RegExp(r'^([Kk]abupaten|[Kk]ota)\s+'), ''),
               p.postalCode ?? '',
             ].where((s) => s.isNotEmpty).toList();
             address = parts.isNotEmpty ? parts.join(', ') : _fallbackAddress;
@@ -124,6 +111,8 @@ class _LocationDetectorState extends State<LocationDetector> {
     try {
       final dynamic lqrList = transactionStore.state.screenTx['#LQR_LIST'];
       if (lqrList == null || lqrList is! Map || lqrList.isEmpty) return null;
+      String? nearestName;
+      double minDistance = double.infinity;
       for (final entry in lqrList.values) {
         final e = entry as List;
         final double targetLat = (e[1] as num).toDouble();
@@ -136,9 +125,12 @@ class _LocationDetectorState extends State<LocationDetector> {
           position.latitude,
           position.longitude,
         );
-        if (distance <= zone2) return e[0].toString();
+        if (distance <= zone2 && distance < minDistance) {
+          minDistance = distance;
+          nearestName = e[0].toString();
+        }
       }
-      return null;
+      return nearestName;
     } catch (_) {
       return null;
     }
@@ -150,6 +142,8 @@ class _LocationDetectorState extends State<LocationDetector> {
       if (lqrList == null || lqrList is! Map || lqrList.isEmpty) {
         return _gps['status'] as String? ?? 'last_known';
       }
+      double minDistance = double.infinity;
+      double matchZone2 = 0;
       for (final entry in lqrList.values) {
         final e = entry as List;
         final double targetLat = (e[1] as num).toDouble();
@@ -162,9 +156,12 @@ class _LocationDetectorState extends State<LocationDetector> {
           position.latitude,
           position.longitude,
         );
-        if (distance <= zone2) return 'inside';
+        if (distance < minDistance) {
+          minDistance = distance;
+          matchZone2 = zone2;
+        }
       }
-      return 'outside';
+      return minDistance <= matchZone2 ? 'inside' : 'outside';
     } catch (_) {
       return _gps['status'] as String? ?? 'last_known';
     }

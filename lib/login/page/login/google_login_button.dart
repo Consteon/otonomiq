@@ -22,13 +22,17 @@ class GoogleLoginButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 200,
-      child: ElevatedButton.icon(
-        style: ElevatedButton.styleFrom(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.0)), backgroundColor: Colors.teal,
+      width: double.infinity,
+      height: 52,
+      child: OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          backgroundColor: Colors.white,
+          side: BorderSide(color: Colors.grey.shade300),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          elevation: 0,
         ),
-        icon: const Icon(FontAwesomeIcons.google, color: Colors.white),
         onPressed: () {
           rootThis.setState(() {
             rootThis.wait = true;
@@ -38,9 +42,25 @@ class GoogleLoginButton extends StatelessWidget {
             LoginWithGooglePressed(country: _country, inv: _inv),
           );
         },
-        label: Text(_component['google'] ?? 'Masuk menggunakan Google',
-            style: const TextStyle(color: Colors.white)),
-//      color: Colors.redAccent,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(FontAwesomeIcons.google,
+                size: 18, color: Color(0xFF4285F4)),
+            const SizedBox(width: 12),
+            Flexible(
+              child: Text(
+                _component['google'] ?? 'Masuk dengan Google',
+                style: TextStyle(
+                  color: Colors.grey.shade700,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

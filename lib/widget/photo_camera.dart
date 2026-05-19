@@ -1,12 +1,14 @@
 import 'dart:io';
 import 'dart:typed_data';
+
 import 'package:camera/camera.dart';
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:image/image.dart' as img;
 import 'package:image_watermark/image_watermark.dart';
 import 'package:intl/intl.dart';
+
 import '../global.dart';
-import 'package:flutter/material.dart';
-import 'package:image/image.dart' as img;
 
 String inputPath = emptyString; // temporary path variable
 
@@ -91,7 +93,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
   List<File> capturedImages = [];
   File? currentImage;
 
-  initializeCamera(int cameraIndex, int flashIndex) async {
+  Future<void> initializeCamera(int cameraIndex, int flashIndex) async {
     controller = CameraController(
       // Get a specific camera from the list of available cameras.
       widget.cameras[cameraIndex],
@@ -208,11 +210,10 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     media = MediaQuery.maybeOf(context);
-    double? w = media?.size.width;
     double currentWidth = (media?.size.width ?? widget.width) ?? controlHeight;
     double currentHeight =
         (media?.size.height ?? widget.height) ?? controlHeight;
-    dynamic pictureHeight = currentHeight - controlHeight;
+    double pictureHeight = currentHeight - controlHeight;
     int d = 1;
 
     return Stack(
@@ -251,10 +252,6 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
         SizedBox(
           height: currentHeight,
           width: currentWidth,
-          // decoration: BoxDecoration(
-          //   border: Border.all(color: Colors.blue),
-          //   borderRadius: BorderRadius.circular(4),
-          // ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -529,6 +526,8 @@ Future<String> acquireCamera(
   double? width,
 ) async {
   // inputPath = emptyString;
+  FocusManager.instance.primaryFocus?.unfocus();
+  await Future.delayed(const Duration(milliseconds: 300));
   List<String> result = [emptyString];
   await Get.dialog(AlertDialog(
     insetPadding: const EdgeInsets.fromLTRB(12, 40, 12, 20),

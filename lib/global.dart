@@ -1101,6 +1101,7 @@ String? autheniumDecode(String? inp) {
     result = result.replaceAll('_u2B58_', '\u{2B58}');
     result = result.replaceAll('_u2B2A_', '\u{2B2A}');
     result = result.replaceAll('_u25C6_', '\u{25C6}');
+    result = result.replaceAll('_u25C7_', '\u{25C7}');
     result = result.replaceAll('_25FC_', '\u{25FC}'); // this is buggy character
     // result = result.replaceAll('_25C0_', '\u{25C0}');
     // result = result.replaceAll('_25B6_', '\u{25B6}');

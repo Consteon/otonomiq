@@ -11,10 +11,14 @@ class Tasklist extends StatefulWidget {
     required this.component,
     required this.scrName,
     required this.single,
+    required this.lPad,
+    required this.rPad,
   }) : super(key: key);
   final String scrName;
   final dynamic component;
   final bool single;
+  final double lPad;
+  final double rPad;
 
   @override
   State<Tasklist> createState() => _TasklistState();
@@ -210,7 +214,7 @@ class _TasklistState extends State<Tasklist> {
     final taskName = _texts.isNotEmpty ? _texts[0] : '';
 
     return Padding(
-      padding: EdgeInsets.only(top: _margin[0], bottom: _margin[1], left: _margin[2], right: _margin[3]),
+      padding: EdgeInsets.only(top: _margin[0], bottom: _margin[1], left: widget.lPad + _margin[2], right: widget.rPad + _margin[3]),
       child: GestureDetector(
       onTap: _showStatusSheet,
       child: Container(

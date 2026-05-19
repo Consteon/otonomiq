@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+
 import '../global.dart';
 import '../global2.dart';
 
@@ -52,17 +53,19 @@ class FtzAutoNumberState extends State<FtzAutoNumber> {
 
     if (_position != null) {
       txfControllerCheck(widget.scrName, _position);
-      final controller = txfController[widget.scrName]![_position!]!;
+      final controller = txfController[widget.scrName]![_position]!;
       final existingData = controller.finalData;
 
-      if (existingData.isNotEmpty && existingData != emptyString) {
+      if (existingData.isNotEmpty &&
+          existingData != emptyString &&
+          existingData != 'null') {
         controller.controller.text = existingData;
       } else {
-        controller.controller.text = '';
+        controller.controller.text = _placeholder;
       }
 
       final String? executableString =
-      widget.component['executable'] as String?;
+          widget.component['executable'] as String?;
       if (executableString != null && executableString.isNotEmpty) {
         final parts = executableString.split(',');
         if (parts.length == 2) {
@@ -101,7 +104,6 @@ class FtzAutoNumberState extends State<FtzAutoNumber> {
     super.dispose();
   }
 
-
   @override
   Widget build(BuildContext context) {
     if (_position == null) {
@@ -117,9 +119,9 @@ class FtzAutoNumberState extends State<FtzAutoNumber> {
     return GetBuilder<WidgetUpdateController>(
       id: '${widget.scrName}-$_position',
       builder: (_) {
-        final controller = txfController[widget.scrName]![_position!]!;
-        final hasValue =
-            controller.finalData.isNotEmpty && controller.finalData != emptyString;
+        final controller = txfController[widget.scrName]![_position]!;
+        final hasValue = controller.finalData.isNotEmpty &&
+            controller.finalData != emptyString;
 
         return Padding(
           padding: _margin,
@@ -150,8 +152,7 @@ class FtzAutoNumberState extends State<FtzAutoNumber> {
                   style: TextStyle(
                     fontSize: _fontSize,
                     color: hasValue ? _textColor : Colors.grey,
-                    fontWeight:
-                    hasValue ? FontWeight.bold : FontWeight.normal,
+                    fontWeight: hasValue ? FontWeight.bold : FontWeight.normal,
                   ),
                 ),
               ),

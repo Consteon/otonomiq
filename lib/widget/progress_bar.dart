@@ -9,10 +9,14 @@ class ProgressBar extends StatelessWidget {
     required this.component,
     required this.scrName,
     required this.single,
+    required this.lPad,
+    required this.rPad,
   }) : super(key: key);
   final String scrName;
   final dynamic component;
   final bool single;
+  final double lPad;
+  final double rPad;
 
   static bool _parseBool(dynamic v, {bool fallback = true}) {
     if (v is bool) return v;
@@ -35,6 +39,7 @@ class ProgressBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final texts = diamondTextToList(component['text'] as String? ?? '');
+    final margin = marginArray(component['margin'] as String?);
     final positionRaw = component['positionId'];
     final positions = positionRaw is List
         ? positionRaw.map((e) => (e as num).toInt()).toList()
@@ -70,6 +75,12 @@ class ProgressBar extends StatelessWidget {
         final isVerified = total > 0 && done == total;
 
         return Container(
+          margin: EdgeInsets.only(
+            top: margin[0],
+            bottom: margin[1],
+            left: lPad + margin[2],
+            right: rPad + margin[3],
+          ),
           decoration: BoxDecoration(
             color: bgColor,
             borderRadius: BorderRadius.circular(borderRadius),

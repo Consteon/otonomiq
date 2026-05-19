@@ -19,9 +19,10 @@ import '../main_bloc/bloc.dart';
 import '../notification/bloc.dart';
 import '../widget/link_widget.dart';
 import '../model/connection_data.dart';
-import '../otq_icons.dart';
 import '../different_code/different_code.dart';
+import '../otq_icons.dart';
 import '../widget/build_theme.dart';
+import '../widget/otq_bottom_nav_bar.dart';
 import 'package:get/get.dart';
 
 class MainPage extends StatefulWidget {
@@ -54,6 +55,7 @@ class MainPageState extends State<MainPage> {
   int byPass =
       0; // 0 = no by pass, 1 = NotificationList, 2 = NotificationDetail
   late Widget byPassWidget;
+  int _selectedNavIndex = 0;
   // final Connectivity _connectivity = Connectivity();
   // late StreamSubscription<ConnectivityResult> _connectivitySubscription;
   String gpsTime = separator[0];
@@ -159,8 +161,6 @@ class MainPageState extends State<MainPage> {
 
   @override
   Widget build(BuildContext context) {
-    double hPad = 8; // TODO get parameter from mobile sheet
-    double vPad = 4;
     double lPad = (systemUIComponent['Mobile']['leftPad'] ?? 0.0).toDouble();
     double tPad = (systemUIComponent['Mobile']['topPad'] ?? 0.0).toDouble();
     double rPad = (systemUIComponent['Mobile']['rightPad'] ?? 0.0).toDouble();
@@ -180,162 +180,94 @@ class MainPageState extends State<MainPage> {
       errorReport(e);
     }
 
-    List<Widget> buildBottomIcon() {
-      var bottomIcon = [
-        IconButton(
-          icon: Icon(
-              otqIcons[
-                  systemUIComponent[mobile]['bottomBar'][0]['icon'].toString()],
-              size: 32),
-          onPressed: () {
-            bool changePage = true;
-            if (byPass != 0) {
-              changePage = false;
-            }
-            var pgName = systemUIComponent[mobile]['bottomBar'][0]['route'];
-            if (pgName != pageName) {
-              var state = transactionStore.state.screenTx;
-              if (state['#REFRESH']) {
-                oldSettingUpShouldBeDeleted().then((aRes) {
-                  var state = transactionStore.state;
-                  var lifKey = state.screenTx['#INTERFACE_KEY'];
-                  readSettings(lifKey, 1).then((_) {
-                    transactionStore.dispatch(UpdateScreenTxAction(
-                        ScreenTransaction(
-                            {'#REFRESH': false, '#CURRENT_ROUTE': pgName})));
-                    List<Widget> newElementList = reloadPage(pgName);
-                    setState(() {
-                      byPass = 0;
-                      pageName = pgName;
-                      pageElements = newElementList;
-                    });
-                  });
-                });
-              } else {
+    void handleNavTap(int i) {
+      if (i == 0) {
+        bool changePage = true;
+        if (byPass != 0) {
+          changePage = false;
+        }
+        var pgName = systemUIComponent[mobile]['bottomBar'][0]['route'];
+        if (pgName != pageName) {
+          var state = transactionStore.state.screenTx;
+          if (state['#REFRESH']) {
+            oldSettingUpShouldBeDeleted().then((aRes) {
+              var state = transactionStore.state;
+              var lifKey = state.screenTx['#INTERFACE_KEY'];
+              readSettings(lifKey, 1).then((_) {
+                transactionStore.dispatch(UpdateScreenTxAction(
+                    ScreenTransaction(
+                        {'#REFRESH': false, '#CURRENT_ROUTE': pgName})));
                 List<Widget> newElementList = reloadPage(pgName);
                 setState(() {
+                  _selectedNavIndex = i;
+                  byPass = 0;
                   pageName = pgName;
                   pageElements = newElementList;
-                  byPass = 0;
                 });
-              }
-              if (changePage) {
-                routeStack.push(pgName); // only push when not byPassed
-              }
-            }
+              });
+            });
+          } else {
+            List<Widget> newElementList = reloadPage(pgName);
             setState(() {
+              _selectedNavIndex = i;
+              pageName = pgName;
+              pageElements = newElementList;
               byPass = 0;
             });
-          },
-        )
-      ];
-      for (var i = 1; i < systemUIComponent[mobile]['bottomBar'].length; i++) {
-        var displayDot = true; // TODO put message # from firestore
-        const dotDiameter = 12.0;
-        var numTest = 0;
-        bottomIcon.add(IconButton(
-          icon: BlocBuilder<NotificationBloc, NotificationState>(
-              builder: (context, state) {
-            Widget iconResult;
-            if (state is NotificationLoaded) {
-              numTest = state.unReadNumber;
-              if (numTest > 0) {
-                displayDot = true;
-                if (lastNum < numTest) {
-                  // pool.play(scannerBeep);
-                }
-              } else {
-                displayDot = false;
-              }
-              lastNum = numTest;
-            }
-            if (i == 1 && displayDot) {
-              iconResult = Stack(
-                children: <Widget>[
-                  Icon(
-                    otqIcons[systemUIComponent[mobile]['bottomBar'][i]['icon']
-                        .toString()],
-                    // IconData(systemUIComponent[mobile]['bottomBar'][i]['icon'],
-                    //     fontFamily: 'MaterialIcons'),
-                    size: 32,
-                  ),
-                  Positioned(
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(1),
-                      decoration: BoxDecoration(
-                        color: Colors.red,
-                        borderRadius: BorderRadius.circular(dotDiameter / 2),
-                      ),
-                      constraints: const BoxConstraints(
-                        minWidth: dotDiameter,
-                        minHeight: dotDiameter,
-                      ),
-                      child: Center(
-                        child: Text(
-                          '$lastNum',
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 10),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            } else {
-              iconResult = Icon(
-                  otqIcons[systemUIComponent[mobile]['bottomBar'][i]['icon']
-                      .toString()],
-                  size: 32);
-            }
-            return iconResult;
-          }),
-          onPressed: () {
-            if (needUpgrade == empty) {
-              if (i == 1) {
-                // Notification screen
-                setState(() {
-                  byPassWidget = const NotificationList();
-                  byPass = 1;
+          }
+          if (changePage) {
+            routeStack.push(pgName);
+          }
+        }
+        setState(() {
+          _selectedNavIndex = i;
+          byPass = 0;
+        });
+      } else if (needUpgrade == empty) {
+        if (i == 1) {
+          setState(() {
+            _selectedNavIndex = i;
+            byPassWidget = const NotificationList();
+            byPass = 1;
+          });
+        } else {
+          var pgName = systemUIComponent[mobile]['bottomBar'][i]['route'];
+          if (pgName != pageName) {
+            var state = transactionStore.state.screenTx;
+            if (state['#REFRESH']) {
+              oldSettingUpShouldBeDeleted().then((aRes) {
+                var state = transactionStore.state;
+                var lifKey = state.screenTx['#INTERFACE_KEY'];
+                readSettings(lifKey, 1).then((_) {
+                  transactionStore.dispatch(UpdateScreenTxAction(
+                      ScreenTransaction({
+                    '#REFRESH': false,
+                    '#CURRENT_ROUTE': pgName
+                  })));
+                  List<Widget> newElementList = reloadPage(pgName);
+                  setState(() {
+                    _selectedNavIndex = i;
+                    pageName = pgName;
+                    pageElements = newElementList;
+                    byPass = 0;
+                  });
                 });
-              } else {
-                var pgName = systemUIComponent[mobile]['bottomBar'][i]['route'];
-                if (pgName != pageName) {
-                  var state = transactionStore.state.screenTx;
-                  if (state['#REFRESH']) {
-                    oldSettingUpShouldBeDeleted().then((aRes) {
-                      var state = transactionStore.state;
-                      var lifKey = state.screenTx['#INTERFACE_KEY'];
-                      readSettings(lifKey, 1).then((_) {
-                        transactionStore.dispatch(UpdateScreenTxAction(
-                            ScreenTransaction({
-                          '#REFRESH': false,
-                          '#CURRENT_ROUTE': pgName
-                        })));
-                        List<Widget> newElementList = reloadPage(pgName);
-                        setState(() {
-                          pageName = pgName;
-                          pageElements = newElementList;
-                          byPass = 0;
-                        });
-                      });
-                    });
-                  } else {
-                    List<Widget> newElementList = reloadPage(pgName);
-                    setState(() {
-                      pageName = pgName;
-                      pageElements = newElementList;
-                    });
-                  }
-                  routeStack.push(pgName);
-                }
-              } // end if i == 1
-            } // end if needUpgrade
-          },
-        )); // end add
+              });
+            } else {
+              List<Widget> newElementList = reloadPage(pgName);
+              setState(() {
+                _selectedNavIndex = i;
+                pageName = pgName;
+                pageElements = newElementList;
+              });
+            }
+            routeStack.push(pgName);
+          }
+          setState(() {
+            _selectedNavIndex = i;
+          });
+        }
       }
-      return bottomIcon;
     }
 
     void onWillPop(canPop) async {
@@ -622,19 +554,50 @@ class MainPageState extends State<MainPage> {
                         ),
                       ],
                     ),
-                    bottomNavigationBar: BottomAppBar(
-                      // color: Theme.of(context).bottomAppBarColor, // secondaryHeaderColor
-                      color: HSLColor.fromColor(Theme.of(context).primaryColor)
-                          // .withSaturation(0.4)
-                          .withLightness(0.9) // Adjust 0.8 for desired darkness
-                          .toColor(),
-                      child: Container(
-                        padding: EdgeInsets.fromLTRB(hPad, vPad, hPad, vPad),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: buildBottomIcon(),
-                        ),
-                      ),
+                    bottomNavigationBar:
+                        BlocBuilder<AuthenticationBloc, AuthenticationState>(
+                      builder: (context, authState) {
+                        if (authState is Unauthenticated) {
+                          return const SizedBox.shrink();
+                        }
+                        if (screenUIComponent[pageName]?['hideBottomBar'] ==
+                            true) {
+                          return const SizedBox.shrink();
+                        }
+                        return BlocBuilder<NotificationBloc, NotificationState>(
+                          builder: (context, notifState) {
+                            int unread = 0;
+                            if (notifState is NotificationLoaded) {
+                              unread = notifState.unReadNumber;
+                              if (unread > lastNum) {
+                                lastNum = unread;
+                              }
+                              lastNum = unread;
+                            }
+                            final barItems =
+                                systemUIComponent[mobile]['bottomBar'] as List;
+                            final navItems =
+                                List<OtqNavItem>.generate(barItems.length, (i) {
+                              final iconKey = barItems[i]['icon'].toString();
+                              final route =
+                                  barItems[i]['route']?.toString() ?? '';
+                              final label = barItems[i]['label']?.toString() ??
+                                  route.replaceAll('_', ' ');
+                              return OtqNavItem(
+                                icon:
+                                    otqIcons[iconKey] ?? Icons.circle_outlined,
+                                label: label,
+                                badgeCount: i == 1 ? unread : null,
+                              );
+                            });
+                            return OtqBottomNavBar(
+                              selectedIndex: _selectedNavIndex,
+                              items: navItems,
+                              onTap: handleNavTap,
+                            );
+                          },
+                        );
+                      },
                     ),
                     body: byPass == 1
                         ? const NotificationList()
@@ -642,18 +605,39 @@ class MainPageState extends State<MainPage> {
                             children: <Widget>[
                               // Text(gpsTime),
                               // Text(displayRefresher.toString()),
-                              Container(
-                                padding:
-                                    EdgeInsets.fromLTRB(lPad, tPad, rPad, bPad),
-                                child: Builder(
-                                  builder: (context) => ListView.builder(
-                                    controller: scrollController,
-                                    itemCount: pageElements.length,
-                                    itemBuilder: (context, position) {
-                                      return pageElements[position];
-                                    },
-                                  ),
-                                ),
+                              BlocBuilder<AuthenticationBloc,
+                                  AuthenticationState>(
+                                builder: (context, authState) {
+                                  if (authState is Unauthenticated) {
+                                    return Container(
+                                      padding: EdgeInsets.fromLTRB(
+                                          lPad, tPad, rPad, bPad),
+                                      child: Center(
+                                        child: SingleChildScrollView(
+                                          controller: scrollController,
+                                          child: Column(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: pageElements,
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                  return Container(
+                                    padding: EdgeInsets.fromLTRB(
+                                        lPad, tPad, rPad, bPad),
+                                    child: Builder(
+                                      builder: (context) => ListView.builder(
+                                        controller: scrollController,
+                                        itemCount: pageElements.length,
+                                        itemBuilder: (context, position) {
+                                          return pageElements[position];
+                                        },
+                                      ),
+                                    ),
+                                  );
+                                },
                               ),
                               //------ Login bloc listener---------
                               BlocListener(
