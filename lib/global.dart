@@ -1141,17 +1141,21 @@ String? quoteCleanUp(String? inp) {
 } // end of quoteCleanUp
 
 String? stringCleanUp(String? inp) {
-  // replace " and ' to `
-  // replace all character in forbiddenCharacter array to space
   if (inp == null) return null;
   String output = quoteCleanUp(cleanAtiCode(inp)) ?? '';
   if (!beginWithAtiCode(inp)) {
+    // Strip control chars except \n (handled separately in saveSend)
+    output = output.replaceAll(RegExp(r'[\x00-\x09\x0B-\x1F]'), '');
     for (final c in forbiddenCharacter) {
       if (c != separator[5]) {
         // except white diamond for get_images
         output = output.replaceAll(c, ' ');
       } // end if (c != separator[5])
     } // end for c
+    // Guard formula injection: prefix space if starts with = or @
+    if (output.isNotEmpty && (output[0] == '=' || output[0] == '@')) {
+      output = ' $output';
+    }
   } // end if (beginWithAtiCode(inp))
   return output;
 } // end of stringCleanUp

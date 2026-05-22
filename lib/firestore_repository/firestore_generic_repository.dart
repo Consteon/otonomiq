@@ -22,8 +22,6 @@ Future<String> uploadToCloudStorage(
       if (internetConnected()) {
         try {
           String currentLocal = localImage;
-          // currentLocal += 't'; // debug only, will make send images fail
-          // devPrint('send images will fail : $currentLocal');
           File file = File(currentLocal);
           if (file.existsSync()) {
             dynamic storageBucket =
@@ -49,13 +47,18 @@ Future<String> uploadToCloudStorage(
                 rethrow;
               } // end if (c.contains('object-not-found'))
             } // end try eu
+          } else {
+            devPrint('$functionName: file not found $currentLocal');
           } // end if (file.existsSync())
         } catch (e) {
-          // do nothing
-          devPrint('error uploading image $e');
+          devPrint('$functionName: error uploading $e');
         } // end try
+      } else {
+        devPrint('$functionName: no internet, skip upload');
       } // end if (internetConnected())
       imageFirebaseLock.itemUnlockWait(functionName, localImage);
+    } else {
+      devPrint('$functionName: lock failed for $localImage');
     } // end if (await imageFirebaseLock.itemLockWait(functionName, localImage))
   } // end if (imageMapEntry != null && isValidImageUrl(imageMapEntry[1]))
   return result;

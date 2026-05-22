@@ -21,6 +21,7 @@ import 'package:http/io_client.dart'; // part of dart.http package
 import 'package:intl/intl.dart';
 import 'package:ntp/ntp.dart';
 // import 'package:mobile_number/mobile_number.dart'; // android only
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:pointycastle/export.dart';
 import 'package:transparent_image/transparent_image.dart';
@@ -621,17 +622,26 @@ Future<String> renamePath(
   bool originalPath =
       tempImagePath.contains(localImageArtifact); // original path from camera
   if (originalPath) {
-    String finalFolder = folder.isEmpty || folder.endsWith('/')
-        ? folder.substring(0, folder.length - 1)
-        : folder; // delete '/' at the end of folder
+    String finalFolder = folder;
+    if (finalFolder.endsWith('/')) {
+      finalFolder = finalFolder.substring(0, finalFolder.length - 1);
+    }
+    final Directory appDir = await getApplicationSupportDirectory();
+    final String imageDir = '${appDir.path}/otq_images';
+    await Directory(imageDir).create(recursive: true);
     finalImagePath =
-        '${tempImagePath.split(localImageArtifact)[0]}$localImageBeginningFolderDivider%2F${Uri.encodeComponent(finalFolder)}$localImageFolderSeparator${Uri.encodeComponent(fileName)}.jpg';
+        '$imageDir/$localImageBeginningFolderDivider%2F${Uri.encodeComponent(finalFolder)}$localImageFolderSeparator${Uri.encodeComponent(fileName)}.jpg';
     try {
       await File(tempImagePath).rename(finalImagePath);
     } catch (e) {
-      finalImagePath = tempImagePath;
-      debugPrint(
-          'Cannot rename $tempImagePath to $finalImagePath :${e.toString()}');
+      try {
+        await File(tempImagePath).copy(finalImagePath);
+        await File(tempImagePath).delete();
+      } catch (e2) {
+        finalImagePath = tempImagePath;
+        debugPrint(
+            'Cannot move $tempImagePath to $finalImagePath :${e2.toString()}');
+      }
     }
   } else {
     finalImagePath = tempImagePath;
@@ -3679,6 +3689,205 @@ Future saveSendRows(
   appendToSheet(row, appVid, flag, desc, widgetType, tableString);
 } // end of saveSendRows
 
+Future<void> createApprovalEvent({
+  required List<dynamic> row,
+  required String scrName,
+  required String eventFlag,
+  required String actionStatus,
+  required bool updateOverallStatus,
+  required List<List<String>> steps,
+  required int targetIdx,
+  required int nowMs,
+  required int appVid,
+}) async {
+  try {
+    if (eventFlag.isEmpty) return;
+
+    final state = transactionStore.state.screenTx;
+    final String approverVid = (state['#VID'] ?? '').toString();
+    final String approverName = (state['#NAME'] ?? '').toString();
+
+    OtqState locSensor = await OtqState().setAllDataAsync();
+    int timeStamp = await getRealTime();
+    String locString = getLocationString('', '', '', locSensor);
+
+    String updatedStatus = updateOverallStatus
+        ? actionStatus
+        : (row.length > 2 ? row[2].toString() : '');
+
+    int totalPositions = 28;
+    List<dynamic> eventRow =
+        List<dynamic>.filled(sheetSystemLength + totalPositions, '', growable: true);
+    eventRow[0] = null;
+    eventRow[1] = scrName;
+    eventRow[2] = approverVid;
+
+    // Position 3: Photo URL (<15>)
+    eventRow[17] = row.length > 15 ? row[15].toString() : '';
+    // Position 4: Jenis Cuti (<13>)
+    eventRow[18] = row.length > 13 ? row[13].toString() : '';
+    // Position 6: Tanggal Mulai (<16>)
+    eventRow[20] = row.length > 16 ? row[16].toString() : '';
+    // Position 7: Tanggal Selesai (<18>)
+    eventRow[21] = row.length > 18 ? row[18].toString() : '';
+    // Position 10: Keterangan (<14>)
+    eventRow[24] = row.length > 14 ? row[14].toString() : '';
+    // Position 11: Jumlah Hari (<20>)
+    eventRow[25] = row.length > 20 ? row[20].toString() : '';
+    // Position 15: Overall Status (<2> AFTER update)
+    eventRow[29] = updatedStatus;
+    // Position 16: Replacement VID (<22>)
+    eventRow[30] = row.length > 22 ? row[22].toString() : '';
+    // Position 17: Request Number (<1>)
+    eventRow[31] = row.length > 1 ? row[1].toString() : '';
+    // Position 18: Replacement Name (<23>)
+    eventRow[32] = row.length > 23 ? row[23].toString() : '';
+    // Position 19: Approver VID
+    eventRow[33] = approverVid;
+    // Position 20: Approver Name
+    eventRow[34] = approverName;
+
+    // Positions 24-28: Approval level data (cumulative)
+    String wd = separator[5];
+    String formattedNow = DateFormat('dd MMM yyyy HH:mm')
+        .format(DateTime.fromMillisecondsSinceEpoch(nowMs));
+
+    for (int lvl = 0; lvl < 5 && lvl < steps.length; lvl++) {
+      List<String> step = steps[lvl];
+      String status = step.length > 1 ? step[1].trim().toUpperCase() : '';
+      if (status.isEmpty || status == 'PENDING') continue;
+
+      String levelNum = step.isNotEmpty ? step[0].trim() : '${lvl + 1}';
+      String name, vid, ts, epoch;
+      if (lvl == targetIdx) {
+        vid = approverVid;
+        name = approverName;
+        ts = formattedNow;
+        epoch = nowMs.toString();
+      } else {
+        vid = step.length > 2 ? step[2].trim() : '';
+        name = step.length > 3 ? step[3].trim() : '';
+        ts = step.length > 4 ? step[4].trim() : '';
+        epoch = step.length > 5 ? step[5].trim() : '';
+      }
+      eventRow[38 + lvl] =
+          '$levelNum$wd$status$wd$name$wd$vid$wd$ts$wd$epoch';
+    }
+
+    saveSendRows(scrName, '', eventRow, eventFlag, timeStamp, locString, null,
+        appVid, '', 'approval');
+    debugPrint('[Approval] event created: flag=$eventFlag');
+  } catch (e) {
+    debugPrint('[Approval] event creation error: $e');
+    errorReport(e);
+  }
+} // end of createApprovalEvent
+
+Future<void> buildAndSaveEventFromDSL({
+  required String eventDSL,
+  required List<dynamic> updatedRow,
+  required String scrName,
+  required String flag,
+  required int appVid,
+}) async {
+  try {
+    if (eventDSL.isEmpty || flag.isEmpty) return;
+
+    final state = transactionStore.state.screenTx;
+    final String approverVid = (state['#VID'] ?? '').toString();
+    final String approverName = (state['#NAME'] ?? '').toString();
+    final String approverEmail = (state['#EMAIL'] ?? '').toString();
+    final String wd = separator[5];
+
+    OtqState locSensor = await OtqState().setAllDataAsync();
+    int timeStamp = await getRealTime();
+    String locString = getLocationString('', '', '', locSensor);
+
+    int totalPositions = 28;
+    List<dynamic> eventRow = List<dynamic>.filled(
+        sheetSystemLength + totalPositions, '', growable: true);
+    eventRow[0] = null;
+    eventRow[1] = scrName;
+    eventRow[2] = approverVid;
+
+    // ★1 identity block (auto, same as savesend)
+    eventRow[16] = '$approverVid$wd$approverName$wd$approverEmail';
+
+    for (final entry in eventDSL.split('⭘')) {
+      final parts = entry.split('◼');
+      if (parts.length != 2) continue;
+
+      final starStr = parts[0].replaceAll('★', '').trim();
+      final starIdx = int.tryParse(starStr);
+      if (starIdx == null || starIdx < 2 || starIdx > 27) continue;
+
+      final source = parts[1].trim();
+      final eventIdx = 15 + starIdx;
+
+      if (source == 'approver') {
+        eventRow[eventIdx] = '$approverVid$wd$approverName';
+      } else if (source == 'levels') {
+        _expandEventLevels(updatedRow, eventRow, eventIdx);
+      } else if (RegExp(r'^<\d+>$').hasMatch(source)) {
+        final fieldIdx =
+            int.parse(source.substring(1, source.length - 1));
+        eventRow[eventIdx] = fieldIdx < updatedRow.length
+            ? updatedRow[fieldIdx].toString()
+            : '';
+      } else {
+        eventRow[eventIdx] = source;
+      }
+    }
+
+    saveSendRows(scrName, '', eventRow, flag, timeStamp, locString, null,
+        appVid, '', 'approval');
+    debugPrint('[Approval] DSL event created: flag=$flag');
+  } catch (e) {
+    debugPrint('[Approval] DSL event creation error: $e');
+    errorReport(e);
+  }
+}
+
+void _expandEventLevels(
+    List<dynamic> updatedRow, List<dynamic> eventRow, int startEventIdx) {
+  String chainStr = '';
+  for (int i = 0; i < updatedRow.length; i++) {
+    String s = updatedRow[i].toString().trim();
+    if (s.startsWith('[[') && s.contains(',')) {
+      chainStr = s;
+      break;
+    }
+  }
+  if (chainStr.isEmpty) return;
+
+  String inner = chainStr.substring(1, chainStr.length - 1);
+  List<List<String>> steps = [];
+  for (var stepStr in inner.split(RegExp(r'\]\s*,\s*\['))) {
+    stepStr = stepStr.replaceAll('[', '').replaceAll(']', '').trim();
+    steps.add(stepStr.split(',').map((e) => e.trim()).toList());
+  }
+
+  String wd = separator[5];
+  for (int i = 0; i < steps.length && i < 5; i++) {
+    int targetIdx = startEventIdx + i;
+    if (targetIdx >= eventRow.length) break;
+
+    List<String> step = steps[i];
+    String status = step.length > 1 ? step[1].trim().toUpperCase() : '';
+    if (status == 'PENDING' || status.isEmpty) continue;
+
+    String levelNum = step.isNotEmpty ? step[0].trim() : '${i + 1}';
+    String vid = step.length > 2 ? step[2].trim() : '';
+    String name = step.length > 3 ? step[3].trim() : '';
+    String ts = step.length > 4 ? step[4].trim() : '';
+    String epoch = step.length > 5 ? step[5].trim() : '';
+
+    // Output: level◇status◇name◇vid◇timestamp◇epoch (name before vid)
+    eventRow[targetIdx] =
+        '$levelNum$wd$status$wd$name$wd$vid$wd$ts$wd$epoch';
+  }
+}
+
 Future<String> appendToSheet(dynamic val, int appVid, String flag, String desc,
     String wType, String? tableString) async {
   var state = transactionStore.state.screenTx;
@@ -3881,7 +4090,7 @@ Future<String> getPhotoCameraImage(
   //     imagePath: pickedFileUrl, folder: folder, fileName: fileName);
   String url = await prepareImageAsLocal(
       imagePath: pickedFileUrl, folder: folder, fileName: fileName);
-  saveImagePutInImageMap(url); // save image to imageMap
+  await saveImagePutInImageMap(url);
   // var state = transactionStore.state.screenTx;
   // var storageBucket = state['#STORAGE_BUCKET'];
   // Reference storageRef = storageBucket.ref().child("$folder/$fileName.jpg");

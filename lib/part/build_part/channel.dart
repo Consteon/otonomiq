@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import '../../global.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
@@ -10,7 +11,8 @@ import '../../redux/screen_transaction.dart';
 
 void setMe(){
   // sinner(ios), andrew(android), windy(window), spider(web)
-      andrew = true; // this is android
+  andrew = Platform.isAndroid;
+  sinner = Platform.isIOS;
 } // end of setMe
 
 LocationSettings myLocationSetting() {

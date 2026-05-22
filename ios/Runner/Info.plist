@@ -66,7 +66,7 @@
 		<string>The example App requires temporary access to the device&apos;s precise location.</string>
 	</dict>
 	<key>GIDClientID</key>
-	<string>721538991284-iet4kp21754cj1ve7a78dpml9p6lps60.apps.googleusercontent.com</string>
+	<string>721538991284-lqq5e3jsm6g91gdeh2qo24tkjlu4bn0o.apps.googleusercontent.com</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -74,7 +74,7 @@
 			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.googleusercontent.apps.721538991284-iet4kp21754cj1ve7a78dpml9p6lps60</string>
+				<string>com.googleusercontent.apps.721538991284-lqq5e3jsm6g91gdeh2qo24tkjlu4bn0o</string>
 			</array>
 		</dict>
 	</array>

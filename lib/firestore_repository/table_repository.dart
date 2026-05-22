@@ -2727,14 +2727,7 @@ Future<void> uploadUpdateImage(
   // upload image to cloud and update imageMap
   // this is used for image that is not in imageMap
 
-  String url = await uploadImageToCloud(localPath);
-  // if (url.contains('aume__') && retry >= maxImageUploadRetry - 1) {
-  //   devPrint('Error upload in sendImagesInImageMap:$url');
-  //   imageMapUpdateUrl(localPath, originalPath);
-  // } else {
-  //   imageMapUpdateUrl(localPath, url)
-  // }
-  imageMapUpdateUrl(localPath, url);
+  await uploadImageToCloud(localPath);
 } // end of uploadUpdateImage
 
 Future<String> uploadImageToCloud(String localPath) async {

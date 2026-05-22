@@ -23,6 +23,45 @@ An Otonomiq mobile apps
 - gpsData (as diamond separated string) and gpsTime are stored in transactionStore ('#GPSDATA' & '#LASTGPSTIME')
 
 ## Release Note
+
+### Fix: Image Upload to Firebase Storage (2026-05-20)
+Perbaikan kegagalan upload image ke Firebase Storage yang menghasilkan error `InvalidImagePath-13`.
+
+**Files Changed:**
+- `lib/api.dart` — renamePath(), getPhotoCameraImage()
+- `lib/firestore_repository/firestore_generic_repository.dart` — uploadToCloudStorage()
+- `lib/firestore_repository/table_repository.dart` — uploadUpdateImage()
+
+**Root Cause:**
+1. File image disimpan di cache directory (`/data/.../cache/`) yang bisa dihapus Android kapan saja saat storage penuh. Ketika retry upload, file sudah tidak ada.
+2. Retry counter di-increment 2x per attempt (di `uploadImageToCloud` dan `uploadUpdateImage`), sehingga max 5 retry habis dalam 3 attempt saja.
+3. `saveImagePutInImageMap` dipanggil tanpa `await`, menyebabkan race condition dengan `sendImagesInImageMap`.
+4. Kegagalan upload tidak di-log (file not found, no internet, lock failed semua silent), menyulitkan debugging.
+5. Bug `folder.isEmpty` di `renamePath` menyebabkan `RangeError` pada `substring(0, -1)`.
+
+**Perbaikan:**
+1. **Persistent storage** — Image file dipindah dari cache ke `getApplicationSupportDirectory()/otq_images/`. Directory ini tidak akan di-clean oleh Android. Jika `File.rename()` gagal (cross-mount), fallback ke `copy()` + `delete()`.
+2. **Fix double retry increment** — Hapus `imageMapUpdateUrl` duplikat di `uploadUpdateImage()`. Retry counter sekarang increment 1x per attempt (5 retry = 5 attempt).
+3. **Await first upload** — `saveImagePutInImageMap` sekarang di-`await`, mencegah race condition dengan retry scheduler.
+4. **Logging** — Tambah `devPrint` untuk semua failure path di `uploadToCloudStorage`: file not found, no internet, lock failed.
+5. **Fix folder.isEmpty crash** — Ganti conditional ternary dengan explicit `endsWith('/')` check.
+
+**Flow Diagram:**
+```
+Camera → renamePath() → app_support/otq_images/FTZIMG%2F{folder}___{file}.jpg
+  → await saveImagePutInImageMap()
+    → uploadToCloudStorage() [attempt 1]
+      → success: imageMap updated, file deleted after 5s
+      → fail: imageMap retry++ (1x only)
+  → sendImagesInImageMap() [retry 2-5]
+    → uploadImageToCloud() → uploadToCloudStorage()
+      → success: imageMap updated
+      → fail: retry++ until max 5
+  → replaceLocalImageToUrl() [saat submit transaksi]
+    → final attempt upload
+    → jika retry >= 5: replace dengan defaultImage
+```
+
 ### 0.9.75.04
 - Max of position in event is 14, event[14] will be used for table definition. History sync table_repository.dart [1527]
 

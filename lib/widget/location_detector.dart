@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 
-import '../api.dart';
 import '../global.dart';
+import '../model/otq_state.dart';
 import '../page/map_page.dart';
 
 class LocationDetector extends StatefulWidget {
@@ -57,30 +56,24 @@ class _LocationDetectorState extends State<LocationDetector> {
     if (!mounted) return;
     setState(() => _isLoading = true);
     try {
-      final position = await getLocation();
-      if (position == null) throw Exception('Location not available');
-      final lat = position.latitude;
-      final lng = position.longitude;
-      final status = _deriveGpsStatus(position);
+      final otqState = await OtqState().setAllDataAsync();
+      if (!otqState.gpsOn) throw Exception('Location not available');
+      final lat = otqState.latitude;
+      final lng = otqState.longitude;
+      final status = _deriveGpsStatus(otqState);
 
       String address;
       if (status == 'inside') {
-        address = _getInsideLocationName(position) ?? _fallbackAddress;
+        address = _getInsideLocationName(otqState) ?? _fallbackAddress;
       } else {
         try {
-          final placemarks = await placemarkFromCoordinates(lat, lng);
-          if (placemarks.isNotEmpty) {
-            final p = placemarks.first;
-            final parts = [
-              p.subLocality ?? '',
-              (p.locality ?? '').replaceFirst(RegExp(r'^[Kk]ecamatan\s+'), ''),
-              (p.subAdministrativeArea ?? '').replaceFirst(RegExp(r'^([Kk]abupaten|[Kk]ota)\s+'), ''),
-              p.postalCode ?? '',
-            ].where((s) => s.isNotEmpty).toList();
-            address = parts.isNotEmpty ? parts.join(', ') : _fallbackAddress;
-          } else {
-            address = _fallbackAddress;
-          }
+          final parts = [
+            otqState.subLocality,
+            otqState.locality.replaceFirst(RegExp(r'^[Kk]ecamatan\s+'), ''),
+            otqState.subAdministrativeArea.replaceFirst(RegExp(r'^([Kk]abupaten|[Kk]ota)\s+'), ''),
+            otqState.postalCode,
+          ].where((s) => s.isNotEmpty).toList();
+          address = parts.isNotEmpty ? parts.join(', ') : _fallbackAddress;
         } catch (_) {
           address = _fallbackAddress;
         }
@@ -91,7 +84,7 @@ class _LocationDetectorState extends State<LocationDetector> {
           _lat = lat;
           _lng = lng;
           _address = address;
-          _accuracy = position.accuracy;
+          _accuracy = otqState.accuracy;
           _lastUpdated = DateTime.now();
           _gpsStatus = status;
           _isLoading = false;

@@ -34,6 +34,8 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
   String title = '', searchLabel = '', hint = '';
   String searchValue = '';
   String? finalFilter;
+  Worker? _tableWorker;
+  late String _tableCode;
 
   @override
   void initState() {
@@ -80,18 +82,47 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
     }
     try {
       searchValue = '';
+      _tableCode = normalizeTableName(
+          autheniumDecode(widget.component['table'] ?? 'default') ?? '');
       initialTable =
           searchTable(finalFilter ?? '', List.from(widget.localTable));
-      // pickTable = List.from(initialTable);
       pickTable = searchTable(searchValue, initialTable);
     } catch (e) {
       // do nothing}
     }
+    _tableWorker = ever(tableContent, (_) {
+      _rebuildTableData();
+    });
     super.initState();
   } // end of initState
 
+  void _rebuildTableData() {
+    List<dynamic> currentTableData =
+        List.from(tableContent[_tableCode] ?? []);
+    List<dynamic> newInitial = searchTable(finalFilter ?? '', currentTableData);
+    String sortParam = widget.component['sort'] ?? '';
+    if (sortParam == 'asc' || sortParam == 'desc') {
+      int sortFactor = sortParam == 'asc' ? 1 : -1;
+      try {
+        newInitial.sort((a, b) =>
+            sortFactor *
+            int.parse(a[0].toString())
+                .compareTo(int.parse(b[0].toString())));
+      } catch (e) {
+        devPrint(e);
+      }
+    }
+    if (mounted) {
+      setState(() {
+        initialTable = newInitial;
+        pickTable = searchTable(searchValue, initialTable);
+      });
+    }
+  }
+
   @override
   void dispose() {
+    _tableWorker?.dispose();
     pickTable.clear();
     textArray.clear();
     style.clear();
@@ -160,10 +191,9 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
           // inputFormatters: tiFormatter,
           // onTap: txfOnTap,
           onChanged: (value) {
-            // search
             setState(() {
               searchValue = value;
-              // by ai : pickTable = searchTable(searchValue, initialTable);
+              pickTable = searchTable(searchValue, initialTable);
             });
           },
           //end of onChanged
@@ -195,66 +225,7 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
         ),
         const SizedBox(height: 8),
         Expanded(
-          // height: 200,
-          child: Obx(() {
-            String tableCode = normalizeTableName(
-                autheniumDecode(widget.component['table'] ?? 'default') ?? '');
-            '';
-            debugPrint(
-                'ftz_array_search Obx for table ${widget.component['table']} triggered');
-            // --- FIX by AI STARTS HERE ---
-            // 1. Directly use the reactive tableContent to get the latest data.
-            List<dynamic> currentTableData =
-                List.from(tableContent[tableCode] ?? []);
-
-            // 2. Perform all data preparation here, without modifying any reactive state.
-            initialTable = searchTable(finalFilter ?? '', currentTableData);
-
-            String sortParam = widget.component['sort'] ?? '';
-            if (sortParam == 'asc' || sortParam == 'desc') {
-              int sortFactor = sortParam == 'asc' ? 1 : -1;
-              try {
-                initialTable.sort((a, b) =>
-                    sortFactor *
-                    int.parse(a[0].toString())
-                        .compareTo(int.parse(b[0].toString())));
-              } catch (e) {
-                devPrint(e);
-              }
-            }
-
-            // 3. Filter based on the local search value.
-            pickTable = searchTable(searchValue, initialTable);
-            // --- FIX ENDS HERE ---
-
-            // debugPrint(
-            //     'ftz_array_search Obx widget.localTable len = ${widget.localTable.length}. ');
-            // if (tableSourceUpdated[tableCode] ?? true) {
-            //   // tableSourceUpdated[tableCode] = false;
-            //   int sortFactor = 0;
-            //   String sortParam = widget.component['sort'] ?? '';
-            //   switch (sortParam) {
-            //     case 'asc':
-            //       sortFactor = 1;
-            //       break;
-            //     case 'desc':
-            //       sortFactor = -1;
-            //       break;
-            //     default:
-            //       sortFactor = 0;
-            //   }
-            //   initialTable = searchTable(widget.component['filter'] ?? '',
-            //       List.from(tableContent[tableCode] ?? []));
-            //   if (sortFactor != 0) {
-            //     try {
-            //       initialTable.sort((a, b) =>
-            //           sortFactor * int.parse(a[0].toString()).compareTo(int.parse(b[0].toString())));
-            //     } catch (e) {
-            //       devPrint(e);
-            //     }
-            //   } //if (sortFactor != 0)
-            //   pickTable = searchTable(searchValue, initialTable);
-            // }
+          child: Builder(builder: (context) {
             debugPrint('pickTable length = ${pickTable.length}');
             return ListView.builder(
               itemCount: pickTable.length,
@@ -377,7 +348,7 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
               },
             );
           }),
-        ),
+        ),  // Expanded
       ],
     );
   }

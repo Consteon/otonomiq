@@ -2,15 +2,17 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:intl/intl.dart';
 
+import '../api.dart';
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
 import '../global2.dart';
 import '../redux/screen_transaction.dart';
 import 'do_chain.dart';
 
-class Approval extends StatefulWidget {
-  const Approval({
+class ListItemCard extends StatefulWidget {
+  const ListItemCard({
     super.key,
     required this.component,
     required this.scrName,
@@ -25,10 +27,10 @@ class Approval extends StatefulWidget {
   final double lPad, tPad, rPad, bPad;
 
   @override
-  State<Approval> createState() => _ApprovalState();
+  State<ListItemCard> createState() => _ListItemCardState();
 }
 
-class _ApprovalState extends State<Approval> {
+class _ListItemCardState extends State<ListItemCard> {
   int _selectedTabIndex = 0;
   List<String> _tabs = [];
   List<String> _textArray = [];
@@ -40,6 +42,8 @@ class _ApprovalState extends State<Approval> {
   final Map<int, String> _searchFilters = {};
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  bool _showIcon = true;
+  bool _showProgress = true;
 
   @override
   void initState() {
@@ -87,6 +91,13 @@ class _ApprovalState extends State<Approval> {
         }
       }
     }
+    _showIcon =
+        (widget.component['showIcon'] ?? '').toString().toUpperCase() !=
+            'FALSE';
+    _showProgress =
+        (widget.component['showProgress'] ?? '').toString().toUpperCase() !=
+            'FALSE';
+
     if (_role == 'APPROVER') {
       String condRaw = (widget.component['conditions'] ?? '').toString().trim();
       String condStr = autheniumDecode(condRaw) ?? condRaw;
@@ -109,7 +120,6 @@ class _ApprovalState extends State<Approval> {
         }
       }
     }
-
   }
 
   void _subscribeTable() {
@@ -224,11 +234,16 @@ class _ApprovalState extends State<Approval> {
   static Color _statusColor(String status) {
     switch (status.toUpperCase()) {
       case 'PENDING':
+      case 'MENUNGGU':
         return const Color(0xFFE8910C);
       case 'APPROVED':
+      case 'SELESAI':
         return const Color(0xFF16A34A);
       case 'REJECTED':
+      case 'DITUTUP':
         return const Color(0xFFDC2626);
+      case 'DITINJAU':
+        return const Color(0xFF2563EB);
       default:
         return const Color(0xFF6B7280);
     }
@@ -237,11 +252,46 @@ class _ApprovalState extends State<Approval> {
   static Color _statusBgColor(String status) {
     switch (status.toUpperCase()) {
       case 'PENDING':
+      case 'MENUNGGU':
         return const Color(0xFFFEF3C7);
       case 'APPROVED':
+      case 'SELESAI':
         return const Color(0xFFDCFCE7);
       case 'REJECTED':
+      case 'DITUTUP':
         return const Color(0xFFFEE2E2);
+      case 'DITINJAU':
+        return const Color(0xFFDBEAFE);
+      default:
+        return const Color(0xFFF3F4F6);
+    }
+  }
+
+  static Color _priorityColor(String priority) {
+    switch (priority.toUpperCase()) {
+      case 'KRITIS':
+        return const Color(0xFFDC2626);
+      case 'TINGGI':
+        return const Color(0xFFEA580C);
+      case 'SEDANG':
+        return const Color(0xFFE8910C);
+      case 'RENDAH':
+        return const Color(0xFF16A34A);
+      default:
+        return const Color(0xFF6B7280);
+    }
+  }
+
+  static Color _priorityBgColor(String priority) {
+    switch (priority.toUpperCase()) {
+      case 'KRITIS':
+        return const Color(0xFFFEE2E2);
+      case 'TINGGI':
+        return const Color(0xFFFFF7ED);
+      case 'SEDANG':
+        return const Color(0xFFFEF3C7);
+      case 'RENDAH':
+        return const Color(0xFFDCFCE7);
       default:
         return const Color(0xFFF3F4F6);
     }
@@ -295,6 +345,7 @@ class _ApprovalState extends State<Approval> {
         'approval_buttons': widget.component['buttons'],
         'approval_table': widget.component['table'],
         'approval_vidtable': widget.component['vidtable'],
+        'approval_flag': widget.component['flag'],
         'approval_status_field': _statusFieldIndex,
       })));
     }
@@ -418,6 +469,55 @@ class _ApprovalState extends State<Approval> {
             debugPrint('[Approval] event row: $eventRowString');
             List<String> result = await updateTableRow(input, eventRowString);
             debugPrint('[Approval] updateTableRow result: $result');
+
+            // Create Event C via DSL if button has 'event' property
+            String eventDSL =
+                (buttonConfig['event'] ?? '').toString();
+            if (eventDSL.isNotEmpty &&
+                result.isNotEmpty &&
+                result[0].startsWith('OK')) {
+              String eventFlag =
+                  (widget.component['flag'] ?? '').toString();
+              int appVid = defaultVid();
+              String vidTable =
+                  (widget.component['vidtable'] ?? '').toString();
+              if (vidTable.isNotEmpty) {
+                appVid = int.tryParse(vidTable) ?? defaultVid();
+              }
+
+              List<dynamic> updatedRow = List.from(row);
+              // Resolve ◀...▶ markers in chain for event DSL
+              final openM = forbiddenCharacter[7];
+              final closeM = forbiddenCharacter[9];
+              String formattedNow = DateFormat('dd MMM yyyy HH:mm')
+                  .format(DateTime.fromMillisecondsSinceEpoch(nowMs));
+              String resolvedChain = newChainStr;
+              int mPos = 0;
+              while (mPos < resolvedChain.length) {
+                int start = resolvedChain.indexOf('${openM}5|', mPos);
+                if (start < 0) break;
+                int end = resolvedChain.indexOf(closeM, start);
+                if (end < 0) break;
+                resolvedChain = resolvedChain.substring(0, start) +
+                    formattedNow +
+                    resolvedChain.substring(end + 1);
+                mPos = start + formattedNow.length;
+              }
+              resolvedChain = resolvedChain.replaceAll(
+                  '${openM}5$closeM', '$nowMs');
+              updatedRow[chainColIdx] = resolvedChain;
+              if (updateOverallStatus) {
+                updatedRow[_statusFieldIndex] = actionStatus;
+              }
+
+              buildAndSaveEventFromDSL(
+                eventDSL: eventDSL,
+                updatedRow: updatedRow,
+                scrName: widget.scrName,
+                flag: eventFlag,
+                appVid: appVid,
+              );
+            }
           } else {
             debugPrint('[Approval] no PENDING step found in chain');
           }
@@ -451,28 +551,33 @@ class _ApprovalState extends State<Approval> {
       String selStatus = _tabs.isNotEmpty && _selectedTabIndex < _tabs.length
           ? _tabs[_selectedTabIndex]
           : '';
+      bool isAllTab = selStatus.toUpperCase() == 'SEMUA' ||
+          selStatus.toUpperCase() == 'ALL';
       Map<String, int> counts = {};
-      if (_role == 'APPROVER') {
-        for (var tab in _tabs) {
+      for (var tab in _tabs) {
+        String tabUpper = tab.toUpperCase();
+        if (tabUpper == 'SEMUA' || tabUpper == 'ALL') {
+          counts[tab] = baseFiltered.length;
+        } else if (_role == 'APPROVER') {
           counts[tab] =
-              _applyApproverTabFilter(baseFiltered, tab.toUpperCase()).length;
-        }
-      } else {
-        for (var tab in _tabs) {
-          counts[tab] = baseFiltered.where((r) => _getStatus(r) == tab).length;
+              _applyApproverTabFilter(baseFiltered, tabUpper).length;
+        } else {
+          counts[tab] =
+              baseFiltered.where((r) => _getStatus(r) == tabUpper).length;
         }
       }
 
       // [3] Filter by selected tab
       List<dynamic> filtered;
-      if (selStatus.isEmpty) {
+      if (selStatus.isEmpty || isAllTab) {
         filtered = baseFiltered;
       } else if (_role == 'APPROVER') {
         filtered =
             _applyApproverTabFilter(baseFiltered, selStatus.toUpperCase());
       } else {
-        filtered =
-            baseFiltered.where((r) => _getStatus(r) == selStatus).toList();
+        filtered = baseFiltered
+            .where((r) => _getStatus(r) == selStatus.toUpperCase())
+            .toList();
       }
 
       // [4] Apply text search
@@ -480,8 +585,12 @@ class _ApprovalState extends State<Approval> {
 
       // [5] Sort descending by request timestamp (field [12])
       filtered.sort((a, b) {
-        final tA = int.tryParse((a as List).length > 12 ? a[12]?.toString() ?? '0' : '0') ?? 0;
-        final tB = int.tryParse((b as List).length > 12 ? b[12]?.toString() ?? '0' : '0') ?? 0;
+        final tA = int.tryParse(
+                (a as List).length > 12 ? a[12]?.toString() ?? '0' : '0') ??
+            0;
+        final tB = int.tryParse(
+                (b as List).length > 12 ? b[12]?.toString() ?? '0' : '0') ??
+            0;
         return tB.compareTo(tA);
       });
 
@@ -580,74 +689,91 @@ class _ApprovalState extends State<Approval> {
   }
 
   Widget _buildTabBar(Map<String, int> counts) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF3F4F6),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: List.generate(_tabs.length, (i) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        bool needsScroll = _tabs.length > 3;
+
+        List<Widget> tabWidgets = List.generate(_tabs.length, (i) {
           bool selected = i == _selectedTabIndex;
           String tab = _tabs[i];
           int count = counts[tab] ?? 0;
 
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => setState(() => _selectedTabIndex = i),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeOut,
-                padding:
-                    const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-                decoration: BoxDecoration(
-                  color: selected ? Colors.white : Colors.transparent,
-                  borderRadius: BorderRadius.circular(11),
-                  boxShadow: selected
-                      ? [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.06),
-                            blurRadius: 6,
-                            offset: const Offset(0, 2),
-                          )
-                        ]
-                      : null,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        _capitalize(tab),
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight:
-                              selected ? FontWeight.w600 : FontWeight.w500,
-                          color: selected
-                              ? const Color(0xFF1F2937)
-                              : const Color(0xFF9CA3AF),
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+          Widget tabChild = GestureDetector(
+            onTap: () => setState(() => _selectedTabIndex = i),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+              padding:
+                  const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+              decoration: BoxDecoration(
+                color: selected ? Colors.white : Colors.transparent,
+                borderRadius: BorderRadius.circular(11),
+                boxShadow: selected
+                    ? [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.06),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        )
+                      ]
+                    : null,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _capitalize(tab),
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight:
+                          selected ? FontWeight.w600 : FontWeight.w500,
+                      color: selected
+                          ? const Color(0xFF1F2937)
+                          : const Color(0xFF9CA3AF),
                     ),
-                    const SizedBox(width: 5),
-                    Text(
-                      '$count',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: selected
-                            ? _statusColor(tab)
-                            : const Color(0xFFD1D5DB),
-                      ),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    '$count',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: selected
+                          ? _statusColor(tab)
+                          : const Color(0xFFD1D5DB),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           );
-        }),
-      ),
+
+          if (needsScroll) return tabChild;
+          return Expanded(child: tabChild);
+        });
+
+        Widget row = Row(children: tabWidgets);
+
+        Widget content;
+        if (needsScroll) {
+          content = SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: row,
+          );
+        } else {
+          content = row;
+        }
+
+        return Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF3F4F6),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: content,
+        );
+      },
     );
   }
 
@@ -680,7 +806,229 @@ class _ApprovalState extends State<Approval> {
     );
   }
 
+  Widget _buildReportCard(List<dynamic> row, BuildContext context) {
+    String id = row.length > 1 ? row[1].toString() : '';
+    String title = _textArray.length > 1
+        ? _resolveText(_textArray[1], row)
+        : id;
+    String subtitle =
+        _textArray.length > 2 ? _resolveText(_textArray[2], row) : '';
+    String dateText =
+        _textArray.length > 3 ? _resolveText(_textArray[3], row) : '';
+    String status =
+        _role == 'APPROVER' ? _getChainStatus(row) : _getStatus(row);
+    String progress = _showProgress ? _getChainProgress(row) : '';
+    Color sColor = _statusColor(status);
+    Color sBgColor = _statusBgColor(status);
+
+    String priorityTemplate = (widget.component['priority'] ?? '').toString();
+    String priority = priorityTemplate.isNotEmpty
+        ? _resolveText(priorityTemplate, row).trim().toUpperCase()
+        : '';
+
+    String assigneeTemplate = (widget.component['assignee'] ?? '').toString();
+    String assignee = assigneeTemplate.isNotEmpty
+        ? _resolveText(assigneeTemplate, row).trim()
+        : '';
+    String assigneeDefault = _textArray.length > 7 ? _textArray[7] : '';
+    if (assignee.isEmpty) assignee = assigneeDefault;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => _onCardTap(row),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+            ),
+            child: IntrinsicHeight(
+              child: Row(
+                children: [
+                  Container(
+                    width: 4,
+                    decoration: BoxDecoration(
+                      color: sColor,
+                      borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(14),
+                        bottomLeft: Radius.circular(14),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  id,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                    color: Color(0xFF6B7280),
+                                    letterSpacing: 0.3,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (priority.isNotEmpty)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: _priorityBgColor(priority),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    priority,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: _priorityColor(priority),
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF1F2937),
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (subtitle.isNotEmpty ||
+                              dateText.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                if (subtitle.isNotEmpty) ...[
+                                  Icon(Icons.location_on,
+                                      size: 14,
+                                      color: const Color(0xFF9CA3AF)),
+                                  const SizedBox(width: 4),
+                                  Flexible(
+                                    child: Text(
+                                      subtitle,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        color: Color(0xFF9CA3AF),
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                                if (dateText.isNotEmpty) ...[
+                                  if (subtitle.isNotEmpty)
+                                    const SizedBox(width: 12),
+                                  Icon(Icons.access_time,
+                                      size: 14,
+                                      color: const Color(0xFF9CA3AF)),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    dateText,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: Color(0xFF9CA3AF),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+                          const Divider(
+                              height: 1, color: Color(0xFFE5E7EB)),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: sBgColor,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 6,
+                                      height: 6,
+                                      decoration: BoxDecoration(
+                                        color: sColor,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      progress.isEmpty
+                                          ? _capitalize(status)
+                                          : '${_capitalize(status)} $progress',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: sColor,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (assignee.isNotEmpty) ...[
+                                const Spacer(),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (assignee != assigneeDefault)
+                                      Icon(Icons.person,
+                                          size: 14,
+                                          color: const Color(0xFF6B7280)),
+                                    if (assignee != assigneeDefault)
+                                      const SizedBox(width: 4),
+                                    Text(
+                                      assignee,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: assignee == assigneeDefault
+                                            ? const Color(0xFF9CA3AF)
+                                            : const Color(0xFF1F2937),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildCard(List<dynamic> row, BuildContext context) {
+    if (!_showIcon) return _buildReportCard(row, context);
+
     String name = _textArray.length > 1
         ? _resolveText(_textArray[1], row)
         : (row.length > 1 ? row[1].toString() : '');

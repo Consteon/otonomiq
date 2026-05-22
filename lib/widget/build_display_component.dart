@@ -34,7 +34,6 @@ import 'otq_get_images_2.dart';
 import 'otq_rdo_2.dart';
 import 'otq_txf_2.dart';
 import 'progress_bar.dart';
-import 'selectable_btn.dart';
 import 'tasklist.dart';
 import 'time_presence.dart';
 
@@ -468,7 +467,7 @@ Widget buildDisplayComponent(
         result = ApproverStickyBar(
           scrName: scrName,
           builder: () => Obx(() {
-            String s = ApprovalDetail.currentStatus.value;
+            String s = ItemCardDetail.currentStatus.value;
             if (s.isNotEmpty && s != defaultStatus) {
               return const SizedBox.shrink();
             }
@@ -1110,9 +1109,9 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     } // end of try
-  } else if (tip == 'approval') {
+  } else if (tip == 'list_item_card') {
     try {
-      result = Approval(
+      result = ListItemCard(
         key: txfKey,
         component: component,
         scrName: scrName,
@@ -1138,9 +1137,9 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }
-  } else if (tip == 'approval_detail') {
+  } else if (tip == 'item_card_detail') {
     try {
-      result = ApprovalDetail(
+      result = ItemCardDetail(
         key: txfKey,
         component: component,
         scrName: scrName,
@@ -1152,9 +1151,9 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }
-  } else if (tip == 'comment_detail') {
+  } else if (tip == 'timeline') {
     try {
-      result = CommentDetail(
+      result = Timeline(
         key: txfKey,
         component: component,
         scrName: scrName,

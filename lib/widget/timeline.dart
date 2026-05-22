@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:camera/camera.dart';
@@ -15,8 +16,8 @@ import '../firestore_repository/firestore_generic_repository.dart';
 import '../global.dart';
 import 'approver_sticky_bar.dart';
 
-class CommentDetail extends StatefulWidget {
-  const CommentDetail({
+class Timeline extends StatefulWidget {
+  const Timeline({
     super.key,
     required this.component,
     required this.scrName,
@@ -31,16 +32,21 @@ class CommentDetail extends StatefulWidget {
   final double lPad, tPad, rPad, bPad;
 
   @override
-  State<CommentDetail> createState() => _CommentDetailState();
+  State<Timeline> createState() => _TimelineState();
 }
 
-class _CommentDetailState extends State<CommentDetail> {
+class _TimelineState extends State<Timeline> {
   String _label = 'CONVERSATION';
   final TextEditingController _commentController = TextEditingController();
   List<Map<String, dynamic>> _comments = [];
   StreamSubscription? _subscription;
   CollectionReference? _commentCollRef;
   bool _expanded = false;
+  String _searchKey = '';
+  String _searchValue = '';
+  int _nameIdx = 1;
+  int _attachIdx = 5;
+  int _tsIdx = 4;
 
   final ImagePicker _picker = ImagePicker();
   final List<File> _pendingAttachments = [];
@@ -51,13 +57,16 @@ class _CommentDetailState extends State<CommentDetail> {
   String _attachmentFilename = '';
   List<String> _attachmentSources = const ['camera'];
   OverlayEntry? _inputEntry;
+  bool _hasCommentBox = false;
 
   @override
   void initState() {
     super.initState();
     _initConfig();
     _setupStream();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _insertInputOverlay());
+    if (_hasCommentBox) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _insertInputOverlay());
+    }
   }
 
   @override
@@ -88,8 +97,7 @@ class _CommentDetailState extends State<CommentDetail> {
             return Positioned(
               left: 0,
               right: 0,
-              bottom:
-                  bottomInset > 0 ? bottomInset : navBarHeight + safeBottom,
+              bottom: bottomInset > 0 ? bottomInset : navBarHeight + safeBottom,
               child: Material(
                 color: Colors.white,
                 elevation: 8,
@@ -126,13 +134,26 @@ class _CommentDetailState extends State<CommentDetail> {
 
   void _initConfig() {
     String text = (widget.component['text'] ?? '').toString().trim();
-    if (text.isNotEmpty) _label = text;
+    if (text.isNotEmpty) {
+      List<String> textParts = text.split('◆');
+      _label = textParts[0];
+      if (textParts.length > 1) {
+        _nameIdx = _parseFieldIdx(textParts[1], 2) - 1;
+      }
+      if (textParts.length > 2) {
+        _attachIdx = _parseFieldIdx(textParts[2], 6) - 1;
+      }
+      if (textParts.length > 3) {
+        _tsIdx = _parseFieldIdx(textParts[3], 5) - 1;
+      }
+    }
 
     try {
       List<dynamic> children = screenUIComponent[widget.scrName]['children'];
       for (var comp in children) {
         if (comp['type']?.toString().toLowerCase() == 'txf' &&
             comp['variant']?.toString().toLowerCase() == 'commentbox') {
+          _hasCommentBox = true;
           _attachmentFolder = (comp['attachmentFolder'] ?? '').toString();
           _attachmentFilename = (comp['attachmentFilename'] ?? '').toString();
           _attachmentMax =
@@ -151,6 +172,11 @@ class _CommentDetailState extends State<CommentDetail> {
     } catch (_) {}
   }
 
+  int _parseFieldIdx(String raw, int fallback) {
+    RegExpMatch? m = RegExp(r'<(\d+)>').firstMatch(raw.trim());
+    return m != null ? (int.tryParse(m.group(1)!) ?? fallback) : fallback;
+  }
+
   String _resolveNamedMarkers(String text) {
     var screenTx = transactionStore.state.screenTx;
     return text.replaceAllMapped(RegExp(r'<([a-zA-Z_][a-zA-Z0-9_]*)>'), (m) {
@@ -166,7 +192,7 @@ class _CommentDetailState extends State<CommentDetail> {
 
     int dblSlashIdx = resolved.indexOf('//');
     if (dblSlashIdx < 0) {
-      debugPrint('[CommentDetail] no // separator found');
+      debugPrint('[Timeline] no // separator found');
       return;
     }
 
@@ -175,7 +201,7 @@ class _CommentDetailState extends State<CommentDetail> {
     List<String> afterParts =
         afterDblSlash.split('/').where((s) => s.isNotEmpty).toList();
     if (afterParts.isEmpty) {
-      debugPrint('[CommentDetail] no subcollection after //');
+      debugPrint('[Timeline] no subcollection after //');
       return;
     }
 
@@ -192,66 +218,117 @@ class _CommentDetailState extends State<CommentDetail> {
       tableCode = '$beforeDblSlash/${afterParts[0]}';
       subcollection = afterParts.last;
     } else {
-      debugPrint('[CommentDetail] cannot parse path: $resolved');
-      return;
+      // Format: basePath//tableName (e.g., $test/request-approval//comment)
+      tableCode = '$beforeDblSlash/${afterParts.first}';
+      subcollection = '';
     }
 
-    int vid = int.tryParse((widget.component['vidtable'] ?? '').toString()) ??
+    var screenTx = transactionStore.state.screenTx;
+    int vid = int.tryParse(
+            (screenTx['approval_vidtable'] ?? '').toString()) ??
+        int.tryParse((widget.component['vidtable'] ?? '').toString()) ??
         appCodeController.applicationTableVid;
     String basePath = '$mobileTable/$vid/$mobileTableCollection';
 
-    var screenTx = transactionStore.state.screenTx;
-    String docT = (screenTx['request_doc_t'] ?? '').toString();
-
-    debugPrint('[CommentDetail] === PATH DEBUG ===');
-    debugPrint('[CommentDetail] resolved: $resolved');
-    debugPrint('[CommentDetail] contentIdx: $contentIdx');
-    debugPrint('[CommentDetail] basePath: $basePath');
-    debugPrint('[CommentDetail] tableCode: $tableCode');
-    debugPrint('[CommentDetail] subcollection: $subcollection');
-    debugPrint('[CommentDetail] docT: $docT');
-    debugPrint('[CommentDetail] === END PATH DEBUG ===');
-
-    if (docT.isEmpty) {
-      debugPrint('[CommentDetail] request_doc_t not found in transactionStore');
-      return;
+    String searchRaw = (widget.component['search'] ?? '').toString();
+    if (searchRaw.isNotEmpty) {
+      String searchDecoded = autheniumDecode(searchRaw) ?? searchRaw;
+      String searchResolved = _resolveNamedMarkers(searchDecoded);
+      if (searchResolved.contains('◼')) {
+        List<String> parts = searchResolved.split('◼');
+        _searchKey = parts[0].trim();
+        _searchValue = parts.length > 1 ? parts[1].trim() : '';
+      }
     }
+
+    debugPrint('[Timeline] === PATH DEBUG ===');
+    debugPrint('[Timeline] resolved: $resolved');
+    debugPrint('[Timeline] contentIdx: $contentIdx');
+    debugPrint('[Timeline] basePath: $basePath');
+    debugPrint('[Timeline] tableCode: $tableCode');
+    debugPrint('[Timeline] subcollection: $subcollection');
+    debugPrint('[Timeline] search: key=$_searchKey value=$_searchValue');
+    debugPrint('[Timeline] === END PATH DEBUG ===');
 
     try {
       DocumentReference tableDocRef =
           firestoreDb.collection(basePath).doc(tableCode);
-      CollectionReference contentRef =
-          tableDocRef.collection(mobileTableContent);
 
-      int? tValue = int.tryParse(docT);
-      debugPrint('[CommentDetail] querying content where t=${tValue ?? docT}');
-      contentRef.where('t', isEqualTo: tValue ?? docT).get().then((snapshot) {
-        if (!mounted) return;
-        if (snapshot.docs.isEmpty) {
-          debugPrint('[CommentDetail] no content doc found with t=$docT');
+      if (subcollection.isEmpty) {
+        // New format: comments are content docs in the table
+        _commentCollRef = tableDocRef.collection(mobileTableContent);
+        debugPrint('[Timeline] subscribing directly: ${_commentCollRef!.path}');
+        Query query;
+        if (_searchKey.isNotEmpty && _searchValue.isNotEmpty) {
+          query = _commentCollRef!.where(_searchKey, isEqualTo: _searchValue);
+        } else {
+          query = _commentCollRef!;
+        }
+        _subscription = query.snapshots().listen((snap) {
+          if (!mounted) return;
+          List<Map<String, dynamic>> parsed = [];
+          for (var doc in snap.docs) {
+            var raw = doc.data() as Map<String, dynamic>;
+            int t = (raw['t'] as int?) ?? 0;
+            Map<String, dynamic> entry = {'t': t};
+            try {
+              List<dynamic> fields = jsonDecode(raw['c'] ?? '[]');
+              entry['n'] = fields.length > _nameIdx ? fields[_nameIdx].toString() : '';
+              entry['a'] = fields.length > _attachIdx ? fields[_attachIdx].toString() : '';
+              entry['ts'] = fields.length > _tsIdx ? fields[_tsIdx].toString() : '';
+              entry['c'] = fields.length > 3 ? fields[3].toString() : '';
+            } catch (_) {
+              entry['c'] = raw['c'] ?? '';
+            }
+            parsed.add(entry);
+          }
+          parsed.sort((a, b) =>
+              (a['t'] as int? ?? 0).compareTo(b['t'] as int? ?? 0));
+          setState(() => _comments = parsed);
+        });
+      } else {
+        // Old format: find content doc by request_doc_t, then subcollection
+        var screenTx = transactionStore.state.screenTx;
+        String docT = (screenTx['request_doc_t'] ?? '').toString();
+        debugPrint('[Timeline] docT: $docT');
+        if (docT.isEmpty) {
+          debugPrint('[Timeline] request_doc_t not found in transactionStore');
           return;
         }
-
-        DocumentReference contentDocRef = snapshot.docs.first.reference;
-        _commentCollRef = contentDocRef.collection(subcollection);
-        debugPrint('[CommentDetail] content doc: ${contentDocRef.path}');
-        debugPrint('[CommentDetail] subscribing: ${_commentCollRef!.path}');
-
-        _subscription = _commentCollRef!
-            .orderBy('t', descending: false)
-            .snapshots()
-            .listen((snap) {
+        CollectionReference contentRef =
+            tableDocRef.collection(mobileTableContent);
+        int? tValue = int.tryParse(docT);
+        debugPrint('[Timeline] querying content where t=${tValue ?? docT}');
+        contentRef
+            .where('t', isEqualTo: tValue ?? docT)
+            .get()
+            .then((snapshot) {
           if (!mounted) return;
-          setState(() {
-            _comments =
-                snap.docs.map((d) => d.data() as Map<String, dynamic>).toList();
+          if (snapshot.docs.isEmpty) {
+            debugPrint('[Timeline] no content doc found with t=$docT');
+            return;
+          }
+          DocumentReference contentDocRef = snapshot.docs.first.reference;
+          _commentCollRef = contentDocRef.collection(subcollection);
+          debugPrint('[Timeline] content doc: ${contentDocRef.path}');
+          debugPrint('[Timeline] subscribing: ${_commentCollRef!.path}');
+          _subscription = _commentCollRef!
+              .orderBy('t', descending: false)
+              .snapshots()
+              .listen((snap) {
+            if (!mounted) return;
+            setState(() {
+              _comments = snap.docs
+                  .map((d) => d.data() as Map<String, dynamic>)
+                  .toList();
+            });
           });
+        }).catchError((e) {
+          debugPrint('[Timeline] query error: $e');
         });
-      }).catchError((e) {
-        debugPrint('[CommentDetail] query error: $e');
-      });
+      }
     } catch (e) {
-      debugPrint('[CommentDetail] error: $e');
+      debugPrint('[Timeline] error: $e');
     }
   }
 
@@ -260,8 +337,11 @@ class _CommentDetailState extends State<CommentDetail> {
     return ValueListenableBuilder<WidgetBuilder?>(
       valueListenable: ApproverStickyBar.slot,
       builder: (ctx, approverBuilder, child) {
-        double extraBottom = approverBuilder != null ? 130.0 : 100.0;
-        if (_pendingAttachments.isNotEmpty) extraBottom += 82.0;
+        double extraBottom = 0.0;
+        if (_hasCommentBox) {
+          extraBottom = approverBuilder != null ? 130.0 : 100.0;
+          if (_pendingAttachments.isNotEmpty) extraBottom += 82.0;
+        }
         return Padding(
           padding: EdgeInsets.fromLTRB(
               widget.lPad, widget.tPad, widget.rPad, widget.bPad + extraBottom),
@@ -685,7 +765,7 @@ class _CommentDetailState extends State<CommentDetail> {
           }
         }
         if (cams == null || cams.isEmpty) {
-          debugPrint('[CommentDetail] #CAMS missing, fallback to ImagePicker');
+          debugPrint('[Timeline] #CAMS missing, fallback to ImagePicker');
           final XFile? picked = await _picker.pickImage(
             source: ImageSource.camera,
             maxWidth: 1080,
@@ -699,8 +779,7 @@ class _CommentDetailState extends State<CommentDetail> {
         } else {
           String folder = _attachmentFolder.isEmpty
               ? 'comment-temp'
-              : _resolveNamedMarkers(_attachmentFolder)
-                  .replaceAll('//', '/');
+              : _resolveNamedMarkers(_attachmentFolder).replaceAll('//', '/');
           String baseName = _attachmentFilename.isEmpty
               ? 'comment'
               : _resolveNamedMarkers(_attachmentFilename);
@@ -759,7 +838,7 @@ class _CommentDetailState extends State<CommentDetail> {
         _inputEntry?.markNeedsBuild();
       }
     } catch (e) {
-      debugPrint('[CommentDetail] pick error: $e');
+      debugPrint('[Timeline] pick error: $e');
     }
   }
 
@@ -891,14 +970,14 @@ class _CommentDetailState extends State<CommentDetail> {
 
       final file = File('${dir.path}/$filename');
       await file.writeAsBytes(response.bodyBytes);
-      debugPrint('[CommentDetail] file saved: ${file.path}');
+      debugPrint('[Timeline] file saved: ${file.path}');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Saved to Downloads: $filename')),
         );
       }
     } catch (e) {
-      debugPrint('[CommentDetail] download error: $e');
+      debugPrint('[Timeline] download error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Download failed')),
@@ -915,10 +994,10 @@ class _CommentDetailState extends State<CommentDetail> {
     _inputEntry?.markNeedsBuild();
 
     Map<String, String> addFields = _parseAddToTable();
-    String name = addFields['<1>'] ?? currentUser?.displayName ?? '';
-    String vid = addFields['<2>'] ??
+    String name = addFields['<2>'] ?? currentUser?.displayName ?? '';
+    String vid = addFields['<3>'] ??
         (transactionStore.state.screenTx['#VID'] ?? '').toString();
-    String rating = addFields['<6>'] ?? '';
+    String rating = addFields['<7>'] ?? '';
     int now = DateTime.now().millisecondsSinceEpoch;
     String formattedDate =
         DateFormat('dd MMM yyyy HH:mm').format(DateTime.now());
@@ -929,14 +1008,12 @@ class _CommentDetailState extends State<CommentDetail> {
           _resolveNamedMarkers(_attachmentFolder).replaceAll('//', '/');
       String baseFilename = _resolveNamedMarkers(_attachmentFilename);
 
-      debugPrint('[CommentDetail] === UPLOAD DEBUG ===');
-      debugPrint('[CommentDetail] raw attachmentFolder: $_attachmentFolder');
-      debugPrint('[CommentDetail] resolved folder: $folder');
-      debugPrint(
-          '[CommentDetail] raw attachmentFilename: $_attachmentFilename');
-      debugPrint('[CommentDetail] resolved baseFilename: $baseFilename');
-      debugPrint(
-          '[CommentDetail] pending count: ${_pendingAttachments.length}');
+      debugPrint('[Timeline] === UPLOAD DEBUG ===');
+      debugPrint('[Timeline] raw attachmentFolder: $_attachmentFolder');
+      debugPrint('[Timeline] resolved folder: $folder');
+      debugPrint('[Timeline] raw attachmentFilename: $_attachmentFilename');
+      debugPrint('[Timeline] resolved baseFilename: $baseFilename');
+      debugPrint('[Timeline] pending count: ${_pendingAttachments.length}');
 
       for (int i = 0; i < _pendingAttachments.length; i++) {
         String ts = DateTime.now().millisecondsSinceEpoch.toString();
@@ -954,36 +1031,40 @@ class _CommentDetailState extends State<CommentDetail> {
           cloudFilename = '${nameWithoutExt}_$ts.$ext';
         }
         String cloudPath = '$folder/$cloudFilename';
-        debugPrint('[CommentDetail] uploading [$i]: $cloudPath');
-        debugPrint(
-            '[CommentDetail] local file: ${_pendingAttachments[i].path}');
+        debugPrint('[Timeline] uploading [$i]: $cloudPath');
+        debugPrint('[Timeline] local file: ${_pendingAttachments[i].path}');
         try {
           String url = await uploadToCloudStorage(
               _pendingAttachments[i].path, cloudPath);
-          debugPrint('[CommentDetail] upload result [$i]: $url');
-          debugPrint(
-              '[CommentDetail] isValidUrl [$i]: ${isValidImageUrl(url)}');
+          debugPrint('[Timeline] upload result [$i]: $url');
+          debugPrint('[Timeline] isValidUrl [$i]: ${isValidImageUrl(url)}');
           if (isValidImageUrl(url)) uploadedUrls.add(url);
         } catch (e) {
-          debugPrint('[CommentDetail] upload error [$i]: $e');
+          debugPrint('[Timeline] upload error [$i]: $e');
         }
       }
-      debugPrint('[CommentDetail] === END UPLOAD DEBUG ===');
+      debugPrint('[Timeline] === END UPLOAD DEBUG ===');
     }
 
     String attachment = uploadedUrls.isNotEmpty
         ? uploadedUrls.join('◇')
-        : (addFields['<5>'] ?? '');
+        : (addFields['<6>'] ?? '');
 
     try {
+      List<String> content = [
+        _searchValue,
+        name,
+        vid,
+        text,
+        formattedDate,
+        attachment,
+        rating,
+      ];
       await _commentCollRef!.add({
-        'n': name,
-        'v': vid,
-        'c': text,
-        'ts': formattedDate,
+        'c': jsonEncode(content),
         't': now,
-        'a': attachment,
-        'r': rating,
+        if (_searchKey.isNotEmpty && _searchValue.isNotEmpty)
+          _searchKey: _searchValue,
       });
       _commentController.clear();
       setState(() {
@@ -993,7 +1074,7 @@ class _CommentDetailState extends State<CommentDetail> {
       });
       _inputEntry?.markNeedsBuild();
     } catch (e) {
-      debugPrint('[CommentDetail] _onSend error: $e');
+      debugPrint('[Timeline] _onSend error: $e');
       setState(() => _uploading = false);
       _inputEntry?.markNeedsBuild();
     }

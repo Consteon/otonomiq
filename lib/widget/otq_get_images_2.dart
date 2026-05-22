@@ -42,7 +42,6 @@ class OtqGetImages2State extends State<OtqGetImages2>
 
   void buttonPressed(dynamic component, bool isEnabled) async {
     if (isEnabled) {
-      List<CameraDescription> cams = transactionStore.state.screenTx['#CAMS'];
       late List<int> imgParameter;
       try {
         List<String> imgParStr = (component['imageParameter'] ?? "400,400,80")
@@ -56,6 +55,10 @@ class OtqGetImages2State extends State<OtqGetImages2>
       } catch (e) {
         imgParameter = [400, 400, 80];
       }
+      List<CameraDescription>? cams =
+          transactionStore.state.screenTx['#CAMS'] as List<CameraDescription>?;
+      if (cams == null || cams.isEmpty) return;
+
       String imgUrl = await getPhotoCameraImage(
         cams,
         component['label'] ?? 'Camera',
@@ -70,6 +73,8 @@ class OtqGetImages2State extends State<OtqGetImages2>
         h,
         w,
       );
+
+      if (!mounted) return;
 
       if (imgUrl != emptyImageUrl) {
         setState(() {
@@ -205,8 +210,7 @@ class OtqGetImages2State extends State<OtqGetImages2>
         left: widget.lPad + margin[2],
         right: widget.rPad + margin[3],
       ),
-      padding:
-          EdgeInsets.fromLTRB(16, widget.tPad + 14, 16, widget.bPad + 14),
+      padding: EdgeInsets.fromLTRB(16, widget.tPad + 14, 16, widget.bPad + 14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -220,156 +224,156 @@ class OtqGetImages2State extends State<OtqGetImages2>
         ],
       ),
       child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header
+          Row(
             children: [
-              // Header
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(7),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEEF2F8),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(
-                      Icons.camera_alt_outlined,
-                      size: 16,
-                      color: Color(0xFF334155),
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEEF2F8),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.camera_alt_outlined,
+                  size: 16,
+                  color: Color(0xFF334155),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  headerLabel,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF334155),
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ),
+              Text(
+                '${imageUrls.length} / $maxImages $fotoLabel',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFF94A3B8),
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Photo zone
+          if (imageWidgets.isEmpty)
+            GestureDetector(
+              onTap: canAddMore && isEnabled
+                  ? () => buttonPressed(widget.component, isEnabled)
+                  : null,
+              child: CustomPaint(
+                painter: _DashedBorderPainter(
+                  color: const Color(0xFFBFDBFE),
+                ),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 32),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEEF2F8),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.camera_alt_outlined,
+                            size: 26,
+                            color: Color(0xFF94A3B8),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          emptyTitle,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1E293B),
+                          ),
+                        ),
+                        if (emptySubtitle.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            emptySubtitle,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFF94A3B8),
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      headerLabel,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF334155),
-                        letterSpacing: 1.2,
+                ),
+              ),
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  height: thumbSize,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: imageWidgets.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (_, i) => SizedBox(
+                      width: thumbSize,
+                      height: thumbSize,
+                      child: imageWidgets[i],
+                    ),
+                  ),
+                ),
+                if (canAddMore && isEnabled) ...[
+                  const SizedBox(height: 10),
+                  GestureDetector(
+                    onTap: () => buttonPressed(widget.component, isEnabled),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 9),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEEF2F8),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFBFDBFE)),
                       ),
-                    ),
-                  ),
-                  Text(
-                    '${imageUrls.length} / $maxImages $fotoLabel',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF94A3B8),
-                      fontWeight: FontWeight.w500,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.add_a_photo_outlined,
+                              size: 15, color: Color(0xFF3B82F6)),
+                          const SizedBox(width: 6),
+                          Text(
+                            addLabel,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFF3B82F6),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],
-              ),
-              const SizedBox(height: 12),
-              // Photo zone
-              if (imageWidgets.isEmpty)
-                GestureDetector(
-                  onTap: canAddMore && isEnabled
-                      ? () => buttonPressed(widget.component, isEnabled)
-                      : null,
-                  child: CustomPaint(
-                    painter: _DashedBorderPainter(
-                      color: const Color(0xFFBFDBFE),
-                    ),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 32),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFEEF2F8),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(
-                                Icons.camera_alt_outlined,
-                                size: 26,
-                                color: Color(0xFF94A3B8),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              emptyTitle,
-                              style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF1E293B),
-                              ),
-                            ),
-                            if (emptySubtitle.isNotEmpty) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                emptySubtitle,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Color(0xFF94A3B8),
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                )
-              else
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      height: thumbSize,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: imageWidgets.length,
-                        separatorBuilder: (_, __) => const SizedBox(width: 8),
-                        itemBuilder: (_, i) => SizedBox(
-                          width: thumbSize,
-                          height: thumbSize,
-                          child: imageWidgets[i],
-                        ),
-                      ),
-                    ),
-                    if (canAddMore && isEnabled) ...[
-                      const SizedBox(height: 10),
-                      GestureDetector(
-                        onTap: () => buttonPressed(widget.component, isEnabled),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 9),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEEF2F8),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFFBFDBFE)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.add_a_photo_outlined,
-                                  size: 15, color: Color(0xFF3B82F6)),
-                              const SizedBox(width: 6),
-                              Text(
-                                addLabel,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Color(0xFF3B82F6),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-            ],
-          ),
-        );
+              ],
+            ),
+        ],
+      ),
+    );
   }
 
   Widget buildImageWidget(String imageUrl, bool isEnabled) {
