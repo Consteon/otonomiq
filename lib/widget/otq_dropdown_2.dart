@@ -308,7 +308,7 @@ class _OtqDropdown2State extends State<OtqDropdown2>
                 child: Text(
                   hasValue ? _itemSelected : hintStr,
                   style: TextStyle(
-                    color: Color(0xFF94A3B8),
+                    color: Color.fromARGB(255, 88, 91, 97),
                     fontSize: 13,
                   ),
                 ),

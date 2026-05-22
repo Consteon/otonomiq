@@ -61,9 +61,11 @@ class _ApproverStickyBarState extends State<ApproverStickyBar>
     try {
       final children = screenUIComponent[widget.scrName]?['children'] ?? [];
       for (final c in children) {
-        if (c is Map &&
-            c['type']?.toString().toLowerCase() == 'comment_detail') {
-          return true;
+        if (c is Map) {
+          final type = c['type']?.toString().toLowerCase() ?? '';
+          if (type == 'comment_detail' || type == 'timeline') {
+            return true;
+          }
         }
       }
     } catch (_) {}

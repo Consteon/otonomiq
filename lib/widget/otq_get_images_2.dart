@@ -42,7 +42,6 @@ class OtqGetImages2State extends State<OtqGetImages2>
 
   void buttonPressed(dynamic component, bool isEnabled) async {
     if (isEnabled) {
-      List<CameraDescription> cams = transactionStore.state.screenTx['#CAMS'];
       late List<int> imgParameter;
       try {
         List<String> imgParStr = (component['imageParameter'] ?? "400,400,80")
@@ -56,6 +55,10 @@ class OtqGetImages2State extends State<OtqGetImages2>
       } catch (e) {
         imgParameter = [400, 400, 80];
       }
+      List<CameraDescription>? cams =
+      transactionStore.state.screenTx['#CAMS'] as List<CameraDescription>?;
+      if (cams == null || cams.isEmpty) return;
+
       String imgUrl = await getPhotoCameraImage(
         cams,
         component['label'] ?? 'Camera',
@@ -70,6 +73,8 @@ class OtqGetImages2State extends State<OtqGetImages2>
         h,
         w,
       );
+
+      if (!mounted) return;
 
       if (imgUrl != emptyImageUrl) {
         setState(() {
@@ -205,8 +210,7 @@ class OtqGetImages2State extends State<OtqGetImages2>
         left: widget.lPad + margin[2],
         right: widget.rPad + margin[3],
       ),
-      padding:
-      EdgeInsets.fromLTRB(16, widget.tPad + 14, 16, widget.bPad + 14),
+      padding: EdgeInsets.fromLTRB(16, widget.tPad + 14, 16, widget.bPad + 14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),

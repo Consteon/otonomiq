@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -180,7 +178,9 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
 
     Future<String> takePicture(String lens) async {
       // get selfie, save to firebase, then return url to selfie image
-      List<CameraDescription> cams = transactionStore.state.screenTx['#CAMS'];
+      List<CameraDescription>? cams =
+      transactionStore.state.screenTx['#CAMS'] as List<CameraDescription>?;
+      if (cams == null || cams.isEmpty) return emptyImageUrl;
       String selfieUrl = await getPhotoCameraImage(
         cams,
         widget.component['label'] ?? 'Camera',
@@ -240,9 +240,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
         // actionLock('processData attendance_qr_selfie_gps_verify');
         // pool.play(scannerBeep);
         while (!locSensor.gpsDone) {
-          // waiting for gps location (if not done)
-          sleep(const Duration(milliseconds: 100));
-        } // end while !locSensor.gpsDone
+          await Future.delayed(const Duration(milliseconds: 100));
+        }
         vibrate(duration: 100);
         widget.component['route'] =
             widget.component['route'] ?? home; //= default route = Home
@@ -621,7 +620,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
         String actionType, List tArray, OtqState? locSensor) async {
       try {
         for (var i = 0; i < 10 && locSensor == null; i++) {
-          sleep(Duration(milliseconds: 100 + i * 20));
+          await Future.delayed(Duration(milliseconds: 100 + i * 20));
         }
         if ((actionType != 'selfie') &&
             (actionType != 'back') &&
@@ -663,8 +662,9 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
               lens = 'back';
             }
             try {
-              List<CameraDescription> cams =
-              transactionStore.state.screenTx['#CAMS'];
+              List<CameraDescription>? cams =
+              transactionStore.state.screenTx['#CAMS'] as List<CameraDescription>?;
+              if (cams == null || cams.isEmpty) throw Exception('No cameras available');
               transactionStore.dispatch(
                   UpdateScreenTxAction(ScreenTransaction({'#CAMERA': true})));
               selfieUrl = await getPhotoCameraImage(
@@ -690,8 +690,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                 for (var l = 0;
                 l < 50 && (locSensor == null || !locSensor.gpsDone);
                 l++) {
-                  sleep(Duration(milliseconds: 100 + l * 20));
-                } // end while !otqData.gpsDone
+                  await Future.delayed(Duration(milliseconds: 100 + l * 20));
+                }
               } // end if selfieUrl == emptyString
             } catch (e) {
               errorReport(e);
@@ -1088,7 +1088,6 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                       }
                                       if (distance <= zone2) {
                                         insideAny = true;
-                                        break;
                                       }
                                     }
                                     debugPrint(
@@ -1215,7 +1214,6 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                       }
                                       if (distance <= zone2) {
                                         insideAny = true;
-                                        break;
                                       }
                                     }
                                     debugPrint(
@@ -1344,7 +1342,6 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                       }
                                       if (distance <= zone2) {
                                         insideAny = true;
-                                        break;
                                       }
                                     }
                                     debugPrint(
@@ -1405,9 +1402,11 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                           setDataOK('2');
                           errorReport(e);
                         }
-                        setState(() {
-                          tapped = false;
-                        });
+                        if (mounted) {
+                          setState(() {
+                            tapped = false;
+                          });
+                        }
                       }
                     } // end if !tapped
                   }, // end of onTap
@@ -1583,7 +1582,6 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                 }
                                 if (distance <= zone2) {
                                   insideAny = true;
-                                  break;
                                 }
                               }
                               debugPrint(
@@ -1709,7 +1707,6 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                 }
                                 if (distance <= zone2) {
                                   insideAny = true;
-                                  break;
                                 }
                               }
                               debugPrint(
@@ -1836,7 +1833,6 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                 }
                                 if (distance <= zone2) {
                                   insideAny = true;
-                                  break;
                                 }
                               }
                               debugPrint(
@@ -1900,12 +1896,10 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                   setDataOK('2');
                 } // end if internetOK
                 // } // end if dataOk
-                try {
+                if (mounted) {
                   setState(() {
                     tapped = false;
                   });
-                } catch (e) {
-                  errorReport(e);
                 }
               } // end if ! tapped
             }, // end of onTap

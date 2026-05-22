@@ -6,10 +6,10 @@ import '../global.dart';
 import '../global2.dart';
 import 'approver_sticky_bar.dart';
 
-class ApprovalDetail extends StatefulWidget {
+class ItemCardDetail extends StatefulWidget {
   static final RxString currentStatus = ''.obs;
 
-  const ApprovalDetail({
+  const ItemCardDetail({
     super.key,
     required this.component,
     required this.scrName,
@@ -24,10 +24,10 @@ class ApprovalDetail extends StatefulWidget {
   final double lPad, tPad, rPad, bPad;
 
   @override
-  State<ApprovalDetail> createState() => _ApprovalDetailState();
+  State<ItemCardDetail> createState() => _ItemCardDetailState();
 }
 
-class _ApprovalDetailState extends State<ApprovalDetail> {
+class _ItemCardDetailState extends State<ItemCardDetail> {
   String _tableCode = '';
   List<String> _textArray = [];
   List<String> _contentArray = [];
@@ -55,15 +55,15 @@ class _ApprovalDetailState extends State<ApprovalDetail> {
     }
 
     var screenTx = transactionStore.state.screenTx;
-    String txRole = (screenTx['approval_role'] ?? '').toString().trim().toUpperCase();
+    String txRole =
+    (screenTx['approval_role'] ?? '').toString().trim().toUpperCase();
     _role = txRole.isNotEmpty
         ? txRole
         : (widget.component['role'] ?? '').toString().trim().toUpperCase();
 
     if (screenTx['approval_tabs'] is List) {
-      _tabs = (screenTx['approval_tabs'] as List)
-          .map((e) => e.toString())
-          .toList();
+      _tabs =
+          (screenTx['approval_tabs'] as List).map((e) => e.toString()).toList();
     }
     _myApprovalLevel =
         int.tryParse((screenTx['approval_level'] ?? '').toString()) ?? -1;
@@ -309,9 +309,9 @@ class _ApprovalDetailState extends State<ApprovalDetail> {
       List<dynamic> allData = List.from(tableContent[_tableCode] ?? []);
       String condRaw = (widget.component['conditions'] ?? '').toString();
       debugPrint(
-          '[ApprovalDetail] tableCode=$_tableCode | rows=${allData.length} | conditions=$condRaw');
+          '[ItemCardDetail] tableCode=$_tableCode | rows=${allData.length} | conditions=$condRaw');
       allData = _applyConditions(allData);
-      debugPrint('[ApprovalDetail] after conditions: ${allData.length} rows');
+      debugPrint('[ItemCardDetail] after conditions: ${allData.length} rows');
 
       if (allData.isEmpty) return const SizedBox.shrink();
 
@@ -336,11 +336,11 @@ class _ApprovalDetailState extends State<ApprovalDetail> {
       String statusDisplay = progress.isEmpty
           ? _capitalize(status)
           : '${_capitalize(status)} $progress';
-      if (ApprovalDetail.currentStatus.value != status) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          ApprovalDetail.currentStatus.value = status;
-        });
-      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (ItemCardDetail.currentStatus.value != status) {
+          ItemCardDetail.currentStatus.value = status;
+        }
+      });
 
       String reasonTemplate = (widget.component['reason'] ?? '').toString();
       String reason =

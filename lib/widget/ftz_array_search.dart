@@ -34,6 +34,8 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
   String title = '', searchLabel = '', hint = '';
   String searchValue = '';
   String? finalFilter;
+  Worker? _tableWorker;
+  late String _tableCode;
 
   @override
   void initState() {
@@ -80,18 +82,47 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
     }
     try {
       searchValue = '';
+      _tableCode = normalizeTableName(
+          autheniumDecode(widget.component['table'] ?? 'default') ?? '');
       initialTable =
           searchTable(finalFilter ?? '', List.from(widget.localTable));
-      // pickTable = List.from(initialTable);
       pickTable = searchTable(searchValue, initialTable);
     } catch (e) {
       // do nothing}
     }
+    _tableWorker = ever(tableContent, (_) {
+      _rebuildTableData();
+    });
     super.initState();
   } // end of initState
 
+  void _rebuildTableData() {
+    List<dynamic> currentTableData =
+    List.from(tableContent[_tableCode] ?? []);
+    List<dynamic> newInitial = searchTable(finalFilter ?? '', currentTableData);
+    String sortParam = widget.component['sort'] ?? '';
+    if (sortParam == 'asc' || sortParam == 'desc') {
+      int sortFactor = sortParam == 'asc' ? 1 : -1;
+      try {
+        newInitial.sort((a, b) =>
+        sortFactor *
+            int.parse(a[0].toString())
+                .compareTo(int.parse(b[0].toString())));
+      } catch (e) {
+        devPrint(e);
+      }
+    }
+    if (mounted) {
+      setState(() {
+        initialTable = newInitial;
+        pickTable = searchTable(searchValue, initialTable);
+      });
+    }
+  }
+
   @override
   void dispose() {
+    _tableWorker?.dispose();
     pickTable.clear();
     textArray.clear();
     style.clear();
@@ -160,18 +191,17 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
           // inputFormatters: tiFormatter,
           // onTap: txfOnTap,
           onChanged: (value) {
-            // search
             setState(() {
               searchValue = value;
-              // by ai : pickTable = searchTable(searchValue, initialTable);
+              pickTable = searchTable(searchValue, initialTable);
             });
           },
           //end of onChanged
           decoration: InputDecoration(
             prefixIcon: widget.component['icon'].toString().isNotEmpty
                 ? Icon(
-                    otqIcons[widget.component['icon'].toString()],
-                  )
+              otqIcons[widget.component['icon'].toString()],
+            )
                 : null,
             labelText: searchLabel,
             hintText: hint,
@@ -184,9 +214,9 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
                 ? Color(int.parse(widget.component['color']))
                 : Theme.of(context).textTheme.bodyLarge!.color,
             backgroundColor:
-                (widget.component['background'] ?? 'default') != 'default'
-                    ? Color(int.parse(widget.component['background']))
-                    : Theme.of(context).textTheme.bodyLarge!.backgroundColor,
+            (widget.component['background'] ?? 'default') != 'default'
+                ? Color(int.parse(widget.component['background']))
+                : Theme.of(context).textTheme.bodyLarge!.backgroundColor,
             // fontWeight: style[0],
             // fontStyle: style[1],
             // decoration: style[2],
@@ -195,66 +225,7 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
         ),
         const SizedBox(height: 8),
         Expanded(
-          // height: 200,
-          child: Obx(() {
-            String tableCode = normalizeTableName(
-                autheniumDecode(widget.component['table'] ?? 'default') ?? '');
-            '';
-            debugPrint(
-                'ftz_array_search Obx for table ${widget.component['table']} triggered');
-            // --- FIX by AI STARTS HERE ---
-            // 1. Directly use the reactive tableContent to get the latest data.
-            List<dynamic> currentTableData =
-                List.from(tableContent[tableCode] ?? []);
-
-            // 2. Perform all data preparation here, without modifying any reactive state.
-            initialTable = searchTable(finalFilter ?? '', currentTableData);
-
-            String sortParam = widget.component['sort'] ?? '';
-            if (sortParam == 'asc' || sortParam == 'desc') {
-              int sortFactor = sortParam == 'asc' ? 1 : -1;
-              try {
-                initialTable.sort((a, b) =>
-                    sortFactor *
-                    int.parse(a[0].toString())
-                        .compareTo(int.parse(b[0].toString())));
-              } catch (e) {
-                devPrint(e);
-              }
-            }
-
-            // 3. Filter based on the local search value.
-            pickTable = searchTable(searchValue, initialTable);
-            // --- FIX ENDS HERE ---
-
-            // debugPrint(
-            //     'ftz_array_search Obx widget.localTable len = ${widget.localTable.length}. ');
-            // if (tableSourceUpdated[tableCode] ?? true) {
-            //   // tableSourceUpdated[tableCode] = false;
-            //   int sortFactor = 0;
-            //   String sortParam = widget.component['sort'] ?? '';
-            //   switch (sortParam) {
-            //     case 'asc':
-            //       sortFactor = 1;
-            //       break;
-            //     case 'desc':
-            //       sortFactor = -1;
-            //       break;
-            //     default:
-            //       sortFactor = 0;
-            //   }
-            //   initialTable = searchTable(widget.component['filter'] ?? '',
-            //       List.from(tableContent[tableCode] ?? []));
-            //   if (sortFactor != 0) {
-            //     try {
-            //       initialTable.sort((a, b) =>
-            //           sortFactor * int.parse(a[0].toString()).compareTo(int.parse(b[0].toString())));
-            //     } catch (e) {
-            //       devPrint(e);
-            //     }
-            //   } //if (sortFactor != 0)
-            //   pickTable = searchTable(searchValue, initialTable);
-            // }
+          child: Builder(builder: (context) {
             debugPrint('pickTable length = ${pickTable.length}');
             return ListView.builder(
               itemCount: pickTable.length,
@@ -267,7 +238,7 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
                       leading: AspectRatio(
                         aspectRatio: 1,
                         child:
-                            displayImage(imageUrl: defaultImage, cached: true),
+                        displayImage(imageUrl: defaultImage, cached: true),
                         // child: FadeInImage.memoryNetwork(
                         //     placeholder: kTransparentImage,
                         //     image: defaultImage),
@@ -275,17 +246,17 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
                       subtitle: pickTable.isEmpty
                           ? const Text('\n--\n\n')
                           : Text(
-                              displayObject['content'] == null
-                                  ? '${pickTable.first[0].value}\n${pickTable.first[1].value}\n${pickTable.first[5].value}'
-                                  : replaceMarkerPrototype(
-                                      displayObject['content'],
-                                      pickTable.first,
-                                      widget.component['indexStart'] ?? 0),
-                              style: TextStyle(
-                                  color: Colors.black.withOpacity(0.6)),
-                              overflow: TextOverflow.fade,
-                              softWrap: false,
-                            ),
+                        displayObject['content'] == null
+                            ? '${pickTable.first[0].value}\n${pickTable.first[1].value}\n${pickTable.first[5].value}'
+                            : replaceMarkerPrototype(
+                            displayObject['content'],
+                            pickTable.first,
+                            widget.component['indexStart'] ?? 0),
+                        style: TextStyle(
+                            color: Colors.black.withOpacity(0.6)),
+                        overflow: TextOverflow.fade,
+                        softWrap: false,
+                      ),
                     ),
                     const SizedBox(height: 5), //bottom padding
                   ],
@@ -320,26 +291,26 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
                                 displayObject['content'] == null
                                     ? '${pickTable.first[0]}\n${pickTable.first[1]}'
                                     : replaceMarker(
-                                        displayObject['content'],
-                                        pickTable[index],
-                                        widget.component['indexStart'] ?? 0,
-                                        false));
+                                    displayObject['content'],
+                                    pickTable[index],
+                                    widget.component['indexStart'] ?? 0,
+                                    false));
                           }
                         },
                         leading: (widget.component['image'] ?? '') == ''
                             ? null
                             : AspectRatio(
-                                aspectRatio: 1,
-                                child: displayImage(
-                                    imageUrl: getImageList(pickTable[index],
-                                        widget.component['image'])[0],
-                                    cached: false),
-                                // child: FadeInImage.memoryNetwork(
-                                //   placeholder: kTransparentImage,
-                                //   image: getImageList(pickTable[index],
-                                //       widget.component['image'])[0],
-                                // ),
-                              ),
+                          aspectRatio: 1,
+                          child: displayImage(
+                              imageUrl: getImageList(pickTable[index],
+                                  widget.component['image'])[0],
+                              cached: false),
+                          // child: FadeInImage.memoryNetwork(
+                          //   placeholder: kTransparentImage,
+                          //   image: getImageList(pickTable[index],
+                          //       widget.component['image'])[0],
+                          // ),
+                        ),
                         // leading: AspectRatio(
                         //   aspectRatio: 1,
                         //   child: FadeInImage.memoryNetwork(
@@ -348,27 +319,27 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
                         //       'https://firebasestorage.googleapis.com/v0/b/otq-01-ase2/o/vt%2F2020%2Fs%2Fkrusty-services%2Fattendance-selfie%2Fsurya-widjaja%2F60181816889090-2020-11-06-13-07-12.jpg?alt=media&token=d04a568d-5de5-4b98-bc9a-7dbdfacc58ae'),
                         // ),
                         subtitle:
-                            // FittedBox(
-                            // // fit: BoxFit.scaleDown,
-                            // fit: BoxFit.fitHeight,
-                            // clipBehavior: Clip.hardEdge,
-                            // alignment: Alignment.centerLeft,
-                            // child:
-                            pickTable.isEmpty
-                                ? const Text('--')
-                                : Text(
-                                    displayObject['content'] == null
-                                        ? '${pickTable.first[0]}\n${pickTable.first[1]}\n${pickTable.first[5]}'
-                                        : replaceMarker(
-                                            displayObject['content'],
-                                            pickTable[index],
-                                            widget.component['indexStart'] ?? 0,
-                                            false),
-                                    style: TextStyle(
-                                        color: Colors.black.withOpacity(0.6)),
-                                    overflow: TextOverflow.fade,
-                                    softWrap: false,
-                                  ),
+                        // FittedBox(
+                        // // fit: BoxFit.scaleDown,
+                        // fit: BoxFit.fitHeight,
+                        // clipBehavior: Clip.hardEdge,
+                        // alignment: Alignment.centerLeft,
+                        // child:
+                        pickTable.isEmpty
+                            ? const Text('--')
+                            : Text(
+                          displayObject['content'] == null
+                              ? '${pickTable.first[0]}\n${pickTable.first[1]}\n${pickTable.first[5]}'
+                              : replaceMarker(
+                              displayObject['content'],
+                              pickTable[index],
+                              widget.component['indexStart'] ?? 0,
+                              false),
+                          style: TextStyle(
+                              color: Colors.black.withOpacity(0.6)),
+                          overflow: TextOverflow.fade,
+                          softWrap: false,
+                        ),
                         // ),
                       ),
                     ],
@@ -377,7 +348,7 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
               },
             );
           }),
-        ),
+        ),  // Expanded
       ],
     );
   }

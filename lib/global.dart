@@ -183,7 +183,7 @@ import 'global2.dart';
                           attendance_qr_selfie_gps_verify, stl_page, main_page,
                           home_page, any_page, login_form, google_login_button,
                           apple_login_button
-
+  0.9.78.32 (260522) OO : udpate approval, etc
  */
 // ========= Constants ==========================
 const iOSDevPage = false;
@@ -194,7 +194,7 @@ int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
 const String version = '0.9.78';
-const String subVersion = '.31';
+const String subVersion = '.32';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing
@@ -1141,6 +1141,26 @@ bool beginWithAtiCode(String? input) {
   return input.substring(0, atiCode.length) == atiCode;
 } // end of atiCheck
 
+String? stringCleanUp(String? inp) {
+  if (inp == null) return null;
+  String output = quoteCleanUp(cleanAtiCode(inp)) ?? '';
+  if (!beginWithAtiCode(inp)) {
+    // Strip control chars except \n (handled separately in saveSend)
+    output = output.replaceAll(RegExp(r'[\x00-\x09\x0B-\x1F]'), '');
+    for (final c in forbiddenCharacter) {
+      if (c != separator[5]) {
+        // except white diamond for get_images
+        output = output.replaceAll(c, ' ');
+      } // end if (c != separator[5])
+    } // end for c
+    // Guard formula injection: prefix space if starts with = or @
+    if (output.isNotEmpty && (output[0] == '=' || output[0] == '@')) {
+      output = ' $output';
+    }
+  } // end if (beginWithAtiCode(inp))
+  return output;
+} // end of stringCleanUp
+
 String? cleanAtiCode(String? input) {
   if (input == null) return null;
   if (beginWithAtiCode(input)) {
@@ -1155,22 +1175,6 @@ String? quoteCleanUp(String? inp) {
   String output = inp.replaceAll('"', '``').replaceAll("'", '`');
   return output;
 } // end of quoteCleanUp
-
-String? stringCleanUp(String? inp) {
-  // replace " and ' to `
-  // replace all character in forbiddenCharacter array to space
-  if (inp == null) return null;
-  String output = quoteCleanUp(cleanAtiCode(inp)) ?? '';
-  if (!beginWithAtiCode(inp)) {
-    for (final c in forbiddenCharacter) {
-      if (c != separator[5]) {
-        // except white diamond for get_images
-        output = output.replaceAll(c, ' ');
-      } // end if (c != separator[5])
-    } // end for c
-  } // end if (beginWithAtiCode(inp))
-  return output;
-} // end of stringCleanUp
 
 List<dynamic> tableToArray(
     Map<String, dynamic>? sourceTable, String tableCode, String? sort) {

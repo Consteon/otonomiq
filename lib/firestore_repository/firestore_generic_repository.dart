@@ -22,8 +22,6 @@ Future<String> uploadToCloudStorage(
       if (internetConnected()) {
         try {
           String currentLocal = localImage;
-          // currentLocal += 't'; // debug only, will make send images fail
-          // devPrint('send images will fail : $currentLocal');
           File file = File(currentLocal);
           if (file.existsSync()) {
             dynamic storageBucket =
@@ -49,13 +47,18 @@ Future<String> uploadToCloudStorage(
                 rethrow;
               } // end if (c.contains('object-not-found'))
             } // end try eu
+          } else {
+            devPrint('$functionName: file not found $currentLocal');
           } // end if (file.existsSync())
         } catch (e) {
-          // do nothing
-          devPrint('error uploading image $e');
+          devPrint('$functionName: error uploading $e');
         } // end try
+      } else {
+        devPrint('$functionName: no internet, skip upload');
       } // end if (internetConnected())
       imageFirebaseLock.itemUnlockWait(functionName, localImage);
+    } else {
+      devPrint('$functionName: lock failed for $localImage');
     } // end if (await imageFirebaseLock.itemLockWait(functionName, localImage))
   } // end if (imageMapEntry != null && isValidImageUrl(imageMapEntry[1]))
   return result;
@@ -85,7 +88,7 @@ Future<String?> checkIfUserReset(var user, String did) async {
         .get();
     if (device.docs.length > 0) {
       result =
-          '$path/dvc${separator[1]}${device.docs[0].id}'; // get first record
+      '$path/dvc${separator[1]}${device.docs[0].id}'; // get first record
     }
   } // end if (query.docs.length >0)
   return result;
@@ -96,7 +99,7 @@ Future subscribeToUserReset(String docId) async {
     String myDid = await getDeviceId();
     List<String> docPath = docId.split(separator[1]);
     dynamic deviceListener =
-        transactionStore.state.screenTx['#DEVICE_LISTENER'];
+    transactionStore.state.screenTx['#DEVICE_LISTENER'];
     bool needToListen = false;
     if (deviceListener == null) {
       devPrint('No DEVICE_LISTENER subscribed');
@@ -110,7 +113,7 @@ Future subscribeToUserReset(String docId) async {
       if (docRef != null) {
         try {
           deviceListener = docRef.snapshots().listen(
-            (event) {
+                (event) {
               bool kicked = false;
               if (event.data() == null) {
                 kicked = true;

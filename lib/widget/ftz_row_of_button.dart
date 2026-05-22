@@ -150,7 +150,7 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                   DocumentSnapshot parentSnapshot = await parentRef.get();
                   if (parentSnapshot.exists) {
                     Map<String, dynamic> parentData =
-                        parentSnapshot.data() as Map<String, dynamic>;
+                    parentSnapshot.data() as Map<String, dynamic>;
                     int d = 1;
                     if (parentData['tt'] == 'A') {
                       // todo: handle table type A
@@ -158,8 +158,8 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                       // table type D, dynamic
                       // 4. Query Firestore
                       CollectionReference contentRef =
-                          FirebaseFirestore.instance.collection(
-                              'MobileTable/$tableVid/tables/$tableName/content');
+                      FirebaseFirestore.instance.collection(
+                          'MobileTable/$tableVid/tables/$tableName/content');
 
                       QuerySnapshot querySnapshot = await contentRef
                           .where(searchField, isEqualTo: searchValue)
@@ -169,7 +169,7 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                       if (querySnapshot.docs.isNotEmpty) {
                         DocumentSnapshot doc = querySnapshot.docs.first;
                         Map<String, dynamic> data =
-                            doc.data() as Map<String, dynamic>;
+                        doc.data() as Map<String, dynamic>;
 
                         // 5. Parse Content and Update
                         String jsonContent = data['c'] ?? '[]';
@@ -177,14 +177,14 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
 
                         // Parse instruction: <12>◼approved
                         List<String> updateInstructionParts =
-                            updateInstruction.split(updateSep);
+                        updateInstruction.split(updateSep);
                         Map<String, dynamic> updateData = {};
                         for (String inst in updateInstructionParts) {
                           if (inst.trim().isEmpty) continue;
                           List<String> instructionParts = inst.split(valueSep);
                           if (instructionParts.length >= 2) {
                             Map<String, String> positionMap =
-                                parsePosition(instructionParts[1]);
+                            parsePosition(instructionParts[1]);
                             int indexStart =
                                 widget.component['indexStart'] ?? 1;
                             String newValue = instructionParts[1];
@@ -192,25 +192,25 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
                               newValue = positionMap['val'] ?? '';
                             } else if (positionMap['type'] == 'position') {
                               int? positionRef =
-                                  int.tryParse(positionMap['val'] ?? '');
+                              int.tryParse(positionMap['val'] ?? '');
                               if (positionRef != null) {
                                 newValue = txfController[widget.scrName]
-                                            ?[positionRef]
-                                        ?.finalData ??
+                                ?[positionRef]
+                                    ?.finalData ??
                                     '';
                               } else {
                                 newValue = '';
                               }
                             } else if (positionMap['type'] == 'table') {
                               int? positionRef =
-                                  int.tryParse(positionMap['val'] ?? '');
+                              int.tryParse(positionMap['val'] ?? '');
                               if (positionRef != null) {
                                 newValue =
-                                    contentList[positionRef - indexStart];
+                                contentList[positionRef - indexStart];
                               } // end if positionRef != null
                             } else if (positionMap['type'] == 'left') {
                               newValue =
-                                  '${instructionParts[1]} not implemented';
+                              '${instructionParts[1]} not implemented';
                               debugPrint(newValue);
                               // todo: implement left side of event as newValue
                             } else {
@@ -297,7 +297,7 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
           timeStamp = await getRealTime();
           locString = '${separator[1]}$timeStamp';
           locString +=
-              '${separator[1] * 3}$invalidLocation${separator[1]}$invalidLocation${separator[1] * 10}';
+          '${separator[1] * 3}$invalidLocation${separator[1]}$invalidLocation${separator[1] * 10}';
         }
         if (children[i]['type'] == null) {
           children[i]['type'] = 'rbt';
@@ -333,9 +333,9 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
           final textColorStr = buttonData['textColor'] as String?;
 
           final buttonColor =
-              buttonColorStr != null && buttonColorStr.isNotEmpty
-                  ? stringToColor(buttonColorStr)
-                  : null;
+          buttonColorStr != null && buttonColorStr.isNotEmpty
+              ? stringToColor(buttonColorStr)
+              : null;
           final textColor = textColorStr != null && textColorStr.isNotEmpty
               ? stringToColor(textColorStr)
               : null;
@@ -365,523 +365,558 @@ class _FtzRowOfButtonState extends State<FtzRowOfButton>
               style: style,
               onPressed: isEnabled
                   ? () async {
-                      final String runCommand =
-                          (autheniumDecode(buttonData['run'] as String?) ?? '')
-                              .trim()
-                              .toLowerCase();
-                      if (runCommand.isNotEmpty) {
-                        final commands = runCommand.split('◆');
-                        final List<String> widgetsToUpdate = [];
+                final String runCommand =
+                (autheniumDecode(buttonData['run'] as String?) ?? '')
+                    .trim()
+                    .toLowerCase();
+                if (runCommand.isNotEmpty) {
+                  final commands = runCommand.split('◆');
+                  final List<String> widgetsToUpdate = [];
 
-                        for (final cmd in commands) {
-                          final parts = cmd.split(':');
-                          if (parts.length == 2) {
-                            final int? targetPosition =
-                                int.tryParse(parts[0].trim());
-                            final String action = parts[1].trim().toLowerCase();
+                  for (final cmd in commands) {
+                    final parts = cmd.split(':');
+                    if (parts.length == 2) {
+                      final int? targetPosition =
+                      int.tryParse(parts[0].trim());
+                      final String action = parts[1].trim().toLowerCase();
 
-                            if (targetPosition != null) {
-                              txfControllerCheck(scrName, targetPosition);
-                              final controller =
-                                  txfController[scrName]?[targetPosition];
-                              if (controller == null) continue;
-                              if (action == 'get_radius') {
-                                allOtqData ??=
-                                    await OtqState().setAllDataAsync();
-                                String content = '${allOtqData.accuracy} m';
-                                controller.finalData = action;
-                                controller.controller.text = content;
-                                controller.finalData = content;
-                                widgetsToUpdate.add('$scrName-$targetPosition');
-                              } else if (action == 'get_address') {
-                                allOtqData ??=
-                                    await OtqState().setAllDataAsync();
-                                String content =
-                                    getAddressFromOtqState(allOtqData);
-                                controller.finalData = action;
-                                controller.controller.text = content;
-                                controller.finalData = content;
-                                widgetsToUpdate.add('$scrName-$targetPosition');
-                              } else if (action == 'get_gps') {
-                                allOtqData ??=
-                                    await OtqState().setAllDataAsync();
-                                String content =
-                                    '${allOtqData.latitude},${allOtqData.longitude}';
-                                controller.finalData = action;
-                                controller.controller.text = content;
-                                controller.finalData = content;
-                                widgetsToUpdate.add('$scrName-$targetPosition');
-                              } else if (action == 'enable') {
-                                controller.isEnabled = true;
-                                widgetsToUpdate.add('$scrName-$targetPosition');
-                                debugPrint(
-                                    "&&&&&&&&&&&& set $scrName-$targetPosition to TRUE");
-                              } else if (action == 'disable') {
-                                controller.isEnabled = false;
-                                widgetsToUpdate.add('$scrName-$targetPosition');
-                                debugPrint(
-                                    "&&&&&&&&&&&& set $scrName-$targetPosition to FALSE");
-                              } else if (action == 'toggle') {
-                                controller.isEnabled = !controller.isEnabled;
-                                widgetsToUpdate.add('$scrName-$targetPosition');
-                              } else if (action == 'generate_number') {
-                                // Find the specific 'generate_number' action in execute1
-                                final execute1Actions = controller.execute1
-                                        ?.where((item) =>
-                                            item != null &&
-                                            item.length >= 2 &&
-                                            item[1].toString().toLowerCase() ==
-                                                'generate_number')
-                                        .toList() ??
-                                    [];
+                      if (targetPosition != null) {
+                        txfControllerCheck(scrName, targetPosition);
+                        final controller =
+                        txfController[scrName]?[targetPosition];
+                        if (controller == null) continue;
+                        if (action == 'get_radius') {
+                          allOtqData ??=
+                          await OtqState().setAllDataAsync();
+                          String content = '${allOtqData.accuracy} m';
+                          controller.finalData = action;
+                          controller.controller.text = content;
+                          controller.finalData = content;
+                          widgetsToUpdate.add('$scrName-$targetPosition');
+                        } else if (action == 'get_address') {
+                          allOtqData ??=
+                          await OtqState().setAllDataAsync();
+                          String content =
+                          getAddressFromOtqState(allOtqData);
+                          controller.finalData = action;
+                          controller.controller.text = content;
+                          controller.finalData = content;
+                          widgetsToUpdate.add('$scrName-$targetPosition');
+                        } else if (action == 'get_gps') {
+                          allOtqData ??=
+                          await OtqState().setAllDataAsync();
+                          String content =
+                              '${allOtqData.latitude},${allOtqData.longitude}';
+                          controller.finalData = action;
+                          controller.controller.text = content;
+                          controller.finalData = content;
+                          widgetsToUpdate.add('$scrName-$targetPosition');
+                        } else if (action == 'enable') {
+                          controller.isEnabled = true;
+                          widgetsToUpdate.add('$scrName-$targetPosition');
+                          debugPrint(
+                              "&&&&&&&&&&&& set $scrName-$targetPosition to TRUE");
+                        } else if (action == 'disable') {
+                          controller.isEnabled = false;
+                          widgetsToUpdate.add('$scrName-$targetPosition');
+                          debugPrint(
+                              "&&&&&&&&&&&& set $scrName-$targetPosition to FALSE");
+                        } else if (action == 'toggle') {
+                          controller.isEnabled = !controller.isEnabled;
+                          widgetsToUpdate.add('$scrName-$targetPosition');
+                        } else if (action == 'generate_number') {
+                          final execute1Actions = controller.execute1
+                              ?.where((item) =>
+                          item != null &&
+                              item.length >= 2 &&
+                              item[1].toString().toLowerCase() ==
+                                  'generate_number')
+                              .toList() ??
+                              [];
 
-                                for (final actionItem in execute1Actions) {
-                                  if (actionItem!.length >= 3) {
-                                    final String template =
-                                        actionItem[2] as String;
-                                    final generatedString =
-                                        await generateAutoNumber(
-                                            template, scrName);
-                                    addToTxfController(targetPosition, scrName,
-                                        generatedString);
-                                    widgetsToUpdate
-                                        .add('$scrName-$targetPosition');
-                                  }
-                                }
-                              }
+                          for (final actionItem in execute1Actions) {
+                            if (actionItem!.length >= 3) {
+                              final String template =
+                              actionItem[2] as String;
+                              final generatedString =
+                              await generateAutoNumber(
+                                  template, scrName);
+                              addToTxfController(targetPosition, scrName,
+                                  generatedString);
+                              widgetsToUpdate
+                                  .add('$scrName-$targetPosition');
                             }
                           }
                         }
-                        // Update all affected widgets at once
-                        if (widgetsToUpdate.isNotEmpty) {
-                          Get.find<WidgetUpdateController>()
-                              .update(widgetsToUpdate);
-                        }
-                      } // end of runCommand
-
-                      // await executeWidgets(scrName,
-                      //     (buttonData['exe'] ?? emptyString).toLowerCase());
-
-                      switch ((buttonData['action'] ?? emptyString)
-                          .toString()
-                          .trim()
-                          .toLowerCase()) {
-                        case 'clear':
-                          clearData(scrName);
-                          // historyClear(); // clear history
-                          // Get.defaultDialog(
-                          //   title: "History",
-                          //   content: const Text("History cleared."),
-                          // );
-                          break;
-
-                        case 'clearhistory':
-                          historyClear(); // clear history
-                          Get.defaultDialog(
-                            title: "History",
-                            content: const Text("History cleared."),
-                          );
-                          break;
-
-                        case 'sendhistory':
-                          historySync(
-                              'rbt sendhistory', true); // force send history
-                          Get.defaultDialog(
-                            title: "History",
-                            content: const Text("History synced."),
-                          );
-                          break;
-
-                        case 'archivehistory':
-                          archiveHistory(); // archive history to firestore proxy h2
-                          Get.defaultDialog(
-                            title: "History",
-                            content: const Text("History archived."),
-                          );
-                          break;
-
-                        case 'share':
-                          break;
-
-                        case 'savesend':
-                          {
-                            if (await dataOk(context)) {
-                              final List<String> btnTextArray =
-                                  (autheniumDecode(
-                                              buttonData['text']?.toString()) ??
-                                          '')
-                                      .split(separator[1]);
-                              final bool fakeGpsAllowed =
-                                  (buttonData['fakeGpsAllowed']
-                                              ?.toString()
-                                              .toLowerCase() ??
-                                          'true') !=
-                                      'false';
-                              if (!fakeGpsAllowed) {
-                                allOtqData ??=
-                                    await OtqState().setAllDataAsync();
-                                if (allOtqData.mock) {
-                                  if (mounted) {
-                                    await showDialog(
-                                        context: context,
-                                        builder: (BuildContext ctx) {
-                                          return AlertDialog(
-                                            title: Text(btnTextArray.length > 1
-                                                ? btnTextArray[1]
-                                                : 'Lokasi tidak valid'),
-                                            content: Text(
-                                                btnTextArray.length > 2
-                                                    ? btnTextArray[2]
-                                                    : 'Nonaktifkan Fake GPS'),
-                                            actions: [
-                                              TextButton(
-                                                child: const Text('OK'),
-                                                onPressed: () =>
-                                                    Navigator.of(ctx).pop(),
-                                              ),
-                                            ],
-                                          );
-                                        });
-                                  }
-                                  return;
-                                }
-                              }
-                              final bool outPositionAllowed =
-                                  (buttonData['outPositionAllowed']
-                                              ?.toString()
-                                              .toUpperCase() ??
-                                          'TRUE') !=
-                                      'FALSE';
-                              bool outBlocked = false;
-                              if (!outPositionAllowed) {
-                                allOtqData ??=
-                                    await OtqState().setAllDataAsync();
-                                final dynamic lqrRef =
-                                    transactionStore.state.screenTx['#LQR_REF'];
-                                final bool hasLqrRef = lqrRef != null &&
-                                    lqrRef is Map &&
-                                    lqrRef.isNotEmpty;
-                                if (hasLqrRef) {
-                                  try {
-                                    final firstEntry =
-                                        lqrRef.values.first as List;
-                                    final double targetLat =
-                                        (firstEntry[1] as num).toDouble();
-                                    final double targetLng =
-                                        (firstEntry[2] as num).toDouble();
-                                    final double tolerance =
-                                        (firstEntry[3] as num).toDouble();
-                                    final double zone2 =
-                                        tolerance + allOtqData.accuracy * 2;
-                                    final double distance =
-                                        Geolocator.distanceBetween(
-                                      targetLat,
-                                      targetLng,
-                                      allOtqData.latitude,
-                                      allOtqData.longitude,
-                                    );
-                                    debugPrint(
-                                        '[savesend/ftz_row_of_button] distance=${distance.toStringAsFixed(1)}m, zone2=${zone2.toStringAsFixed(1)}m');
-                                    if (distance > zone2) {
-                                      outBlocked = true;
-                                      if (mounted) {
-                                        await Get.dialog(AlertDialog(
-                                          title: Text(btnTextArray.length > 3
-                                              ? btnTextArray[3]
-                                              : 'Diluar Area Absensi'),
-                                          content: Text(btnTextArray.length > 4
-                                              ? btnTextArray[4]
-                                              : 'Silahkan menuju lokasi yang ditentukan'),
-                                          actions: [
-                                            TextButton(
-                                              child: const Text('OK'),
-                                              onPressed: () => Get.back(),
-                                            ),
-                                          ],
-                                        ));
-                                      }
-                                    }
-                                  } catch (eLoc) {
-                                    debugPrint(
-                                        '[savesend/ftz_row_of_button] parse error: $eLoc — bypass pengecekan');
-                                  }
-                                } else {
-                                  debugPrint(
-                                      '[savesend/ftz_row_of_button] #LQR_REF kosong/null — bypass pengecekan');
-                                }
-                              }
-                              if (outBlocked) return;
-                              actionLock('savesend case ftz_row_of_button');
-                              await doSaveProcedure(i);
-                            } // end if dataOk
-                          } // end of case saveSend
-                          break;
-
-                        case 'update':
-                          {
-                            if (await dataOk(context)) {
-                              actionLock('update case ftz_row_of_button');
-                              try {
-                                // 1. Resolve Table VID
-                                String com = buttonData['com'] ?? '';
-                                int tableVid = getTableVid(com);
-
-                                // 2. Resolve Table Name & Update Instruction
-                                // Input format: "$vtl/request//request_master⭘<12>◼approved"
-                                String rawTable = buttonData['table'] ?? '';
-                                String decodedTable =
-                                    autheniumDecode(rawTable) ?? '';
-
-                                // Separators based on user prompt
-                                const String updateSep = '⭘'; // U+2B58
-                                const String valueSep = '◼'; // U+25FC
-
-                                List<String> splitTable =
-                                    decodedTable.split(updateSep);
-                                String cleanTableNameStr =
-                                    splitTable.isNotEmpty ? splitTable[0] : '';
-                                String updateInstruction =
-                                    splitTable.length > 1 ? splitTable[1] : '';
-
-                                String tableName =
-                                    normalizeTableName(cleanTableNameStr);
-                                int separatorIndex =
-                                    tableName.indexOf(separator[2]);
-                                if (separatorIndex != -1) {
-                                  tableName = tableName.substring(
-                                      0, separatorIndex); // get only table name
-                                }
-
-                                // 3. Parse Search Key
-                                // Input format: "1:16" (Field '1', Controller Index 16)
-                                String tableKey = buttonData['tableKey'] ?? '';
-                                List<String> keyParts = tableKey.split(':');
-
-                                if (keyParts.length == 2 &&
-                                    updateInstruction.isNotEmpty) {
-                                  String searchField = keyParts[0];
-                                  int? controllerPos =
-                                      int.tryParse(keyParts[1]);
-
-                                  if (controllerPos != null) {
-                                    txfControllerCheck(
-                                        widget.scrName, controllerPos);
-                                    String searchValue =
-                                        txfController[widget.scrName]
-                                                    ?[controllerPos]
-                                                ?.finalData ??
-                                            '';
-
-                                    if (searchValue.isNotEmpty) {
-                                      DocumentReference parentRef =
-                                          FirebaseFirestore.instance
-                                              .collection(
-                                                  'MobileTable/$tableVid/tables')
-                                              .doc(tableName);
-                                      DocumentSnapshot parentSnapshot =
-                                          await parentRef.get();
-                                      if (parentSnapshot.exists) {
-                                        Map<String, dynamic> parentData =
-                                            parentSnapshot.data()
-                                                as Map<String, dynamic>;
-                                        int d = 1;
-                                        if (parentData['tt'] == 'A') {
-                                          // todo: handle table type A
-                                        } else {
-                                          // table type D, dynamic
-                                          // 4. Query Firestore
-                                          CollectionReference contentRef =
-                                              FirebaseFirestore.instance.collection(
-                                                  'MobileTable/$tableVid/tables/$tableName/content');
-
-                                          QuerySnapshot querySnapshot =
-                                              await contentRef
-                                                  .where(searchField,
-                                                      isEqualTo: searchValue)
-                                                  .limit(1)
-                                                  .get();
-
-                                          if (querySnapshot.docs.isNotEmpty) {
-                                            DocumentSnapshot doc =
-                                                querySnapshot.docs.first;
-                                            Map<String, dynamic> data = doc
-                                                .data() as Map<String, dynamic>;
-
-                                            // 5. Parse Content and Update
-                                            String jsonContent =
-                                                data['c'] ?? '[]';
-                                            List<dynamic> contentList =
-                                                jsonDecode(jsonContent);
-
-                                            // Parse instruction: <12>◼approved
-                                            List<String> instructionParts =
-                                                updateInstruction
-                                                    .split(valueSep);
-                                            if (instructionParts.length >= 2) {
-                                              String indexStr =
-                                                  instructionParts[0]
-                                                      .replaceAll('<', '')
-                                                      .replaceAll('>', '');
-                                              int targetIndexRaw =
-                                                  int.tryParse(indexStr) ?? 0;
-                                              String newValue =
-                                                  instructionParts[1];
-
-                                              int indexStart = widget.component[
-                                                      'indexStart'] ??
-                                                  1;
-                                              int arrayIndex =
-                                                  targetIndexRaw - indexStart;
-
-                                              if (arrayIndex >= 0 &&
-                                                  arrayIndex <
-                                                      contentList.length) {
-                                                // Capture index before update to check for field existence
-                                                String fieldName =
-                                                    targetIndexRaw.toString();
-
-                                                // Update the array content
-                                                contentList[arrayIndex] =
-                                                    newValue;
-
-                                                // Prepare the update payload
-                                                Map<String, dynamic>
-                                                    updateData = {
-                                                  'c': jsonEncode(contentList)
-                                                };
-
-                                                // Check if a field with the same name as the OLD content exists
-                                                // The user requested to check for the field matching the *content* at the array index.
-                                                // Example: if content at index is "12", check for field "12".
-                                                if (data
-                                                    .containsKey(fieldName)) {
-                                                  updateData[fieldName] =
-                                                      newValue;
-                                                }
-
-                                                // 6. Write back to Firestore
-                                                await Future.wait([
-                                                  doc.reference.update(
-                                                      updateData), // update content array
-                                                  parentRef.update({
-                                                    'u': DateTime.now()
-                                                        .millisecondsSinceEpoch // update parent 'u' timestamp
-                                                  })
-                                                ]);
-                                                debugPrint(
-                                                    'Update successful: Index $arrayIndex to "$newValue". Extra field "$fieldName" updated: ${data.containsKey(fieldName)}');
-                                              } else {
-                                                debugPrint(
-                                                    'Update failed: Index $arrayIndex out of bounds (Size: ${contentList.length})');
-                                              }
-                                            }
-                                          } else {
-                                            debugPrint(
-                                                'Update failed: Document not found for $searchField = $searchValue');
-                                          } // end if querySnapshot.docs.isNotEmpty
-                                        } // end else tt != A
-                                      } // end if parentSnapshot.exists
-                                    } // end if searchValue.isNotEmpty
-                                  } // end if controllerPos != null
-                                }
-                              } catch (e) {
-                                errorReport(e);
-                              }
-                              actionUnLock('update case ftz_row_of_button');
-                            }
-                          }
-                          break;
-
-                        case 'resetvid':
-                          {
-                            int resetStatus = -99;
-                            if (await dataOk(context)) {
-                              if (buttonData['reference'] != null &&
-                                  buttonData['reference'] > 0) {
-                                String vid = emptyString;
-                                String invitation = emptyString;
-                                try {
-                                  vid = txfController[widget.scrName]![
-                                          buttonData['reference']]!
-                                      .finalData;
-                                } catch (e) {
-                                  vid = emptyString;
-                                }
-                                if (vid == emptyString) {
-                                  resetStatus = -1;
-                                } else {
-                                  invitation = '';
-                                  try {
-                                    invitation = txfController[widget.scrName]![
-                                            buttonData['invitationReference']]!
-                                        .finalData;
-                                  } catch (e) {
-                                    invitation = '';
-                                  }
-                                  String tc = '';
-                                  try {
-                                    tc = stringCleanUp(txfController[
-                                                    widget.scrName]![
-                                                buttonData[
-                                                    'tableContentReference']]!
-                                            .finalData) ??
-                                        '';
-                                  } catch (e) {
-                                    tc = '';
-                                  }
-                                  resetStatus = await resetVid([
-                                    [vid, invitation, tc]
-                                  ]);
-                                  if (resetStatus > 0) {
-                                    actionLock(
-                                        'resetvid case ftz_row_of_button');
-                                    await doSaveProcedure(i);
-                                  }
-                                }
-                              } else {
-                                resetStatus = -3;
-                              }
-                            }
-                          }
-                          break;
-
-                        case 'reset':
-                          {
-                            if (await dataOk(context)) {
-                              actionLock('reset case ftz_row_of_button');
-                              resetVidUid(state['#FIREBASE_USER'].uid);
-                            }
-                          }
-                          break;
-
-                        case 'signout':
-                          {
-                            await ConnectionData().getConnection(false, false);
-                            if (await dataOk(context)) {
-                              actionLock('signout case ftz_row_of_button');
-                              BlocProvider.of<AuthenticationBloc>(context)
-                                  .add(LoggedOut());
-                              signOut();
-                            }
-                          }
-                          break;
-
-                        default:
-                          {
-                            if (routeExist(buttonData['route'])) {
-                              String pageToGo = buttonData['route'] ?? scrName;
-                              routeStack.push(pageToGo);
-                              gotoRoute(pageToGo);
-                            } // end if routeExist
-                          }
-                      } // end switch
-                      if (hasChain) {
-                        await doChain(context, scrName, buttonData['chain']);
-                      }
-                      if (dialog ?? false) {
-                        Get.back();
                       }
                     }
+                  }
+                  // Update all affected widgets at once
+                  if (widgetsToUpdate.isNotEmpty) {
+                    Get.find<WidgetUpdateController>()
+                        .update(widgetsToUpdate);
+                  }
+                } // end of runCommand
+
+                // await executeWidgets(scrName,
+                //     (buttonData['exe'] ?? emptyString).toLowerCase());
+
+                switch ((buttonData['action'] ?? emptyString)
+                    .toString()
+                    .trim()
+                    .toLowerCase()) {
+                  case 'clear':
+                    clearData(scrName);
+                    // historyClear(); // clear history
+                    // Get.defaultDialog(
+                    //   title: "History",
+                    //   content: const Text("History cleared."),
+                    // );
+                    break;
+
+                  case 'clearhistory':
+                    historyClear(); // clear history
+                    Get.defaultDialog(
+                      title: "History",
+                      content: const Text("History cleared."),
+                    );
+                    break;
+
+                  case 'sendhistory':
+                    historySync(
+                        'rbt sendhistory', true); // force send history
+                    Get.defaultDialog(
+                      title: "History",
+                      content: const Text("History synced."),
+                    );
+                    break;
+
+                  case 'archivehistory':
+                    archiveHistory(); // archive history to firestore proxy h2
+                    Get.defaultDialog(
+                      title: "History",
+                      content: const Text("History archived."),
+                    );
+                    break;
+
+                  case 'share':
+                    break;
+
+                  case 'savesend':
+                    {
+                      if (await dataOk(context)) {
+                        final List<String> btnTextArray =
+                        (autheniumDecode(
+                            buttonData['text']?.toString()) ??
+                            '')
+                            .split(separator[1]);
+                        final bool fakeGpsAllowed =
+                            (buttonData['fakeGpsAllowed']
+                                ?.toString()
+                                .toLowerCase() ??
+                                'true') !=
+                                'false';
+                        if (!fakeGpsAllowed) {
+                          allOtqData ??=
+                          await OtqState().setAllDataAsync();
+                          if (allOtqData.mock) {
+                            if (mounted) {
+                              await showDialog(
+                                  context: context,
+                                  builder: (BuildContext ctx) {
+                                    return AlertDialog(
+                                      title: Text(btnTextArray.length > 1
+                                          ? btnTextArray[1]
+                                          : 'Lokasi tidak valid'),
+                                      content: Text(
+                                          btnTextArray.length > 2
+                                              ? btnTextArray[2]
+                                              : 'Nonaktifkan Fake GPS'),
+                                      actions: [
+                                        TextButton(
+                                          child: const Text('OK'),
+                                          onPressed: () =>
+                                              Navigator.of(ctx).pop(),
+                                        ),
+                                      ],
+                                    );
+                                  });
+                            }
+                            return;
+                          }
+                        }
+                        final bool outPositionAllowed =
+                            (buttonData['outPositionAllowed']
+                                ?.toString()
+                                .toUpperCase() ??
+                                'TRUE') !=
+                                'FALSE';
+                        bool outBlocked = false;
+                        if (!outPositionAllowed) {
+                          allOtqData ??=
+                          await OtqState().setAllDataAsync();
+                          final dynamic lqrList = transactionStore
+                              .state.screenTx['#LQR_LIST'];
+                          final bool hasLqrList = lqrList != null &&
+                              lqrList is Map &&
+                              lqrList.isNotEmpty;
+                          if (hasLqrList) {
+                            try {
+                              final double gpsAccuracy =
+                                  allOtqData.accuracy;
+                              bool insideAny = false;
+                              double minDistance = double.infinity;
+                              double matchZone2 = 0;
+                              for (final entry in lqrList.values) {
+                                final List data = entry as List;
+                                final double targetLat =
+                                (data[1] as num).toDouble();
+                                final double targetLng =
+                                (data[2] as num).toDouble();
+                                final double tolerance =
+                                (data[3] as num).toDouble();
+                                final double zone2 =
+                                    tolerance + gpsAccuracy * 2;
+                                final double distance =
+                                Geolocator.distanceBetween(
+                                  targetLat,
+                                  targetLng,
+                                  allOtqData.latitude,
+                                  allOtqData.longitude,
+                                );
+                                if (distance < minDistance) {
+                                  minDistance = distance;
+                                  matchZone2 = zone2;
+                                }
+                                if (distance <= zone2) {
+                                  insideAny = true;
+                                  break;
+                                }
+                              }
+                              debugPrint(
+                                  '[savesend/ftz_row_of_button] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m');
+                              if (!insideAny) {
+                                outBlocked = true;
+                                if (mounted) {
+                                  await Get.dialog(AlertDialog(
+                                    title: Text(btnTextArray.length > 3
+                                        ? btnTextArray[3]
+                                        : 'Diluar Area Absensi'),
+                                    content: Text(btnTextArray.length > 4
+                                        ? btnTextArray[4]
+                                        : 'Silahkan menuju lokasi yang ditentukan'),
+                                    actions: [
+                                      TextButton(
+                                        child: const Text('OK'),
+                                        onPressed: () => Get.back(),
+                                      ),
+                                    ],
+                                  ));
+                                }
+                              }
+                            } catch (eLoc) {
+                              debugPrint(
+                                  '[savesend/ftz_row_of_button] parse error: $eLoc — bypass pengecekan');
+                            }
+                          } else {
+                            if (!internetConnected()) {
+                              debugPrint(
+                                  '[savesend/ftz_row_of_button] offline & #LQR_LIST kosong/null — block absensi');
+                              outBlocked = true;
+                              if (mounted) {
+                                await Get.dialog(AlertDialog(
+                                  title: Text(btnTextArray.length > 3
+                                      ? btnTextArray[3]
+                                      : 'Diluar Area Absensi'),
+                                  content: Text(btnTextArray.length > 4
+                                      ? btnTextArray[4]
+                                      : 'Silahkan menuju lokasi yang ditentukan'),
+                                  actions: [
+                                    TextButton(
+                                      child: const Text('OK'),
+                                      onPressed: () => Get.back(),
+                                    ),
+                                  ],
+                                ));
+                              }
+                            } else {
+                              debugPrint(
+                                  '[savesend/ftz_row_of_button] online & #LQR_LIST kosong/null — bypass pengecekan');
+                            }
+                          }
+                        }
+                        if (outBlocked) return;
+                        actionLock('savesend case ftz_row_of_button');
+                        await doSaveProcedure(i);
+                      } // end if dataOk
+                    } // end of case saveSend
+                    break;
+
+                  case 'update':
+                    {
+                      if (await dataOk(context)) {
+                        actionLock('update case ftz_row_of_button');
+                        try {
+                          // 1. Resolve Table VID
+                          String com = buttonData['com'] ?? '';
+                          int tableVid = getTableVid(com);
+
+                          // 2. Resolve Table Name & Update Instruction
+                          // Input format: "$vtl/request//request_master⭘<12>◼approved"
+                          String rawTable = buttonData['table'] ?? '';
+                          String decodedTable =
+                              autheniumDecode(rawTable) ?? '';
+
+                          // Separators based on user prompt
+                          const String updateSep = '⭘'; // U+2B58
+                          const String valueSep = '◼'; // U+25FC
+
+                          List<String> splitTable =
+                          decodedTable.split(updateSep);
+                          String cleanTableNameStr =
+                          splitTable.isNotEmpty ? splitTable[0] : '';
+                          String updateInstruction =
+                          splitTable.length > 1 ? splitTable[1] : '';
+
+                          String tableName =
+                          normalizeTableName(cleanTableNameStr);
+                          int separatorIndex =
+                          tableName.indexOf(separator[2]);
+                          if (separatorIndex != -1) {
+                            tableName = tableName.substring(
+                                0, separatorIndex); // get only table name
+                          }
+
+                          // 3. Parse Search Key
+                          // Input format: "1:16" (Field '1', Controller Index 16)
+                          String tableKey = buttonData['tableKey'] ?? '';
+                          List<String> keyParts = tableKey.split(':');
+
+                          if (keyParts.length == 2 &&
+                              updateInstruction.isNotEmpty) {
+                            String searchField = keyParts[0];
+                            int? controllerPos =
+                            int.tryParse(keyParts[1]);
+
+                            if (controllerPos != null) {
+                              txfControllerCheck(
+                                  widget.scrName, controllerPos);
+                              String searchValue =
+                                  txfController[widget.scrName]
+                                  ?[controllerPos]
+                                      ?.finalData ??
+                                      '';
+
+                              if (searchValue.isNotEmpty) {
+                                DocumentReference parentRef =
+                                FirebaseFirestore.instance
+                                    .collection(
+                                    'MobileTable/$tableVid/tables')
+                                    .doc(tableName);
+                                DocumentSnapshot parentSnapshot =
+                                await parentRef.get();
+                                if (parentSnapshot.exists) {
+                                  Map<String, dynamic> parentData =
+                                  parentSnapshot.data()
+                                  as Map<String, dynamic>;
+                                  int d = 1;
+                                  if (parentData['tt'] == 'A') {
+                                    // todo: handle table type A
+                                  } else {
+                                    // table type D, dynamic
+                                    // 4. Query Firestore
+                                    CollectionReference contentRef =
+                                    FirebaseFirestore.instance.collection(
+                                        'MobileTable/$tableVid/tables/$tableName/content');
+
+                                    QuerySnapshot querySnapshot =
+                                    await contentRef
+                                        .where(searchField,
+                                        isEqualTo: searchValue)
+                                        .limit(1)
+                                        .get();
+
+                                    if (querySnapshot.docs.isNotEmpty) {
+                                      DocumentSnapshot doc =
+                                          querySnapshot.docs.first;
+                                      Map<String, dynamic> data = doc
+                                          .data() as Map<String, dynamic>;
+
+                                      // 5. Parse Content and Update
+                                      String jsonContent =
+                                          data['c'] ?? '[]';
+                                      List<dynamic> contentList =
+                                      jsonDecode(jsonContent);
+
+                                      // Parse instruction: <12>◼approved
+                                      List<String> instructionParts =
+                                      updateInstruction
+                                          .split(valueSep);
+                                      if (instructionParts.length >= 2) {
+                                        String indexStr =
+                                        instructionParts[0]
+                                            .replaceAll('<', '')
+                                            .replaceAll('>', '');
+                                        int targetIndexRaw =
+                                            int.tryParse(indexStr) ?? 0;
+                                        String newValue =
+                                        instructionParts[1];
+
+                                        int indexStart = widget.component[
+                                        'indexStart'] ??
+                                            1;
+                                        int arrayIndex =
+                                            targetIndexRaw - indexStart;
+
+                                        if (arrayIndex >= 0 &&
+                                            arrayIndex <
+                                                contentList.length) {
+                                          // Capture index before update to check for field existence
+                                          String fieldName =
+                                          targetIndexRaw.toString();
+
+                                          // Update the array content
+                                          contentList[arrayIndex] =
+                                              newValue;
+
+                                          // Prepare the update payload
+                                          Map<String, dynamic>
+                                          updateData = {
+                                            'c': jsonEncode(contentList)
+                                          };
+
+                                          // Check if a field with the same name as the OLD content exists
+                                          // The user requested to check for the field matching the *content* at the array index.
+                                          // Example: if content at index is "12", check for field "12".
+                                          if (data
+                                              .containsKey(fieldName)) {
+                                            updateData[fieldName] =
+                                                newValue;
+                                          }
+
+                                          // 6. Write back to Firestore
+                                          await Future.wait([
+                                            doc.reference.update(
+                                                updateData), // update content array
+                                            parentRef.update({
+                                              'u': DateTime.now()
+                                                  .millisecondsSinceEpoch // update parent 'u' timestamp
+                                            })
+                                          ]);
+                                          debugPrint(
+                                              'Update successful: Index $arrayIndex to "$newValue". Extra field "$fieldName" updated: ${data.containsKey(fieldName)}');
+                                        } else {
+                                          debugPrint(
+                                              'Update failed: Index $arrayIndex out of bounds (Size: ${contentList.length})');
+                                        }
+                                      }
+                                    } else {
+                                      debugPrint(
+                                          'Update failed: Document not found for $searchField = $searchValue');
+                                    } // end if querySnapshot.docs.isNotEmpty
+                                  } // end else tt != A
+                                } // end if parentSnapshot.exists
+                              } // end if searchValue.isNotEmpty
+                            } // end if controllerPos != null
+                          }
+                        } catch (e) {
+                          errorReport(e);
+                        }
+                        actionUnLock('update case ftz_row_of_button');
+                      }
+                    }
+                    break;
+
+                  case 'resetvid':
+                    {
+                      int resetStatus = -99;
+                      if (await dataOk(context)) {
+                        if (buttonData['reference'] != null &&
+                            buttonData['reference'] > 0) {
+                          String vid = emptyString;
+                          String invitation = emptyString;
+                          try {
+                            vid = txfController[widget.scrName]![
+                            buttonData['reference']]!
+                                .finalData;
+                          } catch (e) {
+                            vid = emptyString;
+                          }
+                          if (vid == emptyString) {
+                            resetStatus = -1;
+                          } else {
+                            invitation = '';
+                            try {
+                              invitation = txfController[widget.scrName]![
+                              buttonData['invitationReference']]!
+                                  .finalData;
+                            } catch (e) {
+                              invitation = '';
+                            }
+                            String tc = '';
+                            try {
+                              tc = stringCleanUp(txfController[
+                              widget.scrName]![
+                              buttonData[
+                              'tableContentReference']]!
+                                  .finalData) ??
+                                  '';
+                            } catch (e) {
+                              tc = '';
+                            }
+                            resetStatus = await resetVid([
+                              [vid, invitation, tc]
+                            ]);
+                            if (resetStatus > 0) {
+                              actionLock(
+                                  'resetvid case ftz_row_of_button');
+                              await doSaveProcedure(i);
+                            }
+                          }
+                        } else {
+                          resetStatus = -3;
+                        }
+                      }
+                    }
+                    break;
+
+                  case 'reset':
+                    {
+                      if (await dataOk(context)) {
+                        actionLock('reset case ftz_row_of_button');
+                        resetVidUid(state['#FIREBASE_USER'].uid);
+                      }
+                    }
+                    break;
+
+                  case 'signout':
+                    {
+                      await ConnectionData().getConnection(false, false);
+                      if (await dataOk(context)) {
+                        actionLock('signout case ftz_row_of_button');
+                        BlocProvider.of<AuthenticationBloc>(context)
+                            .add(LoggedOut());
+                        signOut();
+                      }
+                    }
+                    break;
+
+                  default:
+                    {
+                      if (routeExist(buttonData['route'])) {
+                        String pageToGo = buttonData['route'] ?? scrName;
+                        routeStack.push(pageToGo);
+                        gotoRoute(pageToGo);
+                      } // end if routeExist
+                    }
+                } // end switch
+                if (hasChain) {
+                  await doChain(context, scrName, buttonData['chain']);
+                }
+                if (dialog ?? false) {
+                  Get.back();
+                }
+              }
                   : null,
               child: Text(
                 (autheniumDecode(buttonData['text']?.toString()) ?? "")

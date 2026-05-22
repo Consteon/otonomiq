@@ -1195,7 +1195,7 @@ class OtqTxf2State extends State<OtqTxf2>
                             widget.bPad.clamp(10.0, 16.0)),
                       ),
                       style: TextStyle(
-                        color: Color(0xFF94A3B8),
+                        color: Color.fromARGB(255, 88, 91, 97),
                         backgroundColor:
                         (component['background'] ?? 'default') != 'default'
                             ? Color(int.parse(component['background']))
