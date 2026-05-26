@@ -21,6 +21,7 @@ import '../widget/link_widget.dart';
 import '../model/connection_data.dart';
 import '../different_code/different_code.dart';
 import '../otq_icons.dart';
+import '../widget/approver_sticky_bar.dart';
 import '../widget/build_theme.dart';
 import '../widget/otq_bottom_nav_bar.dart';
 import 'package:get/get.dart';
@@ -638,6 +639,48 @@ class MainPageState extends State<MainPage> {
                         ),
                       );
                     },
+                  ),
+                  // Sticky bottom bar (approval/incident buttons)
+                  ValueListenableBuilder<String>(
+                    valueListenable:
+                    ApproverStickyBar.activeBarScreen,
+                    builder: (_, route, __) =>
+                        ValueListenableBuilder<int>(
+                          valueListenable: ApproverStickyBar.version,
+                          builder: (_, __, ___) =>
+                              ValueListenableBuilder<bool>(
+                                valueListenable:
+                                ApproverStickyBar.overlaysHidden,
+                                builder: (ctx, hidden, _) {
+                                  final configs =
+                                  ApproverStickyBar.getConfigs(route);
+                                  if (hidden || configs == null || configs.isEmpty) {
+                                    return const SizedBox.shrink();
+                                  }
+                                  final bottomInset =
+                                      MediaQuery.of(ctx).viewInsets.bottom;
+                                  if (bottomInset > 0) {
+                                    return const SizedBox.shrink();
+                                  }
+                                  return Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: Material(
+                                      color: Colors.white,
+                                      elevation: 8,
+                                      child: SafeArea(
+                                        top: false,
+                                        child: Padding(
+                                          padding: const EdgeInsets.only(
+                                              bottom: 12),
+                                          child: StickyBarRenderer(
+                                              configs: configs),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                        ),
                   ),
                   //------ Login bloc listener---------
                   BlocListener(

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../api.dart';
 import '../global.dart';
+import 'approver_sticky_bar.dart';
+import 'item_card_detail.dart';
 import 'otq_formatted_text.dart';
 
 class OtqTxt extends StatelessWidget {
@@ -22,11 +24,18 @@ class OtqTxt extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    String searchStr = (component['search'] ?? '').toString().trim();
+    if (searchStr.isNotEmpty) {
+      List<dynamic> row = ItemCardDetail.currentRow.value;
+      if (row.isNotEmpty && !evaluateRbtSearch(searchStr, row)) {
+        return const SizedBox.shrink();
+      }
+    }
     List<double> margin = marginArray(component['margin']);
     return Container(
       margin: EdgeInsets.only(top: margin[0], bottom: margin[1]),
       padding:
-          EdgeInsets.fromLTRB(lPad + margin[2], tPad, rPad + margin[3], bPad),
+      EdgeInsets.fromLTRB(lPad + margin[2], tPad, rPad + margin[3], bPad),
       child: SingleChildScrollView(
         child: GestureDetector(
           child: OtqFormattedText(

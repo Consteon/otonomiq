@@ -37,6 +37,7 @@ import 'progress_bar.dart';
 import 'tasklist.dart';
 import 'time_presence.dart';
 
+
 Widget buildDisplayComponent(
     dynamic component, String scrName, UserRepository userRepository,
     {bool? dialog}) {
@@ -70,7 +71,7 @@ Widget buildDisplayComponent(
   } else {
     if (component['type'].toLowerCase() == 'rbt') {
       final children = component['children'] ?? [];
-      for (Map<String, dynamic> childComponent in children) {
+      for (var childComponent in children) {
         if (childComponent['position'] != null) {
           txfControllerCheck(scrName,
               childComponent['position']); // build txfController if necessary
@@ -446,43 +447,39 @@ Widget buildDisplayComponent(
     try {
       bool isApprovalRbt = (component['children'] as List<dynamic>? ?? [])
           .any((btn) => btn is Map && btn.containsKey('actions'));
-      if (isApprovalRbt) {
-        final rbtComponent = component;
-        final rbtScrName = scrName;
-        final rbtDialog = dialog;
-        final rbtLPad = lPad;
-        final rbtTPad = tPad;
-        final rbtRPad = rPad;
-        final rbtBPad = bPad;
-        final rbtKey = txfKey;
+      bool hasSearch =
+          (component['search'] ?? '').toString().trim().toLowerCase() ==
+              'sticky';
+      if (isApprovalRbt || hasSearch) {
         List<String> tabs = [];
-        var screenTx = transactionStore.state.screenTx;
-        if (screenTx['approval_tabs'] is List) {
-          tabs = (screenTx['approval_tabs'] as List)
-              .map((e) => e.toString())
-              .toList();
+        String? defaultStatus;
+        if (isApprovalRbt) {
+          var screenTx = transactionStore.state.screenTx;
+          if (screenTx['approval_tabs'] is List) {
+            tabs = (screenTx['approval_tabs'] as List)
+                .map((e) => e.toString())
+                .toList();
+          }
+          defaultStatus =
+          tabs.isNotEmpty ? tabs[0].toUpperCase() : 'PENDING';
         }
-        final String defaultStatus =
-        tabs.isNotEmpty ? tabs[0].toUpperCase() : 'PENDING';
-        result = ApproverStickyBar(
+        ApproverStickyBar.register(
           scrName: scrName,
-          builder: () => Obx(() {
-            String s = ItemCardDetail.currentStatus.value;
-            if (s.isNotEmpty && s != defaultStatus) {
-              return const SizedBox.shrink();
-            }
-            return FtzRowOfButton2(
-              key: rbtKey,
-              component: rbtComponent,
-              scrName: rbtScrName,
-              dialog: rbtDialog,
-              lPad: rbtLPad,
-              tPad: rbtTPad,
-              rPad: rbtRPad,
-              bPad: rbtBPad,
-            );
-          }),
+          component: component,
+          type: isApprovalRbt ? 'approval' : 'incident',
+          defaultStatus: defaultStatus,
+          widgetKey: txfKey,
+          dialog: dialog ?? false,
+          lPad: lPad,
+          tPad: tPad,
+          rPad: rPad,
+          bPad: bPad,
         );
+        if (ApproverStickyBar.hasCommentInput(scrName)) {
+          result = StickyBarSlot(scrName: scrName);
+        } else {
+          result = const SizedBox.shrink();
+        }
       } else {
         result = FtzRowOfButton2(
           key: txfKey,

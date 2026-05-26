@@ -184,7 +184,8 @@ import 'global2.dart';
                           home_page, any_page, login_form, google_login_button,
                           apple_login_button
   0.9.78.32 (260522) OO : udpate approval, etc
- */
+  0.9.78.33 (260526) OO : update request incident, fix bug log history
+*/
 // ========= Constants ==========================
 const iOSDevPage = false;
 final launchTime = DateTime.now().millisecondsSinceEpoch;
@@ -194,7 +195,7 @@ int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
 const String version = '0.9.78';
-const String subVersion = '.32';
+const String subVersion = '.33';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing
@@ -1736,15 +1737,16 @@ Future firstLoginDemo(String vid, String sheetKey) async {
 } // end of firstLoginDemo
 
 List<String> diamondTextToList(String input) {
-  // convert "abc???def???" => List ["abc","def"]
+  // convert "abc◆def◆ghi" => List ["abc","def","ghi"]
   List<String> retVal = [];
   if (input != empty) {
-    String noDiamondStr = input.replaceAll(separator[1], '_u25C6_');
-    String strTest = '["${noDiamondStr.replaceAll('_u25C6_', '","')}"]';
-    // dynamic t = jsonDecode(strTest);
-    // List<String> t2 = t.map((item) => item.toString()).toList();
-    // List<String> t2 = t.cast<String>();
-    retVal = jsonDecode(strTest).cast<String>();
+    try {
+      String noDiamondStr = input.replaceAll(separator[1], '_u25C6_');
+      String strTest = '["${noDiamondStr.replaceAll('_u25C6_', '","')}"]';
+      retVal = jsonDecode(strTest).cast<String>();
+    } catch (_) {
+      retVal = input.split(separator[1]);
+    }
   } // end if input
   return retVal;
 } // end of diamondTextToList

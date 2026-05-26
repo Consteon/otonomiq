@@ -99,7 +99,8 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
         }
       }
       if (row == null) {
-        debugPrint('[FtzRowOfButton2] approval row not found for docT=$requestDocT');
+        debugPrint(
+            '[FtzRowOfButton2] approval row not found for docT=$requestDocT');
         return;
       }
 
@@ -127,8 +128,8 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
 
       String defaultStatus =
       tabs.isNotEmpty ? tabs[0].toUpperCase() : 'PENDING';
-      int targetIdx = steps
-          .indexWhere((s) => s.length > 1 && s[1].toUpperCase() == defaultStatus);
+      int targetIdx = steps.indexWhere(
+              (s) => s.length > 1 && s[1].toUpperCase() == defaultStatus);
       if (targetIdx < 0) {
         debugPrint('[FtzRowOfButton2] no $defaultStatus step found in chain');
         return;
@@ -157,12 +158,9 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
 
       String actionStatus =
       newStep.length > 1 ? newStep[1].trim().toUpperCase() : '';
-      String continueStatus =
-      tabs.length > 1 ? tabs[1].toUpperCase() : '';
-      bool isLastLevel =
-          myApprovalLevel > 0 && myApprovalLevel == steps.length;
-      bool updateOverallStatus =
-          isLastLevel || actionStatus != continueStatus;
+      String continueStatus = tabs.length > 1 ? tabs[1].toUpperCase() : '';
+      bool isLastLevel = myApprovalLevel > 0 && myApprovalLevel == steps.length;
+      bool updateOverallStatus = isLastLevel || actionStatus != continueStatus;
 
       debugPrint(
           '[FtzRowOfButton2] actionStatus=$actionStatus | myLevel=$myApprovalLevel | totalSteps=${steps.length} | isLastLevel=$isLastLevel | updateOverall=$updateOverallStatus');
@@ -191,6 +189,28 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
       debugPrint('[FtzRowOfButton2] approval input: $input');
       List<String> result = await updateTableRow(input, eventRowString);
       debugPrint('[FtzRowOfButton2] approval chain update result: $result');
+
+      // Create approval event for spreadsheet recording
+      String eventFlag = (screenTx['approval_flag'] ?? '').toString();
+      if (eventFlag.isNotEmpty &&
+          result.isNotEmpty &&
+          result[0].startsWith('OK')) {
+        int appVid = defaultVid();
+        if (vid.isNotEmpty) {
+          appVid = int.tryParse(vid) ?? defaultVid();
+        }
+        createApprovalEvent(
+          row: row,
+          scrName: scrName,
+          eventFlag: eventFlag,
+          actionStatus: actionStatus,
+          updateOverallStatus: updateOverallStatus,
+          steps: steps,
+          targetIdx: targetIdx,
+          nowMs: nowMs,
+          appVid: appVid,
+        );
+      }
     } catch (e) {
       debugPrint('[FtzRowOfButton2] approval chain update error: $e');
     }
@@ -481,6 +501,7 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
             disabledForegroundColor: Colors.grey.shade500,
             minimumSize: Size(minWidth, minHeight),
             maximumSize: Size(screenWidth, double.infinity),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8.0),
             ),
@@ -1039,12 +1060,19 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
                     }
                 } // end switch
                 var approvalScreenTx = transactionStore.state.screenTx;
-                String approvalRole = (approvalScreenTx['approval_role'] ?? '').toString().toUpperCase();
-                if (approvalRole == 'APPROVER' || approvalRole == 'MAKER') {
-                  String rawActions = (buttonData['actions'] ?? '').toString();
-                  String actionsStr = autheniumDecode(rawActions) ?? rawActions;
+                String approvalRole =
+                (approvalScreenTx['approval_role'] ?? '')
+                    .toString()
+                    .toUpperCase();
+                if (approvalRole == 'APPROVER' ||
+                    approvalRole == 'MAKER') {
+                  String rawActions =
+                  (buttonData['actions'] ?? '').toString();
+                  String actionsStr =
+                      autheniumDecode(rawActions) ?? rawActions;
                   if (actionsStr.isNotEmpty) {
-                    await _updateApprovalChain(actionsStr, approvalScreenTx, scrName);
+                    await _updateApprovalChain(
+                        actionsStr, approvalScreenTx, scrName);
                   }
                 }
 
@@ -1137,8 +1165,8 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
       child: BlocBuilder<TimerBloc, TimerState>(
         builder: (context, state) {
           final List<dynamic> btns = widget.component['children'] ?? [];
-          final bool useRow = btns.length > 1 &&
-              btns.every((b) => b['width'] is! num);
+          final bool useRow =
+              btns.length > 1 && btns.every((b) => b['width'] is! num);
           final buttonWidgets = buildButtonList(
             btns,
             widget.scrName,

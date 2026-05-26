@@ -47,6 +47,7 @@ class _TimelineState extends State<Timeline> {
   int _nameIdx = 1;
   int _attachIdx = 5;
   int _tsIdx = 4;
+  String _variant = 'comment';
 
   final ImagePicker _picker = ImagePicker();
   final List<File> _pendingAttachments = [];
@@ -65,7 +66,10 @@ class _TimelineState extends State<Timeline> {
     _initConfig();
     _setupStream();
     if (_hasCommentBox) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _insertInputOverlay());
+      ApproverStickyBar.ensureRouteListener();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _insertInputOverlay();
+      });
     }
   }
 
@@ -82,48 +86,56 @@ class _TimelineState extends State<Timeline> {
     if (!mounted) return;
     final overlay = Overlay.maybeOf(context);
     if (overlay == null) return;
+    final scrName = widget.scrName;
     _inputEntry = OverlayEntry(
       builder: (ctx) {
-        return ValueListenableBuilder<bool>(
-          valueListenable: ApproverStickyBar.overlaysHidden,
-          builder: (vctx, hidden, _) {
-            if (hidden) return const SizedBox.shrink();
-            final bottomInset = MediaQuery.of(vctx).viewInsets.bottom;
-            final safeBottom = MediaQuery.of(vctx).padding.bottom;
-            final hideNav =
-                screenUIComponent[widget.scrName]?['hideBottomBar'] == true;
-            final navBarHeight = hideNav ? 0.0 : 66.0;
-            final bottomPadding = hideNav ? 8.0 : 0.0;
-            return Positioned(
-              left: 0,
-              right: 0,
-              bottom: bottomInset > 0 ? bottomInset : navBarHeight + safeBottom,
-              child: Material(
-                color: Colors.white,
-                elevation: 8,
-                child: SafeArea(
-                  top: false,
-                  bottom: false,
-                  child: Padding(
-                    padding: EdgeInsets.only(bottom: bottomPadding),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _buildInputSection(vctx),
-                        ValueListenableBuilder<WidgetBuilder?>(
-                          valueListenable: ApproverStickyBar.slot,
-                          builder: (innerCtx, builder, _) {
-                            if (builder == null || bottomInset > 0) {
-                              return const SizedBox.shrink();
-                            }
-                            return builder(innerCtx);
-                          },
+        return ValueListenableBuilder<String>(
+          valueListenable: ApproverStickyBar.activeBarScreen,
+          builder: (_, activeScreen, __) {
+            if (activeScreen != scrName) return const SizedBox.shrink();
+            return ValueListenableBuilder<bool>(
+              valueListenable: ApproverStickyBar.overlaysHidden,
+              builder: (vctx, hidden, _) {
+                if (hidden) return const SizedBox.shrink();
+                final bottomInset = MediaQuery.of(vctx).viewInsets.bottom;
+                final safeBottom = MediaQuery.of(vctx).padding.bottom;
+                final hideNav =
+                    screenUIComponent[scrName]?['hideBottomBar'] == true;
+                final navBarHeight = hideNav ? 0.0 : 66.0;
+                final bottomPadding = hideNav ? 8.0 : 0.0;
+                return Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom:
+                  bottomInset > 0 ? bottomInset : navBarHeight + safeBottom,
+                  child: Material(
+                    color: Colors.white,
+                    elevation: 8,
+                    child: SafeArea(
+                      top: false,
+                      bottom: false,
+                      child: Padding(
+                        padding: EdgeInsets.only(bottom: bottomPadding),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _buildInputSection(vctx),
+                            ValueListenableBuilder<WidgetBuilder?>(
+                              valueListenable: ApproverStickyBar.slot,
+                              builder: (innerCtx, builder, _) {
+                                if (builder == null || bottomInset > 0) {
+                                  return const SizedBox.shrink();
+                                }
+                                return builder(innerCtx);
+                              },
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              ),
+                );
+              },
             );
           },
         );
@@ -133,7 +145,12 @@ class _TimelineState extends State<Timeline> {
   }
 
   void _initConfig() {
-    String text = (widget.component['text'] ?? '').toString().trim();
+    _variant = (widget.component['variant'] ?? 'comment')
+        .toString()
+        .trim()
+        .toLowerCase();
+    String textRaw = (widget.component['text'] ?? '').toString().trim();
+    String text = autheniumDecode(textRaw) ?? textRaw;
     if (text.isNotEmpty) {
       List<String> textParts = text.split('◆');
       _label = textParts[0];
@@ -148,28 +165,30 @@ class _TimelineState extends State<Timeline> {
       }
     }
 
-    try {
-      List<dynamic> children = screenUIComponent[widget.scrName]['children'];
-      for (var comp in children) {
-        if (comp['type']?.toString().toLowerCase() == 'txf' &&
-            comp['variant']?.toString().toLowerCase() == 'commentbox') {
-          _hasCommentBox = true;
-          _attachmentFolder = (comp['attachmentFolder'] ?? '').toString();
-          _attachmentFilename = (comp['attachmentFilename'] ?? '').toString();
-          _attachmentMax =
-              int.tryParse((comp['attachmentMax'] ?? '3').toString()) ?? 3;
-          String srcRaw = (comp['source'] ?? '').toString().trim();
-          if (srcRaw.isNotEmpty) {
-            _attachmentSources = srcRaw
-                .split('◆')
-                .map((s) => s.trim().toLowerCase())
-                .where((s) => s.isNotEmpty)
-                .toList();
+    if (_variant != 'timeline') {
+      try {
+        List<dynamic> children = screenUIComponent[widget.scrName]['children'];
+        for (var comp in children) {
+          if (comp['type']?.toString().toLowerCase() == 'txf' &&
+              comp['variant']?.toString().toLowerCase() == 'commentbox') {
+            _hasCommentBox = true;
+            _attachmentFolder = (comp['attachmentFolder'] ?? '').toString();
+            _attachmentFilename = (comp['attachmentFilename'] ?? '').toString();
+            _attachmentMax =
+                int.tryParse((comp['attachmentMax'] ?? '3').toString()) ?? 3;
+            String srcRaw = (comp['source'] ?? '').toString().trim();
+            if (srcRaw.isNotEmpty) {
+              _attachmentSources = srcRaw
+                  .split('◆')
+                  .map((s) => s.trim().toLowerCase())
+                  .where((s) => s.isNotEmpty)
+                  .toList();
+            }
+            break;
           }
-          break;
         }
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
   }
 
   int _parseFieldIdx(String raw, int fallback) {
@@ -224,8 +243,7 @@ class _TimelineState extends State<Timeline> {
     }
 
     var screenTx = transactionStore.state.screenTx;
-    int vid = int.tryParse(
-        (screenTx['approval_vidtable'] ?? '').toString()) ??
+    int vid = int.tryParse((screenTx['approval_vidtable'] ?? '').toString()) ??
         int.tryParse((widget.component['vidtable'] ?? '').toString()) ??
         appCodeController.applicationTableVid;
     String basePath = '$mobileTable/$vid/$mobileTableCollection';
@@ -273,17 +291,21 @@ class _TimelineState extends State<Timeline> {
             Map<String, dynamic> entry = {'t': t};
             try {
               List<dynamic> fields = jsonDecode(raw['c'] ?? '[]');
-              entry['n'] = fields.length > _nameIdx ? fields[_nameIdx].toString() : '';
-              entry['a'] = fields.length > _attachIdx ? fields[_attachIdx].toString() : '';
-              entry['ts'] = fields.length > _tsIdx ? fields[_tsIdx].toString() : '';
+              entry['n'] =
+              fields.length > _nameIdx ? fields[_nameIdx].toString() : '';
+              entry['a'] = fields.length > _attachIdx
+                  ? fields[_attachIdx].toString()
+                  : '';
+              entry['ts'] =
+              fields.length > _tsIdx ? fields[_tsIdx].toString() : '';
               entry['c'] = fields.length > 3 ? fields[3].toString() : '';
             } catch (_) {
               entry['c'] = raw['c'] ?? '';
             }
             parsed.add(entry);
           }
-          parsed.sort((a, b) =>
-              (a['t'] as int? ?? 0).compareTo(b['t'] as int? ?? 0));
+          parsed.sort(
+                  (a, b) => (a['t'] as int? ?? 0).compareTo(b['t'] as int? ?? 0));
           setState(() => _comments = parsed);
         });
       } else {
@@ -299,10 +321,7 @@ class _TimelineState extends State<Timeline> {
         tableDocRef.collection(mobileTableContent);
         int? tValue = int.tryParse(docT);
         debugPrint('[Timeline] querying content where t=${tValue ?? docT}');
-        contentRef
-            .where('t', isEqualTo: tValue ?? docT)
-            .get()
-            .then((snapshot) {
+        contentRef.where('t', isEqualTo: tValue ?? docT).get().then((snapshot) {
           if (!mounted) return;
           if (snapshot.docs.isEmpty) {
             debugPrint('[Timeline] no content doc found with t=$docT');
@@ -334,6 +353,7 @@ class _TimelineState extends State<Timeline> {
 
   @override
   Widget build(BuildContext context) {
+    if (_variant == 'timeline') return _buildTimeline();
     return ValueListenableBuilder<WidgetBuilder?>(
       valueListenable: ApproverStickyBar.slot,
       builder: (ctx, approverBuilder, child) {
@@ -445,6 +465,150 @@ class _TimelineState extends State<Timeline> {
               }(),
           ],
         ),
+      ),
+    );
+  }
+
+  static const _timelineDotColors = [
+    Color(0xFF3B82F6),
+    Color(0xFFA855F7),
+    Color(0xFFF97316),
+    Color(0xFF22C55E),
+    Color(0xFF9CA3AF),
+  ];
+
+  Widget _buildTimeline() {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          widget.lPad, widget.tPad, widget.rPad, widget.bPad),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFE5E7EB)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _label.toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF6B7280),
+                    letterSpacing: 1.0,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (_comments.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 20),
+                    child: Center(
+                      child: Text(
+                        'Belum ada aktivitas',
+                        style:
+                        TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+                      ),
+                    ),
+                  )
+                else
+                  ...List.generate(_comments.length, (i) {
+                    var data = _comments[i];
+                    return _buildTimelineEntry(
+                      name: (data['n'] ?? '').toString(),
+                      message: (data['a'] ?? '').toString(),
+                      timestamp: (data['ts'] ?? '').toString(),
+                      index: i,
+                      showConnector: i < _comments.length - 1,
+                    );
+                  }),
+              ],
+            ),
+          ),
+          const SizedBox(height: 80),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTimelineEntry({
+    required String name,
+    required String message,
+    required String timestamp,
+    required int index,
+    required bool showConnector,
+  }) {
+    Color dotColor = _timelineDotColors[index % _timelineDotColors.length];
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Column(
+            children: [
+              Container(
+                width: 12,
+                height: 12,
+                margin: const EdgeInsets.only(top: 4),
+                decoration: BoxDecoration(
+                  color: dotColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              if (showConnector)
+                Expanded(
+                  child: Container(
+                    width: 2,
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    color: const Color(0xFFD1D5DB),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(bottom: showConnector ? 20 : 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1F2937),
+                    ),
+                  ),
+                  if (message.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      message,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Color(0xFF6B7280),
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                  if (timestamp.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      timestamp,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF9CA3AF),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
