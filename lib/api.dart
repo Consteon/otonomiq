@@ -3504,6 +3504,14 @@ String replacePlaceholders(String text, List<List<dynamic>> ref) {
   });
 } // end of replacePlaceholders
 
+String _resolveScreenTxMarkers(String text) {
+  var screenTx = transactionStore.state.screenTx;
+  return text.replaceAllMapped(RegExp(r'<([a-zA-Z_][a-zA-Z0-9_]*)>'), (m) {
+    String key = m.group(1)!;
+    return screenTx[key]?.toString() ?? m.group(0)!;
+  });
+}
+
 void saveSend(
     int? timeStamp, String scrName, var component, String locString, int appVid,
     {bool send = true}) {
@@ -3601,6 +3609,7 @@ void saveSend(
           .replaceAll("◼D⭘", "◼D⭘tableVid◼$currentTableVid⭘")
           .replaceAll("◼S⭘", "◼S⭘tableVid◼$currentTableVid⭘");
       tableString = replacePlaceholders(tableString, ref);
+      tableString = _resolveScreenTxMarkers(tableString);
       int d = 1;
     } catch (e) {
       // tableString = null;
@@ -3614,6 +3623,7 @@ void saveSend(
         updateString =
             updateString.replaceAll("◼D⭘", "◼D⭘tableVid◼$currentTableVid⭘");
         updateString = replacePlaceholders(updateString, ref);
+        updateString = _resolveScreenTxMarkers(updateString);
       }
     } catch (e) {
       updateString = '';
@@ -3627,6 +3637,7 @@ void saveSend(
         deleteString =
             deleteString.replaceAll("◼D⭘", "◼D⭘tableVid◼$currentTableVid⭘");
         deleteString = replacePlaceholders(deleteString, ref);
+        deleteString = _resolveScreenTxMarkers(deleteString);
       }
     } catch (e) {
       deleteString = '';

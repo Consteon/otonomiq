@@ -1720,15 +1720,16 @@ Future firstLoginDemo(String vid, String sheetKey) async {
 } // end of firstLoginDemo
 
 List<String> diamondTextToList(String input) {
-  // convert "abc???def???" => List ["abc","def"]
+  // convert "abc◆def◆ghi" => List ["abc","def","ghi"]
   List<String> retVal = [];
   if (input != empty) {
-    String noDiamondStr = input.replaceAll(separator[1], '_u25C6_');
-    String strTest = '["${noDiamondStr.replaceAll('_u25C6_', '","')}"]';
-    // dynamic t = jsonDecode(strTest);
-    // List<String> t2 = t.map((item) => item.toString()).toList();
-    // List<String> t2 = t.cast<String>();
-    retVal = jsonDecode(strTest).cast<String>();
+    try {
+      String noDiamondStr = input.replaceAll(separator[1], '_u25C6_');
+      String strTest = '["${noDiamondStr.replaceAll('_u25C6_', '","')}"]';
+      retVal = jsonDecode(strTest).cast<String>();
+    } catch (_) {
+      retVal = input.split('◆');
+    }
   } // end if input
   return retVal;
 } // end of diamondTextToList

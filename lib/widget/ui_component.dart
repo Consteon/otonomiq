@@ -7,6 +7,7 @@ import '../page/any_page.dart';
 import '../page/home_page.dart';
 import '../redux/screen_transaction.dart';
 import '../widget/all_widget.dart';
+import '../widget/approver_sticky_bar.dart';
 
 void constructPageElements(String scrName) {
   // initiate txfController and linkElement of a page (scrName)
@@ -138,6 +139,9 @@ List<Widget> buildPage(var componentList, String scrName,
       txfController[scrName]!.clear();
     }
   } // end if (txfController[scrName] == null
+  if (clear) {
+    ApproverStickyBar.clearConfigs(scrName);
+  }
 
   dynamic userRepository = myState['#USER_REPOSITORY'];
   List<Widget> pageComponent = [

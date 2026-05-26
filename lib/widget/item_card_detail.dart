@@ -8,6 +8,8 @@ import 'approver_sticky_bar.dart';
 
 class ItemCardDetail extends StatefulWidget {
   static final RxString currentStatus = ''.obs;
+  static final Rx<List<dynamic>> currentRow = Rx<List<dynamic>>([]);
+  static final RxMap<String, String> screenStatus = RxMap<String, String>({});
 
   const ItemCardDetail({
     super.key,
@@ -340,6 +342,8 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
         if (ItemCardDetail.currentStatus.value != status) {
           ItemCardDetail.currentStatus.value = status;
         }
+        ItemCardDetail.screenStatus[widget.scrName] = status;
+        ItemCardDetail.currentRow.value = List.from(row);
       });
 
       String reasonTemplate = (widget.component['reason'] ?? '').toString();

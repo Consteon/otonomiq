@@ -501,6 +501,7 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
             disabledForegroundColor: Colors.grey.shade500,
             minimumSize: Size(minWidth, minHeight),
             maximumSize: Size(screenWidth, double.infinity),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(8.0),
             ),

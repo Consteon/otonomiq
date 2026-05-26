@@ -84,8 +84,11 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
       searchValue = '';
       _tableCode = normalizeTableName(
           autheniumDecode(widget.component['table'] ?? 'default') ?? '');
-      initialTable =
-          searchTable(finalFilter ?? '', List.from(widget.localTable));
+      List<dynamic> source = List.from(tableContent[_tableCode] ?? []);
+      if (source.isEmpty) {
+        source = List.from(widget.localTable);
+      }
+      initialTable = searchTable(finalFilter ?? '', source);
       pickTable = searchTable(searchValue, initialTable);
     } catch (e) {
       // do nothing}
@@ -95,6 +98,14 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
     });
     super.initState();
   } // end of initState
+
+  @override
+  void didUpdateWidget(covariant FtzArraySearch oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.localTable.length != oldWidget.localTable.length) {
+      _rebuildTableData();
+    }
+  }
 
   void _rebuildTableData() {
     List<dynamic> currentTableData =
