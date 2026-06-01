@@ -1,36 +1,37 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+
+import 'package:camera/camera.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:get/get.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:googleapis/sheets/v4.dart';
 import 'package:internet_connection_checker/internet_connection_checker.dart';
 // import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import 'package:intl/intl.dart';
+import 'package:pointycastle/digests/sha3.dart';
+import 'package:redux_dev_tools/redux_dev_tools.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'api.dart';
+import 'different_code/different_code.dart';
+import 'firebase_notification_handler.dart';
+import 'global2.dart';
+import 'login/api/user_repository.dart';
+import 'model/connection_data.dart';
+import 'model/general_get_controller.dart';
 import 'model/lock.dart';
 import 'part/build_part/channel.dart';
-import 'login/api/user_repository.dart';
-import 'states/app_code_controller.dart';
-import 'package:redux_dev_tools/redux_dev_tools.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:camera/camera.dart';
 import 'redux/screen_transaction.dart';
 import 'redux/screen_transaction_reducers.dart';
-import 'model/input_controller.dart';
-import 'api.dart';
 import 'route_stack.dart';
-import 'firebase_notification_handler.dart';
-import 'different_code/different_code.dart';
-import 'package:pointycastle/digests/sha3.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:geocoding/geocoding.dart';
-import 'package:get/get.dart';
-import 'model/general_get_controller.dart';
-import 'model/connection_data.dart';
-import 'global2.dart';
+import 'states/app_code_controller.dart';
 
 // import 'crypto/auth_crypto.dart';
 //import 'package:pointycastle/pointycastle.dart';  // full registry
@@ -166,6 +167,24 @@ import 'global2.dart';
   0.9.78.28 (260424) HH : update attendance_qr_selfie_gps_verify, ftz_row_of_button,
                           otq_txf, to response to fakeGpsAllowed, outPositionAllowed and addition text
                           updated by OO
+  0.9.78.29 (260428) OO : add time_presence, progress_bar, location_detector, tasklist, button_choice
+                          update to otq_rdo_new, otq_txf_new.
+  0.9.78.30 (260507) OO : update dart files: api, table_repository, mobile_table_controller
+                          attendance_qr_selfie_gps_verify, ftz_row_of_button_2, otq_rdo_2,
+                          otq_txf_2, progress_bar, location_detector, tasklist,
+                          ftz_checker, build_display_component
+  0.9.78.31 (260519) OO : pubspec yaml : file_picker: ^8.1.7.
+                          add: worker_card_detail, otq_bottom_nav_bar, approver_sticky_bar,
+                          approval, approval_detail
+                          edit : tasklist, selectable_btn, photo_camera,
+                          otq_txf2, otq_get_image_2, location_detector,
+                          ftz_row_of_button2, ftz_autonumber, comment_detail,
+                          attendance_qr_selfie_gps_verify, stl_page, main_page,
+                          home_page, any_page, login_form, google_login_button,
+                          apple_login_button
+  0.9.78.32 (260522) OO : udpate approval, etc
+  0.9.78.33 (260526) OO : update request incident, fix bug log history
+  0.9.78.34 (260602) OO : fix bug front camera stuck, blank white screen when open apps, implement addToEvent to Firestore
  */
 // ========= Constants ==========================
 const iOSDevPage = false;
