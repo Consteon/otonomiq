@@ -55,7 +55,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    //controller.dispose();
+    controller?.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -93,36 +93,34 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
   List<File> capturedImages = [];
   File? currentImage;
 
-  Future<void> initializeCamera(int cameraIndex, int flashIndex) async {
+  Future<void> _doInitializeCamera(int cameraIndex, int flashIndex) async {
+    await controller?.dispose();
     controller = CameraController(
-      // Get a specific camera from the list of available cameras.
       widget.cameras[cameraIndex],
-      // Define the resolution to use.
       ResolutionPreset.medium,
     );
 
-    // Next, initialize the controller. This returns a Future.
-    _initializeControllerFuture = controller!.initialize();
+    await controller!.initialize();
     await Future.delayed(const Duration(milliseconds: 500));
-    // _controller.setFlashMode(FlashMode.auto);
     switch (flashIndex) {
       case 0:
         controller!.setFlashMode(FlashMode.auto);
         break;
-
       case 1:
         controller!.setFlashMode(FlashMode.always);
         break;
-
       case 2:
         controller!.setFlashMode(FlashMode.torch);
         break;
-
       case 3:
         controller!.setFlashMode(FlashMode.off);
         break;
-    } // end switch
-  } // end of initializeCamera
+    }
+  }
+
+  void initializeCamera(int cameraIndex, int flashIndex) {
+    _initializeControllerFuture = _doInitializeCamera(cameraIndex, flashIndex);
+  }
 
   Future<void> onNewCameraSelected(CameraDescription cameraDescription) async {
     final CameraController? oldController = controller;

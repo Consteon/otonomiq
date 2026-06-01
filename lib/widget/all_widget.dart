@@ -29,5 +29,6 @@ export 'pdf_viewer.dart';
 //  margin, style, alighment, etc
 export 'photo_camera.dart';
 export 'selectable_btn.dart';
+export 'stepper_widget.dart';
 export 'timeline.dart';
 export 'worker_card_detail.dart';

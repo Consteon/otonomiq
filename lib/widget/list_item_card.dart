@@ -827,10 +827,13 @@ class _ListItemCardState extends State<ListItemCard> {
         : '';
 
     String assigneeTemplate = (widget.component['assignee'] ?? '').toString();
+    if (assigneeTemplate.isEmpty && _textArray.length > 7) {
+      assigneeTemplate = _textArray[7];
+    }
     String assignee = assigneeTemplate.isNotEmpty
         ? _resolveText(assigneeTemplate, row).trim()
         : '';
-    String assigneeDefault = _textArray.length > 7 ? _textArray[7] : '';
+    String assigneeDefault = _textArray.length > 8 ? _textArray[8] : '';
     if (assignee.isEmpty) assignee = assigneeDefault;
 
     return Padding(
@@ -992,12 +995,6 @@ class _ListItemCardState extends State<ListItemCard> {
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    if (assignee != assigneeDefault)
-                                      Icon(Icons.person,
-                                          size: 14,
-                                          color: const Color(0xFF6B7280)),
-                                    if (assignee != assigneeDefault)
-                                      const SizedBox(width: 4),
                                     Text(
                                       assignee,
                                       style: TextStyle(

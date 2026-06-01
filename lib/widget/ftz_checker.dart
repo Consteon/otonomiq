@@ -342,7 +342,11 @@ class FtzCheckerState extends State<FtzChecker> {
       String checkerTableString = widget.component['addToTable'] ?? '';
       String updateRaw = widget.component['updateTableRow'] ?? '';
       String deleteRaw = widget.component['deleteFromTable'] ?? '';
-      if (updateRaw.isNotEmpty || deleteRaw.isNotEmpty) {
+      String eventRaw = widget.component['addToEvent'] ?? '';
+      if (eventRaw.isNotEmpty) {
+        checkerTableString =
+            '$checkerTableString${separator[0]}$updateRaw${separator[0]}$deleteRaw${separator[0]}$eventRaw';
+      } else if (updateRaw.isNotEmpty || deleteRaw.isNotEmpty) {
         checkerTableString =
             '$checkerTableString${separator[0]}$updateRaw${separator[0]}$deleteRaw';
       }
