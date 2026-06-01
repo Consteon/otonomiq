@@ -46,6 +46,9 @@ Widget buildDisplayComponent(
   var tPad = (systemUIComponent['Mobile']['topPad'] ?? 0.0).toDouble();
   var rPad = (systemUIComponent['Mobile']['rightPad'] ?? 0.0).toDouble();
   var bPad = (systemUIComponent['Mobile']['bottomPad'] ?? 0.0).toDouble();
+  if (component['position'] != null && component['position'] is String) {
+    component['position'] = getPosition(component['position']);
+  }
   // final txfKey = UniqueKey();
   final txfKey = ObjectKey("$scrName-${component['position']}");
   if (component['position'] != null) {
@@ -1151,6 +1154,20 @@ Widget buildDisplayComponent(
   } else if (tip == 'timeline') {
     try {
       result = Timeline(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'stepper') {
+    try {
+      result = StepperWidget(
         key: txfKey,
         component: component,
         scrName: scrName,

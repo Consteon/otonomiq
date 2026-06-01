@@ -14,6 +14,7 @@ import '../crypto/auth_crypto.dart';
 import '../states/mobile_table_controller.dart';
 import 'firestore_generic_repository.dart';
 import '../model/ftz_scanned_code.dart';
+import 'add_to_event.dart';
 
 /// Returns the number of seconds from the epoch time, modulo 86400.
 /// The documentName parameter is ignored for now.
@@ -1100,23 +1101,8 @@ List<dynamic> parseEventString(dynamic inp) {
 Future<List<dynamic>> parseTableInput(List<dynamic> inpArray, List<dynamic> ref,
     int tableVid, int appVid, int timeReceived, String receivingPage,
     {int sourceIndex = 0}) async {
-  const vidNotation = '%vid%';
-  const appVidNotation = '%appVid%';
-  const timeReceivedNotation = '%timeReceived%';
-  const receivingPageNotation = '%receivingPage%';
-  const errorNotation = '*';
-  final openNotation = forbiddenCharacter[7]; // black left triangle
-  final closeNotation = forbiddenCharacter[9]; // black right triangle
-  final openNotation2 = forbiddenCharacter[8]; // white left triangle
-  final closeNotation2 = forbiddenCharacter[10]; // white right triangle
-  const openReplacement = '<<||'; // must be in sync with expression in RegExp
-  const closeReplacement = '||>>'; // must be in sync with expression in RegExp
   const openField = '<';
   const closeField = '>';
-  const subSourceSeparator = '.';
-  final dataSeparator = forbiddenCharacter[0]; // black diamond
-  final RegExp exp = RegExp(
-      r'<<\|\|(.*?)\|\|>>'); // must be in sync with openReplacement and closeReplacement
   List<dynamic> result = [
     inpArray[0][0].toString().trim(),
     '20160',
@@ -1180,141 +1166,15 @@ Future<List<dynamic>> parseTableInput(List<dynamic> inpArray, List<dynamic> ref,
           int end = inpArray[i][0].toString().trim().indexOf(closeField);
           int tableIndex =
               int.parse(inpArray[i][0].substring(start + 1, end)) - 1;
-          String notation = inpArray[i][1].toString();
-          // notation = notation.replaceAll(vidNotation, vid.toString());
-          notation = notation.replaceAll(
-              '$openNotation$receivingPageNotation$closeNotation',
-              receivingPage);
-          notation = notation.replaceAll(
-              '$openNotation2$receivingPageNotation$closeNotation2',
-              receivingPage);
-          notation = notation
-              .replaceAll(openNotation, openReplacement)
-              .replaceAll(closeNotation, closeReplacement);
-          String origin = notation;
-          Iterable<RegExpMatch> matches = exp.allMatches(origin);
-          for (Match match in matches) {
-            String contentString = match.group(1) ?? '';
-            String replacement = errorNotation;
-            try {
-              replacement = ref[sourceIndex][int.parse(contentString) - 1];
-            } catch (e) {
-              try {
-                Map<String, dynamic> fieldMap = parseField(contentString);
-                String? sourceValue;
-                switch (fieldMap['c']) {
-                  case vidNotation:
-                    sourceValue = tableVid.toString();
-                    break;
-                  case appVidNotation:
-                    sourceValue = appVid.toString();
-                    break;
-                  case timeReceivedNotation:
-                    sourceValue = timeReceived.toString();
-                    break;
-                  default:
-                    int dotPosition = fieldMap['c']
-                        .toString()
-                        .trim()
-                        .indexOf(subSourceSeparator);
-                    if (dotPosition < 0) {
-                      sourceValue = ref[0]
-                          [int.parse(fieldMap['c'].toString().trim()) - 1];
-                    } else {
-                      List<String> eventArray = fieldMap['c']
-                          .toString()
-                          .trim()
-                          .split(subSourceSeparator);
-                      if (eventArray.length > 1) {
-                        int index = int.parse(eventArray[0]) - 1;
-                        int subIndex = int.parse(eventArray[1]) - 1;
-                        List<String> dataArray =
-                            ref[0][index].toString().split(dataSeparator);
-                        sourceValue = dataArray[subIndex];
-                      } // end if (eventArray.length > 1)
-                    } // end if (dotPosition < 0)
-                } // end switch (fieldMap['c'])
-                replacement = stringFormat(sourceValue, fieldMap);
-              } catch (e) {
-                replacement = errorNotation;
-              } // end of try eventArray
-            } // end try
-            if (replacement != errorNotation) {
-              notation =
-                  notation.replaceAll(match.group(0).toString(), replacement);
-            }
-          } // end for (Match match in matches)
-
-          notation = notation
-              .replaceAll(openNotation2, openReplacement)
-              .replaceAll(closeNotation2, closeReplacement);
-          origin = notation;
-          matches = exp.allMatches(origin);
-          for (Match match in matches) {
-            String substring = match.group(1) ?? '';
-            String replacement = errorNotation;
-            try {
-              if (substring.startsWith('%')) {
-                final String indexStr = substring.substring(1); // Remove '%'
-                final int refIndex = int.parse(indexStr) - 1;
-                final String valueToProcess = ref[1][refIndex];
-                replacement = getDocumentName(valueToProcess);
-              } else {
-                // Original logic for placeholders like ◁8▷
-                replacement = ref[1][int.parse(substring) - 1];
-              }
-            } catch (e) {
-              try {
-                // Fallback for when int.parse fails (e.g., for "6|T7|D...")
-                try {
-                  // This logic mirrors the formatting capability of the ◀...▶ placeholder
-                  // but uses the second data source (ref[1]).
-                  Map<String, dynamic> fieldMap = parseField(substring);
-                  String? sourceValue;
-
-                  int dotPosition = fieldMap['c']
-                      .toString()
-                      .trim()
-                      .indexOf(subSourceSeparator);
-                  if (dotPosition < 0) {
-                    // Simple index, e.g., '6' from "6|T7|..."
-                    sourceValue =
-                        ref[1][int.parse(fieldMap['c'].toString().trim()) - 1];
-                  } else {
-                    // Dot notation, e.g., '8.1'
-                    List<String> eventArray = fieldMap['c']
-                        .toString()
-                        .trim()
-                        .split(subSourceSeparator);
-                    if (eventArray.length > 1) {
-                      int index = int.parse(eventArray[0]) - 1;
-                      int subIndex = int.parse(eventArray[1]) - 1;
-                      List<String> dataArray =
-                          ref[1][index].toString().split(dataSeparator);
-                      sourceValue = dataArray[subIndex];
-                    }
-                  }
-                  replacement = stringFormat(sourceValue, fieldMap);
-                } catch (e2) {
-                  replacement = errorNotation;
-                }
-                // List<String> eventArray =
-                //     substring.trim().split(subSourceSeparator);
-                // if (eventArray.length > 1) {
-                //   int index = int.parse(eventArray[0]) - 1;
-                //   int subIndex = int.parse(eventArray[1]) - 1;
-                //   List<String> dataArray =
-                //       ref[1][index].toString().split(dataSeparator);
-                //   replacement = dataArray[subIndex];
-                // } // end if (eventArray.length > 1)
-              } catch (e) {
-                replacement = errorNotation;
-              } // end of try eventArray
-            } // end try
-            notation =
-                notation.replaceAll(match.group(0).toString(), replacement);
-          } // end for (Match match in matches)
-
+          String notation = resolveValueTokens(
+            inpArray[i][1].toString(),
+            ref,
+            tableVid: tableVid,
+            appVid: appVid,
+            timeReceived: timeReceived,
+            receivingPage: receivingPage,
+            sourceIndex: sourceIndex,
+          );
           int maxIndex = tempResult.length - 1;
           if (maxIndex < tableIndex) {
             for (int c = maxIndex; c < tableIndex; c++) {
@@ -1348,6 +1208,236 @@ Future<List<dynamic>> parseTableInput(List<dynamic> inpArray, List<dynamic> ref,
   result[5] = indexContent;
   return result;
 } // end of parseTableInput
+
+/// Resolves `◀N▶` (system / ref[0]) then `◁N▷` (form / ref[1]) tokens inside a
+/// single field value — byte-identical to the per-value logic previously inline
+/// in parseTableInput's `default:` case. Shared by addToTable and addToEvent.
+String resolveValueTokens(
+  String notation,
+  List<dynamic> ref, {
+  required int tableVid,
+  required int appVid,
+  required int timeReceived,
+  required String receivingPage,
+  int sourceIndex = 0,
+}) {
+  const vidNotation = '%vid%';
+  const appVidNotation = '%appVid%';
+  const timeReceivedNotation = '%timeReceived%';
+  const receivingPageNotation = '%receivingPage%';
+  const errorNotation = '*';
+  final openNotation = forbiddenCharacter[7];
+  final closeNotation = forbiddenCharacter[9];
+  final openNotation2 = forbiddenCharacter[8];
+  final closeNotation2 = forbiddenCharacter[10];
+  const openReplacement = '<<||';
+  const closeReplacement = '||>>';
+  const subSourceSeparator = '.';
+  final dataSeparator = forbiddenCharacter[0];
+  final RegExp exp = RegExp(r'<<\|\|(.*?)\|\|>>');
+
+  notation = notation.replaceAll(
+      '$openNotation$receivingPageNotation$closeNotation', receivingPage);
+  notation = notation.replaceAll(
+      '$openNotation2$receivingPageNotation$closeNotation2', receivingPage);
+  notation = notation
+      .replaceAll(openNotation, openReplacement)
+      .replaceAll(closeNotation, closeReplacement);
+  String origin = notation;
+  Iterable<RegExpMatch> matches = exp.allMatches(origin);
+  for (Match match in matches) {
+    String contentString = match.group(1) ?? '';
+    String replacement = errorNotation;
+    try {
+      replacement = ref[sourceIndex][int.parse(contentString) - 1];
+    } catch (e) {
+      try {
+        Map<String, dynamic> fieldMap = parseField(contentString);
+        String? sourceValue;
+        switch (fieldMap['c']) {
+          case vidNotation:
+            sourceValue = tableVid.toString();
+            break;
+          case appVidNotation:
+            sourceValue = appVid.toString();
+            break;
+          case timeReceivedNotation:
+            sourceValue = timeReceived.toString();
+            break;
+          default:
+            int dotPosition =
+                fieldMap['c'].toString().trim().indexOf(subSourceSeparator);
+            if (dotPosition < 0) {
+              sourceValue =
+                  ref[0][int.parse(fieldMap['c'].toString().trim()) - 1];
+            } else {
+              List<String> eventArray =
+                  fieldMap['c'].toString().trim().split(subSourceSeparator);
+              if (eventArray.length > 1) {
+                int index = int.parse(eventArray[0]) - 1;
+                int subIndex = int.parse(eventArray[1]) - 1;
+                List<String> dataArray =
+                    ref[0][index].toString().split(dataSeparator);
+                sourceValue = dataArray[subIndex];
+              }
+            }
+        }
+        replacement = stringFormat(sourceValue, fieldMap);
+      } catch (e) {
+        replacement = errorNotation;
+      }
+    }
+    if (replacement != errorNotation) {
+      notation = notation.replaceAll(match.group(0).toString(), replacement);
+    }
+  }
+
+  notation = notation
+      .replaceAll(openNotation2, openReplacement)
+      .replaceAll(closeNotation2, closeReplacement);
+  origin = notation;
+  matches = exp.allMatches(origin);
+  for (Match match in matches) {
+    String substring = match.group(1) ?? '';
+    String replacement = errorNotation;
+    try {
+      if (substring.startsWith('%')) {
+        final String indexStr = substring.substring(1);
+        final int refIndex = int.parse(indexStr) - 1;
+        final String valueToProcess = ref[1][refIndex];
+        replacement = getDocumentName(valueToProcess);
+      } else {
+        replacement = ref[1][int.parse(substring) - 1];
+      }
+    } catch (e) {
+      try {
+        try {
+          Map<String, dynamic> fieldMap = parseField(substring);
+          String? sourceValue;
+          int dotPosition =
+              fieldMap['c'].toString().trim().indexOf(subSourceSeparator);
+          if (dotPosition < 0) {
+            sourceValue =
+                ref[1][int.parse(fieldMap['c'].toString().trim()) - 1];
+          } else {
+            List<String> eventArray =
+                fieldMap['c'].toString().trim().split(subSourceSeparator);
+            if (eventArray.length > 1) {
+              int index = int.parse(eventArray[0]) - 1;
+              int subIndex = int.parse(eventArray[1]) - 1;
+              List<String> dataArray =
+                  ref[1][index].toString().split(dataSeparator);
+              sourceValue = dataArray[subIndex];
+            }
+          }
+          replacement = stringFormat(sourceValue, fieldMap);
+        } catch (e2) {
+          replacement = errorNotation;
+        }
+      } catch (e) {
+        replacement = errorNotation;
+      }
+    }
+    notation = notation.replaceAll(match.group(0).toString(), replacement);
+  }
+  return notation;
+}
+
+/// Result of building one event document: its target collection + the doc map.
+class EventDoc {
+  final String collection;
+  final Map<String, dynamic> doc;
+  EventDoc(this.collection, this.doc);
+}
+
+/// Parse one decoded `◆`-block, resolve each value's tokens, blank-prefill.
+EventDoc buildEventDoc(
+  String block,
+  List<dynamic> ref, {
+  required int tableVid,
+  required int appVid,
+  required int timeReceived,
+  required String receivingPage,
+}) {
+  final parsed = parseAddToEvent(block);
+  final doc = <String, dynamic>{};
+  parsed.forEach((k, v) {
+    if (k == '_collection') return; // write target, not a stored field
+    doc[k] = resolveValueTokens(
+      v.toString(),
+      ref,
+      tableVid: tableVid,
+      appVid: appVid,
+      timeReceived: timeReceived,
+      receivingPage: receivingPage,
+    );
+  });
+  // No blank-prefill: the document contains exactly the fields written in the
+  // DSL (token-resolved), nothing else.
+  return EventDoc((parsed['_collection'] ?? '').toString(), doc);
+}
+
+/// Decode + ◆-split the event segment, build each doc, batch-write atomically
+/// to `collection(<line1>)`. Mirrors writeToTable's decode/ref handling.
+Future<void> writeToEvent(String? inp, String eventRowString) async {
+  if (inp == null || inp.trim().isEmpty) return;
+  try {
+    final List<dynamic> eventRow = jsonDecode(eventRowString);
+    final List<dynamic> ref = parseEventString(eventRow);
+    final String decoded = autheniumDecode(inp) ?? '';
+    final int tableVid = appCodeController.applicationTableVid;
+    final int timeReceived = int.tryParse(eventRow[0].toString()) ?? 0;
+    final String receivingPage = eventRow[1].toString();
+
+    final blocks = decoded
+        .split(separator[1])
+        .where((b) => b.trim().isNotEmpty)
+        .toList();
+    debugPrint('[writeToEvent] ${blocks.length} block(s); ref=$ref');
+    final WriteBatch batch = firestoreDb.batch();
+    int queued = 0;
+    for (final block in blocks) {
+      final built = buildEventDoc(
+        block,
+        ref,
+        tableVid: tableVid,
+        appVid: appCodeController.applicationTableVid,
+        timeReceived: timeReceived,
+        receivingPage: receivingPage,
+      );
+      // Line 1 of the DSL is a TABLE NAME (like addToTable), not a raw Firestore
+      // collection path. The event doc lands in the same location as addToTable
+      // so the existing MobileTable security rules apply:
+      //   MobileTable/<tableVid>/tables/<tableName>/content/<autoId>
+      final String tableName = getDocumentName(built.collection);
+      if (tableName.isEmpty || tableName == 'NO_NAME') {
+        debugPrint('[writeToEvent] skip: no table name from '
+            '"${built.collection}"');
+        continue;
+      }
+      int eventTableVid = tableVid;
+      final String tvRaw = (built.doc['tablevid'] ?? '').toString().trim();
+      if (tvRaw.isNotEmpty) {
+        eventTableVid = int.tryParse(tvRaw) ?? tableVid;
+      }
+      final String path =
+          'MobileTable/$eventTableVid/tables/$tableName/content';
+      final docRef = firestoreDb.collection(path).doc();
+      debugPrint('[writeToEvent] queue $path/${docRef.id} '
+          'keys=${built.doc.keys.length} doc=${built.doc}');
+      batch.set(docRef, built.doc);
+      queued++;
+    }
+    if (queued > 0) {
+      await batch.commit();
+      debugPrint('[writeToEvent] committed $queued doc(s) OK');
+    } else {
+      debugPrint('[writeToEvent] nothing to commit');
+    }
+  } catch (e, st) {
+    debugPrint('[writeToEvent] ERROR: $e\n$st');
+  }
+}
 
 void createInternalTable(
   String tableCode,
@@ -2448,6 +2538,8 @@ Future historySync(String source, bool forceSend) async {
                           tbParts.length > 1 ? tbParts[1] : '';
                       final String deleteStr =
                           tbParts.length > 2 ? tbParts[2] : '';
+                      final String eventStr =
+                          tbParts.length > 3 ? tbParts[3] : '';
                       final String eventRowString = jsonEncode([
                         eventHistory[0],
                         eventHistory[1],
@@ -2461,6 +2553,9 @@ Future historySync(String source, bool forceSend) async {
                       }
                       if (deleteStr.isNotEmpty) {
                         deleteFromTable(deleteStr, eventRowString);
+                      }
+                      if (eventStr.isNotEmpty) {
+                        writeToEvent(eventStr, eventRowString);
                       }
                     } else {
                       devPrint(

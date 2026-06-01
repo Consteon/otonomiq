@@ -48,6 +48,7 @@ class _TimelineState extends State<Timeline> {
   int _attachIdx = 5;
   int _tsIdx = 4;
   String _variant = 'comment';
+  bool _sortAsc = true;
 
   final ImagePicker _picker = ImagePicker();
   final List<File> _pendingAttachments = [];
@@ -149,6 +150,7 @@ class _TimelineState extends State<Timeline> {
         .toString()
         .trim()
         .toLowerCase();
+    _sortAsc = (widget.component['sort'] ?? 'asc').toString().trim().toLowerCase() != 'desc';
     String textRaw = (widget.component['text'] ?? '').toString().trim();
     String text = autheniumDecode(textRaw) ?? textRaw;
     if (text.isNotEmpty) {
@@ -304,8 +306,11 @@ class _TimelineState extends State<Timeline> {
             }
             parsed.add(entry);
           }
-          parsed.sort(
-              (a, b) => (a['t'] as int? ?? 0).compareTo(b['t'] as int? ?? 0));
+          parsed.sort((a, b) {
+            int tA = a['t'] as int? ?? 0;
+            int tB = b['t'] as int? ?? 0;
+            return _sortAsc ? tA.compareTo(tB) : tB.compareTo(tA);
+          });
           setState(() => _comments = parsed);
         });
       } else {
@@ -332,7 +337,7 @@ class _TimelineState extends State<Timeline> {
           debugPrint('[Timeline] content doc: ${contentDocRef.path}');
           debugPrint('[Timeline] subscribing: ${_commentCollRef!.path}');
           _subscription = _commentCollRef!
-              .orderBy('t', descending: false)
+              .orderBy('t', descending: !_sortAsc)
               .snapshots()
               .listen((snap) {
             if (!mounted) return;

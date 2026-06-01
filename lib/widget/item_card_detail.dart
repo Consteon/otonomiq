@@ -96,7 +96,7 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
 
   String _resolveText(String template, List<dynamic> row) {
     return replaceMarker(
-        template, row, widget.component['indexStart'] ?? 1, false);
+        template, row, int.tryParse((widget.component['indexStart'] ?? '1').toString()) ?? 1, false);
   }
 
   List<dynamic> _applyConditions(List<dynamic> data) {
@@ -415,18 +415,21 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
                               size: 18, color: const Color(0xFF6B7280)),
                         ),
                         const SizedBox(width: 10),
-                        Text(
-                          typeLabel.toUpperCase(),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF6B7280),
-                            letterSpacing: 0.8,
+                        Expanded(
+                          child: Text(
+                            typeLabel.toUpperCase(),
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF6B7280),
+                              letterSpacing: 0.8,
+                            ),
                           ),
                         ),
-                        const Spacer(),
                         if (status.isNotEmpty)
-                          Container(
+                          Flexible(
+                            child: Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 12, vertical: 5),
                             decoration: BoxDecoration(
@@ -456,6 +459,7 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
                               ],
                             ),
                           ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 14),

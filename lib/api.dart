@@ -3658,7 +3658,22 @@ void saveSend(
       deleteString = '';
     }
 
-    if (updateString.isNotEmpty || deleteString.isNotEmpty) {
+    String eventString = '';
+    try {
+      String raw = component['addToEvent'] ?? '';
+      if (raw.isNotEmpty) {
+        eventString = autheniumDecode(raw) ?? '';
+        eventString = replacePlaceholders(eventString, ref);
+        eventString = _resolveScreenTxMarkers(eventString);
+      }
+    } catch (e) {
+      eventString = '';
+    }
+
+    if (eventString.isNotEmpty) {
+      tableString =
+          '${tableString ?? ''}${separator[0]}$updateString${separator[0]}$deleteString${separator[0]}$eventString';
+    } else if (updateString.isNotEmpty || deleteString.isNotEmpty) {
       tableString =
           '${tableString ?? ''}${separator[0]}$updateString${separator[0]}$deleteString';
     }
