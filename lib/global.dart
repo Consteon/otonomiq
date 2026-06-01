@@ -14,7 +14,6 @@ import 'login/api/user_repository.dart';
 import 'states/app_code_controller.dart';
 import 'package:redux_dev_tools/redux_dev_tools.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:camera/camera.dart';
 import 'redux/screen_transaction.dart';
@@ -31,7 +30,6 @@ import 'package:geocoding/geocoding.dart';
 import 'package:get/get.dart';
 import 'model/general_get_controller.dart';
 import 'model/connection_data.dart';
-import 'firebase_options.dart';
 import 'global2.dart';
 
 // import 'crypto/auth_crypto.dart';
@@ -715,14 +713,10 @@ Future<int> globalInit() async {
   await internetConnectedCheck(forceTest: true);
   debugCount = -23;
   trace(debugCount);
+  // Firebase.initializeApp() already ran in main() before globalInit().
+  // Calling it again here was redundant work on the critical startup path.
   dynamic initValue = await Future.wait([
     getAllPermission(),
-    Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    ),
-    // need to follow  to initialize firebase https://firebase.google.com/docs/flutter/setup?platform=ios
-    // need to run C:\Users\harto\AppData\Local\Pub\Cache\bin\flutterfire configure
-    // in the project folder
     SharedPreferences.getInstance(),
   ]);
   internetConnection.onStatusChange.listen((status) {
@@ -733,7 +727,7 @@ Future<int> globalInit() async {
   });
   debugCount = -24;
   trace(debugCount);
-  prefs = initValue[2];
+  prefs = initValue[1];
   firestoreDb = FirebaseFirestore.instance;
   fsCollection = "users_$fsName";
   fsMsgCollection = msgPrefix;

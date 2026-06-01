@@ -402,8 +402,9 @@ Future<bool> internetConnectedCheck({bool forceTest = false}) async {
   // check internet connection flag
   // use https://pub.dev/packages/internet_connection_checker_plus
   if (forceTest) {
-    bool nowConnected = await internetConnection
-        .hasConnection; //.InternetConnection().hasInternetAccess;
+    bool nowConnected = await internetConnection.hasConnection
+        .timeout(const Duration(seconds: 5),
+            onTimeout: () => false); //.InternetConnection().hasInternetAccess;
     if (nowConnected != internetConnectionFlag.value) {
       internetConnectionFlag.value = nowConnected;
     } // end if (nowConnected != internetConnectionFlag.value)
@@ -1648,7 +1649,7 @@ Future<dynamic> getDataFromCloud() async {
       dynamic uri =
           Uri.https(autsorzFunctionDomain, appSettingFunctionName, qParams);
       dynamic rawReturnValue = await Future.wait([
-        http.post(uri),
+        http.post(uri).timeout(const Duration(seconds: 15)),
 //      getServiceAccountCredential(), //= TODO uncomment this
       ]);
       returnValue = [
@@ -1761,7 +1762,13 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
       {'#INTERFACE_KEY': settingKey}))); // set state #INTERFACE_KEY
   dynamic response;
   String lastPages = '';
-  if (opt == 1 && !(await newUpdateApp())) {
+  // Always reuse the cached pages on the startup-critical loader (opt 1) when
+  // they exist, so the home shell renders immediately from cache instead of
+  // blocking on a full network page-fetch. A version change (newUpdateApp) no
+  // longer forces a blocking re-fetch here — the secondary loader
+  // (asyncAppStartup2 / opt 2) always re-fetches the latest pages in the
+  // background and rebuilds, so updated layouts appear a moment later.
+  if (opt == 1) {
     try {
       lastPages = prefs.getString('@screenUI') ?? "";
     } catch (e) {
@@ -1916,12 +1923,15 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
       debugCount = 5229;
     } // end if (opt == 2 || lastPages.isEmpty)
     devPrint('saving screenUIComponent & systemUIComponent to pref');
-    prefs.setString('@screenUI', json.encode(screenUIComponent)).then((_) {
-      devPrint('Done saving screenUIComponent to pref');
-    });
-    prefs.setString('@systemUI', json.encode(systemUIComponent)).then((_) {
-      devPrint('Done saving systemUIComponent to pref');
-    });
+    // Encode once and persist; guard so an encode failure can't crash startup.
+    try {
+      final encScreen = json.encode(screenUIComponent);
+      final encSystem = json.encode(systemUIComponent);
+      prefs.setString('@screenUI', encScreen);
+      prefs.setString('@systemUI', encSystem);
+    } catch (e) {
+      devPrint('save screenUI/systemUI failed: $e');
+    }
     debugCount = 52291;
     trace(debugCount);
     if (opt == 2) {
@@ -2429,7 +2439,9 @@ Future getVidData() async {
     futures.add(getFirestoreMessageRef(myVid));
 
     //https://alvinalexander.com/dart/how-run-multiple-dart-futures-in-parallel/
-    await Future.wait(futures).then((List<dynamic> res) {
+    await Future.wait(futures)
+        .timeout(const Duration(seconds: 12))
+        .then((List<dynamic> res) {
       ref = res[0];
       messageRef = res[1];
     });
@@ -2743,8 +2755,9 @@ Future<int> launchCheck() async {
           FunctionBody functionBody =
               getFunctionBody(settingKey, ['Settings!G10']);
           result = 995;
-          var response = await http.post(Uri.parse(functionBody.url),
-              body: functionBody.body);
+          var response = await http
+              .post(Uri.parse(functionBody.url), body: functionBody.body)
+              .timeout(const Duration(seconds: 15));
           result = 996;
           var entryList = jsonDecode(response.body);
           result = 997;
@@ -2769,8 +2782,9 @@ Future<int> launchCheck() async {
           FunctionBody functionBody =
               getFunctionBody(settingKey, ['Settings!G10']);
           result = 9911;
-          var response = await http.post(Uri.parse(functionBody.url),
-              body: functionBody.body);
+          var response = await http
+              .post(Uri.parse(functionBody.url), body: functionBody.body)
+              .timeout(const Duration(seconds: 15));
           result = 9912;
           var entryList = jsonDecode(response.body);
           result = 9913;
@@ -2807,8 +2821,9 @@ Future<int> launchCheck() async {
         FunctionBody functionBody =
             getFunctionBody(settingKey, ['Settings!G10']);
         result = 9918;
-        var response = await http.post(Uri.parse(functionBody.url),
-            body: functionBody.body);
+        var response = await http
+            .post(Uri.parse(functionBody.url), body: functionBody.body)
+            .timeout(const Duration(seconds: 15));
         result = 9919;
         var entryList = jsonDecode(response.body);
         result = 9920;

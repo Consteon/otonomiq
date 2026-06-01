@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -59,6 +60,10 @@ void main() async {
   debugCount = -2;
   trace(debugCount);
   await globalInit();
+  // Paint a loading screen immediately so the user never stares at a blank
+  // white window while the (cache-backed) bootstrap below runs. The real app
+  // replaces this with a second runApp() call once the home shell is ready.
+  runApp(const _BootstrapLoadingApp());
   debugCount = -3;
   trace(debugCount);
   // await apiTest();
@@ -230,25 +235,27 @@ void main() async {
 //    BlocSupervisor.delegate = SimpleBlocDelegate();
     Bloc.observer = SimpleBlocDelegate();
     state = transactionStore.state.screenTx;
-    int launchOk = 0;
     if (state['#INTERFACE_KEY'] != null &&
         state['#INTERFACE_KEY'] != '' &&
         state['#INTERFACE_KEY'] != loginSsid) {
       subscribeToEvent(state['#INTERFACE_KEY']);
     }
+    // launchCheck() does FCM setup + Firestore reads + a pin-hash cloud call.
+    // None of it is needed to paint the home shell (already built from cache),
+    // so run it off the critical path after the first frame instead of
+    // blocking startup on it.
     if (state['#VID'] != null && state['#VID'] != '') {
-      launchOk = await launchCheck(); // Check launch status
-      debugCount = 8;
-      trace(debugCount);
+      unawaited(launchCheck().then((launchOk) {
+        debugCount = 8;
+        trace(debugCount);
+        if (launchOk > 0) {
+          debugPrint('launchCheck returned $launchOk (background)');
+        }
+      }).catchError((e) {
+        debugPrint('launchCheck error (background): $e');
+      }));
     }
-    // setTransactionOK('main');
-    if (launchOk > 0) {
-      // error in launching
-      debugCount = launchOk;
-      runApp(TestApp(
-        flag: 'launchOK = $launchOk',
-      ));
-    } else {
+    {
       debugCount = 9;
       /*
       // argon2 example
@@ -313,6 +320,20 @@ void main() async {
     ));
   }
 } // end of main
+
+// Minimal loading shell shown by the first runApp() call while the bootstrap
+// in main() finishes. Replaced by the real App once the home shell is ready.
+class _BootstrapLoadingApp extends StatelessWidget {
+  const _BootstrapLoadingApp();
+
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: SplashScreen(),
+    );
+  }
+}
 
 class AppBlocObserver extends BlocObserver {
   @override
