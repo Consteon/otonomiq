@@ -185,6 +185,7 @@ import 'global2.dart';
                           apple_login_button
   0.9.78.32 (260522) OO : udpate approval, etc
   0.9.78.33 (260526) OO : update request incident, fix bug log history
+  0.9.78.34 (260602) OO : fix bug front camera stuck, blank white screen when open apps, implement addToEvent to Firestore
 */
 // ========= Constants ==========================
 const iOSDevPage = false;
@@ -195,7 +196,7 @@ int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
 const String version = '0.9.78';
-const String subVersion = '.33';
+const String subVersion = '.34';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing
@@ -734,12 +735,6 @@ Future<int> globalInit() async {
   trace(debugCount);
   dynamic initValue = await Future.wait([
     getAllPermission(),
-    Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    ),
-    // need to follow  to initialize firebase https://firebase.google.com/docs/flutter/setup?platform=ios
-    // need to run C:\Users\harto\AppData\Local\Pub\Cache\bin\flutterfire configure
-    // in the project folder
     SharedPreferences.getInstance(),
   ]);
   internetConnection.onStatusChange.listen((status) {
@@ -750,7 +745,7 @@ Future<int> globalInit() async {
   });
   debugCount = -24;
   trace(debugCount);
-  prefs = initValue[2];
+  prefs = initValue[1];
   firestoreDb = FirebaseFirestore.instance;
   fsCollection = "users_$fsName";
   fsMsgCollection = msgPrefix;

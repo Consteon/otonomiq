@@ -1,36 +1,37 @@
-import 'package:flutter/material.dart';
 import 'dart:async';
-import 'package:flutter_localizations/flutter_localizations.dart';
+import 'dart:convert';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 // import 'package:geolocator/geolocator.dart';
 import 'package:get/get_navigation/src/root/get_material_app.dart';
-import 'widget/build_theme.dart';
+
 import 'api.dart';
+import 'bloc_submit/bloc.dart';
+import 'bloc_timer/bloc.dart';
 import 'firebase_options.dart';
 import 'firestore_repository/firestore_generic_repository.dart';
 import 'firestore_repository/proxy_repository.dart';
 import 'firestore_repository/table_repository.dart';
 import 'global.dart';
-import 'page/vertriz_app.dart';
-import 'redux/screen_transaction.dart';
-import 'widget/ui_component.dart';
 import 'login/api/user_repository.dart';
 import 'login/bloc_authentication/bloc.dart';
-import 'login/page/tos_page.dart';
-import 'login/page/splash_screen.dart';
-import 'login/page/simple_bloc_delegate.dart';
-import 'page/test_page.dart';
-import 'bloc_timer/bloc.dart';
 import 'login/bloc_login/bloc.dart';
-import 'ticker.dart';
+import 'login/page/simple_bloc_delegate.dart';
+import 'login/page/splash_screen.dart';
+import 'login/page/tos_page.dart';
 import 'notification/bloc.dart';
-import 'bloc_submit/bloc.dart';
+import 'page/test_page.dart';
+import 'page/vertriz_app.dart';
 import 'part/build_part/channel.dart';
+import 'redux/screen_transaction.dart';
+import 'ticker.dart';
+import 'widget/build_theme.dart';
+import 'widget/ui_component.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
 // Sets a platform override for desktop to avoid exceptions. See
@@ -59,6 +60,10 @@ void main() async {
   debugCount = -2;
   trace(debugCount);
   await globalInit();
+  // Paint a loading screen immediately so the user never stares at a blank
+  // white window while the (cache-backed) bootstrap below runs. The real app
+  // replaces this with a second runApp() call once the home shell is ready.
+  runApp(const _BootstrapLoadingApp());
   debugCount = -3;
   trace(debugCount);
   // await apiTest();
@@ -92,9 +97,9 @@ void main() async {
     //         .shortestSide) <
     //     600;
     mobileLayout = (MediaQueryData.fromView(
-                WidgetsBinding.instance.platformDispatcher.views.first)
-            .size
-            .shortestSide) <
+        WidgetsBinding.instance.platformDispatcher.views.first)
+        .size
+        .shortestSide) <
         600;
     if (mobileLayout) {
       // mobile
@@ -157,10 +162,7 @@ void main() async {
     if (myLif == null) {
       try {
         // Attempt 1: Normal write
-        await storage.write(
-            key: 'myLif',
-            value: defaultLifKey
-        );
+        await storage.write(key: 'myLif', value: defaultLifKey);
       } on PlatformException catch (e) {
         // Detect the specific "NullPointerException" or general platform failure
         devPrint("Storage corrupted. Resetting... Error: $e");
@@ -170,10 +172,7 @@ void main() async {
         await storage.deleteAll();
 
         // 2. Retry the write immediately after the wipe
-        await storage.write(
-            key: 'myLif',
-            value: defaultLifKey
-        );
+        await storage.write(key: 'myLif', value: defaultLifKey);
       } catch (e) {
         // Fallback for other non-platform errors
         devPrint("Unexpected error writing to storage: $e");
@@ -236,25 +235,27 @@ void main() async {
 //    BlocSupervisor.delegate = SimpleBlocDelegate();
     Bloc.observer = SimpleBlocDelegate();
     state = transactionStore.state.screenTx;
-    int launchOk = 0;
     if (state['#INTERFACE_KEY'] != null &&
         state['#INTERFACE_KEY'] != '' &&
         state['#INTERFACE_KEY'] != loginSsid) {
       subscribeToEvent(state['#INTERFACE_KEY']);
     }
+    // launchCheck() does FCM setup + Firestore reads + a pin-hash cloud call.
+    // None of it is needed to paint the home shell (already built from cache),
+    // so run it off the critical path after the first frame instead of
+    // blocking startup on it.
     if (state['#VID'] != null && state['#VID'] != '') {
-      launchOk = await launchCheck(); // Check launch status
-      debugCount = 8;
-      trace(debugCount);
+      unawaited(launchCheck().then((launchOk) {
+        debugCount = 8;
+        trace(debugCount);
+        if (launchOk > 0) {
+          debugPrint('launchCheck returned $launchOk (background)');
+        }
+      }).catchError((e) {
+        debugPrint('launchCheck error (background): $e');
+      }));
     }
-    // setTransactionOK('main');
-    if (launchOk > 0) {
-      // error in launching
-      debugCount = launchOk;
-      runApp(TestApp(
-        flag: 'launchOK = $launchOk',
-      ));
-    } else {
+    {
       debugCount = 9;
       /*
       // argon2 example
@@ -274,8 +275,8 @@ void main() async {
           providers: [
             BlocProvider<AuthenticationBloc>(
                 create: (context) =>
-                    AuthenticationBloc(userRepository: userRepository)
-                      ..add(AppStarted())),
+                AuthenticationBloc(userRepository: userRepository)
+                  ..add(AppStarted())),
             BlocProvider<TimerBloc>(
               create: (BuildContext context1) {
                 TimerBloc timerBloc = TimerBloc(ticker: Ticker());
@@ -319,6 +320,20 @@ void main() async {
     ));
   }
 } // end of main
+
+// Minimal loading shell shown by the first runApp() call while the bootstrap
+// in main() finishes. Replaced by the real App once the home shell is ready.
+class _BootstrapLoadingApp extends StatelessWidget {
+  const _BootstrapLoadingApp();
+
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: SplashScreen(),
+    );
+  }
+}
 
 class AppBlocObserver extends BlocObserver {
   @override

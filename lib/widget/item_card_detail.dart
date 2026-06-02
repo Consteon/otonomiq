@@ -96,7 +96,7 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
 
   String _resolveText(String template, List<dynamic> row) {
     return replaceMarker(
-        template, row, widget.component['indexStart'] ?? 1, false);
+        template, row, int.tryParse((widget.component['indexStart'] ?? '1').toString()) ?? 1, false);
   }
 
   List<dynamic> _applyConditions(List<dynamic> data) {
@@ -415,45 +415,49 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
                               size: 18, color: const Color(0xFF6B7280)),
                         ),
                         const SizedBox(width: 10),
-                        Text(
-                          typeLabel.toUpperCase(),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF6B7280),
-                            letterSpacing: 0.8,
+                        Expanded(
+                          child: Text(
+                            typeLabel.toUpperCase(),
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF6B7280),
+                              letterSpacing: 0.8,
+                            ),
                           ),
                         ),
-                        const Spacer(),
                         if (status.isNotEmpty)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: statusBg,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 6,
-                                  height: 6,
-                                  decoration: BoxDecoration(
-                                    color: accentColor,
-                                    shape: BoxShape.circle,
+                          Flexible(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: statusBg,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: BoxDecoration(
+                                      color: accentColor,
+                                      shape: BoxShape.circle,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 6),
-                                Text(
-                                  statusDisplay,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: accentColor,
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    statusDisplay,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: accentColor,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                       ],

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'table_repository.dart';
 //import 'table_repository.dart';
@@ -76,16 +77,13 @@ Future<String?> checkIfUserReset(var user, String did) async {
   // check
   String? result;
   String path = topCollection;
-  final query = await firestoreDb
-      .collection(fsCollection)
-      .where("u", isEqualTo: user.uid)
-      .get();
+  final query = await _getResilient(
+      firestoreDb.collection(fsCollection).where("u", isEqualTo: user.uid));
   if (query.docs.length > 0) {
     path += '/${query.docs[0].id}';
-    final device = await query.docs[0].reference
+    final device = await _getResilient(query.docs[0].reference
         .collection('dvc')
-        .where('did', isEqualTo: did)
-        .get();
+        .where('did', isEqualTo: did));
     if (device.docs.length > 0) {
       result =
       '$path/dvc${separator[1]}${device.docs[0].id}'; // get first record
@@ -93,6 +91,25 @@ Future<String?> checkIfUserReset(var user, String did) async {
   } // end if (query.docs.length >0)
   return result;
 } // end of checkIfUserReset
+
+// Read from the local Firestore cache first (instant on app reopen, even right
+// after the process was killed), and only hit the server when the cache has no
+// data yet (e.g. first run). Falls back to a server read with a timeout so a
+// slow Firestore handshake can never block cold start indefinitely.
+// Server-side changes (e.g. device reset on another phone) are still caught
+// shortly after by the subscribeToUserReset() snapshot listener.
+Future<QuerySnapshot<Map<String, dynamic>>> _getResilient(
+    Query<Map<String, dynamic>> query) async {
+  try {
+    final cached = await query.get(const GetOptions(source: Source.cache));
+    if (cached.docs.isNotEmpty) return cached;
+  } catch (_) {
+    // no cached data available -> fall through to a server read
+  }
+  return await query
+      .get(const GetOptions(source: Source.server))
+      .timeout(const Duration(seconds: 12));
+} // end of _getResilient
 
 Future subscribeToUserReset(String docId) async {
   try {
