@@ -186,6 +186,7 @@ import 'global2.dart';
   0.9.78.32 (260522) OO : udpate approval, etc
   0.9.78.33 (260526) OO : update request incident, fix bug log history
   0.9.78.34 (260602) OO : fix bug front camera stuck, blank white screen when open apps, implement addToEvent to Firestore
+  0.9.78.35 (260602) OO : fix bug in attendance_qr_selfie_gps_verify
 */
 // ========= Constants ==========================
 const iOSDevPage = false;
@@ -196,7 +197,7 @@ int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
 const String version = '0.9.78';
-const String subVersion = '.34';
+const String subVersion = '.35';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing
