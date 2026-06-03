@@ -388,6 +388,9 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
       String finalQrText = empty;
       String mock = 'Unknown';
       dynamic tArray = diamondTextToList(widget.component['text'] ?? []);
+      while (tArray.length < 27) {
+        tArray.add(tArray.length == 26 ? 'Scan QR' : '');
+      }
 
       // Platform messages may fail, so we use a try/catch PlatformException.
       try {
@@ -811,9 +814,10 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
       String selfieUrl = '';
       String qrResult = '';
       dynamic tArray = diamondTextToList(widget.component['text'] ?? []);
-      int lastTextIndex = 26;
-      if (tArray.length == lastTextIndex) {
-        tArray.add('Scan QR');
+      // This widget reads text slots up to index 26 (26 = QR button label).
+      // Tenants whose sheet supplies fewer fields must not crash on access.
+      while (tArray.length < 27) {
+        tArray.add(tArray.length == 26 ? 'Scan QR' : '');
       }
       if (widget.component['opMode'] == 'qr-checker-single' ||
           widget.component['opMode'] == 'qr-checker-continuous') {
@@ -936,6 +940,9 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
     var topPad = 6.0;
     double fontSize = (widget.component['fontSize'] ?? 14.0).toDouble();
     var textArray = diamondTextToList(widget.component['text']);
+    while (textArray.length < 27) {
+      textArray.add(textArray.length == 26 ? 'Scan QR' : '');
+    }
     Widget button1;
     if (widget.single) {
       button1 = Center(
