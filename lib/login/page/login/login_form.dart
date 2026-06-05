@@ -44,9 +44,15 @@ class _LoginFormState extends State<LoginForm> {
   LoginBloc? _loginBloc;
   bool _tosOk = false;
   bool _isLoadingDialogShown = false;
+  // Stable keys: created once, not per-build, so rebuilds don't throw the
+  // social buttons' elements away.
+  final GlobalKey _appleBtnKey = GlobalKey();
+  final GlobalKey _googleBtnKey = GlobalKey();
+  // The loading dialog's own route, captured when shown so we can remove
+  // exactly it — not whatever else happens to be on top of the navigator.
+  ModalRoute<dynamic>? _loadingDialogRoute;
   String tText = 'a';
   UserRepository get _userRepository => widget._userRepository;
-  final bool _wait = false;
 
   bool get isPopulated =>
 //      _emailController.text.isNotEmpty && _passwordController.text.isNotEmpty;
@@ -71,8 +77,7 @@ class _LoginFormState extends State<LoginForm> {
   }
 
   bool isLoginProcessing(LoginState state) {
-    return (state.inLoginProcess && !state.isSuccess && !state.isFailure) ||
-        _wait;
+    return loginSpinnerVisible(state);
   }
 
   bool isInvNeeded(LoginState state) {
@@ -110,6 +115,7 @@ class _LoginFormState extends State<LoginForm> {
             barrierDismissible: false,
             barrierColor: Colors.black.withValues(alpha: 0.3),
             builder: (BuildContext ctx) {
+              _loadingDialogRoute = ModalRoute.of(ctx);
               return PopScope(
                 canPop: false,
                 child: Center(
@@ -159,7 +165,11 @@ class _LoginFormState extends State<LoginForm> {
           );
         } else if (!isLoginProcessing(state) && _isLoadingDialogShown) {
           _isLoadingDialogShown = false;
-          Navigator.of(context, rootNavigator: true).pop();
+          final route = _loadingDialogRoute;
+          _loadingDialogRoute = null;
+          if (route != null && route.isActive) {
+            Navigator.of(context, rootNavigator: true).removeRoute(route);
+          }
         }
 
         if (state.isFailure) {
@@ -598,7 +608,7 @@ class _LoginFormState extends State<LoginForm> {
                                   child: Opacity(
                                     opacity: _isLoginReady() ? 1.0 : 0.4,
                                     child: AppleLoginButton(
-                                      key: GlobalKey(),
+                                      key: _appleBtnKey,
                                       component: widget.component,
                                       country: _countryController.text,
                                       inv: _invController.text,
@@ -611,7 +621,7 @@ class _LoginFormState extends State<LoginForm> {
                                 child: Opacity(
                                   opacity: _isLoginReady() ? 1.0 : 0.4,
                                   child: GoogleLoginButton(
-                                    key: GlobalKey(),
+                                    key: _googleBtnKey,
                                     component: widget.component,
                                     country: _countryController.text,
                                     inv: _invController.text,

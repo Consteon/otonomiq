@@ -83,18 +83,12 @@ class LoginBloc extends Bloc<LoginEvent, LoginState> {
       // for login status > 100
       String uid,
       int status) async* {
-    state.update(
-      inLoginProcess: true,
-    );
     yield LoginState.loginError(state.currentState, state.signInMethod, status);
   } // end of _mapLoginFailedWithStatusToState
 
   Stream<LoginState> _mapInvitationLoginFailedToState(
       String inv, String country, String uid, int status) async* {
     try {
-      state.update(
-        inLoginProcess: true,
-      );
       switch (status) {
         case 0:
           yield LoginState.success(1, state.signInMethod, uid);
@@ -148,98 +142,93 @@ class LoginBloc extends Bloc<LoginEvent, LoginState> {
 
   Stream<LoginState> _mapLoginWithGooglePressedToState(
       String country, String inv) async* {
-    var googleSuccess = false;
     User? user;
     try {
-      state.update(
-        inLoginProcess: true,
-      );
       yield LoginState.loading(state.signInMethod);
       user = await _userRepository.signInWithGoogle();
-      if (user != null) {
-        googleSuccess = true;
-      }
     } catch (err) {
+      // Genuine sign-in error (network, Firebase credential, etc.).
       yield LoginState.firebaseLoginFailure(state.signInMethod, state.loginUid,
           state.loginVid, state.loginInv, state.loginCountry);
+      return;
     }
-    if (googleSuccess) {
-      try {
-        var loginResult = await _userRepository.aumLogin(
-            country, inv); // vertriz login procedure
-        switch (loginResult) {
-          case 0:
-            yield LoginState.success(-1, state.signInMethod, user!.uid);
-            break;
-          case 1:
-            yield LoginState.newUser(state.signInMethod, user!.uid);
-            break;
-          case 2:
-            yield LoginState.failure(state.currentState, state.signInMethod,
-                state.loginVid, state.loginInv, state.loginCountry);
-            break;
+    if (user == null) {
+      // User cancelled the account picker, or sign-in produced no user.
+      // Dismiss the spinner and return to the form without an error dialog.
+      yield LoginState.cancelled(state.signInMethod);
+      return;
+    }
+    try {
+      var loginResult = await _userRepository.aumLogin(
+          country, inv); // vertriz login procedure
+      switch (loginResult) {
+        case 0:
+          yield LoginState.success(-1, state.signInMethod, user.uid);
+          break;
+        case 1:
+          yield LoginState.newUser(state.signInMethod, user.uid);
+          break;
+        case 2:
+          yield LoginState.failure(state.currentState, state.signInMethod,
+              state.loginVid, state.loginInv, state.loginCountry);
+          break;
 
-          default:
-            yield LoginState.loginError(
-                state.currentState, state.signInMethod, loginResult);
-        }
-      } catch (_) {
-        yield LoginState.failure(state.currentState, state.signInMethod,
-            state.loginVid, state.loginInv, state.loginCountry);
+        default:
+          yield LoginState.loginError(
+              state.currentState, state.signInMethod, loginResult);
       }
+    } catch (_) {
+      yield LoginState.failure(state.currentState, state.signInMethod,
+          state.loginVid, state.loginInv, state.loginCountry);
     }
   } //end of _mapLoginWithGooglePressedToState
 
   Stream<LoginState> _mapLoginWithApplePressedToState(
       String country, String inv) async* {
-    var appleSuccess = false;
     User? user;
     try {
-      state.update(
-        inLoginProcess: true,
-      );
       yield LoginState.loading(state.signInMethod);
       user = await _userRepository.signInWithApple();
-      if (user != null) {
-        appleSuccess = true;
-      }
     } catch (err) {
+      // Genuine sign-in error (network, Firebase credential, etc.).
       yield LoginState.firebaseLoginFailure(state.signInMethod, state.loginUid,
           state.loginVid, state.loginInv, state.loginCountry);
+      return;
     }
-    if (appleSuccess) {
-      try {
-        var loginResult = await _userRepository.aumLogin(
-            country, inv); // vertriz login procedure
-        switch (loginResult) {
-          case 0:
-            yield LoginState.success(-1, state.signInMethod, user!.uid);
-            break;
-          case 1:
-            yield LoginState.newUser(state.signInMethod, user!.uid);
-            break;
-          case 2:
-            yield LoginState.failure(state.currentState, state.signInMethod,
-                state.loginVid, state.loginInv, state.loginCountry);
-            break;
+    if (user == null) {
+      // User cancelled the Apple sheet, or sign-in produced no user.
+      // Dismiss the spinner and return to the form without an error dialog.
+      yield LoginState.cancelled(state.signInMethod);
+      return;
+    }
+    try {
+      var loginResult = await _userRepository.aumLogin(
+          country, inv); // vertriz login procedure
+      switch (loginResult) {
+        case 0:
+          yield LoginState.success(-1, state.signInMethod, user.uid);
+          break;
+        case 1:
+          yield LoginState.newUser(state.signInMethod, user.uid);
+          break;
+        case 2:
+          yield LoginState.failure(state.currentState, state.signInMethod,
+              state.loginVid, state.loginInv, state.loginCountry);
+          break;
 
-          default:
-            yield LoginState.loginError(
-                state.currentState, state.signInMethod, loginResult);
-        }
-      } catch (_) {
-        yield LoginState.failure(state.currentState, state.signInMethod,
-            state.loginVid, state.loginInv, state.loginCountry);
+        default:
+          yield LoginState.loginError(
+              state.currentState, state.signInMethod, loginResult);
       }
+    } catch (_) {
+      yield LoginState.failure(state.currentState, state.signInMethod,
+          state.loginVid, state.loginInv, state.loginCountry);
     }
   } //end of _mapLoginWithApplePressedToState
 
   Stream<LoginState> _mapInvitationLoginPressedToState(
       String inv, String uid) async* {
     try {
-      state.update(
-        inLoginProcess: true,
-      );
       int loginResult;
       if (demoApp) {
         loginResult = await _userRepository.invitationLoginDemo(inv);

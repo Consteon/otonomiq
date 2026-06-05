@@ -188,6 +188,7 @@ import 'global2.dart';
   0.9.78.34 (260602) OO : fix bug front camera stuck, blank white screen when open apps, implement addToEvent to Firestore
   0.9.78.35 (260602) OO : fix bug in attendance_qr_selfie_gps_verify
   0.9.79.01 (260604) OO : Release
+  0.9.79.02 (260605) OO : fix loading bug
 */
 // ========= Constants ==========================
 const iOSDevPage = false;
@@ -198,7 +199,7 @@ int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
 const String version = '0.9.79';
-const String subVersion = '.01';
+const String subVersion = '.02';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing
@@ -254,6 +255,10 @@ RxMap<String, bool> tableSourceUpdated =
     {'default': false}.obs; // State management for table
 RxMap<String, dynamic> tableContent =
     {'default': []}.obs; // content of table in ready to use array
+// Char-code map subcollections (e.g. `site`, `workforce`): each entry is a list
+// of raw Firestore doc maps (NOT positional `c`-arrays like `tableContent`).
+RxMap<String, List<Map<String, dynamic>>> mapTableContent =
+    <String, List<Map<String, dynamic>>>{}.obs;
 final displayRefresher = true.obs; // change this for updating screen
 final internetConnectionFlag = false.obs; // read by internetConnected()
 final transactionOKFlag = false.obs; // read by transactionOK()

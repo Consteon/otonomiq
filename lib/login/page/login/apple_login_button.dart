@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../login/page/login/login.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import '../../../global.dart';
 
 class AppleLoginButton extends StatelessWidget {
   final _component;
@@ -34,10 +33,8 @@ class AppleLoginButton extends StatelessWidget {
           elevation: 0,
         ),
         onPressed: () {
-          rootThis.setState(() {
-            rootThis.wait = true;
-            rootThis.touch = !rootThis.touch;
-          });
+          // The spinner is driven by the bloc's loading state (login_form
+          // dialog + main_page LoginWaitScreen), not by rootThis.wait.
           BlocProvider.of<LoginBloc>(context).add(
             LoginWithApplePressed(country: _country, inv: _inv),
           );

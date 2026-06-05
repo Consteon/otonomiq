@@ -1123,6 +1123,34 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }
+  } else if (tip == 'list_multiple_panel_card') {
+    try {
+      result = ListMultiplePanelCard(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'list_statistic_card') {
+    try {
+      result = ListStatisticCard(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
   } else if (tip == 'worker_card_detail') {
     try {
       result = WorkerCardDetail(
@@ -1153,15 +1181,29 @@ Widget buildDisplayComponent(
     }
   } else if (tip == 'timeline') {
     try {
-      result = Timeline(
-        key: txfKey,
-        component: component,
-        scrName: scrName,
-        lPad: lPad,
-        tPad: tPad,
-        rPad: rPad,
-        bPad: bPad,
-      );
+      final String tlVariant =
+      (component['variant'] ?? '').toString().trim().toLowerCase();
+      if (tlVariant == 'periodic') {
+        result = TimelinePeriodic(
+          key: txfKey,
+          component: component,
+          scrName: scrName,
+          lPad: lPad,
+          tPad: tPad,
+          rPad: rPad,
+          bPad: bPad,
+        );
+      } else {
+        result = Timeline(
+          key: txfKey,
+          component: component,
+          scrName: scrName,
+          lPad: lPad,
+          tPad: tPad,
+          rPad: rPad,
+          bPad: bPad,
+        );
+      }
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }

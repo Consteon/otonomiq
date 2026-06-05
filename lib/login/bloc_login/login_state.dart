@@ -99,6 +99,36 @@ class LoginState {
     );
   }
 
+  factory LoginState.cancelled(int last) {
+    // Social sign-in returned null: the user cancelled the account picker, or a
+    // silent failure produced no user. Terminal and NON-error — dismiss the
+    // spinner and leave the form usable. isFailure stays false (no error
+    // dialog) and loginUid stays empty (no accidental invitation navigation).
+    return LoginState(
+      isEmailValid: true,
+      isPasswordValid: true,
+      isSmsCodeValid: true,
+      isPhoneValid: true,
+      isTosOK: true, // keep social buttons enabled
+      isWaitingSmsCode: false,
+      isSubmitting: false,
+      loginUid: '',
+      isSuccess: false,
+      isFailure: false,
+      isVidOK: false,
+      isPinOK: false,
+      isFirebaseOK: false,
+      isUserFull: false,
+      loginVid: '',
+      loginInv: '',
+      loginCountry: '',
+      inLoginProcess: false,
+      loginStatus: 99,
+      signInMethod: last,
+      currentState: -1,
+    );
+  }
+
   factory LoginState.loading(int last) {
     return LoginState(
       isEmailValid: true,
@@ -540,3 +570,12 @@ class LoginState {
     }''';
   }
 }
+
+/// Single source of truth for the blocking login spinner's visibility.
+///
+/// Driven by [LoginState.isSubmitting] (true only for [LoginState.loading]) so
+/// every terminal/transitional state — newUser, success, failure, cancel —
+/// dismisses it. The previous predicate keyed off
+/// `inLoginProcess && !isSuccess && !isFailure`, which stayed true for the
+/// newUser state and left the spinner stuck over the invitation screen.
+bool loginSpinnerVisible(LoginState state) => state.isSubmitting;

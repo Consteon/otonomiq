@@ -250,7 +250,8 @@ class _DisplayListState extends State<DisplayList> {
                     padding: const EdgeInsets.only(left: 10, right: 10),
                     color: Colors.white,
                     child: OtqFormattedText(
-                        textData: textArray[0] ?? "",
+                        textData:
+                        (textArray.isNotEmpty ? textArray[0] : null) ?? "",
                         component: widget.component),
                   )),
             ],
