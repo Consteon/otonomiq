@@ -225,7 +225,16 @@ void main() async {
     // setTransactionOK('main');
     debugCount = 52;
     trace(debugCount);
-    await readSettingsStart(myLif, 1); // *** need to delete
+    // Watchdog: never let the (possibly network-bound) settings load block the
+    // splash forever. On timeout we proceed to runApp and mount the home shell
+    // from cache; the secondary background loader refreshes pages a moment
+    // later. The inner http.post calls also have their own 15s timeouts.
+    await readSettingsStart(myLif, 1).timeout(
+      const Duration(seconds: 25),
+      onTimeout: () {
+        devPrint('readSettingsStart timed out; mounting from cache');
+      },
+    ); // *** need to delete
     buildTheme(systemUIComponent[theme]);
     debugCount = 6;
     trace(debugCount);

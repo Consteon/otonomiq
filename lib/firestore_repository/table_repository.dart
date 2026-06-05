@@ -579,10 +579,12 @@ Future<String> _handleSummaryTableCreation(
         } else {
           switch (field[0]) {
             case 'master':
-              priceMapColumnIndex = int.parse(field[2] ?? '1');
+              priceMapColumnIndex =
+                  int.parse((field.length > 2 ? field[2] : null) ?? '1');
               break;
             case 'detail':
-              groupingColumnIndex = int.parse(field[2] ?? '1');
+              groupingColumnIndex =
+                  int.parse((field.length > 2 ? field[2] : null) ?? '1');
               break;
             case 'retention':
               retention = int.tryParse(field[1]) ?? 30160;
@@ -1358,9 +1360,16 @@ EventDoc buildEventDoc(
   required int appVid,
   required int timeReceived,
   required String receivingPage,
+  required String eventData,
 }) {
   final parsed = parseAddToEvent(block);
   final doc = <String, dynamic>{};
+  // Auto-inject Event-tab cols A/B/C (et/p/ev) on every event doc. Set BEFORE the
+  // DSL loop so an explicit DSL field of the same key still wins. Col D (Stored)
+  // is server-generated (processEvent2) and unavailable client-side.
+  doc['et'] = timeReceived.toString(); // A: Time (epoch ms)
+  doc['p'] = receivingPage; // B: Route
+  doc['ev'] = eventData; // C: Data (raw content blob)
   parsed.forEach((k, v) {
     if (k == '_collection') return; // write target, not a stored field
     doc[k] = resolveValueTokens(
@@ -1372,9 +1381,41 @@ EventDoc buildEventDoc(
       receivingPage: receivingPage,
     );
   });
-  // No blank-prefill: the document contains exactly the fields written in the
-  // DSL (token-resolved), nothing else.
+  // `r` is stored as int, not string. Only coerce when it parses cleanly;
+  // leave non-numeric values untouched. Other numeric-looking fields (an, cv,
+  // sn, ...) stay String — they are IDs/hashes that must not lose precision.
+  if (doc.containsKey('r')) {
+    final int? rInt = int.tryParse(doc['r'].toString().trim());
+    if (rInt != null) doc['r'] = rInt;
+  }
   return EventDoc((parsed['_collection'] ?? '').toString(), doc);
+}
+
+/// Firestore collection path for an event write, from the DSL line-1 collection.
+///
+/// New form `<tableDocId>//<subColl>` →
+/// `MobileTable/<vid>/tables/<tableDocId>/<subColl>` — a subcollection parallel
+/// to `site`/`workforce` (5 segments, valid; matches subscribeToMapCollection).
+/// Legacy plain name → `MobileTable/<vid>/tables/<name>/content`.
+///
+/// The legacy path MUST keep the trailing `/content` (a plain name alone yields
+/// an even-segment, invalid collection). The new `//` form MUST NOT, or it
+/// yields a 6-segment even path that `.collection()` rejects. Returns '' when
+/// the doc id / name is empty (caller skips).
+String eventCollectionPath(String rawColl, int eventTableVid) {
+  final String coll = rawColl.trim();
+  if (coll.contains(folderSeparator)) {
+    final List<String> seg = coll.split(folderSeparator);
+    final String docId = seg.first.trim();
+    if (docId.isEmpty) return '';
+    final String sub = (seg.length > 1 && seg.last.trim().isNotEmpty)
+        ? seg.last.trim()
+        : 'content';
+    return 'MobileTable/$eventTableVid/tables/$docId/$sub';
+  }
+  final String tableName = getDocumentName(coll);
+  if (tableName.isEmpty || tableName == 'NO_NAME') return '';
+  return 'MobileTable/$eventTableVid/tables/$tableName/content';
 }
 
 /// Decode + ◆-split the event segment, build each doc, batch-write atomically
@@ -1404,24 +1445,24 @@ Future<void> writeToEvent(String? inp, String eventRowString) async {
         appVid: appCodeController.applicationTableVid,
         timeReceived: timeReceived,
         receivingPage: receivingPage,
+        eventData: eventRow[2].toString(),
       );
       // Line 1 of the DSL is a TABLE NAME (like addToTable), not a raw Firestore
       // collection path. The event doc lands in the same location as addToTable
       // so the existing MobileTable security rules apply:
       //   MobileTable/<tableVid>/tables/<tableName>/content/<autoId>
-      final String tableName = getDocumentName(built.collection);
-      if (tableName.isEmpty || tableName == 'NO_NAME') {
-        debugPrint('[writeToEvent] skip: no table name from '
-            '"${built.collection}"');
-        continue;
-      }
       int eventTableVid = tableVid;
       final String tvRaw = (built.doc['tablevid'] ?? '').toString().trim();
       if (tvRaw.isNotEmpty) {
         eventTableVid = int.tryParse(tvRaw) ?? tableVid;
       }
-      final String path =
-          'MobileTable/$eventTableVid/tables/$tableName/content';
+      // tablevid is routing metadata only — used for the path, not stored.
+      built.doc.remove('tablevid');
+      final String path = eventCollectionPath(built.collection, eventTableVid);
+      if (path.isEmpty) {
+        debugPrint('[writeToEvent] skip: no path from "${built.collection}"');
+        continue;
+      }
       final docRef = firestoreDb.collection(path).doc();
       debugPrint('[writeToEvent] queue $path/${docRef.id} '
           'keys=${built.doc.keys.length} doc=${built.doc}');
@@ -1819,6 +1860,47 @@ List<dynamic>? findData(String tableCode, String recordKey) {
   } //end if (table != null)
   return rec;
 } // end of findData
+
+// Guards against double-listening to the same map subcollection.
+final Set<String> _mapSubscribed = <String>{};
+
+/// Listen to a char-code-map subcollection at
+/// `MobileTable/<appVid>/tables/<tableDocId>/<subColl>` and store each doc as a
+/// raw `Map<String,dynamic>` under `mapTableContent[code]`. Mirrors the
+/// `proxy_repository` `.data()` listener pattern. Idempotent per `code`.
+Future<void> subscribeToMapCollection(
+  String appVid,
+  String tableDocId,
+  String subColl,
+  String code,
+) async {
+  if (appVid.isEmpty || tableDocId.isEmpty || subColl.isEmpty) return;
+  if (_mapSubscribed.contains(code)) return;
+  _mapSubscribed.add(code);
+  final String path =
+      '$mobileTable/$appVid/$mobileTableCollection/$tableDocId/$subColl';
+  try {
+    firestoreDb.collection(path).snapshots().listen(
+      (snap) {
+        // firestoreDb is `dynamic`, so snap.docs.map(...).toList() infers
+        // List<dynamic> at runtime and fails to assign to the typed store.
+        // Build the typed list explicitly (mirrors subscribeToTable's loop).
+        final List<Map<String, dynamic>> docs = <Map<String, dynamic>>[];
+        for (final d in snap.docs) {
+          final dynamic data = d.data();
+          if (data is Map) {
+            docs.add(Map<String, dynamic>.from(data));
+          }
+        }
+        mapTableContent[code] = docs;
+      },
+      onError: (e) => devPrint('subscribeToMapCollection $path error: $e'),
+    );
+  } catch (e) {
+    devPrint('subscribeToMapCollection $path failed: $e');
+    _mapSubscribed.remove(code);
+  }
+}
 
 Future subscribeToTable(
   String rawTableCode,

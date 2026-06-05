@@ -1,18 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import '../../global.dart';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../redux/screen_transaction.dart';
-import '../../api.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import '../../ftz_secret.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
+import '../../api.dart';
 import '../../firestore_repository/firestore_generic_repository.dart';
 import '../../firestore_repository/proxy_repository.dart';
 import '../../firestore_repository/table_repository.dart';
+import '../../ftz_secret.dart';
+import '../../global.dart';
+import '../../redux/screen_transaction.dart';
 // idea from https://medium.flutterdevs.com/google-sign-in-with-flutter-8960580dec96
 
 class UserRepository {
@@ -23,9 +24,9 @@ class UserRepository {
   UserRepository({FirebaseAuth? firebaseAuth, GoogleSignIn? googleSignin})
       : _firebaseAuth = firebaseAuth ?? FirebaseAuth.instance,
         _googleSignIn = googleSignin ?? GoogleSignIn.instance;
-            // GoogleSignIn();
-              // signInOption: SignInOption.standard,
-              // scopes: [
+  // GoogleSignIn();
+  // signInOption: SignInOption.standard,
+  // scopes: [
 //                'https://www.googleapis.com/auth/drive',
 //                'https://www.googleapis.com/auth/drive.appdata',
 //                'https://www.googleapis.com/auth/spreadsheets',
@@ -33,8 +34,6 @@ class UserRepository {
 //             );
 
   Future<User?> signInWithGoogle() async {
-    GoogleSignInAccount? googleUser;
-    User? currentUser;
     const List<String> scopes = <String>[
       'email',
       // 'https://www.googleapis.com/auth/drive',
@@ -42,106 +41,87 @@ class UserRepository {
       // 'https://www.googleapis.com/auth/spreadsheets',
     ];
     try {
+      // 1. Interactive sign-in.
       // googleUser = await _googleSignIn.authenticate(scopeHint: scopes);
-      googleUser = await _googleSignIn.authenticate();
-    } catch (er) {
-      devPrint('signInWithGoogle error : $er');
-    }
+      final GoogleSignInAccount googleUser = await _googleSignIn.authenticate();
 
-    if (googleUser != null) {
-      final GoogleSignInClientAuthorization? auth =
-      await googleUser.authorizationClient.authorizeScopes(scopes);
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-      final String? accessToken = auth?.accessToken;
+      // 2. Authorize scopes and read the tokens. `.authentication` is sync.
+      final GoogleSignInClientAuthorization auth =
+          await googleUser.authorizationClient.authorizeScopes(scopes);
+      final GoogleSignInAuthentication googleAuth = googleUser.authentication;
+      final String accessToken = auth.accessToken;
       final String? idToken = googleAuth.idToken;
-
-      // Ensure both tokens are available before creating the credential.
-      if (accessToken == null || idToken == null) {
-        devPrint('Missing Google Auth Token after authorization.');
-        return null;
+      if (idToken == null) {
+        throw StateError('Missing Google auth token after authorization.');
       }
+
+      // 3. Exchange for a Firebase credential and sign in.
       final AuthCredential credential = GoogleAuthProvider.credential(
-        // accessToken: googleAuth.accessToken,
         accessToken: accessToken,
-        idToken: googleAuth.idToken,
+        idToken: idToken,
       );
-      devPrint(googleUser);
-      devPrint(googleAuth);
-      devPrint(credential);
-      late UserCredential userAuth;
-      try {
-        userAuth = await _firebaseAuth.signInWithCredential(credential);
-      } catch (e) {
-        devPrint(e);
+      final UserCredential userAuth =
+          await _firebaseAuth.signInWithCredential(credential);
+      final User? user = userAuth.user;
+      if (user == null) {
+        throw StateError(
+            'Firebase returned no user for the Google credential.');
       }
-      User? user;
-      try {
-        user = userAuth.user;
-      } catch (e) {
-        devPrint(e);
-      }
-      assert(user!.email != null);
-      assert(user!.displayName != null);
-      assert(!user!.isAnonymous);
-      // assert(await user!.getIdToken() != null);
-      devPrint('${user!.displayName} => ${user.uid}');
+      devPrint('${user.displayName} => ${user.uid}');
 
-      currentUser = _firebaseAuth.currentUser!;
-      assert(user.uid == currentUser.uid);
+      final User currentUser = _firebaseAuth.currentUser ?? user;
       transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
         '#FIREBASE_USER': currentUser,
         '#AUTH_METHOD': 'Google',
       }))); // Set currentUser as FIREBASE_USER
-//    var sKey = await getUserDataFirebase(currentUser);
-    } // end of googleUser
-    return currentUser;
+      return currentUser;
+    } on Object catch (e) {
+      // User dismissed the picker / scope grant -> null (bloc emits
+      // `cancelled`, silent). Any genuine failure rethrows -> error dialog.
+      if (isSocialSignInCancellation(e)) {
+        return null;
+      }
+      rethrow;
+    }
   } // end of signInWithGoogle
 
   Future<User?> signInWithApple() async {
-    User? currentUser;
-    late UserCredential userAuth;
-    dynamic appleCredential;
-    dynamic oauthCredential;
+    // 1. Request the Apple ID credential. A user cancel returns null (-> bloc
+    //    emits `cancelled`, silent); any other failure rethrows (-> error
+    //    dialog). Mirrors signInWithGoogle.
+    final AuthorizationCredentialAppleID appleCredential;
     try {
-      try {
-        appleCredential = await SignInWithApple.getAppleIDCredential(
-          scopes: [
-            AppleIDAuthorizationScopes.email,
-            AppleIDAuthorizationScopes.fullName,
-          ],
-          // nonce: 'YOUR_NONCE', // (Optional) Generate and use a nonce for additional security
-        );
-      } catch (eApple) {
-        devPrint(eApple);
+      appleCredential = await SignInWithApple.getAppleIDCredential(
+        scopes: [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+        // nonce: 'YOUR_NONCE', // (Optional) nonce for additional security
+      );
+    } on Object catch (eApple) {
+      if (isSocialSignInCancellation(eApple)) {
+        return null;
       }
-      // 2. Create an `OAuthCredential` from the credential returned by Apple
-      try {
-        oauthCredential = OAuthProvider("apple.com").credential(
-          idToken: appleCredential.identityToken,
-          accessToken: appleCredential.authorizationCode,
-        );
-      } catch (eAuth) {
-        devPrint(eAuth);
-      }
-      userAuth = await _firebaseAuth.signInWithCredential(oauthCredential);
-      // userAuth = await _firebaseAuth.signInWithProvider(AppleAuthProvider());
-    } catch (e) {
-      devPrint(e);
+      rethrow;
     }
-    User? user;
-    try {
-      user = userAuth.user;
-    } catch (e) {
-      devPrint(e);
-    }
-    // assert(user!.email != null);
-    // assert(user!.displayName != null);
-    // assert(!user!.isAnonymous);
-    devPrint('${user!.displayName} => ${user.uid}');
 
-    currentUser = _firebaseAuth.currentUser!;
-    assert(user.uid == currentUser.uid);
+    // 2. Create an `OAuthCredential` from the credential returned by Apple.
+    final OAuthCredential oauthCredential =
+        OAuthProvider("apple.com").credential(
+      idToken: appleCredential.identityToken,
+      accessToken: appleCredential.authorizationCode,
+    );
+
+    // 3. Sign in to Firebase. A genuine failure propagates -> error dialog.
+    final UserCredential userAuth =
+        await _firebaseAuth.signInWithCredential(oauthCredential);
+    final User? user = userAuth.user;
+    if (user == null) {
+      throw StateError('Firebase returned no user for the Apple credential.');
+    }
+    devPrint('${user.displayName} => ${user.uid}');
+
+    final User currentUser = _firebaseAuth.currentUser ?? user;
     transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
       '#FIREBASE_USER': currentUser,
       '#AUTH_METHOD': 'Apple ID',
@@ -188,6 +168,16 @@ class UserRepository {
       email: email,
       password: password,
     );
+  }
+
+  bool isSocialSignInCancellation(Object error) {
+    if (error is GoogleSignInException) {
+      return error.code == GoogleSignInExceptionCode.canceled;
+    }
+    if (error is SignInWithAppleAuthorizationException) {
+      return error.code == AuthorizationErrorCode.canceled;
+    }
+    return false;
   }
 
   /// Sends the code to the specified phone number.
@@ -375,8 +365,14 @@ class UserRepository {
             key: 'sd1',
             value: ftzSecretOneSeed); //   put Account key in secure storage
         var nxPage = home; //   set default page = Home
-        loadHistory(clearHistory, 'aumLogin (user_repository) <= async' );
-        readSettings(sk, 1).then((_) {
+        loadHistory(clearHistory, 'aumLogin (user_repository) <= async');
+        // Load the new user's pages concurrently with reLogin(), but capture
+        // the future so we can await it below. readSettings persists the
+        // @screenUI/@systemUI cache when it completes (api.dart) — login must
+        // not report success until that cache is written, otherwise a kill
+        // right after login leaves an empty cache and the next warm reopen is
+        // forced onto the (slow/possibly-stalled) network page-fetch path.
+        final Future<void> settingsReady = readSettings(sk, 1).then((_) {
           transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
               {'#REFRESH': false, '#CURRENT_ROUTE': nxPage})));
           List<Widget> newElementList = reloadPage(nxPage);
@@ -388,6 +384,13 @@ class UserRepository {
           });
         });
         result = await reLogin();
+        try {
+          await settingsReady; // ensure the page cache is persisted before success
+        } catch (e) {
+          // A page-fetch failure shouldn't fail the login (warm reopen falls
+          // back to the now-timed-out network path); just log it.
+          devPrint('readSettings during login failed: $e');
+        }
         subscribeToUserReset(getDevicePath(ds));
       } else {
         result = ds;

@@ -1208,20 +1208,15 @@ String timeOfDayToGSheet(TimeOfDay myTime, bool utc) {
 
 void getLqrList(String? proxySsid) async {
   Map<String, dynamic> lqr = {};
-  Map<String, dynamic> rLoc = {};
   String? lqrString;
   try {
     lqrString = await secureRead(
         key: "lqrList"); //= get documentID of entry in msg_xxxx collection
     if (lqrString != null) {
       lqr = json.decode(lqrString);
-      Map<String, dynamic> lRef = {
-        lqr.entries.first.key: lqr.entries.first.value
-      };
-      transactionStore.dispatch(
-          UpdateScreenTxAction(ScreenTransaction({'#LQR_REF': lRef})));
       transactionStore.dispatch(
           UpdateScreenTxAction(ScreenTransaction({'#LQR_LIST': lqr})));
+      debugPrint('[getLqrList] cache #LQR_LIST=$lqr');
     }
   } catch (er) {
     errorReport(er);
@@ -1239,12 +1234,6 @@ void getLqrList(String? proxySsid) async {
     dynamic lqrArray = json.decode(locString.body)[0];
     lqr = {};
 
-    rLoc[lqrArray[0][3]] = [
-      lqrArray[0][2],
-      lqrArray[0][0],
-      lqrArray[0][1],
-      lqrArray[0][4]
-    ];
     for (int i = 0; i < lqrArray.length && lqrArray[i][3] != ""; i++) {
       lqr[lqrArray[i][3]] = [
         lqrArray[i][2],
@@ -1257,9 +1246,8 @@ void getLqrList(String? proxySsid) async {
     errorReport(eLoc);
   }
   transactionStore
-      .dispatch(UpdateScreenTxAction(ScreenTransaction({'#LQR_REF': rLoc})));
-  transactionStore
       .dispatch(UpdateScreenTxAction(ScreenTransaction({'#LQR_LIST': lqr})));
+  debugPrint('[getLqrList] net #LQR_LIST=$lqr');
   storage.write(key: "lqrList", value: json.encode(lqr));
 } //end of getLqrList
 
@@ -1734,6 +1722,18 @@ Future<bool> newUpdateApp() async {
   return (lastVersion != null && lastVersion != '$version$subVersion');
 } // end of newUpdateApp
 
+/// Persist the current home/system page maps to SharedPreferences so the next
+/// (warm) startup renders the home shell from cache instead of re-fetching.
+/// Guarded so an encode failure can't crash startup.
+void _persistUiCache() {
+  try {
+    prefs.setString('@screenUI', json.encode(screenUIComponent));
+    prefs.setString('@systemUI', json.encode(systemUIComponent));
+  } catch (e) {
+    devPrint('save screenUI/systemUI failed: $e');
+  }
+}
+
 Future<void> readSettingsStart(String? lifKey, int opt) async {
   // opt 1 = regular startup, load only home.
   // opt 2 = fastened setup, load as second loader in asyncAppStartup2
@@ -1816,8 +1816,9 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
         try {
           FunctionBody functionBody = getFunctionBody(
               settingKey, [systemJsonRange, guestRange, lifSetting]);
-          response = await http.post(Uri.parse(functionBody.url),
-              body: functionBody.body);
+          response = await http
+              .post(Uri.parse(functionBody.url), body: functionBody.body)
+              .timeout(const Duration(seconds: 15));
           debugCount = 5213;
           trace(debugCount);
           lastPages = response.body;
@@ -1901,10 +1902,23 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
         }
         debugCount = 5227;
         trace(debugCount);
-        await readUIPages(
-          settingKey,
-          guestIndex,
-        );
+        // #1 Persist the home/system pages from the FIRST fetch now — before
+        // the all-pages load below. Previously the save sat AFTER readUIPages
+        // inside the same try, so a readUIPages timeout (~15s) threw and SKIPPED
+        // the save → @screenUI stayed empty → every reopen re-fetched (the slow
+        // "Loading…"). Saving here breaks that cycle.
+        _persistUiCache();
+        // #2 On the startup-critical loader (opt 1) DON'T block home on the
+        // full all-pages fetch — the home page is already in screenUIComponent
+        // from the first fetch. The background loader (asyncAppStartup2 / opt 2,
+        // which runs right after home on every launch) fetches the complete
+        // page set and re-caches it.
+        if (opt != 1) {
+          await readUIPages(
+            settingKey,
+            guestIndex,
+          );
+        }
         debugCount = 5228;
         trace(debugCount);
       } else {
@@ -1915,23 +1929,19 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
       debugCount = 52282;
       trace(debugCount);
     } else {
-      String lastSystem = prefs.getString('@systemUI')!;
-      systemUIComponent.clear();
-      systemUIComponent = jsonDecode(lastSystem);
+      // Load the home shell from cache. Guard each key independently so a
+      // missing @systemUI can't NPE — keep whatever serverSetup already set.
+      final String? lastSystem = prefs.getString('@systemUI');
+      if (lastSystem != null) {
+        systemUIComponent.clear();
+        systemUIComponent = jsonDecode(lastSystem);
+      }
       screenUIComponent.clear();
       screenUIComponent = jsonDecode(lastPages);
       debugCount = 5229;
     } // end if (opt == 2 || lastPages.isEmpty)
     devPrint('saving screenUIComponent & systemUIComponent to pref');
-    // Encode once and persist; guard so an encode failure can't crash startup.
-    try {
-      final encScreen = json.encode(screenUIComponent);
-      final encSystem = json.encode(systemUIComponent);
-      prefs.setString('@screenUI', encScreen);
-      prefs.setString('@systemUI', encSystem);
-    } catch (e) {
-      devPrint('save screenUI/systemUI failed: $e');
-    }
+    _persistUiCache();
     debugCount = 52291;
     trace(debugCount);
     if (opt == 2) {
@@ -1960,8 +1970,9 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
 Future<void> readUIPages(String lifKey, int guestIndex) async {
   // read json part of lif and put them in screenUIComponent
   FunctionBody functionBody = getFunctionBody(settingKey, [screenJsonRange]);
-  var response =
-      await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+  var response = await http
+      .post(Uri.parse(functionBody.url), body: functionBody.body)
+      .timeout(const Duration(seconds: 15));
   var entryList = jsonDecode(response.body);
   entryList[0].forEach((scr) {
     var combination = combineJson(scr);
@@ -2018,8 +2029,9 @@ Future<void> readSettings(String lifKey, int opt) async {
       //opt == 2
       functionBody = getFunctionBody(settingKey, [screenJsonRange]);
     }
-    response =
-        await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+    response = await http
+        .post(Uri.parse(functionBody.url), body: functionBody.body)
+        .timeout(const Duration(seconds: 15));
   } catch (e) {
     errorReport(e);
   }
@@ -2528,7 +2540,14 @@ Future signOut() async {
   //updateData["fcm"] = "";
   updateData["ph1"] = "";
   try {
-    myDocRef.update(updateData);
+    // #FS_REF can be null on a warm-reopened session; this firestore
+    // housekeeping (in=false) is non-critical and must NEVER abort the logout
+    // UI reset below — otherwise the shell stays on the (nav-less) home page.
+    try {
+      myDocRef?.update(updateData);
+    } catch (e) {
+      devPrint('signOut firestore update skipped: $e');
+    }
     var pgName = routeStack.popAll();
     dynamic signUpKey;
     if (demoApp) {
@@ -2560,16 +2579,28 @@ Future signOut() async {
       prefs.remove('@screenUI'),
       prefs.remove('@lastGpsTime'),
     ]);
-    readSettings(signUpKey, 1).then((_) {
-      // constructAllPageElements();
-      transactionStore.dispatch(
-          UpdateScreenTxAction(ScreenTransaction({'#REFRESH': false})));
-      List<Widget> newElementList = reloadPage(pgName);
-      rootThis.setState(() {
-        rootThis.pageName = pgName;
-        rootThis.pageElements = newElementList;
-      });
+    // Switch the shell back to the sign-in page. This MUST run or the body
+    // keeps rendering the stale (now nav-less) home pageElements. Reset on BOTH
+    // success and failure of the page re-fetch so a slow/failed network — or a
+    // readSettings timeout — can never strand the user on home.
+    void showSignInPage() {
+      try {
+        transactionStore.dispatch(
+            UpdateScreenTxAction(ScreenTransaction({'#REFRESH': false})));
+        List<Widget> newElementList = reloadPage(pgName);
+        rootThis.setState(() {
+          rootThis.pageName = pgName;
+          rootThis.pageElements = newElementList;
+        });
+      } catch (e) {
+        devPrint('signOut showSignInPage failed: $e');
+      }
       setDataOK('2');
+    }
+
+    readSettings(signUpKey, 1).then((_) => showSignInPage()).catchError((e) {
+      devPrint('signOut readSettings failed: $e');
+      showSignInPage();
     });
   } catch (err) {
     // devPrint("Error writing to firestore :" + err.toString());

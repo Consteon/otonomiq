@@ -185,6 +185,8 @@ import 'states/app_code_controller.dart';
   0.9.78.32 (260522) OO : udpate approval, etc
   0.9.78.33 (260526) OO : update request incident, fix bug log history
   0.9.78.34 (260602) OO : fix bug front camera stuck, blank white screen when open apps, implement addToEvent to Firestore
+  0.9.78.35 (260605) OO : fix bug loading indicator in home, function logout cannot redirect to login page, addToEvent to firestore, widget supervisor view 
+                          (list_multiple_panel_card, panel_card_support list_statistic_card, statistic_card_support, timeline_periodic, timeline_periodic_support)
  */
 // ========= Constants ==========================
 const iOSDevPage = false;
@@ -251,6 +253,10 @@ RxMap<String, bool> tableSourceUpdated =
     {'default': false}.obs; // State management for table
 RxMap<String, dynamic> tableContent =
     {'default': []}.obs; // content of table in ready to use array
+// Char-code map subcollections (e.g. `site`, `workforce`): each entry is a list
+// of raw Firestore doc maps (NOT positional `c`-arrays like `tableContent`).
+RxMap<String, List<Map<String, dynamic>>> mapTableContent =
+    <String, List<Map<String, dynamic>>>{}.obs;
 final displayRefresher = true.obs; // change this for updating screen
 final internetConnectionFlag = false.obs; // read by internetConnected()
 final transactionOKFlag = false.obs; // read by transactionOK()

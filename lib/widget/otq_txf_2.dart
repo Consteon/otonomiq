@@ -1121,9 +1121,14 @@ class OtqTxf2State extends State<OtqTxf2>
                                   widget.component['position']]!
                               .finalData = exp2Epoch(value).toString();
                         } else if (variant == 'qrscan') {
+                          // Manual typing = no QR scanned → keep lq (this field's
+                          // own position) EMPTY; only the location NAME goes to
+                          // locationNamePosition (ln). A real scan sets this
+                          // position = qrResult via the scan handler, which does
+                          // not fire onChanged, so scans are unaffected.
                           txfController[widget.scrName]![
                                   widget.component['position']]!
-                              .finalData = value.toString();
+                              .finalData = '';
                           if (widget.component['locationNamePosition'] !=
                                   null &&
                               widget.component['locationNamePosition']
