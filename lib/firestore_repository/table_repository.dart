@@ -2771,6 +2771,8 @@ Future historySync(String source, bool forceSend) async {
                           tbParts.length > 2 ? tbParts[2] : '';
                       final String eventStr =
                           tbParts.length > 3 ? tbParts[3] : '';
+                      final String updateEventStr =
+                          tbParts.length > 4 ? tbParts[4] : '';
                       final String eventRowString = jsonEncode([
                         eventHistory[0],
                         eventHistory[1],
@@ -2796,6 +2798,11 @@ Future historySync(String source, bool forceSend) async {
                               await writeToEvent(eventStr, eventRowString);
                           tally('writeToEvent', ok,
                               'writeToEvent returned false');
+                        }
+                        if (updateEventStr.isNotEmpty) {
+                          final res = await writeUpdateEventRow(
+                              updateEventStr, eventRowString);
+                          tally('writeUpdateEventRow', resultOk(res), res);
                         }
                       } catch (eTable) {
                         // A throw means an op did not complete -> count one
