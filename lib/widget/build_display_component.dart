@@ -16,6 +16,7 @@ import '../model/input_controller.dart';
 import '../redux/screen_transaction.dart';
 import '../widget/all_widget.dart';
 import 'list_statistic_card_keyed.dart';
+import 'worker_card_detail_keyed.dart';
 import '../widget/approver_sticky_bar.dart';
 import '../widget/qr_gps.dart';
 import '../widget/radio_text.dart';
@@ -1168,15 +1169,29 @@ Widget buildDisplayComponent(
     }
   } else if (tip == 'worker_card_detail') {
     try {
-      result = WorkerCardDetail(
-        key: txfKey,
-        component: component,
-        scrName: scrName,
-        lPad: lPad,
-        tPad: tPad,
-        rPad: rPad,
-        bPad: bPad,
-      );
+      final String wcdVariant =
+          (component['variant'] ?? '').toString().trim().toLowerCase();
+      if (wcdVariant == 'keyed') {
+        result = WorkerCardDetailKeyed(
+          key: txfKey,
+          component: component,
+          scrName: scrName,
+          lPad: lPad,
+          tPad: tPad,
+          rPad: rPad,
+          bPad: bPad,
+        );
+      } else {
+        result = WorkerCardDetail(
+          key: txfKey,
+          component: component,
+          scrName: scrName,
+          lPad: lPad,
+          tPad: tPad,
+          rPad: rPad,
+          bPad: bPad,
+        );
+      }
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }
