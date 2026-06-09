@@ -1,3 +1,5 @@
+import 'panel_card_support.dart';
+
 /// One option in the LIST_STATISTIC_CARD period selector.
 class PeriodOption {
   final String label;
@@ -241,4 +243,64 @@ List<Map<String, dynamic>> filterByCharCodeEquality(
   return docs
       .where((d) => (d[field] ?? '').toString().trim() == value)
       .toList();
+}
+
+// ─── Kehadiran (attendance) worker-list helpers ─────────────────────────────
+
+/// Per-worker status code from clock-in/out state.
+/// `ci` not set -> 'danger'; `ci` set & `co` not set -> 'warn'; else 'ok'.
+String workerStatus(Map<String, dynamic> w) {
+  if (!attendanceSet(w['ci'])) return 'danger';
+  if (!attendanceSet(w['co'])) return 'warn';
+  return 'ok';
+}
+
+/// Human status line. 'danger' -> "Belum scan"; 'warn' -> "Belum clock-out";
+/// 'ok' -> "".
+String workerStatusLine(Map<String, dynamic> w) {
+  switch (workerStatus(w)) {
+    case 'danger':
+      return 'Belum scan';
+    case 'warn':
+      return 'Belum clock-out';
+    default:
+      return '';
+  }
+}
+
+/// Aggregate attendance counts for one cost center's filtered workers.
+/// Mirrors the dev spec tokens exactly:
+///   total = all matching; hadir = ci set; belumScan = ci not set;
+///   perluTindak = ci not set OR (ci set & co not set).
+class KehadiranListAgg {
+  final int total;
+  final int hadir;
+  final int belumScan;
+  final int perluTindak;
+  const KehadiranListAgg(
+      this.total, this.hadir, this.belumScan, this.perluTindak);
+
+  Map<String, String> toTokens() => {
+        'total': '$total',
+        'hadir': '$hadir',
+        'belumScan': '$belumScan',
+        'perluTindak': '$perluTindak',
+      };
+}
+
+KehadiranListAgg computeKehadiranList(List<Map<String, dynamic>> workers) {
+  int total = 0, hadir = 0, belumScan = 0, perluTindak = 0;
+  for (final w in workers) {
+    total++;
+    final bool ci = attendanceSet(w['ci']);
+    final bool co = attendanceSet(w['co']);
+    if (ci) {
+      hadir++;
+      if (!co) perluTindak++;
+    } else {
+      belumScan++;
+      perluTindak++;
+    }
+  }
+  return KehadiranListAgg(total, hadir, belumScan, perluTindak);
 }
