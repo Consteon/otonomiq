@@ -3701,7 +3701,22 @@ void saveSend(
       eventString = '';
     }
 
-    if (eventString.isNotEmpty) {
+    String updateEventString = '';
+    try {
+      String raw = component['updateEventRow'] ?? '';
+      if (raw.isNotEmpty) {
+        updateEventString = autheniumDecode(raw) ?? '';
+        updateEventString = replacePlaceholders(updateEventString, ref);
+        updateEventString = _resolveScreenTxMarkers(updateEventString);
+      }
+    } catch (e) {
+      updateEventString = '';
+    }
+
+    if (updateEventString.isNotEmpty) {
+      tableString =
+          '${tableString ?? ''}${separator[0]}$updateString${separator[0]}$deleteString${separator[0]}$eventString${separator[0]}$updateEventString';
+    } else if (eventString.isNotEmpty) {
       tableString =
           '${tableString ?? ''}${separator[0]}$updateString${separator[0]}$deleteString${separator[0]}$eventString';
     } else if (updateString.isNotEmpty || deleteString.isNotEmpty) {
