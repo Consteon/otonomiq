@@ -10,6 +10,7 @@ Dokumentasi untuk operasi CRUD pada Firestore dynamic tables (`MobileTable`).
 | updateTableRow | [update_table_row.md](update_table_row.md) | done | Update sebagian kolom pada row di dynamic table |
 | deleteFromTable | [delete_from_table.md](delete_from_table.md) | done | Hapus row dari dynamic table berdasarkan search query |
 | addToEvent | [add_to_event.md](add_to_event.md) | done | Tulis dokumen event keyed ke collection bernama (tambahan, selain Event spreadsheet) |
+| updateEventRow | [update_event_row.md](update_event_row.md) | done | keyed sparse merge of an existing keyed doc |
 
 ## Arsitektur
 
