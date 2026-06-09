@@ -1,0 +1,81 @@
+# Syncs this repo's docs/ into Consteon/consteon-tech-documentation.
+# Pair file: .github/scripts/stamp_provenance.py
+# Requires repo secret DOCS_SYNC_TOKEN (fine-grained PAT, Contents: read/write
+# on the docs repo).
+
+name: Sync docs
+
+on:
+  push:
+    branches: [dev]
+    paths: ['docs/**']
+  workflow_dispatch:
+
+concurrency:
+  group: sync-docs-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  DOCS_REPO: Consteon/consteon-tech-documentation
+  TARGET_FOLDER: field-first-mobile-app
+  SOURCE_DIR: docs
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+
+      - name: Checkout docs repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DOCS_REPO }}
+          token: ${{ secrets.DOCS_SYNC_TOKEN }}
+          path: _docs
+
+      - name: Mirror docs/ into target folder (with deletions)
+        run: |
+          mkdir -p "_docs/${TARGET_FOLDER}"
+          # /README.md protects the curated folder index here.
+          # /.syncignore is never published.
+          # docs/.syncignore (if present) lists source-only paths to skip
+          # (e.g. AI agent planning output like superpowers/). .gitignore-style.
+          EXCLUDES=( --exclude '/README.md' --exclude '/.syncignore' )
+          if [ -f "${SOURCE_DIR}/.syncignore" ]; then
+            EXCLUDES+=( --exclude-from "${SOURCE_DIR}/.syncignore" )
+          fi
+          rsync -a --delete "${EXCLUDES[@]}" \
+            "${SOURCE_DIR}/" "_docs/${TARGET_FOLDER}/"
+
+      - name: Stamp provenance + update manifest
+        env:
+          SRC_REPO: ${{ github.repository }}
+          SRC_SHA: ${{ github.sha }}
+          SRC_SERVER: ${{ github.server_url }}
+          SRC_TS: ${{ github.event.head_commit.timestamp }}
+          TARGET_FOLDER: ${{ env.TARGET_FOLDER }}
+        run: |
+          python3 .github/scripts/stamp_provenance.py "_docs/${TARGET_FOLDER}" "_docs/SOURCES.json"
+
+      - name: Commit & push to docs repo
+        run: |
+          cd _docs
+          git config user.name "docs-sync-bot"
+          git config user.email "docs-sync@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No doc changes to sync."
+            exit 0
+          fi
+          SHORT="${GITHUB_SHA:0:8}"
+          git commit \
+            -m "docs(${TARGET_FOLDER}): sync from ${GITHUB_REPOSITORY}@${SHORT}" \
+            -m "Source commit: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          # Retry to survive races when two source repos push at once.
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep $(( (RANDOM % 4) + 2 ))
+          done
+          echo "Push failed after retries." >&2
+          exit 1

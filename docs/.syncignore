@@ -1,0 +1,10 @@
+# Paths here stay in this repo but are NOT published to the documentation repo.
+# Works like .gitignore. Leading "/" anchors to docs/ root; trailing "/" = dir.
+
+# AI agent planning / scratch output — source-only, not published:
+/superpowers/
+/.claude/
+/_planning/
+/.tmp/
+
+# Add your own source-only paths below:
