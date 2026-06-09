@@ -15,6 +15,7 @@ import '../states/mobile_table_controller.dart';
 import 'firestore_generic_repository.dart';
 import '../model/ftz_scanned_code.dart';
 import 'add_to_event.dart';
+import 'update_event_row.dart';
 
 /// Returns the number of seconds from the epoch time, modulo 86400.
 /// The documentName parameter is ignored for now.
@@ -1420,8 +1421,11 @@ String eventCollectionPath(String rawColl, int eventTableVid) {
 
 /// Decode + ◆-split the event segment, build each doc, batch-write atomically
 /// to `collection(<line1>)`. Mirrors writeToTable's decode/ref handling.
-Future<void> writeToEvent(String? inp, String eventRowString) async {
-  if (inp == null || inp.trim().isEmpty) return;
+Future<bool> writeToEvent(String? inp, String eventRowString) async {
+  // Returns true on success (incl. nothing-to-write), false if the batch
+  // commit threw. historySync relies on this to decide whether the source
+  // history record may be marked "sent".
+  if (inp == null || inp.trim().isEmpty) return true;
   try {
     final List<dynamic> eventRow = jsonDecode(eventRowString);
     final List<dynamic> ref = parseEventString(eventRow);
@@ -1475,9 +1479,105 @@ Future<void> writeToEvent(String? inp, String eventRowString) async {
     } else {
       debugPrint('[writeToEvent] nothing to commit');
     }
+    return true;
   } catch (e, st) {
     debugPrint('[writeToEvent] ERROR: $e\n$st');
+    return false;
   }
+}
+
+/// Keyed sibling of `updateTableRow`: sparse-merge listed char-code keys into
+/// an EXISTING keyed doc selected by `search` (AND of `key★value`). Mirrors
+/// `writeToEvent`'s decode/ref handling and `updateTableRow`'s search targeting.
+/// Returns one result string per `◆`-statement ("ok ..." on success) so
+/// historySync's `resultOk` can tally it. NEVER blank-prefills (would wipe the
+/// other clock field). 0 matches -> skip+log; >1 -> error+skip (no write).
+Future<List<String>> writeUpdateEventRow(
+    String? inp, String eventRowString) async {
+  final List<String> result = [];
+  if (inp == null || inp.trim().isEmpty) return result;
+  try {
+    final List<dynamic> eventRow = jsonDecode(eventRowString);
+    final List<dynamic> ref = parseEventString(eventRow);
+    final String decoded = autheniumDecode(inp) ?? '';
+    final int tableVid = appCodeController.applicationTableVid;
+    final int timeReceived = int.tryParse(eventRow[0].toString()) ?? 0;
+    final String receivingPage = eventRow[1].toString();
+
+    final blocks = decoded
+        .split(separator[1]) // ◆
+        .where((b) => b.trim().isNotEmpty)
+        .toList();
+
+    for (final block in blocks) {
+      try {
+        final UpdateEventTarget t = parseUpdateEventRow(block);
+        if (t.conditions.isEmpty) {
+          result.add('error: missing search');
+          continue;
+        }
+        final int eventTableVid =
+            int.tryParse(t.tablevid.trim()) ?? tableVid;
+        final String path = eventCollectionPath(t.collection, eventTableVid);
+        if (path.isEmpty) {
+          result.add('error: bad collection "${t.collection}"');
+          continue;
+        }
+
+        // Resolve + type-coerce search values, then build the AND query.
+        dynamic query = firestoreDb.collection(path);
+        for (final c in t.conditions) {
+          final String resolved = resolveValueTokens(
+            c.value,
+            ref,
+            tableVid: eventTableVid,
+            appVid: appCodeController.applicationTableVid,
+            timeReceived: timeReceived,
+            receivingPage: receivingPage,
+          );
+          query = query.where(c.key, isEqualTo: _parseSearchValue(resolved));
+        }
+        final snap = await query.get();
+        final docs = snap.docs;
+
+        if (docs.isEmpty) {
+          devPrint('[writeUpdateEventRow] 0 match at $path; skip (no create)');
+          result.add('ok: no match (skipped)');
+          continue;
+        }
+        if (docs.length > 1) {
+          errorReport(
+              '[writeUpdateEventRow] ${docs.length} matches at $path for '
+              '${t.conditions}; refusing to write (corrupt uniqueness)');
+          result.add('error: ${docs.length} matches');
+          continue;
+        }
+
+        // Resolve body values + sparse merge into the single matched doc.
+        final Map<String, dynamic> patch = {};
+        t.body.forEach((k, v) {
+          patch[k] = resolveValueTokens(
+            v,
+            ref,
+            tableVid: eventTableVid,
+            appVid: appCodeController.applicationTableVid,
+            timeReceived: timeReceived,
+            receivingPage: receivingPage,
+          );
+        });
+        await docs.first.reference.set(patch, SetOptions(merge: true));
+        debugPrint('[writeUpdateEventRow] merged $patch into '
+            '$path/${docs.first.id}');
+        result.add('ok');
+      } catch (e) {
+        errorReport('[writeUpdateEventRow] block failed: $e');
+        result.add('error: $e');
+      }
+    }
+  } catch (e, st) {
+    devPrint('[writeUpdateEventRow] outer error: $e\n$st');
+  }
+  return result;
 }
 
 void createInternalTable(
@@ -1526,8 +1626,10 @@ void createInternalTable(
     processedContent.add(member);
   }
 
-  // Process the array for the `screenTx` store.
-  final dynamic tableArrayForTx = jsonDecode(arrayString);
+  // Reuse the already-decoded content for the screenTx store instead of a
+  // second jsonDecode of the same string. The loop above only mutates copies
+  // (List.from), so tempContent itself is untouched and safe to share here.
+  final dynamic tableArrayForTx = tempContent;
 
   // 5. Loop ONLY through the codes that need rebuilding and apply the changes.
   for (final currentCode in codesToRebuild) {
@@ -2311,9 +2413,9 @@ Future saveHistory() async {
   historyUnLock('$functionName 1');
   // update secure storage
   try {
-    storage.write(key: historyName, value: historyStr);
+    await storage.write(key: historyName, value: historyStr);
   } catch (e) {
-    devPrint('Cannot save history to secure storage $e');
+    errorReport('Cannot save history to secure storage $e');
   } // end try (e)
   // update transactionStore['#TABLE_HISTORY']
   Map<String, dynamic>? table = {historyName: sha3_256(historyStr)};
@@ -2461,6 +2563,15 @@ void historySyncUnLockOld(String from) {
   // debugPrint('***>>> historySyncUnLock from $from');
 } // end of historySyncUnLock
 
+/// In-memory count of consecutive failed historySync attempts per history id.
+/// When ALL table writes for a record fail it is left unsent and retried next
+/// cycle; this counter caps the retries so a permanently-failing ("poison")
+/// record can't wedge the whole queue forever. Reset on success and (by being
+/// in-memory only) on app restart, which is acceptable: a transient failure
+/// resolves on the next online cycle, and a poison record is logged loudly.
+final Map<int, int> _historySyncRetry = {};
+const int historySyncRetryMax = 5;
+
 Future historySync(String source, bool forceSend) async {
   // sent unsent history to event
   // trim history at the end
@@ -2550,11 +2661,13 @@ Future historySync(String source, bool forceSend) async {
                   moreHistory = false;
                 } else {
                   await historyLock('$functionName 2');
+                  try {
                   List<String> contentArray = eventTemp.split(separator[0]);
                   List<String> locArray = contentArray[0].split(separator[1]);
-                  if (locArray[4] != '' &&
+                  if (locArray.length > 14 &&
+                      double.tryParse(locArray[4]) != null &&
                       double.parse(locArray[4]) != invalidLocation &&
-                      locArray[5] != '' &&
+                      double.tryParse(locArray[5]) != null &&
                       double.parse(locArray[5]) != invalidLocation) {
                     List<Placemark> thePlace = [];
                     try {
@@ -2589,9 +2702,17 @@ Future historySync(String source, bool forceSend) async {
                     } catch (ePlace) {
                       devPrint('error in placemarkFromCoordinates $ePlace');
                     }
-                  } // end if (locArray[4] == '')
+                  } // end if (locArray valid coords)
                   eventHistory[2] = eventTemp;
-                  historyUnLock('$functionName 2');
+                  } catch (eLoc) {
+                    // A bad/short locArray (lean history row) or unparseable
+                    // coord used to throw past the unlock below, permanently
+                    // deadlocking all future historySync on the lock. The
+                    // finally guarantees the lock is released.
+                    errorReport('historySync loc parse error $eLoc');
+                  } finally {
+                    historyUnLock('$functionName 2');
+                  }
                   dynamic id =
                       '${state['#VID']}${(Random.secure().nextDouble() * 1000).toString()}';
                   final firestoreEventCollection2 =
@@ -2611,6 +2732,34 @@ Future historySync(String source, bool forceSend) async {
                     //add writeToTable here with Future.wait
                     devPrint(
                         '*** internet connected, send history and writeToTable.');
+                    // Track table-CRUD outcomes so the record is only marked
+                    // "sent" when its table writes actually landed. The CRUD
+                    // ops are NOT idempotent (each addContent creates a new
+                    // row), so a partial success must NOT be retried or it
+                    // duplicates rows. Outcomes:
+                    //   - all ok / no table ops -> send event doc, mark sent
+                    //   - nothing succeeded     -> safe to retry the whole
+                    //                              record (leave unsent), capped
+                    //                              by historySyncRetryMax so a
+                    //                              poison record can't wedge sync
+                    //   - partial success       -> can't retry safely; mark sent
+                    //                              but errorReport loudly
+                    int opsAttempted = 0;
+                    int opsSucceeded = 0;
+                    bool startsOk(String s) =>
+                        s.trim().toLowerCase().startsWith('ok');
+                    bool resultOk(List<String> res) =>
+                        res.isNotEmpty && res.every(startsOk);
+                    void tally(String op, bool ok, dynamic detail) {
+                      opsAttempted++;
+                      if (ok) {
+                        opsSucceeded++;
+                      } else {
+                        errorReport(
+                            'historySync $op failed for historyId ${eventHistory[0]}: $detail');
+                      }
+                    }
+
                     if (eventHistory.length > 14) {
                       final String rawTb =
                           (eventHistory[14] ?? '').toString();
@@ -2627,41 +2776,89 @@ Future historySync(String source, bool forceSend) async {
                         eventHistory[1],
                         eventHistory[2]
                       ]);
-                      if (addStr.isNotEmpty) {
-                        writeToTable(addStr, eventRowString);
-                      }
-                      if (updateStr.isNotEmpty) {
-                        updateTableRow(updateStr, eventRowString);
-                      }
-                      if (deleteStr.isNotEmpty) {
-                        deleteFromTable(deleteStr, eventRowString);
-                      }
-                      if (eventStr.isNotEmpty) {
-                        writeToEvent(eventStr, eventRowString);
+                      try {
+                        if (addStr.isNotEmpty) {
+                          final res = await writeToTable(addStr, eventRowString);
+                          tally('writeToTable', resultOk(res), res);
+                        }
+                        if (updateStr.isNotEmpty) {
+                          final res =
+                              await updateTableRow(updateStr, eventRowString);
+                          tally('updateTableRow', resultOk(res), res);
+                        }
+                        if (deleteStr.isNotEmpty) {
+                          final res =
+                              await deleteFromTable(deleteStr, eventRowString);
+                          tally('deleteFromTable', resultOk(res), res);
+                        }
+                        if (eventStr.isNotEmpty) {
+                          final ok =
+                              await writeToEvent(eventStr, eventRowString);
+                          tally('writeToEvent', ok,
+                              'writeToEvent returned false');
+                        }
+                      } catch (eTable) {
+                        // A throw means an op did not complete -> count one
+                        // failed attempt so the record is not marked sent.
+                        opsAttempted++;
+                        errorReport(
+                            'historySync table CRUD threw for historyId ${eventHistory[0]}: $eTable');
                       }
                     } else {
                       devPrint(
                           'writeToTable skipped, no table definition in history.');
                     }
-                    await docReference.set(dataSent).then((value) async {
-                      debugPrint(
-                          'historySync doc $docName sent dataSent $dataSent');
-                      await historySent(eventHistory[0]);
-                      docReference.snapshots().listen((event) async {
+
+                    final bool allFailed =
+                        opsAttempted > 0 && opsSucceeded == 0;
+                    final bool partial = opsAttempted > 0 &&
+                        opsSucceeded > 0 &&
+                        opsSucceeded < opsAttempted;
+                    final int historyId = eventHistory[0] as int;
+
+                    if (allFailed) {
+                      // Nothing landed -> retrying the whole record next cycle
+                      // is safe (no duplicates). Leave it unsent unless it has
+                      // failed too many times (poison), then give up so it can't
+                      // block the rest of the queue forever.
+                      final int tries = (_historySyncRetry[historyId] ?? 0) + 1;
+                      _historySyncRetry[historyId] = tries;
+                      if (tries >= historySyncRetryMax) {
+                        errorReport(
+                            'historySync giving up on historyId $historyId after $tries failed attempts; marking sent to unblock queue (table data lost).');
+                        _historySyncRetry.remove(historyId);
+                        await docReference.set(dataSent);
+                        await historySent(eventHistory[0]);
+                        await historyCloudReceived(eventHistory[0]);
+                        needToCallProcessEvent = true;
+                      } else {
+                        devPrint(
+                            'historySync deferring historyId $historyId for retry ($tries/$historySyncRetryMax).');
+                      }
+                      moreHistory = false; // stop this cycle; retry later
+                    } else {
+                      // all ok / no table ops / partial: send event doc + mark
+                      // sent. Partial was already errorReported; we accept it
+                      // rather than re-run non-idempotent writes.
+                      if (partial) {
+                        errorReport(
+                            'historySync PARTIAL table write for historyId $historyId ($opsSucceeded/$opsAttempted ok); marking sent to avoid duplicate rows on retry.');
+                      }
+                      _historySyncRetry.remove(historyId);
+                      await docReference.set(dataSent).then((value) async {
+                        debugPrint(
+                            'historySync doc $docName sent dataSent $dataSent');
+                        await historySent(eventHistory[0]);
+                        // One-shot read instead of a snapshots().listen() that
+                        // was never cancelled (it leaked one Firestore listener
+                        // per synced record). The old listener body only marked
+                        // the record processed; the rest was dead code.
+                        await docReference.get();
                         await historyProcessed(eventHistory[0]);
-                        if (event.exists) {
-                          // Timer timer = Timer(const Duration(seconds: 1), () async {
-                          // dynamic qParams = {"ssid": ssid};
-                          // devPrint(
-                          //     '=== call $eventFunctionName with param=$qParams');
-                          // dynamic uri = Uri.https(functionFront, eventFunctionName);
-                          // await callHttpPost(uri, qParams);
-                          // });
-                        } // end if (event.exists)
-                      }); // end of listen
-                    }); // end of docReference.then
-                    await historyCloudReceived(eventHistory[0]);
-                    needToCallProcessEvent = true;
+                      }); // end of docReference.then
+                      await historyCloudReceived(eventHistory[0]);
+                      needToCallProcessEvent = true;
+                    }
                   } else {
                     devPrint('*** internet not connected.');
                     moreHistory = false; // no internet, get out
