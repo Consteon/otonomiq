@@ -7,9 +7,9 @@ import 'panel_card_support.dart';
 import 'statistic_card_support.dart';
 
 /// WORKER_CARD_DETAIL · variant:"keyed" — read-only fact card for ONE worker.
-/// Reads the keyed `workforce` doc whose `vid` matches `<vid>` from screenTx
+/// Reads the keyed `workforce` doc whose `vid` matches `` `<vid>` `` from screenTx
 /// (set by the worker-list tap). `text` layout (diamond-separated):
-///   [0]=<n>  [1]=<is>  [2]=<os>  [3]=role label  [4]=Masuk label  [5]=Keluar label
+///   [0]=`<n>`  [1]=`<is>`  [2]=`<os>`  [3]=role label  [4]=Masuk label  [5]=Keluar label
 class WorkerCardDetailKeyed extends StatefulWidget {
   const WorkerCardDetailKeyed({
     super.key,
