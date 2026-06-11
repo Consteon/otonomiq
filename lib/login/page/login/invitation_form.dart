@@ -223,7 +223,7 @@ class _InvitationFormState extends State<InvitationForm> {
                             ElevatedButton.icon(
                               // shape: RoundedRectangleBorder(
                               //     borderRadius: BorderRadius.circular(30.0)),
-                              icon: const Icon(FontAwesomeIcons.signInAlt,
+                              icon: const FaIcon(FontAwesomeIcons.rightToBracket,
                                   color: Colors.white),
                               onPressed: () {
                                 setState(() {

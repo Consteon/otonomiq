@@ -42,7 +42,7 @@ class GoogleLoginButton extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(FontAwesomeIcons.google,
+            const FaIcon(FontAwesomeIcons.google,
                 size: 18, color: Color(0xFF4285F4)),
             const SizedBox(width: 12),
             Flexible(

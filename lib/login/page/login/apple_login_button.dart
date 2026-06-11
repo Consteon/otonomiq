@@ -42,7 +42,7 @@ class AppleLoginButton extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(FontAwesomeIcons.apple, size: 20),
+            const FaIcon(FontAwesomeIcons.apple, size: 20),
             const SizedBox(width: 12),
             Text(
               _component['apple'] ?? 'Masuk dengan Apple',
