@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:camera/camera.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -1868,11 +1869,20 @@ String phoneCleanup(String ph) {
       RegExp("^0|^62|^65|^60|^63|^66|^66|^1|^673|^61|^52"), "");
 } // end of phoneCleanup
 
-void errorReport(dynamic e) {
-  // errorReport(e);
-  // TODO create error reporting to Otonomiq server via firebase
-  // devPrint(e);
-  devPrint(e.toString());
+void errorReport(dynamic e, [StackTrace? stack]) {
+  // Log unconditionally (debugPrint prints in release too) AND forward to
+  // Crashlytics as a non-fatal for remote capture — the hundreds of
+  // catch-then-errorReport sites (incl. historySync data-loss) are now visible
+  // in the field. Crashlytics no-ops when collection is disabled (debug).
+  // Guarded so a not-yet-initialised Firebase never turns an error report into
+  // a second crash.
+  debugPrint('errorReport: ${e.toString()}');
+  try {
+    FirebaseCrashlytics.instance
+        .recordError(e, stack ?? StackTrace.current, fatal: false);
+  } catch (_) {
+    // Crashlytics unavailable (e.g. before Firebase.initializeApp) — ignore.
+  }
 } //errorReport
 
 void devPrint(dynamic e) {
@@ -1912,16 +1922,23 @@ List<dynamic> searchTable(String rx, var myList) {
         .toLowerCase()
         .replaceAll(RegExp(r"\s+\b|\b\s"), ' ')
         .split(' ');
+    // Compile each search term's RegExp ONCE up front. Previously a fresh
+    // RegExp was compiled per (row x term) inside the loop, i.e. on every
+    // keystroke for every row — the main cost of search lag on large tables.
+    final List<RegExp> regexps =
+        rList.map((rg) => RegExp(rg.toLowerCase())).toList();
     res = myList.where((c) {
       bool? finalResult;
-      for (var rg in rList) {
-        RegExp regexp = RegExp(rg.toLowerCase());
+      for (final regexp in regexps) {
         bool result = false;
         for (var e in c) {
-          result = result || regexp.hasMatch(e.toString().toLowerCase());
+          if (regexp.hasMatch(e.toString().toLowerCase())) {
+            result = true;
+            break;
+          }
         }
         finalResult = finalResult == null ? result : (finalResult && result);
-      } // end of rList
+      } // end of regexps
       return finalResult ?? false;
     }).toList();
   } else {

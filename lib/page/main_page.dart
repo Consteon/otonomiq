@@ -6,7 +6,6 @@ import 'dart:async';
 import 'package:flutter_redux/flutter_redux.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get/get_state_manager/src/rx_flutter/rx_obx_widget.dart';
-import '../firestore_repository/table_repository.dart';
 import '../global.dart';
 import '../api.dart';
 import '../login/bloc_login/bloc.dart';
@@ -14,7 +13,6 @@ import '../redux/screen_transaction.dart';
 import '../login/bloc_authentication/bloc.dart';
 import '../bloc_timer/bloc.dart';
 import '../page/wait_screen.dart';
-import '../page/login_wait_screen.dart';
 import '../main_bloc/bloc.dart';
 import '../notification/bloc.dart';
 import '../widget/link_widget.dart';
@@ -332,9 +330,16 @@ class MainPageState extends State<MainPage> {
       // return retVal;
     } // end of onWillPop
 
-    return StoreConnector<ScreenTransaction, ScreenTransaction>(
-        converter: (transactionStore) => transactionStore.state,
-        builder: (context, list) {
+    return StoreConnector<ScreenTransaction, int>(
+        distinct: true,
+        // The builder reads no Redux key at render time; every visible update
+        // flows via rootThis.setState + nested Bloc/Obx/ValueListenable
+        // builders. Constant converter + distinct:true => the shell renders
+        // once and is NOT rebuilt on each of the ~200+ dispatches. If a future
+        // edit needs a # key at render time, switch this converter to a
+        // value-comparable record of exactly those keys and keep distinct:true.
+        converter: (store) => 0,
+        builder: (context, _) {
           PopScope v;
 
           v = PopScope(
@@ -989,20 +994,14 @@ class MainPageState extends State<MainPage> {
                                   },
                                 ),
                               ),
-                              // WaitScreen(),
-                              BlocBuilder<LoginBloc, LoginState>(
-                                // buildWhen: (previousState, currentState) =>
-                                //     currentState.inLoginProcess !=
-                                //     previousState.inLoginProcess,
-                                builder: (context, state) {
-                                  // if (state.inLoginProcess) {
-                                  // }
-                                  Widget retVal = state.inLoginProcess
-                                      ? const LoginWaitScreen()
-                                      : Container();
-                                  return retVal;
-                                },
-                              ),
+                              // The login spinner overlay was removed: it
+                              // watched the TOP-LEVEL LoginBloc, but the
+                              // loading state (isSubmitting) is only ever
+                              // emitted by the social/credential handlers on the
+                              // NESTED LoginForm bloc, so this overlay never
+                              // fired in the live flow. The login_form /
+                              // invitation_form modal dialog (PopScope, blocks
+                              // back) is the real single spinner.
                             ],
                           ), // Stack closure=========
                   ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -42,6 +43,7 @@ class _ListItemCardState extends State<ListItemCard> {
   final Map<int, String> _searchFilters = {};
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  Timer? _searchDebounce;
   bool _showIcon = true;
   bool _showProgress = true;
 
@@ -54,6 +56,7 @@ class _ListItemCardState extends State<ListItemCard> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -651,7 +654,14 @@ class _ListItemCardState extends State<ListItemCard> {
     return TextFormField(
       controller: _searchController,
       keyboardType: TextInputType.text,
-      onChanged: (value) => setState(() => _searchQuery = value),
+      onChanged: (value) {
+        // Debounce: run the heavy filter/sort pipeline once the user pauses
+        // typing instead of on every keystroke.
+        _searchDebounce?.cancel();
+        _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+          if (mounted) setState(() => _searchQuery = value);
+        });
+      },
       decoration: InputDecoration(
         prefixIcon: const Icon(Icons.search, color: Color(0xFF9CA3AF)),
         suffixIcon: _searchQuery.isEmpty
@@ -659,6 +669,7 @@ class _ListItemCardState extends State<ListItemCard> {
             : IconButton(
                 icon: const Icon(Icons.close, color: Color(0xFF9CA3AF)),
                 onPressed: () {
+                  _searchDebounce?.cancel();
                   _searchController.clear();
                   setState(() => _searchQuery = '');
                 },

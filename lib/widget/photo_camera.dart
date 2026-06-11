@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:image/image.dart' as img;
@@ -11,6 +12,63 @@ import 'package:intl/intl.dart';
 import '../global.dart';
 
 String inputPath = emptyString; // temporary path variable
+
+class ImageProcessArgs {
+  final Uint8List bytes;
+  final int maxSize;
+  final int quality;
+  final String dateTime;
+  const ImageProcessArgs({
+    required this.bytes,
+    required this.maxSize,
+    required this.quality,
+    required this.dateTime,
+  });
+}
+
+/// Runs in a background isolate (via compute) so the shutter doesn't freeze the
+/// UI (~1s) on every capture: decode -> bake orientation -> resize -> jpg
+/// encode -> two text watermarks. Pure-Dart (image/image_watermark), so it is
+/// isolate-safe. Always returns bytes — falls back to the input on any failure.
+Future<Uint8List> processCapturedImage(ImageProcessArgs a) async {
+  final img.Image? decoded = img.decodeImage(a.bytes);
+  if (decoded == null) return a.bytes;
+  img.Image image = decoded;
+  try {
+    image = img.bakeOrientation(image);
+  } catch (_) {}
+  img.Image resizedImage = image;
+  try {
+    if (image.height > image.width) {
+      resizedImage = img.copyResize(image, height: a.maxSize);
+    } else {
+      resizedImage = img.copyResize(image, width: a.maxSize);
+    }
+  } catch (_) {}
+  Uint8List out =
+      Uint8List.fromList(img.encodeJpg(resizedImage, quality: a.quality));
+  try {
+    out = await ImageWatermark.addTextWatermark(
+      imgBytes: out,
+      watermarkText: a.dateTime,
+      color: const Color.fromARGB(150, 10, 10, 10),
+      font: img.arial14,
+      dstX: 11,
+      dstY: 9,
+    );
+  } catch (_) {}
+  try {
+    out = await ImageWatermark.addTextWatermark(
+      imgBytes: out,
+      watermarkText: a.dateTime,
+      color: const Color.fromARGB(255, 24, 129, 240),
+      font: img.arial14,
+      dstX: 10,
+      dstY: 8,
+    );
+  } catch (_) {}
+  return out;
+}
 
 class PhotoCamera extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -338,72 +396,38 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                             final now = DateTime.now();
                             final String formattedDateTime =
                                 DateFormat(dateTimeFormat).format(now);
-                            dynamic image = img.decodeImage(
-                                File(xFile.path).readAsBytesSync());
+                            // Read bytes + run the CPU-heavy decode/resize/
+                            // watermark pipeline off the UI isolate (compute),
+                            // and use async file I/O, so the shutter no longer
+                            // freezes the UI on every capture.
+                            final Uint8List rawBytes =
+                                await File(xFile.path).readAsBytes();
                             try {
-                              image = img.bakeOrientation(image!);
+                              await File(xFile.path).delete();
                             } catch (e) {
-                              devPrint('orientation error: $e');
+                              devPrint('delete temp capture error: $e');
                             }
-                            File(xFile.path).delete();
-                            img.Image resizedImage = image;
+                            Uint8List watermarkedImage;
                             try {
-                              if (image.height > image.width) {
-                                resizedImage = img.copyResize(image,
-                                    height: widget.maxSize ?? 500);
-                              } else {
-                                resizedImage = img.copyResize(image,
-                                    width: widget.maxSize ?? 500);
-                              }
-                            } catch (e) {
-                              devPrint('resize error: $e');
-                            }
-                            final imageBytes = Uint8List.fromList(img.encodeJpg(
-                                resizedImage,
-                                quality: widget.quality ?? 80));
-                            dynamic watermarkedImage = imageBytes;
-                            try {
-                              watermarkedImage =
-                                  await ImageWatermark.addTextWatermark(
-                                imgBytes: imageBytes,
-
-                                ///image bytes
-                                watermarkText: formattedDateTime,
-
-                                ///watermark text
-                                // color: const Color(0xffF08118),
-                                color: const Color.fromARGB(150, 10, 10, 10),
-                                // b, g, r
-                                // color: Colors.black,
-                                font: img.arial14,
-                                dstX: 11,
-                                dstY: 9,
+                              watermarkedImage = await compute(
+                                processCapturedImage,
+                                ImageProcessArgs(
+                                  bytes: rawBytes,
+                                  maxSize: widget.maxSize ?? 500,
+                                  quality: widget.quality ?? 80,
+                                  dateTime: formattedDateTime,
+                                ),
                               );
                             } catch (e) {
-                              devPrint('watermark error: $e');
+                              errorReport('image processing error: $e');
+                              watermarkedImage = rawBytes;
                             }
                             try {
-                              watermarkedImage =
-                                  await ImageWatermark.addTextWatermark(
-                                imgBytes: watermarkedImage,
-
-                                ///image bytes
-                                watermarkText: formattedDateTime,
-
-                                ///watermark text
-                                // color: const Color(0xffF08118),
-                                // color: const Color.fromARGB(255, 10, 30, 180), // b, g, r
-                                color: const Color.fromARGB(255, 24, 129, 240),
-                                // b, g, r
-                                // color: Colors.black,
-                                font: img.arial14,
-                                dstX: 10,
-                                dstY: 8,
-                              );
+                              await File(imagePath)
+                                  .writeAsBytes(watermarkedImage);
                             } catch (e) {
-                              devPrint('watermark error: $e');
+                              errorReport('write captured image error: $e');
                             }
-                            File(imagePath).writeAsBytesSync(watermarkedImage!);
                             setState(() {
                               // capturedImages.add(File(xFile.path));
                               if (currentImage != null) {

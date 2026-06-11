@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -52,18 +54,38 @@ void main() async {
   debugCount = -1;
   trace(debugCount);
   WidgetsFlutterBinding.ensureInitialized(); // needed by flutter error message
+  // Paint the loading screen immediately, BEFORE the multi-second Firebase +
+  // globalInit bootstrap, so the user sees "Loading…" instead of a blank
+  // window. SplashScreen is self-contained (no Firebase/globals), so it is
+  // safe to render this early.
+  runApp(const _BootstrapLoadingApp());
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // Crash reporting. Disabled in debug so dev runs don't pollute the console.
+  // Captures uncaught Flutter framework errors and async/platform errors;
+  // errorReport() (the app-wide sink) forwards non-fatal errors separately.
+  await FirebaseCrashlytics.instance
+      .setCrashlyticsCollectionEnabled(!kDebugMode);
+  FlutterError.onError = (errorDetails) {
+    if (kDebugMode) {
+      FlutterError.presentError(errorDetails);
+    } else {
+      FirebaseCrashlytics.instance.recordFlutterFatalError(errorDetails);
+    }
+  };
+  WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+    return true;
+  };
 
   enablePlatformOverride();
   debugCount = -2;
   trace(debugCount);
   await globalInit();
-  // Paint a loading screen immediately so the user never stares at a blank
-  // white window while the (cache-backed) bootstrap below runs. The real app
-  // replaces this with a second runApp() call once the home shell is ready.
-  runApp(const _BootstrapLoadingApp());
+  // Loading screen was already painted before Firebase init above; the real
+  // app replaces it with a second runApp() once the home shell is ready.
   debugCount = -3;
   trace(debugCount);
   // await apiTest();
@@ -116,6 +138,15 @@ void main() async {
     } //if (shortest < 600)
 
     debugCount = 2;
+    // Start the serverSetup-independent reads concurrently to shave cold-start
+    // latency. deviceIdF is error-swallowing because on the logged-OUT path
+    // (fUser == null) it is never awaited — an un-awaited rejected future would
+    // otherwise surface as an unhandled async error -> Crashlytics fatal.
+    // serverSetup stays awaited HERE to preserve producer-before-consumer
+    // ordering of the #SETTINGS dispatch that the lines below read.
+    final fUserF = getFirebaseUser();
+    final myLifF = storage.read(key: 'myLif').catchError((_) => null);
+    final deviceIdF = getDeviceId().catchError((_) => '-');
     await serverSetup();
     debugCount = 22;
     trace(debugCount);
@@ -126,21 +157,17 @@ void main() async {
     loginSsid = res['signupLif']; // default signupLif
     var invitationKey = res['signupDemo'];
     debugCount = 3;
-    fUser = await getFirebaseUser();
+    fUser = await fUserF;
     debugCount = 31;
     trace(debugCount);
-    try {
-      myLif = await storage.read(key: 'myLif');
-    } catch (erLif) {
-      debugCount = 32;
-      myLif = null;
-    }
+    myLif =
+        await myLifF; // null-on-error preserved by .catchError on hoisted future
+    debugCount = 32;
     debugCount = 33;
     trace(debugCount);
     if (fUser != null) {
-      String? devId = await getDeviceId();
       String? userDocId = await checkIfUserReset(
-          fUser, await getDeviceId()); // check in firebase if user reset
+          fUser, await deviceIdF); // check in firebase if user reset
       if (userDocId == null) {
         myLif = null;
         await kickedOut();
@@ -242,7 +269,11 @@ void main() async {
     debugCount = 7;
     trace(debugCount);
 //    BlocSupervisor.delegate = SimpleBlocDelegate();
-    Bloc.observer = SimpleBlocDelegate();
+    // Debug-only: SimpleBlocDelegate logs every bloc event incl. password
+    // change events. Keep it out of release builds.
+    if (kDebugMode) {
+      Bloc.observer = SimpleBlocDelegate();
+    }
     state = transactionStore.state.screenTx;
     if (state['#INTERFACE_KEY'] != null &&
         state['#INTERFACE_KEY'] != '' &&

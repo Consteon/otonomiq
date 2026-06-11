@@ -315,12 +315,11 @@ List<Widget> buildBannerList(var bannerList, double aspectRatio) {
                         });
                       } else {
                         String newRoute = bannerList[i]['route'];
-                        List<Widget> newElementList = List<Widget>.of(
-                            linkElement[linkElement[newRoute]!]!
-                                .map((widget) => widget));
-                        // List<Widget> newElementList =
-                        //     List<Widget>.empty(growable: true);
-                        // newElementList.addAll(linkElement[newRoute]!);
+                        // Was linkElement[linkElement[newRoute]!]! — a double
+                        // index that null-deref crashed on the 2nd+ banner of a
+                        // multi-banner home. reloadPage matches the sibling
+                        // banner[0]/grid[0] branches above.
+                        List<Widget> newElementList = reloadPage(newRoute);
                         rootThis.setState(() {
                           rootThis.pageName = newRoute;
                           rootThis.pageElements = newElementList;
