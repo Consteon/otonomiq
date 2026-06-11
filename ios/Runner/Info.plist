@@ -62,8 +62,8 @@
 	</array>
 	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
 	<dict>
-		<key>YourPurposeKey</key>
-		<string>The example App requires temporary access to the device&apos;s precise location.</string>
+		<key>PreciseLocationAttendance</key>
+		<string>Aplikasi memerlukan akses sementara ke lokasi presisi perangkat untuk pencatatan kehadiran dan patroli.</string>
 	</dict>
 	<key>GIDClientID</key>
 	<string>721538991284-lqq5e3jsm6g91gdeh2qo24tkjlu4bn0o.apps.googleusercontent.com</string>

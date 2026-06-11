@@ -1914,10 +1914,21 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
         // which runs right after home on every launch) fetches the complete
         // page set and re-caches it.
         if (opt != 1) {
-          await readUIPages(
-            settingKey,
-            guestIndex,
-          );
+          // Background all-pages refresh. Home/system pages are already
+          // persisted above (_persistUiCache), so a network TimeoutException
+          // here is benign — the opt-2 loader re-runs on every launch. Swallow
+          // only the timeout (debug log); still surface genuine server/parse
+          // failures so they remain visible in Crashlytics.
+          try {
+            await readUIPages(
+              settingKey,
+              guestIndex,
+            );
+          } on TimeoutException catch (e) {
+            devPrint('readUIPages timed out (background refresh): $e');
+          } catch (e) {
+            errorReport(e);
+          }
         }
         debugCount = 5228;
         trace(debugCount);

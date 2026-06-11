@@ -7,12 +7,16 @@ import 'panel_card_support.dart';
 import 'statistic_card_support.dart';
 import 'timeline_periodic_support.dart';
 
-/// TIMELINE variant `periodic` — per-point patrol visit timeline. Binds to the
-/// `event` subcollection (char-code map docs), filters by `ln == screenTx['point']`
-/// AND `ty == report-patrol`, windows by a period selector, and renders a
-/// newest-first vertical timeline: status dot + relative time + evidence badge +
-/// "oleh `<cn>`" + capture method + note, with "Jeda N jam" gap pills and a
-/// locked-note footer.
+/// TIMELINE variant `periodic` — config-driven event timeline. Default
+/// behavior derives `{method}` and `{evidence}` from the `evidenceField` doc
+/// field (default `lq`, for patrol QR-scan). Generic reuse: put `<charcode>`
+/// tokens in `badge`/`text` instead of `{method}`/`{evidence}`, and set
+/// `statusField` for dot/badge coloring from a doc field.
+///
+/// Binds to a Firestore map collection via `table` / `vidtable`, filters by
+/// `conditions`, windows by a period selector, and renders newest-first
+/// vertical timeline entries with gap pills, image galleries, and a
+/// configurable footer.
 class TimelinePeriodic extends StatefulWidget {
   const TimelinePeriodic({
     super.key,
@@ -44,6 +48,9 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
   String _eventCode = '';
   int _nowMs = 0;
   int _windowStartMs = 0;
+  String _evidenceField = 'lq';
+  String? _statusField;
+  String _emptyText = 'Belum ada kunjungan';
 
   @override
   void initState() {
@@ -62,6 +69,16 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
     _selectedMs = _periods.any((p) => p.ms == def)
         ? def
         : (_periods.isNotEmpty ? _periods.first.ms : 604800000);
+    _evidenceField =
+        (widget.component['evidenceField'] ?? '').toString().trim().isEmpty
+            ? 'lq'
+            : widget.component['evidenceField'].toString().trim();
+    final String sfRaw =
+        (widget.component['statusField'] ?? '').toString().trim();
+    _statusField = sfRaw.isEmpty ? null : sfRaw;
+    final String emptyRaw =
+        (widget.component['empty'] ?? '').toString().trim();
+    _emptyText = emptyRaw.isEmpty ? 'Belum ada kunjungan' : emptyRaw;
   }
 
   void _subscribe() {
@@ -228,9 +245,9 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
   }
 
   Widget _buildEmptyState() {
-    return const Center(
-      child: Text('Belum ada kunjungan',
-          style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 14)),
+    return Center(
+      child: Text(_emptyText,
+          style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 14)),
     );
   }
 
@@ -265,19 +282,34 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
   }
 
   Widget _buildEntry(Map<String, dynamic> e) {
-    final String lq = (e['lq'] ?? '').toString();
-    final String evidence = deriveEvidence(lq);
-    final MethodInfo method = deriveMethod(lq);
-    final String mapped = evidence == 'Bukti kuat' ? 'ok' : 'warn';
-    final Color dotColor = statusColor(mapped);
+    final String textTemplate =
+        (widget.component['text'] ?? '').toString();
+    final String badgeTemplate =
+        (widget.component['badge'] ?? '').toString().trim().isEmpty
+            ? '{evidence}'
+            : widget.component['badge'].toString();
 
+    final String rawLq = (e[_evidenceField] ?? '').toString();
+    final String evidence = deriveEvidence(rawLq);
+    final MethodInfo method = deriveMethod(rawLq);
+    final Color dotColor =
+        resolveStatusColor(_statusField, e, evidence);
+
+    final Map<String, String> computed = {
+      'method': method.label,
+      'evidence': evidence,
+    };
     final Map<String, dynamic> doc = Map<String, dynamic>.from(e)
       ..['ts'] = relativeTimestamp(eventEpoch(e), _nowMs);
-    final List<String> seg = diamondTextToList(resolveMapTokens(
-        (widget.component['text'] ?? '').toString(), doc, {'method': method.label}));
+    final List<String> seg =
+        diamondTextToList(resolveMapTokens(textTemplate, doc, computed));
     String at(int i) => seg.length > i ? seg[i] : '';
     final List<String> imageUrls = _splitImages(resolveMapTokens(
         (widget.component['image'] ?? '').toString(), doc, const {}));
+
+    final String resolvedBadge = resolveMapTokens(badgeTemplate, doc, computed);
+    final bool showShieldIcons = badgeContainsEvidence(badgeTemplate);
+    final bool showMethodIcon = textContainsMethod(textTemplate);
 
     return IntrinsicHeight(
       child: Row(
@@ -308,8 +340,15 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
                                   fontWeight: FontWeight.w800,
                                   color: Color(0xFF1A2233))),
                         ),
-                        const SizedBox(width: 8),
-                        _evidenceBadge(evidence),
+                        if (resolvedBadge.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          _evidenceBadge(
+                            resolvedBadge,
+                            evidence,
+                            showShieldIcons,
+                            e,
+                          ),
+                        ],
                       ],
                     ),
                     const SizedBox(height: 6),
@@ -318,9 +357,15 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
                         Text(at(1),
                             style: const TextStyle(
                                 fontSize: 13, color: Color(0xFF6B7280))),
-                        const SizedBox(width: 10),
-                        Icon(method.isQr ? Icons.qr_code_2 : Icons.text_fields,
-                            size: 15, color: const Color(0xFF9AA1AD)),
+                        if (showMethodIcon) ...[
+                          const SizedBox(width: 10),
+                          Icon(
+                              method.isQr
+                                  ? Icons.qr_code_2
+                                  : Icons.text_fields,
+                              size: 15,
+                              color: const Color(0xFF9AA1AD)),
+                        ],
                         const SizedBox(width: 4),
                         Flexible(
                           child: Text(at(2),
@@ -408,36 +453,46 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
     );
   }
 
-  Widget _evidenceBadge(String evidence) {
-    final bool strong = evidence == 'Bukti kuat';
-    final String mapped = strong ? 'ok' : 'warn';
+  Widget _evidenceBadge(
+    String resolvedText,
+    String evidence,
+    bool showShieldIcons,
+    Map<String, dynamic> doc,
+  ) {
+    final Color fg = resolveStatusColor(_statusField, doc, evidence);
+    final Color bg = resolveStatusBgColor(_statusField, doc, evidence);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: statusBgColor(mapped),
+        color: bg,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(strong ? Icons.verified_user_rounded : Icons.gpp_maybe_rounded,
-              size: 14, color: statusColor(mapped)),
-          const SizedBox(width: 4),
-          Text(evidence,
+          if (showShieldIcons) ...[
+            Icon(
+                evidence == 'Bukti kuat'
+                    ? Icons.verified_user_rounded
+                    : Icons.gpp_maybe_rounded,
+                size: 14,
+                color: fg),
+            const SizedBox(width: 4),
+          ],
+          Text(resolvedText,
               style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
-                  color: statusColor(mapped))),
+                  color: fg)),
         ],
       ),
     );
   }
 
   Widget _buildFooter() {
-    final String footer =
-        (widget.component['footer'] ?? '').toString().trim().isNotEmpty
-            ? widget.component['footer'].toString()
-            : _kDefaultFooter;
+    final String raw = (widget.component['footer'] ?? '').toString().trim();
+    if (raw == '-') return const SizedBox.shrink();
+    final String footer = raw.isNotEmpty ? raw : _kDefaultFooter;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(

@@ -104,17 +104,25 @@ class _TimelineState extends State<Timeline> {
                     screenUIComponent[scrName]?['hideBottomBar'] == true;
                 final navBarHeight = hideNav ? 0.0 : 66.0;
                 final bottomPadding = hideNav ? 8.0 : 0.0;
+                final keyboardUp = bottomInset > 0;
+                // With a bottom nav bar, sit the bar on top of it
+                // (navBarHeight + safeBottom). With NO nav bar the bar IS the
+                // bottom-most element: anchor it at bottom:0 so the white
+                // background reaches the screen edge (no floating gap), and let
+                // SafeArea pad the content above the home indicator instead of
+                // offsetting the whole bar by safeBottom (which left it floating).
                 return Positioned(
                   left: 0,
                   right: 0,
-                  bottom:
-                      bottomInset > 0 ? bottomInset : navBarHeight + safeBottom,
+                  bottom: keyboardUp
+                      ? bottomInset
+                      : (hideNav ? 0.0 : navBarHeight + safeBottom),
                   child: Material(
                     color: Colors.white,
                     elevation: 8,
                     child: SafeArea(
                       top: false,
-                      bottom: false,
+                      bottom: hideNav && !keyboardUp,
                       child: Padding(
                         padding: EdgeInsets.only(bottom: bottomPadding),
                         child: Column(
@@ -985,7 +993,7 @@ class _TimelineState extends State<Timeline> {
         setState(() => _pendingAttachments.add(File(picked.path)));
         _inputEntry?.markNeedsBuild();
       } else {
-        FilePickerResult? result = await FilePicker.platform.pickFiles(
+        FilePickerResult? result = await FilePicker.pickFiles(
           type: FileType.custom,
           allowedExtensions: [
             'pdf',

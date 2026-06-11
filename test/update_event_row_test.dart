@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otonomiq/firestore_repository/table_repository.dart';
 import 'package:otonomiq/firestore_repository/update_event_row.dart';
 import 'package:otonomiq/global.dart';
 
@@ -58,6 +59,34 @@ void main() {
       final t = parseUpdateEventRow(block);
       expect(t.conditions.length, 2);
       expect(t.body, {'st': 'on'});
+    });
+  });
+
+  group('isNoMatchResult', () {
+    // historySync tally: 'Error: no match' from updateContent/deleteContent
+    // is non-retryable (row already gone) — counted as success-with-note,
+    // mirroring writeUpdateEventRow's 'ok: no match (skipped)'.
+    test('updateContent/deleteContent no-match -> true', () {
+      expect(isNoMatchResult('Error: no match for vid=58111161122230'), true);
+      expect(isNoMatchResult('Error: no match for 1=X'), true);
+    });
+    test('case-insensitive and trimmed', () {
+      expect(isNoMatchResult('  error: NO MATCH for a=b  '), true);
+    });
+    test('genuine errors stay retryable failures', () {
+      expect(isNoMatchResult('Error'), false);
+      expect(isNoMatchResult('Error: table not found'), false);
+      expect(isNoMatchResult('Error: missing search'), false);
+      expect(
+          isNoMatchResult('Error [cloud_firestore/permission-denied] denied'),
+          false);
+      expect(isNoMatchResult(''), false);
+    });
+    test('success strings are not no-match', () {
+      expect(isNoMatchResult('OK 1 updated'), false);
+      expect(isNoMatchResult('OK 2 deleted'), false);
+      // writeUpdateEventRow's own skip string already passes the ok check.
+      expect(isNoMatchResult('ok: no match (skipped)'), false);
     });
   });
 }

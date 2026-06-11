@@ -38,14 +38,6 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
 
-    kotlin {
-        jvmToolchain {
-            provider {
-                implementation = ':jvmToolchain' // Point to the JVM toolchain defined above
-            }
-        }
-    }
-
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
     }
@@ -94,7 +86,7 @@ flutter {
 }
 
 dependencies {
-    implementation(platform("com.google.firebase:firebase-bom:32.7.4"))
+    implementation(platform("com.google.firebase:firebase-bom:34.14.0"))
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")

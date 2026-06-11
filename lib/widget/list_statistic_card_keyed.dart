@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
+import '../global2.dart';
 import '../redux/screen_transaction.dart';
 import 'panel_card_support.dart';
 import 'statistic_card_support.dart';
@@ -59,8 +60,10 @@ class _ListStatisticCardKeyedState extends State<ListStatisticCardKeyed> {
       _textArray = [];
     }
     try {
+      final String contentRaw =
+          (widget.component['content'] ?? '').toString();
       _contentArray =
-          diamondTextToList((widget.component['content'] ?? '').toString());
+          diamondTextToList(autheniumDecode(contentRaw) ?? contentRaw);
     } catch (_) {
       _contentArray = [];
     }
@@ -98,8 +101,13 @@ class _ListStatisticCardKeyedState extends State<ListStatisticCardKeyed> {
 
   void _onWorkerTap(Map<String, dynamic> worker) {
     final String route = (widget.component['route'] ?? '').toString();
+    debugPrint('[KeyedTap] worker.keys=${worker.keys.toList()} '
+        'vid="${worker['vid']}" sv="${worker['sv']}" n="${worker['n']}"');
     transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
       'vid': (worker['vid'] ?? '').toString(),
+      'sv': (worker['sv'] ?? '').toString(),
+      'is': (worker['is'] ?? '').toString(),
+      'os': (worker['os'] ?? '').toString(),
       'n': (worker['n'] ?? '').toString(),
       'worker': (worker['n'] ?? '').toString(),
       'worker_route': route,
@@ -245,17 +253,88 @@ class _ListStatisticCardKeyedState extends State<ListStatisticCardKeyed> {
       'status': workerStatus(worker),
       'statusLine': workerStatusLine(worker),
     };
-    String at(int i) => _contentArray.length > i
-        ? resolveMapTokens(_contentArray[i], worker, tokens)
-        : '';
     final String statusTemplate =
         (widget.component['status'] ?? '{status}').toString();
     final String ps =
         normalizeStatus(resolveMapTokens(statusTemplate, worker, tokens));
     final Color sColor = statusColor(ps);
-    final String name = at(0);
-    final String line2 = at(1);
-    final String line3 = at(2);
+
+    // Badge resolve + suppress
+    final String badgeTemplate =
+        (widget.component['badge'] ?? '').toString();
+    final String badgeText = resolveBadge(badgeTemplate, worker, tokens);
+
+    // Build content segments
+    final List<Widget> bodyWidgets = [];
+    final List<Widget> chipWidgets = [];
+    bool titleDone = false;
+    int plainLineIdx = 0; // ordinal of plain non-title lines (for style selection)
+
+    for (int i = 0; i < _contentArray.length; i++) {
+      final String raw = _contentArray[i];
+      final ChipSpec? chip = parseChipSpec(raw);
+
+      if (chip == null) {
+        // Plain text segment
+        final String text = resolveMapTokens(raw, worker, tokens);
+        if (!titleDone) {
+          // First plain-text segment = title row (name + badge + chevron)
+          titleDone = true;
+          bodyWidgets.add(_buildTitleRow(text, badgeText, ps));
+        } else {
+          // Subsequent plain-text segments = text lines (backward compat)
+          if (text.isNotEmpty) {
+            if (plainLineIdx == 0) {
+              // Line2 style (first non-title plain): 6px gap, 13px w600, constant gray
+              bodyWidgets.add(const SizedBox(height: 6));
+              bodyWidgets.add(Text(text,
+                  style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF6B7280))));
+            } else {
+              // Line3 style (second+ non-title plain): 4px gap, 12px w600, status-colored
+              bodyWidgets.add(const SizedBox(height: 4));
+              bodyWidgets.add(Text(text,
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: ps == 'ok'
+                          ? const Color(0xFF9AA1AD)
+                          : sColor)));
+            }
+            plainLineIdx++;
+          }
+        }
+      } else {
+        // Chip segment -- collect into one Wrap row
+        final String resolved =
+            resolveMapTokens(chip.valueTemplate, worker, tokens);
+        final String formatted = formatTimeShort(resolved);
+        final String tone = chipTone(formatted, ps);
+        chipWidgets.add(_buildChip(chip.iconName, formatted, tone));
+      }
+    }
+
+    // If no plain-text segment was found (unlikely but safe), ensure title
+    if (!titleDone) {
+      bodyWidgets.insert(0, _buildTitleRow('', badgeText, ps));
+    }
+
+    // Insert chip row after title, before any trailing text lines
+    if (chipWidgets.isNotEmpty) {
+      // Insert after index 0 (title row)
+      final int insertIdx = bodyWidgets.length > 1 ? 1 : bodyWidgets.length;
+      bodyWidgets.insert(insertIdx, const SizedBox(height: 8));
+      bodyWidgets.insert(
+        insertIdx + 1,
+        Wrap(
+          spacing: 16,
+          runSpacing: 6,
+          children: chipWidgets,
+        ),
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
@@ -295,42 +374,7 @@ class _ListStatisticCardKeyedState extends State<ListStatisticCardKeyed> {
                       padding: const EdgeInsets.fromLTRB(16, 16, 12, 16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w800,
-                                        color: Color(0xFF1A2233))),
-                              ),
-                              const SizedBox(width: 8),
-                              const Icon(Icons.chevron_right_rounded,
-                                  color: Color(0xFFC7CCD4), size: 20),
-                            ],
-                          ),
-                          if (line2.isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            Text(line2,
-                                style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: Color(0xFF6B7280))),
-                          ],
-                          if (line3.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            Text(line3,
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: ps == 'ok'
-                                        ? const Color(0xFF9AA1AD)
-                                        : sColor)),
-                          ],
-                        ],
+                        children: bodyWidgets,
                       ),
                     ),
                   ),
@@ -340,6 +384,64 @@ class _ListStatisticCardKeyedState extends State<ListStatisticCardKeyed> {
           ),
         ),
       ),
+    );
+  }
+
+  /// Title row: name (expanded) + optional badge pill + chevron.
+  Widget _buildTitleRow(String name, String badgeText, String cardStatus) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF1A2233))),
+        ),
+        if (badgeText.isNotEmpty) ...[
+          const SizedBox(width: 8),
+          _buildBadgePill(badgeText, cardStatus),
+        ],
+        const SizedBox(width: 8),
+        const Icon(Icons.chevron_right_rounded,
+            color: Color(0xFFC7CCD4), size: 20),
+      ],
+    );
+  }
+
+  /// Badge pill -- mirrors _evidenceBadge style from list_statistic_card.dart.
+  /// Tone = card status (danger/warn/ok).
+  Widget _buildBadgePill(String text, String cardStatus) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: statusBgColor(cardStatus),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(text,
+          style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: statusColor(cardStatus))),
+    );
+  }
+
+  /// One icon-chip: icon + formatted value, colored by tone.
+  Widget _buildChip(String iconName, String formattedValue, String tone) {
+    final Color fg = statusColor(tone);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(stringToIconData(iconName), size: 16, color: fg),
+        const SizedBox(width: 4),
+        Text(formattedValue,
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: fg)),
+      ],
     );
   }
 }

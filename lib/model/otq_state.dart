@@ -235,17 +235,17 @@ class OtqState {
               try {
                 // List<Placemark?> myPlace;
                 dynamic myPlace = gpsPlaceMark;
-                isoCountryCode = (myPlace[0].isoCountryCode) ?? '88';
-                postalCode = myPlace[0].postalCode ?? '';
+                isoCountryCode = (myPlace.isoCountryCode) ?? '88';
+                postalCode = myPlace.postalCode ?? '';
                 administrativeArea =
-                    cleanupString(myPlace[0].administrativeArea ?? '');
+                    cleanupString(myPlace.administrativeArea ?? '');
                 subAdministrativeArea =
-                    cleanupString(myPlace[0].subAdministrativeArea ?? '');
-                locality = cleanupString(myPlace[0].locality ?? '');
-                subLocality = cleanupString(myPlace[0].subLocality ?? '');
-                thoroughfare = cleanupString(myPlace[0].thoroughfare ?? '');
+                    cleanupString(myPlace.subAdministrativeArea ?? '');
+                locality = cleanupString(myPlace.locality ?? '');
+                subLocality = cleanupString(myPlace.subLocality ?? '');
+                thoroughfare = cleanupString(myPlace.thoroughfare ?? '');
                 subThoroughfare =
-                    cleanupString(myPlace[0].subThoroughfare ?? '');
+                    cleanupString(myPlace.subThoroughfare ?? '');
                 gpsDone = true;
               } catch (e) {
                 gpsDone = true;

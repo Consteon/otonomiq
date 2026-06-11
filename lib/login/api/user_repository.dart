@@ -34,30 +34,29 @@ class UserRepository {
 //             );
 
   Future<User?> signInWithGoogle() async {
-    const List<String> scopes = <String>[
-      'email',
-      // 'https://www.googleapis.com/auth/drive',
-      // 'https://www.googleapis.com/auth/drive.appdata',
-      // 'https://www.googleapis.com/auth/spreadsheets',
-    ];
     try {
-      // 1. Interactive sign-in.
-      // googleUser = await _googleSignIn.authenticate(scopeHint: scopes);
+      // 1. Interactive sign-in. authenticate() runs the OpenID sign-in and
+      //    yields the ID token Firebase needs; basic email/profile claims come
+      //    with it.
       final GoogleSignInAccount googleUser = await _googleSignIn.authenticate();
 
-      // 2. Authorize scopes and read the tokens. `.authentication` is sync.
-      final GoogleSignInClientAuthorization auth =
-          await googleUser.authorizationClient.authorizeScopes(scopes);
+      // 2. Read the ID token (`.authentication` is sync). We deliberately do
+      //    NOT call authorizationClient.authorizeScopes() here: on iOS that
+      //    opens a SECOND ASWebAuthenticationSession — the duplicate "wants to
+      //    use google.com to Sign In" consent popup seen after picking the
+      //    account — purely to mint an OAuth access token. Firebase sign-in only
+      //    needs the ID token; authorization (access token / extra scopes) is
+      //    only required to call Google APIs such as Drive/Sheets, which this
+      //    flow does not. Re-add authorizeScopes(<scopes>) only if/when those
+      //    Google-API scopes are actually needed.
       final GoogleSignInAuthentication googleAuth = googleUser.authentication;
-      final String accessToken = auth.accessToken;
       final String? idToken = googleAuth.idToken;
       if (idToken == null) {
-        throw StateError('Missing Google auth token after authorization.');
+        throw StateError('Missing Google ID token after authentication.');
       }
 
       // 3. Exchange for a Firebase credential and sign in.
       final AuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: accessToken,
         idToken: idToken,
       );
       final UserCredential userAuth =

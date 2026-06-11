@@ -2563,6 +2563,18 @@ void historySyncUnLockOld(String from) {
   // debugPrint('***>>> historySyncUnLock from $from');
 } // end of historySyncUnLock
 
+/// True when a per-statement result from `updateTableRow`/`deleteFromTable`
+/// is the "no match" outcome of `updateContent`/`deleteContent`
+/// (`'Error: no match for <field>=<value>'`). No match means the target row no
+/// longer exists (e.g. already deleted on another device — a normal
+/// multi-device occurrence), so retrying can never succeed. historySync
+/// classifies it as non-retryable success-with-note, mirroring
+/// `writeUpdateEventRow`'s 'ok: no match (skipped)'. Genuine errors (network,
+/// permission, table not found, missing search) do NOT match and stay
+/// retryable failures.
+bool isNoMatchResult(String s) =>
+    s.trim().toLowerCase().startsWith('error: no match');
+
 /// In-memory count of consecutive failed historySync attempts per history id.
 /// When ALL table writes for a record fail it is left unsent and retried next
 /// cycle; this counter caps the retries so a permanently-failing ("poison")
@@ -2744,12 +2756,39 @@ Future historySync(String source, bool forceSend) async {
                     //                              poison record can't wedge sync
                     //   - partial success       -> can't retry safely; mark sent
                     //                              but errorReport loudly
+                    //   - update/delete no-match -> non-retryable (row already
+                    //                              gone); counted ok with an
+                    //                              errorReport note
                     int opsAttempted = 0;
                     int opsSucceeded = 0;
                     bool startsOk(String s) =>
                         s.trim().toLowerCase().startsWith('ok');
                     bool resultOk(List<String> res) =>
                         res.isNotEmpty && res.every(startsOk);
+                    // updateTableRow/deleteFromTable only: a 'Error: no match'
+                    // statement is non-retryable (see isNoMatchResult) — count
+                    // it as success-with-note instead of failing the tally,
+                    // which would head-of-line block the whole queue for
+                    // historySyncRetryMax cycles and then drop the record as
+                    // "table data lost". Any OTHER error keeps the op a
+                    // retryable failure.
+                    bool resultOkOrNoMatch(String op, List<String> res) {
+                      if (res.isEmpty) return false;
+                      bool sawNoMatch = false;
+                      for (final String s in res) {
+                        if (startsOk(s)) continue;
+                        if (isNoMatchResult(s)) {
+                          sawNoMatch = true;
+                          continue;
+                        }
+                        return false;
+                      }
+                      if (sawNoMatch) {
+                        errorReport(
+                            'historySync $op no match for historyId ${eventHistory[0]} (row already gone; skipped, non-retryable): $res');
+                      }
+                      return true;
+                    }
                     void tally(String op, bool ok, dynamic detail) {
                       opsAttempted++;
                       if (ok) {
@@ -2786,12 +2825,14 @@ Future historySync(String source, bool forceSend) async {
                         if (updateStr.isNotEmpty) {
                           final res =
                               await updateTableRow(updateStr, eventRowString);
-                          tally('updateTableRow', resultOk(res), res);
+                          tally('updateTableRow',
+                              resultOkOrNoMatch('updateTableRow', res), res);
                         }
                         if (deleteStr.isNotEmpty) {
                           final res =
                               await deleteFromTable(deleteStr, eventRowString);
-                          tally('deleteFromTable', resultOk(res), res);
+                          tally('deleteFromTable',
+                              resultOkOrNoMatch('deleteFromTable', res), res);
                         }
                         if (eventStr.isNotEmpty) {
                           final ok =

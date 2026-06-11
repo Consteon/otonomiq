@@ -5,14 +5,22 @@ import '../firestore_repository/table_repository.dart';
 import '../global.dart';
 import '../redux/screen_transaction.dart';
 import 'panel_card_support.dart';
+import 'statistic_card_support.dart';
 
-/// LIST_MULTIPLE_PANEL_CARD — cost-center list bound to char-code-map docs in a
-/// subcollection (`MobileTable/{appVid}/tables/{tableDocId}/{subColl}`).
-/// Search + colored status summary + collapsible status accordions (PERLU
-/// TINDAK / PERHATIAN / AMAN) + cost-center cards: header (`<an>`/`<sn>`) +
-/// colored left strip (worst status) + N nested nav panels (icon box +
-/// UPPERCASE label + status pill + bold headline + details + chevron), each
-/// tapping its own route with `{ccVid}` = `<av>` context.
+/// LIST_MULTIPLE_PANEL_CARD — reusable card-list widget for any domain.
+///
+/// Renders a list of cards from a Firestore map-collection, each card showing
+/// N nav panels. Config-driven: `variant` ('grouped' for accordion+summary,
+/// flat for plain list), `statusLabels` for label vocabulary, `groupBy` for
+/// grouping token, `searchFields` for client search, `routeParam` for nav
+/// context dispatch, `conditions`/`search` for client-side equality filter.
+///
+/// Aggregation is TYPE-BOUND: `computeKehadiran` + `computePatroli` always run
+/// (harmless on non-patrol docs where `{computed}` tokens resolve empty).
+/// Pure `<charcode>` panels bypass aggregation naturally via `resolveMapTokens`.
+///
+/// Subscriptions: unconditionally subscribes to site + workforce + event
+/// subcollections (empty reads in non-patrol domains are harmless).
 class ListMultiplePanelCard extends StatefulWidget {
   const ListMultiplePanelCard({
     super.key,
@@ -35,17 +43,29 @@ class ListMultiplePanelCard extends StatefulWidget {
 class _ListMultiplePanelCardState extends State<ListMultiplePanelCard> {
   List<String> _textArray = [];
   List<PanelConfig> _panels = [];
+  int _thresholdMs = 43200000; // 12h default
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+  final Map<String, bool> _expanded = {};
+
+  // Config fields parsed from component JSON
+  String _variant = ''; // '' / non-'grouped' = flat; 'grouped' = accordion
+  List<StatusLabelEntry> _statusLabels = const [];
+  String _groupByTemplate = '{ws}';
+  List<String> _searchFieldCodes = const ['an', 'sn'];
+  RouteParamConfig _routeParam = const RouteParamConfig('av', 'ccVid');
+  bool _showIcon = true;
+  String _conditionsRaw = '';
+
+  // Subscription codes
   String _code = ''; // site subcollection code
   String _workforceCode = '';
   String _eventCode = '';
-  int _staleMs = 43200000; // 12h default, configurable via component['staleMs']
-  String _searchQuery = '';
-  final TextEditingController _searchController = TextEditingController();
-  final Map<String, bool> _expanded = {'danger': true, 'warn': true, 'ok': true};
+
   // Build-scoped precomputed indexes (rebuilt each Obx pass).
   int _nowMs = 0;
   Map<String, List<Map<String, dynamic>>> _workersBySv = const {};
-  Map<String, int> _lastVisitByLi = const {};
+  Map<String, int> _lastVisitByLn = const {};
 
   @override
   void initState() {
@@ -67,8 +87,51 @@ class _ListMultiplePanelCardState extends State<ListMultiplePanelCard> {
       _textArray = [];
     }
     _panels = parsePanels(widget.component['panels']);
-    _staleMs =
-        int.tryParse((widget.component['staleMs'] ?? '').toString()) ?? 43200000;
+    _thresholdMs =
+        int.tryParse((widget.component['thresholdMs'] ?? '').toString()) ??
+            43200000;
+
+    // variant: 'grouped' keeps accordion+summary; anything else = flat
+    _variant =
+        (widget.component['variant'] ?? '').toString().trim().toLowerCase();
+
+    // statusLabels: autheniumDecode before ◼ split (server sends _25FC_)
+    final String slRaw = (widget.component['statusLabels'] ?? '').toString();
+    _statusLabels = parseStatusLabels(autheniumDecode(slRaw) ?? slRaw);
+
+    // Pre-seed _expanded from statusLabels (all open by default)
+    for (final entry in _statusLabels) {
+      _expanded[entry.value] = true;
+    }
+
+    // groupBy: only meaningful when grouped, but parse always
+    final String gbRaw = (widget.component['groupBy'] ?? '').toString().trim();
+    _groupByTemplate = gbRaw.isEmpty ? '{ws}' : gbRaw;
+
+    // searchFields: autheniumDecode, then diamondTextToList
+    final String sfRaw = (widget.component['searchFields'] ?? '').toString();
+    final String sfDecoded = autheniumDecode(sfRaw) ?? sfRaw;
+    try {
+      final List<String> parsed = diamondTextToList(sfDecoded);
+      _searchFieldCodes = parsed.where((s) => s.trim().isNotEmpty).toList();
+    } catch (_) {
+      _searchFieldCodes = const ['an', 'sn'];
+    }
+    if (_searchFieldCodes.isEmpty) _searchFieldCodes = const ['an', 'sn'];
+
+    // routeParam: autheniumDecode before ◼ split
+    final String rpRaw = (widget.component['routeParam'] ?? '').toString();
+    _routeParam = parseRouteParam(autheniumDecode(rpRaw) ?? rpRaw);
+
+    // showIcon: absent = true; 'FALSE' (case-insensitive) = false
+    _showIcon =
+        (widget.component['showIcon'] ?? '').toString().toUpperCase() != 'FALSE';
+    // showProgress: accepted, NO-OP (reserved)
+
+    // conditions/search: raw string, decoded + filtered at build time
+    _conditionsRaw =
+        (widget.component['conditions'] ?? widget.component['search'] ?? '')
+            .toString();
   }
 
   void _subscribe() {
@@ -85,7 +148,7 @@ class _ListMultiplePanelCardState extends State<ListMultiplePanelCard> {
   }
 
   /// Real aggregation from the build-scoped indexes: Kehadiran (workforce by
-  /// sv) + Patroli (events joined to ll[].li). `{ws}` = worst(ps, qs).
+  /// sv) + Patroli (events joined to ll[].ln). `{ws}` = worst(ps, qs).
   Map<String, String> _computeCardValues(Map<String, dynamic> doc) {
     final String sv = (doc['sv'] ?? '').toString();
     final KehadiranAgg keh =
@@ -93,7 +156,7 @@ class _ListMultiplePanelCardState extends State<ListMultiplePanelCard> {
     final List<dynamic> ll =
         (doc['ll'] is List) ? doc['ll'] as List : const [];
     final PatroliAgg pat =
-        computePatroli(ll, _lastVisitByLi, _nowMs, _staleMs);
+        computePatroli(ll, _lastVisitByLn, _nowMs, _thresholdMs);
     return {
       'hadir': '${keh.hadir}',
       'issues': keh.issues,
@@ -105,6 +168,8 @@ class _ListMultiplePanelCardState extends State<ListMultiplePanelCard> {
       'ws': worstStatus([keh.ps, pat.qs]),
     };
   }
+
+  Map<String, dynamic> get _screenTx => transactionStore.state.screenTx;
 
   String _resolve(String tmpl, Map<String, dynamic> doc, Map<String, String> v) =>
       resolveMapTokens(tmpl, doc, v);
@@ -121,11 +186,15 @@ class _ListMultiplePanelCardState extends State<ListMultiplePanelCard> {
   }
 
   void _onPanelTap(Map<String, dynamic> doc, PanelConfig panel) {
-    final String ccVid = (doc['av'] ?? '').toString();
-    if (ccVid.isNotEmpty) {
+    // Resolve routeParam: panel-level override if non-empty, else card-level
+    final RouteParamConfig rp = panel.routeParam.isNotEmpty
+        ? parseRouteParam(autheniumDecode(panel.routeParam) ?? panel.routeParam)
+        : _routeParam;
+    final String value = (doc[rp.docField] ?? '').toString();
+    if (value.isNotEmpty) {
       transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-        'ccVid': ccVid,
-        'request_vid': ccVid,
+        rp.token: value,
+        'request_vid': value,
         'panel_route': panel.route,
       })));
     }
@@ -140,9 +209,11 @@ class _ListMultiplePanelCardState extends State<ListMultiplePanelCard> {
     final String q = query.trim().toLowerCase();
     if (q.isEmpty) return docs;
     return docs.where((d) {
-      final String an = (d['an'] ?? '').toString().toLowerCase();
-      final String sn = (d['sn'] ?? '').toString().toLowerCase();
-      return an.contains(q) || sn.contains(q);
+      for (final field in _searchFieldCodes) {
+        final String val = (d[field] ?? '').toString().toLowerCase();
+        if (val.contains(q)) return true;
+      }
+      return false;
     }).toList();
   }
 
@@ -156,15 +227,21 @@ class _ListMultiplePanelCardState extends State<ListMultiplePanelCard> {
       _nowMs = DateTime.now().millisecondsSinceEpoch;
       _workersBySv = groupBySv(List<Map<String, dynamic>>.from(
           mapTableContent[_workforceCode] ?? const []));
-      _lastVisitByLi = latestPatrolByPoint(List<Map<String, dynamic>>.from(
+      _lastVisitByLn = latestPatrolByPoint(List<Map<String, dynamic>>.from(
           mapTableContent[_eventCode] ?? const []));
-      final List<Map<String, dynamic>> filtered = _search(_searchQuery, all);
-      final groups = groupByStatus<Map<String, dynamic>>(
-        filtered,
-        (doc) => _cardWorstStatus(doc, _computeCardValues(doc)),
-      );
+
+      // Client-side conditions filter (search/conditions field)
+      final String condDecoded =
+          autheniumDecode(_conditionsRaw) ?? _conditionsRaw;
+      final List<Map<String, dynamic>> condFiltered =
+          filterByCharCodeEquality(all, condDecoded, _screenTx);
+
+      // Client search box filter
+      final List<Map<String, dynamic>> filtered =
+          _search(_searchQuery, condFiltered);
 
       final double availableH = MediaQuery.of(context).size.height * 0.79;
+      final bool isGrouped = _variant == 'grouped';
 
       return SizedBox(
         height: availableH,
@@ -176,26 +253,79 @@ class _ListMultiplePanelCardState extends State<ListMultiplePanelCard> {
             children: [
               _buildSearchField(),
               const SizedBox(height: 14),
-              _buildSummary(groups),
-              const SizedBox(height: 12),
-              Expanded(
-                child: filtered.isEmpty
-                    ? _buildEmptyState()
-                    : ListView(
-                        padding: EdgeInsets.zero,
-                        children: [
-                          for (final status in statusOrder)
-                            if ((groups[status] ?? []).isNotEmpty)
-                              ..._buildGroup(status, groups[status]!),
-                          const SizedBox(height: 24),
-                        ],
-                      ),
-              ),
+              if (isGrouped) ..._buildGroupedContent(filtered),
+              if (!isGrouped) ..._buildFlatContent(filtered),
             ],
           ),
         ),
       );
     });
+  }
+
+  List<Widget> _buildGroupedContent(List<Map<String, dynamic>> filtered) {
+    // Group by resolved groupBy template, in statusLabels order.
+    final List<String> order = statusLabelOrder(_statusLabels);
+    final Map<String, List<Map<String, dynamic>>> groups = {};
+    for (final s in order) {
+      groups[s] = <Map<String, dynamic>>[];
+    }
+    // W2: unknown group keys (outside the statusLabels tier set) fall into the
+    // LAST entry of the order so they always render and stay counted.
+    final String fallbackKey = order.isNotEmpty ? order.last : '';
+    for (final doc in filtered) {
+      final Map<String, String> v = _computeCardValues(doc);
+      final String rawGroup = resolveMapTokens(_groupByTemplate, doc, v);
+      final String groupKey = normalizeStatus(rawGroup);
+      if (groups.containsKey(groupKey)) {
+        groups[groupKey]!.add(doc);
+      } else if (fallbackKey.isNotEmpty) {
+        groups[fallbackKey]!.add(doc);
+      }
+    }
+
+    // Summary line
+    final Map<String, int> counts = {};
+    for (final entry in groups.entries) {
+      counts[entry.key] = entry.value.length;
+    }
+    final List<TextSpan> summarySpans =
+        buildSummarySpans(_statusLabels, counts);
+
+    return [
+      if (summarySpans.isNotEmpty) ...[
+        Text.rich(TextSpan(children: summarySpans)),
+        const SizedBox(height: 12),
+      ],
+      Expanded(
+        child: filtered.isEmpty
+            ? _buildEmptyState()
+            : ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  for (final status in order)
+                    if ((groups[status] ?? []).isNotEmpty)
+                      ..._buildGroup(status, groups[status]!),
+                  const SizedBox(height: 24),
+                ],
+              ),
+      ),
+    ];
+  }
+
+  List<Widget> _buildFlatContent(List<Map<String, dynamic>> filtered) {
+    return [
+      Expanded(
+        child: filtered.isEmpty
+            ? _buildEmptyState()
+            : ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  for (final doc in filtered) _buildCard(doc),
+                  const SizedBox(height: 24),
+                ],
+              ),
+      ),
+    ];
   }
 
   Widget _buildSearchField() {
@@ -222,24 +352,6 @@ class _ListMultiplePanelCardState extends State<ListMultiplePanelCard> {
     );
   }
 
-  Widget _buildSummary(Map<String, List<Map<String, dynamic>>> groups) {
-    final int d = groups['danger']?.length ?? 0;
-    final int w = groups['warn']?.length ?? 0;
-    final int o = groups['ok']?.length ?? 0;
-    const TextStyle sep = TextStyle(fontSize: 13, color: Color(0xFF9CA3AF));
-    TextSpan seg(String text, String status) => TextSpan(
-        text: text,
-        style: TextStyle(
-            fontSize: 13, fontWeight: FontWeight.w700, color: statusColor(status)));
-    return Text.rich(TextSpan(children: [
-      seg('$d perlu tindak', 'danger'),
-      const TextSpan(text: ' · ', style: sep),
-      seg('$w perhatian', 'warn'),
-      const TextSpan(text: ' · ', style: sep),
-      seg('$o aman', 'ok'),
-    ]));
-  }
-
   Widget _buildEmptyState() {
     final String empty =
         _textArray.length > 5 ? _textArray[5] : 'Data tidak ditemukan';
@@ -261,6 +373,7 @@ class _ListMultiplePanelCardState extends State<ListMultiplePanelCard> {
 
   Widget _buildGroupHeader(String status, int count, bool open) {
     final Color sColor = statusColor(status);
+    final String label = lookupGroupLabel(_statusLabels, status);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Material(
@@ -283,7 +396,7 @@ class _ListMultiplePanelCardState extends State<ListMultiplePanelCard> {
                     decoration:
                         BoxDecoration(color: sColor, shape: BoxShape.circle)),
                 const SizedBox(width: 10),
-                Text(statusGroupLabel(status).toUpperCase(),
+                Text(label.toUpperCase(),
                     style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
@@ -379,9 +492,9 @@ class _ListMultiplePanelCardState extends State<ListMultiplePanelCard> {
       PanelConfig p, Map<String, dynamic> doc, Map<String, String> v) {
     final PanelText t = splitPanelText(_resolve(p.text, doc, v));
     final String status = _panelStatus(p, doc, v);
-    final String details = (normalizeStatus(status) == 'ok' && p.okText.isNotEmpty)
-        ? p.okText
-        : t.details;
+    final String normalizedStatus = normalizeStatus(status);
+    final String details =
+        (normalizedStatus == 'ok' && p.okText.isNotEmpty) ? p.okText : t.details;
 
     return InkWell(
       borderRadius: BorderRadius.circular(12),
@@ -391,17 +504,19 @@ class _ListMultiplePanelCardState extends State<ListMultiplePanelCard> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF1F3F5),
-                borderRadius: BorderRadius.circular(12),
+            if (_showIcon) ...[
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F3F5),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(panelIcon(p.icon),
+                    size: 22, color: const Color(0xFF6B7280)),
               ),
-              child: Icon(panelIcon(p.icon),
-                  size: 22, color: const Color(0xFF6B7280)),
-            ),
-            const SizedBox(width: 14),
+              const SizedBox(width: 14),
+            ],
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -448,15 +563,18 @@ class _ListMultiplePanelCardState extends State<ListMultiplePanelCard> {
   }
 
   Widget _statusPill(String status) {
+    final String label = lookupPillLabel(_statusLabels, status);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(
         color: statusBgColor(status),
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Text(statusPillLabel(status),
+      child: Text(label,
           style: TextStyle(
-              fontSize: 11, fontWeight: FontWeight.w700, color: statusColor(status))),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: statusColor(status))),
     );
   }
 }

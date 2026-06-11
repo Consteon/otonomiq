@@ -303,25 +303,30 @@ void main() {
     });
   });
 
+  // ── ln-keyed patrol join (re-keyed 2026-06-11: location NAME, not QR id) ──
+  // Merged: the Task-0 "(ln-keyed)"/"(ln-matched)" groups were folded in here
+  // (W3) so every unique assertion appears exactly once.
   group('latestPatrolByPoint', () {
-    test('keeps max t per lq, patrol-type only, skips empty/zero', () {
+    test('keeps max t per ln, patrol-type only, skips empty/zero', () {
       final m = latestPatrolByPoint([
-        {'ty': 'report-patrol', 'lq': 'A', 't': '100'},
-        {'ty': 'report-patrol', 'lq': 'A', 't': '300'}, // newer wins
-        {'ty': 'report-patrol', 'lq': 'A', 't': '200'},
-        {'ty': 'report-incident', 'lq': 'A', 't': '999'}, // not patrol -> ignored
-        {'ty': 'report-patrol', 'lq': '', 't': '500'}, // empty lq -> ignored
-        {'ty': 'report-patrol', 'lq': 'B', 't': '50'},
+        {'ty': 'report-patrol', 'ln': 'Lobby', 'lq': 'QR-A', 't': '100'},
+        {'ty': 'report-patrol', 'ln': 'Lobby', 'lq': 'QR-A', 't': '300'},
+        {'ty': 'report-patrol', 'ln': 'Lobby', 'lq': 'QR-A', 't': '200'},
+        {'ty': 'report-incident', 'ln': 'Lobby', 'lq': 'QR-A', 't': '999'},
+        {'ty': 'report-patrol', 'ln': '', 'lq': 'QR-B', 't': '500'},
+        {'ty': 'report-patrol', 'ln': 'Parkir', 'lq': 'QR-C', 't': '50'},
       ]);
-      expect(m['A'], 300);
-      expect(m['B'], 50);
+      expect(m['Lobby'], 300);
+      expect(m['Parkir'], 50);
       expect(m.containsKey(''), isFalse);
+      expect(m.containsKey('QR-A'), isFalse); // NOT keyed by lq
+      expect(m.containsKey('QR-C'), isFalse);
     });
     test('falls back to et when t missing', () {
       final m = latestPatrolByPoint([
-        {'ty': 'patrol', 'lq': 'A', 'et': '700'},
+        {'ty': 'patrol', 'ln': 'Gate', 'et': '700'},
       ]);
-      expect(m['A'], 700);
+      expect(m['Gate'], 700);
     });
   });
 
@@ -330,10 +335,10 @@ void main() {
     const stale = 43200000; // 12h
     test('recent visits -> staleCount 0, qs ok', () {
       final ll = [
-        {'li': 'A'},
-        {'li': 'B'}
+        {'ln': 'Lobby', 'li': 'QR1'},
+        {'ln': 'Parkir', 'li': 'QR2'}
       ];
-      final last = {'A': now - 1000, 'B': now - 2000};
+      final last = {'Lobby': now - 1000, 'Parkir': now - 2000};
       final r = computePatroli(ll, last, now, stale);
       expect(r.llCount, 2);
       expect(r.staleCount, 0);
@@ -341,33 +346,157 @@ void main() {
     });
     test('one stale visit -> staleCount 1, qs warn, longestGap hours', () {
       final ll = [
-        {'li': 'A'},
-        {'li': 'B'}
+        {'ln': 'Lobby'},
+        {'ln': 'Parkir'}
       ];
-      final last = {'A': now - (stale + 3600000), 'B': now - 1000}; // A 13h ago
+      // Lobby 13h ago
+      final last = {'Lobby': now - (stale + 3600000), 'Parkir': now - 1000};
       final r = computePatroli(ll, last, now, stale);
       expect(r.staleCount, 1);
       expect(r.qs, 'warn');
       expect(r.longestGapHours, 13);
     });
-    test('never-patrolled point counts as stale', () {
+    test('never-patrolled point (ln not in map) counts as stale', () {
       final ll = [
-        {'li': 'A'},
-        {'li': 'B'}
+        {'ln': 'Lobby', 'li': 'QR1'},
+        {'ln': 'Parkir', 'li': 'QR2'}
       ];
-      final last = {'A': now - 1000}; // B never visited
+      final last = {'Lobby': now - 1000}; // Parkir never visited
       final r = computePatroli(ll, last, now, stale);
       expect(r.staleCount, 1);
       expect(r.qs, 'warn');
     });
-    test('non-map / missing li tolerated', () {
+    test('non-map / missing ln tolerated', () {
       final ll = [
         'oops',
-        {'li': 'A'}
+        {'ln': 'Lobby'}
       ];
-      final r = computePatroli(ll, {'A': now - 1000}, now, stale);
+      final r = computePatroli(ll, {'Lobby': now - 1000}, now, stale);
       expect(r.llCount, 1);
       expect(r.staleCount, 0);
+    });
+  });
+
+  group('parseStatusLabels', () {
+    test('parses ★-then-◼ separated entries', () {
+      final labels = parseStatusLabels(
+          'danger◼Perlu tindak◼Perlu tindak★warn◼Perhatian◼Perhatian★ok◼Aman◼Beres');
+      expect(labels.length, 3);
+      expect(labels[0].value, 'danger');
+      expect(labels[0].groupLabel, 'Perlu tindak');
+      expect(labels[0].pillLabel, 'Perlu tindak');
+      expect(labels[2].value, 'ok');
+      expect(labels[2].groupLabel, 'Aman');
+      expect(labels[2].pillLabel, 'Beres');
+    });
+
+    test('entries with fewer than 3 segments use value as fallback', () {
+      final labels = parseStatusLabels('danger◼Rusak');
+      expect(labels.length, 1);
+      expect(labels[0].groupLabel, 'Rusak');
+      expect(labels[0].pillLabel, 'Rusak'); // fallback = groupLabel
+    });
+
+    test('empty/null returns patrol defaults', () {
+      final labels = parseStatusLabels('');
+      expect(labels.length, 3);
+      expect(labels[0].value, 'danger');
+      expect(labels[0].groupLabel, 'Perlu tindak');
+      expect(labels[1].value, 'warn');
+      expect(labels[2].value, 'ok');
+      expect(labels[2].pillLabel, 'Beres');
+    });
+
+    test('null input returns patrol defaults', () {
+      final labels = parseStatusLabels(null);
+      expect(labels.length, 3);
+    });
+
+    test('single malformed entry (no ◼) returns patrol defaults', () {
+      final labels = parseStatusLabels('garbage');
+      expect(labels.length, 3); // fallback
+    });
+  });
+
+  group('statusLabelLookup helpers', () {
+    final labels = parseStatusLabels(
+        'danger◼Rusak◼Rusak★warn◼Perlu servis◼Perlu servis★ok◼Sehat◼Sehat');
+
+    test('lookupGroupLabel finds by value', () {
+      expect(lookupGroupLabel(labels, 'danger'), 'Rusak');
+      expect(lookupGroupLabel(labels, 'ok'), 'Sehat');
+    });
+
+    test('lookupGroupLabel unknown value falls back to value itself', () {
+      expect(lookupGroupLabel(labels, 'unknown'), 'unknown');
+    });
+
+    test('lookupPillLabel finds by value', () {
+      expect(lookupPillLabel(labels, 'danger'), 'Rusak');
+      expect(lookupPillLabel(labels, 'ok'), 'Sehat');
+    });
+
+    test('lookupPillLabel unknown value falls back to value itself', () {
+      expect(lookupPillLabel(labels, 'unknown'), 'unknown');
+    });
+
+    test('statusLabelOrder returns values in entry order', () {
+      expect(statusLabelOrder(labels), ['danger', 'warn', 'ok']);
+    });
+
+    // W2: a 2-entry config (no 'ok' tier). The widget buckets unknown group
+    // keys into the LAST entry of statusLabelOrder, so .last must be the
+    // intended fallback bucket and the card stays counted (never vanishes).
+    test('2-entry config exposes last-entry as the unknown fallback bucket', () {
+      final twoTier =
+          parseStatusLabels('bad◼Bermasalah◼Bermasalah★fine◼Baik◼Baik');
+      final order = statusLabelOrder(twoTier);
+      expect(order, ['bad', 'fine']);
+      expect(order.last, 'fine'); // unknown group keys land here
+    });
+  });
+
+  group('parseRouteParam', () {
+    test('parses docField◼token', () {
+      final rp = parseRouteParam('av◼ccVid');
+      expect(rp.docField, 'av');
+      expect(rp.token, 'ccVid');
+    });
+
+    test('empty/null returns default av/ccVid', () {
+      expect(parseRouteParam('').docField, 'av');
+      expect(parseRouteParam('').token, 'ccVid');
+      expect(parseRouteParam(null).docField, 'av');
+    });
+
+    test('no ◼ separator returns default', () {
+      final rp = parseRouteParam('justOneWord');
+      expect(rp.docField, 'av');
+      expect(rp.token, 'ccVid');
+    });
+  });
+
+  group('buildSummarySpans', () {
+    final labels = parseStatusLabels(
+        'danger◼Perlu tindak◼Perlu tindak★warn◼Perhatian◼Perhatian★ok◼Aman◼Beres');
+
+    test('includes only tiers with count > 0', () {
+      final counts = {'danger': 3, 'warn': 0, 'ok': 5};
+      final spans = buildSummarySpans(labels, counts);
+      // 2 label spans + 1 separator
+      expect(spans.length, 3); // '3 Perlu tindak' + ' · ' + '5 Aman'
+    });
+
+    test('all zero returns empty list', () {
+      final counts = {'danger': 0, 'warn': 0, 'ok': 0};
+      final spans = buildSummarySpans(labels, counts);
+      expect(spans, isEmpty);
+    });
+
+    test('single tier, no separator', () {
+      final counts = {'danger': 2, 'warn': 0, 'ok': 0};
+      final spans = buildSummarySpans(labels, counts);
+      expect(spans.length, 1);
     });
   });
 }

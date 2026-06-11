@@ -173,10 +173,11 @@ class MainPageState extends State<MainPage> {
       // do nothing
     }
     if (title.substring(0, 1) == '_') title = '';
-    try {
+    // Guard with hasClients: during the first build no scroll view is attached
+    // yet, so an unguarded jumpTo throws '_positions.isNotEmpty' (ScrollController
+    // not attached). hasClients is true only once a position is attached.
+    if (scrollController.hasClients) {
       scrollController.jumpTo(0.0);
-    } catch (e) {
-      errorReport(e);
     }
 
     void handleNavTap(int i) {
@@ -239,10 +240,8 @@ class MainPageState extends State<MainPage> {
                 var lifKey = state.screenTx['#INTERFACE_KEY'];
                 readSettings(lifKey, 1).then((_) {
                   transactionStore.dispatch(UpdateScreenTxAction(
-                      ScreenTransaction({
-                    '#REFRESH': false,
-                    '#CURRENT_ROUTE': pgName
-                  })));
+                      ScreenTransaction(
+                          {'#REFRESH': false, '#CURRENT_ROUTE': pgName})));
                   List<Widget> newElementList = reloadPage(pgName);
                   setState(() {
                     _selectedNavIndex = i;
@@ -485,7 +484,9 @@ class MainPageState extends State<MainPage> {
                                 setState(() {
                                   wait = true;
                                   touch = !touch;
-                                  scrollController.jumpTo(0.0);
+                                  if (scrollController.hasClients) {
+                                    scrollController.jumpTo(0.0);
+                                  }
                                   dataColor = notReadyColor;
                                   // dataColor = readyColor;
                                 });
@@ -656,34 +657,54 @@ class MainPageState extends State<MainPage> {
                                       ValueListenableBuilder<bool>(
                                     valueListenable:
                                         ApproverStickyBar.overlaysHidden,
-                                    builder: (ctx, hidden, _) {
-                                      final configs =
-                                          ApproverStickyBar.getConfigs(route);
-                                      if (hidden || configs == null || configs.isEmpty) {
-                                        return const SizedBox.shrink();
-                                      }
-                                      final bottomInset =
-                                          MediaQuery.of(ctx).viewInsets.bottom;
-                                      if (bottomInset > 0) {
-                                        return const SizedBox.shrink();
-                                      }
-                                      return Align(
-                                        alignment: Alignment.bottomCenter,
-                                        child: Material(
-                                          color: Colors.white,
-                                          elevation: 8,
-                                          child: SafeArea(
-                                            top: false,
-                                            child: Padding(
-                                              padding: const EdgeInsets.only(
-                                                  bottom: 12),
-                                              child: StickyBarRenderer(
-                                                  configs: configs),
+                                    builder: (ctx, hidden, _) =>
+                                        ValueListenableBuilder<WidgetBuilder?>(
+                                      valueListenable: ApproverStickyBar.slot,
+                                      builder: (ctx, slotBuilder, __) {
+                                        final configs =
+                                            ApproverStickyBar.getConfigs(route);
+                                        debugPrint(
+                                            '[StickyBar] activeBarScreen='
+                                            '"$route" configs=${configs?.length} '
+                                            'hidden=$hidden');
+                                        // Slot mode (commentbox screens): the
+                                        // timeline's bottom comment-box overlay
+                                        // already hosts the approve/reject bar via
+                                        // ApproverStickyBar.slot. Suppress this
+                                        // body-level copy, else the bar renders
+                                        // twice (stacked) at the screen bottom.
+                                        if (slotBuilder != null) {
+                                          return const SizedBox.shrink();
+                                        }
+                                        if (hidden ||
+                                            configs == null ||
+                                            configs.isEmpty) {
+                                          return const SizedBox.shrink();
+                                        }
+                                        final bottomInset = MediaQuery.of(ctx)
+                                            .viewInsets
+                                            .bottom;
+                                        if (bottomInset > 0) {
+                                          return const SizedBox.shrink();
+                                        }
+                                        return Align(
+                                          alignment: Alignment.bottomCenter,
+                                          child: Material(
+                                            color: Colors.white,
+                                            elevation: 8,
+                                            child: SafeArea(
+                                              top: false,
+                                              child: Padding(
+                                                padding: const EdgeInsets.only(
+                                                    bottom: 12),
+                                                child: StickyBarRenderer(
+                                                    configs: configs),
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                      );
-                                    },
+                                        );
+                                      },
+                                    ),
                                   ),
                                 ),
                               ),
@@ -907,10 +928,8 @@ class MainPageState extends State<MainPage> {
                                                     ScreenTransaction({
                                               '#CURRENT_ROUTE': nxPage
                                             }))); // set state #CURRENT_ROUTE
-                                            try {
+                                            if (scrollController.hasClients) {
                                               scrollController.jumpTo(0.0);
-                                            } catch (e) {
-                                              errorReport(e);
                                             }
                                             state['#TIMER_BLOC'].dispatch(
                                                 Reset()); // reset timer state to Ready

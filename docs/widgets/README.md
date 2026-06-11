@@ -37,6 +37,9 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | DisplayList | [display_list.md](display_list.md) | todo | List display |
 | DisplayList2 | [display_list_2.md](display_list_2.md) | todo | List display v2 (source file currently empty — doc is a placeholder) |
 | DisplayCard | [display_card.md](display_card.md) | todo | Card display |
+| ListMultiplePanelCard | [list_multiple_panel_card.md](list_multiple_panel_card.md) | draft | Reusable card-list with N nav panels, config-driven layout/labels |
+| ListStatisticCard | [list_statistic_card.md](list_statistic_card.md) | draft | Per-point patrol/cleaning statistic list with optional typed-location merge |
+| TimelinePeriodic | [timeline_periodic.md](timeline_periodic.md) | draft | Config-driven event timeline (TIMELINE variant periodic) with period selector, badge chips, gap pills, image gallery |
 | OtqFormattedText | [otq_formatted_text.md](otq_formatted_text.md) | todo | Text with formatter |
 | TimePresence | [time_presence.md](time_presence.md) | done | Check-in time, live elapsed counter, and last action in 3-column card |
 

@@ -75,6 +75,18 @@ class ApproverStickyBar {
     transactionStore.onChange.listen((state) {
       final route = state.screenTx['#CURRENT_ROUTE'];
       if (route is String && route.isNotEmpty) {
+        // onChange fires on EVERY dispatch (the store is not distinct), so
+        // gate the clear on an actual route CHANGE — an unconditional clear
+        // would wipe currentRow mid-screen on any #GPSDATA/timer dispatch and
+        // blank the incident bar until the detail card happens to rebuild.
+        if (route != activeBarScreen.value) {
+          // Per-screen state cleared on route change: currentRow is a single
+          // static Rx published by the leaving screen's detail card
+          // (ItemCardDetail / WorkerCardDetailKeyed); left uncleared, the
+          // previous worker's row leaks into the next screen's incident bar
+          // until that screen's own publisher runs.
+          ItemCardDetail.currentRow.value = const [];
+        }
         activeBarScreen.value = route;
         ItemCardDetail.screenStatus.remove(route);
       }
@@ -94,9 +106,10 @@ class ApproverStickyBar {
     double bPad = 0,
   }) {
     ensureRouteListener();
-    _configs[scrName] ??= [];
-    _configs[scrName]!.add(StickyBarConfig(
-      component: _deepCopy(component) as Map<dynamic, dynamic>,
+    final List<StickyBarConfig> list = _configs[scrName] ??= [];
+    final copy = _deepCopy(component) as Map<dynamic, dynamic>;
+    final newConfig = StickyBarConfig(
+      component: copy,
       scrName: scrName,
       type: type,
       defaultStatus: defaultStatus,
@@ -106,7 +119,27 @@ class ApproverStickyBar {
       tPad: tPad,
       rPad: rPad,
       bPad: bPad,
-    ));
+    );
+    // Idempotent registration. AnyPage (the page class for every non-home screen,
+    // incl. approval) rebuilds via StoreConnector on EVERY Redux state change and
+    // calls buildPage(clear:false) — which does NOT clearConfigs — and nested
+    // clear:false builds (DisplayList widgetList, dialogs, bottom sheets) re-enter
+    // here too. Appending blindly grows _configs[scrName] so StickyBarRenderer's
+    // Column stacks N identical approve/reject bars (the iOS "stacked buttons"
+    // bug; latent on Android, just fires less often). Dedup on the component's
+    // stable slot ('position'): replace the existing config for that slot so an
+    // updated component/status/padding takes effect, while keeping genuinely
+    // distinct RBTs (different position) as separate bars. NOT widgetKey — that is
+    // an ObjectKey over a freshly-interpolated "$scrName-$position" String, which
+    // compares by identity and would never match across rebuilds.
+    final dynamic pos = copy['position'];
+    final int idx =
+        pos == null ? -1 : list.indexWhere((c) => c.component['position'] == pos);
+    if (idx >= 0) {
+      list[idx] = newConfig;
+    } else {
+      list.add(newConfig);
+    }
     version.value++;
   }
 

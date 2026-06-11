@@ -42,6 +42,7 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
   String _eventCode = '';
   String _siteSv = '';
   String _searchQuery = '';
+  String _mergeTyped = '';
   final TextEditingController _searchController = TextEditingController();
 
   // Build-scoped indexes (rebuilt each Obx pass).
@@ -85,6 +86,7 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
     _selectedMs = _periods.any((p) => p.ms == def)
         ? def
         : (_periods.isNotEmpty ? _periods.first.ms : 86400000);
+    _mergeTyped = (widget.component['mergeTyped'] ?? '').toString().trim();
   }
 
   void _subscribe() {
@@ -99,6 +101,22 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
   }
 
   Map<String, dynamic> get _screenTx => transactionStore.state.screenTx;
+
+  /// Resolve the {ccVid} token from screenTx for event-side av filtering.
+  /// Uses the same conditions/search field (same precedence as [_points]) to
+  /// extract the token name, then looks it up in _screenTx.
+  String get _resolvedCcVid {
+    final String raw =
+        (widget.component['conditions'] ?? widget.component['search'] ?? '')
+            .toString();
+    final String decoded = autheniumDecode(raw) ?? raw;
+    // Extract the token name from the pattern (e.g. "av◼{ccVid}" -> "ccVid").
+    final RegExp tok = RegExp(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}');
+    final Match? m = tok.firstMatch(decoded);
+    if (m == null) return '';
+    final String key = m.group(1) ?? '';
+    return (_screenTx[key] ?? '').toString().trim();
+  }
 
   String get _selectedLabel {
     for (final p in _periods) {
@@ -155,31 +173,110 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
               mapTableContent[_eventCode] ?? const []);
       _nowMs = DateTime.now().millisecondsSinceEpoch;
       _windowStartMs = _nowMs - _selectedMs;
-      _byLn = eventsByLn(events);
 
       final List<Map<String, dynamic>> points = _points(siteDocs);
-      final StatsSummary summary =
-          computeStatsSummary(points, _byLn, _nowMs, _windowStartMs);
-      final List<Map<String, dynamic>> searched = _search(points);
 
-      // Pair each point with its stat, then sort severity-desc, oldest-first.
-      final List<MapEntry<Map<String, dynamic>, PointStat>> entries =
-          searched.map((p) {
-        final stat = computePointStat(
-            _byLn[(p['ln'] ?? '').toString()] ?? const [],
-            _nowMs,
-            _windowStartMs,
-            _staleMs);
-        return MapEntry(p, stat);
-      }).toList();
-      entries.sort((a, b) {
-        final int ra = statusOrder.indexOf(a.value.ps);
-        final int rb = statusOrder.indexOf(b.value.ps);
-        final int sa = ra < 0 ? statusOrder.length : ra;
-        final int sb = rb < 0 ? statusOrder.length : rb;
-        if (sa != sb) return sa - sb;
-        return a.value.lastEpoch.compareTo(b.value.lastEpoch);
-      });
+      // --- Merge-typed path vs legacy path ---
+      final List<MapEntry<Map<String, dynamic>, PointStat>> entries;
+      final StatsSummary summary;
+
+      if (_mergeTyped.isNotEmpty) {
+        // MERGE MODE: scope events, lowercase matching, orphan merge.
+        final String ccVid = _resolvedCcVid;
+        final List<Map<String, dynamic>> scoped =
+            scopePatrolEvents(events, 'report-patrol', ccVid, _windowStartMs);
+        final Map<String, List<Map<String, dynamic>>> byLnLower =
+            eventsByLnLower(scoped);
+
+        // Official points set (lowercase).
+        final Set<String> officialNamesLower = points
+            .map((p) => (p['ln'] ?? '').toString().toLowerCase())
+            .where((s) => s.isNotEmpty)
+            .toSet();
+
+        // Typed entries (orphans).
+        final List<TypedEntry> typedEntries =
+            groupOrphans(byLnLower, officialNamesLower);
+
+        // Stats.
+        summary = computeStatsSummaryMerge(
+          points: points,
+          typedEntries: typedEntries,
+          scopedEvents: scoped,
+          byLnLower: byLnLower,
+        );
+
+        // Build entry pairs: official points.
+        final List<MapEntry<Map<String, dynamic>, PointStat>> officialEntries =
+            points.map((p) {
+          final String lnLower = (p['ln'] ?? '').toString().toLowerCase();
+          final stat = computePointStat(
+              byLnLower[lnLower] ?? const [], _nowMs, _windowStartMs, _staleMs);
+          return MapEntry(p, stat);
+        }).toList();
+
+        // Build entry pairs: typed entries.
+        final List<MapEntry<Map<String, dynamic>, PointStat>> typedPairs =
+            typedEntries.map((te) {
+          final Map<String, dynamic> pseudoPoint = {'ln': te.ln, 'li': ''};
+          final stat = computeTypedPointStat(te.events, _nowMs);
+          return MapEntry(pseudoPoint, stat);
+        }).toList();
+
+        // Union then search.
+        final List<MapEntry<Map<String, dynamic>, PointStat>> union = [
+          ...officialEntries,
+          ...typedPairs,
+        ];
+
+        // Apply search filter.
+        final String q = _searchQuery.trim().toLowerCase();
+        final List<MapEntry<Map<String, dynamic>, PointStat>> searched =
+            q.isEmpty
+                ? union
+                : union
+                    .where((e) => (e.key['ln'] ?? '')
+                        .toString()
+                        .toLowerCase()
+                        .contains(q))
+                    .toList();
+
+        // Sort: severity desc, oldest first.
+        searched.sort((a, b) {
+          final int ra = statusOrder.indexOf(a.value.ps);
+          final int rb = statusOrder.indexOf(b.value.ps);
+          final int sa = ra < 0 ? statusOrder.length : ra;
+          final int sb = rb < 0 ? statusOrder.length : rb;
+          if (sa != sb) return sa - sb;
+          return a.value.lastEpoch.compareTo(b.value.lastEpoch);
+        });
+
+        entries = searched;
+      } else {
+        // LEGACY MODE: exact-case matching, old stats.
+        _byLn = eventsByLn(events);
+        summary = computeStatsSummary(points, _byLn, _nowMs, _windowStartMs);
+        final List<Map<String, dynamic>> searched = _search(points);
+
+        final List<MapEntry<Map<String, dynamic>, PointStat>> legacy =
+            searched.map((p) {
+          final stat = computePointStat(
+              _byLn[(p['ln'] ?? '').toString()] ?? const [],
+              _nowMs,
+              _windowStartMs,
+              _staleMs);
+          return MapEntry(p, stat);
+        }).toList();
+        legacy.sort((a, b) {
+          final int ra = statusOrder.indexOf(a.value.ps);
+          final int rb = statusOrder.indexOf(b.value.ps);
+          final int sa = ra < 0 ? statusOrder.length : ra;
+          final int sb = rb < 0 ? statusOrder.length : rb;
+          if (sa != sb) return sa - sb;
+          return a.value.lastEpoch.compareTo(b.value.lastEpoch);
+        });
+        entries = legacy;
+      }
 
       final double availableH = MediaQuery.of(context).size.height * 0.82;
 

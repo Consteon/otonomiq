@@ -19,7 +19,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 version: 0.9.78+97827
 
 environment:
-  sdk: ">=3.3.1 <4.0.0"
+  sdk: ">=3.12.0 <4.0.0"
 
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
@@ -35,35 +35,31 @@ dependencies:
     sdk: flutter # Added for localization
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^1.0.8
-  image_picker: ^1.1.2
-  file_picker: ^8.1.7
-  geolocator: ^13.0.1
-  mobile_scanner: ^7.0.1
+  cupertino_icons: ^1.0.9
+  image_picker: ^1.2.2
+  file_picker: ^11.0.2
+  geolocator: ^14.0.2
+  mobile_scanner: ^7.2.0
   font_awesome_flutter: ^11.0.0
-  camera: ^0.10.4
-  googleapis: ^14.0.0
-  google_sign_in: ^7.1.1
-  googleapis_auth: ^2.0.0
-  google_maps_flutter: ^2.12.3
-  http: ^1.5.0
-  flutter_secure_storage: ^9.2.4
+  camera: ^0.12.0+1
+  googleapis: ^16.0.0
+  google_sign_in: ^7.2.0
+  googleapis_auth: ^2.3.2
+  http: ^1.6.0
+  flutter_secure_storage: ^10.3.1
   #  encrypt: ^5.0.3
   transparent_image: ^2.0.1
-  ffi: ^2.1.4
   flutter_redux: ^0.10.0
-  flutter_redux_dev_tools: ^0.5.2
-  cloud_firestore: ^6.0.0
-  cloud_functions: ^6.0.0
+  cloud_firestore: ^6.5.0
   flutter_bloc: ^7.0.0
-  equatable: ^2.0.0
-  firebase_auth: ^6.0.1
-  firebase_core: ^4.0.0
-  firebase_crashlytics: ^5.0.0
-  firebase_messaging: ^16.0.0
-  firebase_storage: ^13.0.0
-  webview_flutter: ^4.13.0
-  device_info_plus: ^11.5.0
+  equatable: ^2.0.8
+  firebase_auth: ^6.5.2
+  firebase_core: ^4.10.0
+  firebase_crashlytics: ^5.2.3
+  firebase_messaging: ^16.3.0
+  firebase_storage: ^13.4.2
+  webview_flutter: ^4.13.1
+  device_info_plus: ^12.4.0 # 13.x blocked: needs win32 ^6, file_picker 11 pins win32 ^5.9
   intl: ^0.20.2
   #  soundpool: ^2.4.1
   qr_flutter: ^4.1.0
@@ -75,30 +71,28 @@ dependencies:
   get: ^4.7.3
   cached_network_image: ^3.4.1
   internet_connection_checker: ^3.0.1
-  shared_preferences: ^2.5.3
-  permission_handler: ^12.0.1
-  flutter_multi_formatter: ^2.13.10
-  image: ^4.5.4
+  shared_preferences: ^2.5.5
+  permission_handler: ^12.0.3
+  flutter_multi_formatter: ^2.13.11
+  image: ^4.8.0
   bloc: ^7.0.0
-  meta: ^1.16.0
+  meta: ^1.18.0
   redux_dev_tools: ^0.7.0
-  path: ^1.9.1
-  fast_contacts: ^4.0.0
-  flutter_widget_from_html: ^0.17.1
+  fast_contacts: ^5.0.1
+  flutter_widget_from_html: ^0.17.2
   image_watermark: ^0.1.0
   path_provider: ^2.0.15
-  sign_in_with_apple: ^7.0.1
+  sign_in_with_apple: ^8.1.0
   #  barcode_scan2: ^4.3.3
-  uuid: ^4.5.1
+  uuid: ^4.5.3
   #  argon2: ^1.0.1
-  audioplayers: ^6.5.0
-  vibration: ^3.1.4
+  vibration: ^3.1.8
   collection: ^1.19.1
   expressions: ^0.2.5+3
   esc_pos_utils_plus: ^2.0.4
-  flutter_reactive_ble: ^5.4.0
-  flutter_map: ^7.0.2
-  latlong2: ^0.9.1
+  flutter_reactive_ble: ^5.5.0
+  flutter_map: ^8.3.0
+  latlong2: ^0.9.1 # 0.10 blocked: flutter_map 8.3.0 pins ^0.9.1
 
 #  flutter_blue_plus: ^1.35.5
 #  cryptography: ^2.7.0
@@ -114,7 +108,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
-  flutter_oss_licenses: ^3.0.11
+  flutter_oss_licenses: ^3.2.0
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 

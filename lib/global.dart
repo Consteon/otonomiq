@@ -643,7 +643,10 @@ Future<int> globalInit() async {
     //     '721538991284-iet4kp21754cj1ve7a78dpml9p6lps60.apps.googleusercontent.com',
     // );
   } else {
-    storage = const FlutterSecureStorage();
+    // migrateWithBackup: guard one-time 9.x->10.x cipher migration — kill mid-
+    // migration without it permanently wipes session/tenant keys (resetOnError).
+    storage = const FlutterSecureStorage(
+        aOptions: AndroidOptions(migrateWithBackup: true));
     // vGoogleSignIn = GoogleSignIn();
     // scopes: [
     //   'https://www.googleapis.com/auth/drive',
@@ -957,18 +960,18 @@ Placemark convertToPlaceMark(String? strObj) {
   late Placemark result;
   try {
     result = Placemark(
-      name: placeMark?[0].name ?? '%-pmName-%',
-      street: placeMark?[0].street ?? '%-pmstr-%',
-      isoCountryCode: placeMark?[0].isoCountryCode ?? '%-pmIsoCC-%',
-      country: placeMark?[0].country ?? invalidCountry,
-      postalCode: placeMark?[0].postalCode ?? '%-pmPostal-%',
-      administrativeArea: placeMark?[0].administrativeArea ?? '%-pmAdmin-%',
+      name: placeMark?['name'] ?? '%-pmName-%',
+      street: placeMark?['street'] ?? '%-pmstr-%',
+      isoCountryCode: placeMark?['isoCountryCode'] ?? '%-pmIsoCC-%',
+      country: placeMark?['country'] ?? invalidCountry,
+      postalCode: placeMark?['postalCode'] ?? '%-pmPostal-%',
+      administrativeArea: placeMark?['administrativeArea'] ?? '%-pmAdmin-%',
       subAdministrativeArea:
-          placeMark?[0].subAdministrativeArea ?? '%-pmSubAdmin-%',
-      locality: placeMark?[0].locality ?? '%-pmLocality-%',
-      subLocality: placeMark?[0].subLocality ?? '%-pmSubLocality-%',
-      thoroughfare: placeMark?[0].thoroughfare ?? '%-pmThrFare-%',
-      subThoroughfare: placeMark?[0].subThoroughfare ?? '%-pmSubThrFare-%',
+          placeMark?['subAdministrativeArea'] ?? '%-pmSubAdmin-%',
+      locality: placeMark?['locality'] ?? '%-pmLocality-%',
+      subLocality: placeMark?['subLocality'] ?? '%-pmSubLocality-%',
+      thoroughfare: placeMark?['thoroughfare'] ?? '%-pmThrFare-%',
+      subThoroughfare: placeMark?['subThoroughfare'] ?? '%-pmSubThrFare-%',
     );
   } catch (e) {
     result = const Placemark(

@@ -1,5 +1,9 @@
 import 'package:intl/intl.dart';
 
+import 'package:flutter/painting.dart';
+
+import 'panel_card_support.dart';
+
 /// Relative timestamp for a timeline entry, computed from the event epoch.
 /// Same calendar day → "HH:mm hari ini"; yesterday → "Kemarin HH:mm"; else
 /// "N hari lalu" (N = whole-day difference). Uses the device clock / local tz.
@@ -73,3 +77,52 @@ List<Map<String, dynamic>> filterEventsByConditions(
     return true;
   }).toList();
 }
+
+/// Neutral-gray foreground for status values outside ok/warn/danger.
+const Color kNeutralColor = Color(0xFF6B7280);
+
+/// Neutral-gray background for status values outside ok/warn/danger.
+const Color kNeutralBgColor = Color(0xFFF3F4F6);
+
+const Set<String> _knownStatuses = {'ok', 'warn', 'danger'};
+
+/// Dot / badge foreground color.
+///
+/// When [statusField] is non-null, reads `doc[statusField]`, normalizes it,
+/// and maps through [statusColor] for known statuses (ok/warn/danger).
+/// Unknown or empty values -> [kNeutralColor].
+///
+/// When [statusField] is null (patrol mode), derives color from [evidence]:
+/// `'Bukti kuat'` -> ok (green), else -> warn (amber).
+Color resolveStatusColor(
+    String? statusField, Map<String, dynamic> doc, String evidence) {
+  if (statusField != null) {
+    final String raw = (doc[statusField] ?? '').toString();
+    final String norm = normalizeStatus(raw);
+    if (norm.isEmpty || !_knownStatuses.contains(norm)) return kNeutralColor;
+    return statusColor(norm);
+  }
+  return statusColor(evidence == 'Bukti kuat' ? 'ok' : 'warn');
+}
+
+/// Dot / badge background color. Same routing logic as [resolveStatusColor].
+Color resolveStatusBgColor(
+    String? statusField, Map<String, dynamic> doc, String evidence) {
+  if (statusField != null) {
+    final String raw = (doc[statusField] ?? '').toString();
+    final String norm = normalizeStatus(raw);
+    if (norm.isEmpty || !_knownStatuses.contains(norm)) return kNeutralBgColor;
+    return statusBgColor(norm);
+  }
+  return statusBgColor(evidence == 'Bukti kuat' ? 'ok' : 'warn');
+}
+
+/// True when [badgeTemplate] contains the `{evidence}` computed token.
+/// Used to gate rendering of shield icons (verified_user / gpp_maybe).
+bool badgeContainsEvidence(String badgeTemplate) =>
+    badgeTemplate.contains('{evidence}');
+
+/// True when [textTemplate] contains the `{method}` computed token.
+/// Used to gate rendering of the method icon (qr_code_2 / text_fields).
+bool textContainsMethod(String textTemplate) =>
+    textTemplate.contains('{method}');

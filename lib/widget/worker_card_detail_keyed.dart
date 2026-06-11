@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
+import 'item_card_detail.dart';
 import 'panel_card_support.dart';
 import 'statistic_card_support.dart';
 
@@ -52,8 +53,14 @@ class _WorkerCardDetailKeyedState extends State<WorkerCardDetailKeyed> {
     final String rawTable = (widget.component['table'] ?? '').toString().trim();
     final TablePath tp = parseTablePath(rawTable);
     final String appVid = (widget.component['vidtable'] ?? '').toString().trim();
-    if (tp.tableDocId.isEmpty || appVid.isEmpty) return;
+    debugPrint('[WorkerCardDetailKeyed._subscribe] rawTable="$rawTable" '
+        'vidtable="$appVid" tableDocId="${tp.tableDocId}" subColl="${tp.subColl}"');
+    // `table` is mandatory — it determines the mapTableContent code we read.
+    if (tp.tableDocId.isEmpty) return;
     _code = '${tp.tableDocId}/${tp.subColl}';
+    // `vidtable` only needed to open our OWN subscription. If absent, fall back
+    // to whatever a sibling (e.g. the worker list) already loaded under _code.
+    if (appVid.isEmpty) return;
     subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _code);
   }
 
@@ -117,12 +124,34 @@ class _WorkerCardDetailKeyedState extends State<WorkerCardDetailKeyed> {
       cond = _resolveNamedMarkers(cond);
       final List<Map<String, dynamic>> matched =
           filterByCharCodeEquality(docs, cond, _screenTx);
-      if (matched.isEmpty) return const SizedBox.shrink();
+      debugPrint('[WorkerCardDetailKeyed] code=$_code docs=${docs.length} '
+          'firstDocKeys=${docs.isNotEmpty ? docs.first.keys.toList() : const []} '
+          'screenTxVid="${_screenTx['vid']}" rawCond="$condRaw" '
+          'resolvedCond="$cond" matched=${matched.length}');
+      if (matched.isEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback(
+            (_) => ItemCardDetail.currentRow.value = const []);
+        return const SizedBox.shrink();
+      }
       final Map<String, dynamic> doc = matched.first;
 
       final String name = _at(0, doc);
       final String isVal = _at(1, doc);
       final String osVal = _at(2, doc);
+      // Publish a positional row so the incident sticky bar renders:
+      // _buildIncident (approver_sticky_bar.dart) returns SizedBox.shrink() while
+      // ItemCardDetail.currentRow is empty. Layout: [0]=<n> [1]=<is> [2]=<os>
+      // [3]=vid [4]=sv. Post-frame to avoid setState-during-build (mirrors
+      // ItemCardDetail's own pattern).
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ItemCardDetail.currentRow.value = <dynamic>[
+          name,
+          isVal,
+          osVal,
+          (doc['vid'] ?? '').toString(),
+          (doc['sv'] ?? '').toString(),
+        ];
+      });
       final String roleLabel = _textArray.length > 3 ? _textArray[3] : '';
       final String masukLabel =
           _textArray.length > 4 ? _textArray[4] : 'Masuk';

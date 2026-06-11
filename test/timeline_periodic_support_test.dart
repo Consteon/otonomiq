@@ -1,3 +1,5 @@
+import 'dart:ui' show Color;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otonomiq/widget/timeline_periodic_support.dart';
 
@@ -81,6 +83,90 @@ void main() {
           evs, '[[◀ln▶◼<point>◁sv▷◼<site>]]', {'point': 'Genset', 'site': '83'});
       expect(r.length, 1);
       expect(r.first['cn'], 'Agus');
+    });
+  });
+
+  group('resolveStatusColor', () {
+    test('statusField present, known status ok -> green', () {
+      final c = resolveStatusColor('lv', {'lv': 'ok'}, '');
+      expect(c, const Color(0xFF16A34A));
+    });
+    test('statusField present, known status warn -> amber', () {
+      final c = resolveStatusColor('lv', {'lv': 'WARN'}, '');
+      expect(c, const Color(0xFFD97706));
+    });
+    test('statusField present, known status danger -> red', () {
+      final c = resolveStatusColor('lv', {'lv': 'danger'}, '');
+      expect(c, const Color(0xFFDC2626));
+    });
+    test('statusField present, unknown value -> neutral gray', () {
+      final c = resolveStatusColor('lv', {'lv': 'pending'}, '');
+      expect(c, const Color(0xFF6B7280));
+    });
+    test('statusField present, empty value -> neutral gray', () {
+      final c = resolveStatusColor('lv', {'lv': ''}, '');
+      expect(c, const Color(0xFF6B7280));
+    });
+    test('statusField present, missing field -> neutral gray', () {
+      final c = resolveStatusColor('lv', <String, dynamic>{}, '');
+      expect(c, const Color(0xFF6B7280));
+    });
+    test('statusField null, strong evidence -> ok green', () {
+      final c = resolveStatusColor(null, <String, dynamic>{}, 'Bukti kuat');
+      expect(c, const Color(0xFF16A34A));
+    });
+    test('statusField null, weak evidence -> warn amber', () {
+      final c = resolveStatusColor(null, <String, dynamic>{}, 'GPS saja');
+      expect(c, const Color(0xFFD97706));
+    });
+  });
+
+  group('resolveStatusBgColor', () {
+    test('statusField present, known status ok -> green bg', () {
+      final c = resolveStatusBgColor('lv', {'lv': 'ok'}, '');
+      expect(c, const Color(0xFFDCFCE7));
+    });
+    test('statusField present, unknown value -> neutral gray bg', () {
+      final c = resolveStatusBgColor('lv', {'lv': 'archived'}, '');
+      expect(c, const Color(0xFFF3F4F6));
+    });
+    test('statusField null, strong evidence -> ok green bg', () {
+      final c = resolveStatusBgColor(null, <String, dynamic>{}, 'Bukti kuat');
+      expect(c, const Color(0xFFDCFCE7));
+    });
+    test('statusField null, weak evidence -> warn amber bg', () {
+      final c = resolveStatusBgColor(null, <String, dynamic>{}, 'GPS saja');
+      expect(c, const Color(0xFFFEF3C7));
+    });
+  });
+
+  group('badgeContainsEvidence', () {
+    test('template with {evidence} -> true', () {
+      expect(badgeContainsEvidence('{evidence}'), isTrue);
+    });
+    test('template with mixed tokens including {evidence} -> true', () {
+      expect(badgeContainsEvidence('<lv> {evidence}'), isTrue);
+    });
+    test('template without {evidence} -> false', () {
+      expect(badgeContainsEvidence('<lv>'), isFalse);
+    });
+    test('empty template -> false', () {
+      expect(badgeContainsEvidence(''), isFalse);
+    });
+    test('literal text only -> false', () {
+      expect(badgeContainsEvidence('Approved'), isFalse);
+    });
+  });
+
+  group('textContainsMethod', () {
+    test('template with {method} -> true', () {
+      expect(textContainsMethod('<ts>◆oleh <cn>◆{method}◆<d>'), isTrue);
+    });
+    test('template without {method} -> false', () {
+      expect(textContainsMethod('<ts>◆oleh <cn>◆<act>◆<d>'), isFalse);
+    });
+    test('empty template -> false', () {
+      expect(textContainsMethod(''), isFalse);
     });
   });
 }

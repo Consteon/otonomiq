@@ -480,6 +480,9 @@ Widget buildDisplayComponent(
           rPad: rPad,
           bPad: bPad,
         );
+        debugPrint('[StickyRBT] register scrName="$scrName" '
+            'type=${isApprovalRbt ? "approval" : "incident"} '
+            'activeBarScreen="${ApproverStickyBar.activeBarScreen.value}"');
         if (ApproverStickyBar.hasCommentInput(scrName)) {
           result = StickyBarSlot(scrName: scrName);
         } else {
