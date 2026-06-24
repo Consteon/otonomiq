@@ -1,0 +1,38 @@
+[
+    {
+        "_doc": "custodyReveal (STEP 2/2). Page TERPISAH yang dituju P6. Baca opening doc (ip[] yg ditulis P6 + ie[] gudang), REVEAL angka gudang, COMPARE per item, lalu BRANCH: match→P7, selisih→P8. matchRoute/mismatchRoute ADA DI SINI (CUSTODY_REVEAL), bukan di count-list. Data dari P6 nyebrang lewat FIRESTORE (ip[] di opening doc), bukan passParams.",
+        "_write": "dp[] = ARRAY → NATIVE (dev) doc.update({dp:[...]}). rs = scalar → DSL boleh / native. cst = di P7/P8 (bukan di sini). Tombol match → write rs=matched (native/DSL) → nav P7. Tombol selisih → compute dp[] (ip vs ie: ex=ie.qt, ac=ip.qt, dl=ac-ex) + write dp[]+rs=discrepancy_detected (native) → nav P8.",
+        "_types": "type UPPERCASE_SNAKE. CUSTODY_REVEAL = widget BARU (read-only compare + computed branch).",
+
+        "driverCustodyReveal": [
+            {
+                "type": "CUSTODY_STEP_HEADER",
+                "vidtable": "20342033315492",
+                "vehicleTable": "84214220504259//stock_location",
+                "vehicleSearch": "lv◼{vehicleId}",
+                "plateField": "ln",
+                "text": "KONFIRMASI PENERIMAAN◆STEP 2/2"
+            },
+            { "type": "TXT", "afterSpacing": 0, "size": 4, "data": " " },
+            { "type": "TXT", "size": 18, "data": "Verifikasi hitungan lo vs catatan warehouse" },
+            {
+                "type": "CUSTODY_REVEAL",
+                "vidtable": "20342033315492",
+                "table": "84214220504259//vehicle_check",
+                "search": "cty◼opening⭘vv◼{vehicleId}⭘cdt◼{today}",
+                "expectedField": "ie",
+                "actualField": "ip",
+                "joinTable": "84214220504259//item",
+                "joinKey": "ii",
+                "labelField": "in",
+                "categoryField": "ic",
+                "discrepancyField": "dp",
+                "reconcileField": "rs",
+                "matchRoute": "[ROUTE:custodySuccess]",
+                "mismatchRoute": "[ROUTE:mismatchReport]",
+                "recountRoute": "[ROUTE:custodyCount]",
+                "text": "RETURNABLE◆CONSUMABLE◆warehouse◆hitungan lo◆Match◆Ada selisih dengan catatan warehouse◆Konfirmasi Load · Siap Berangkat◆Lanjut · Report Mismatch◆Hitung Ulang"
+            }
+        ]
+    }
+]

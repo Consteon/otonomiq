@@ -5,6 +5,8 @@
 /id_rsa_consteon.pub
 /id_rsa_consteon
 /start.sct
+/.agents/
+/skills-lock.json
 
 # Miscellaneous
 *.class

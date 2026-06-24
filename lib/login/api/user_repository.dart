@@ -21,6 +21,10 @@ class UserRepository {
   final GoogleSignIn _googleSignIn;
   String? verificationId;
 
+  /// Enable [LOGINPERF] timing logs for the login critical path.
+  /// Set to false (or remove) after root-cause confirmation.
+  static bool loginPerfTrace = true;
+
   UserRepository({FirebaseAuth? firebaseAuth, GoogleSignIn? googleSignin})
       : _firebaseAuth = firebaseAuth ?? FirebaseAuth.instance,
         _googleSignIn = googleSignin ?? GoogleSignIn.instance;
@@ -293,14 +297,20 @@ class UserRepository {
 //    var updateData = Map<String, dynamic>();
     String myPath;
 
+    final swTotal = loginPerfTrace ? (Stopwatch()..start()) : null;
     try {
       bool loginOK = false;
+      final sw1 = loginPerfTrace ? (Stopwatch()..start()) : null;
       ds = await getFirestoreUserData(
           myUid,
           myEmail,
           country,
           phoneCleanup(
               inv)); //= get user data. If uid not defined, will try search email, if fail get new vid
+      if (sw1 != null) {
+        debugPrint(
+            '[LOGINPERF] getFirestoreUserData = ${sw1.elapsedMilliseconds}ms');
+      }
       if (ds is String || ds is int) {
         loginOK = false;
       } else {
@@ -322,7 +332,12 @@ class UserRepository {
         ak0 = userData['acc'];
         fsMsgCollection = "$msgPrefix${userData["clt"]}";
         // firestoreEventCollection = '$eventPrefix${userData["clt"]}';
+        final sw2 = loginPerfTrace ? (Stopwatch()..start()) : null;
         var messageRef = await getFirestoreMessageRef(myVid);
+        if (sw2 != null) {
+          debugPrint(
+              '[LOGINPERF] getFirestoreMessageRef = ${sw2.elapsedMilliseconds}ms');
+        }
         firestoreIO = messageRef.path +
             "/io"; //= set firestoreIO singleton from global.dart
         eventDoc = '$firestoreEventCollection/$sk0';
@@ -341,10 +356,18 @@ class UserRepository {
           '#FS_USER_DOC_ID': ds,
         }))); //   set state #INTERFACE_KEY
         // await prefs.remove('@pages');
-        await prefs.remove('@systemUI');
-        await prefs.remove('@screenUI');
+        // F2: Do NOT clear @systemUI/@screenUI before the fetch. readSettings
+        // overwrites them on success (api.dart:2160-2167). On failure, the
+        // prior cache survives for warm-reopen (readSettingsStart, api.dart:1794
+        // reads @screenUI -- if empty, forces a blocking network fetch).
+        // Logout still clears both keys (api.dart:2622-2623, 2744-2745).
         subscribeToEvent(sk0); // subscribe to user's proxy event
+        final sw3 = loginPerfTrace ? (Stopwatch()..start()) : null;
         await runSheetStartup(sk0, userData["clt"]);
+        if (sw3 != null) {
+          debugPrint(
+              '[LOGINPERF] runSheetStartup = ${sw3.elapsedMilliseconds}ms');
+        }
         state = transactionStore.state.screenTx;
         var sk = state['#INTERFACE_KEY'];
         var ak = state['#ACC_KEY'];
@@ -382,13 +405,22 @@ class UserRepository {
             rootThis.touch = !rootThis.touch;
           });
         });
+        final sw4 = loginPerfTrace ? (Stopwatch()..start()) : null;
         result = await reLogin();
+        if (sw4 != null) {
+          debugPrint('[LOGINPERF] reLogin = ${sw4.elapsedMilliseconds}ms');
+        }
+        final sw5 = loginPerfTrace ? (Stopwatch()..start()) : null;
         try {
           await settingsReady; // ensure the page cache is persisted before success
         } catch (e) {
           // A page-fetch failure shouldn't fail the login (warm reopen falls
           // back to the now-timed-out network path); just log it.
           devPrint('readSettings during login failed: $e');
+        }
+        if (sw5 != null) {
+          debugPrint(
+              '[LOGINPERF] settingsReady = ${sw5.elapsedMilliseconds}ms');
         }
         subscribeToUserReset(getDevicePath(ds));
       } else {
@@ -398,19 +430,35 @@ class UserRepository {
     } catch (err) {
       result = 2;
     }
+    if (swTotal != null) {
+      debugPrint('[LOGINPERF] aumLogin.total = ${swTotal.elapsedMilliseconds}ms');
+    }
     return result;
   } // end of vertrizLogin
 
-  Future reLogin() async {
+  Future<int> reLogin() async {
     // TODO finish justReLogin procedure
     // after logged out then re login
     // Set vid in transactionStore
     // save sheetKey to persistence.storage
     //X save FirebaseUser to persistence.storage 'myFirebaseData'
     // save uid, imei, in to firebase
+    final sw = loginPerfTrace ? (Stopwatch()..start()) : null;
+
+    final sw1 = loginPerfTrace ? (Stopwatch()..start()) : null;
     await getMyImei(); // put imei in #IMEI
+    if (sw1 != null) {
+      debugPrint('[LOGINPERF] getMyImei = ${sw1.elapsedMilliseconds}ms');
+    }
+
     var state = transactionStore.state.screenTx;
+
+    final sw2 = loginPerfTrace ? (Stopwatch()..start()) : null;
     var sheetData = await getLifProfileData(state['#INTERFACE_KEY']);
+    if (sw2 != null) {
+      debugPrint('[LOGINPERF] getLifProfileData = ${sw2.elapsedMilliseconds}ms');
+    }
+
     transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
       '#VID': sheetData['vid'],
 //      '#ADDRESS': sheetData['address'],
@@ -421,7 +469,24 @@ class UserRepository {
     storage.write(key: 'myLif', value: state['#INTERFACE_KEY']);
 //  storage.write(key: 'myFirebaseData', value: jsonEncode(state['#FIREBASE_USER']));
 //    await setUidImeiEmail(sheetData['vid'].toString()); // To Firestore
-    return launchCheck();
+
+    // F4: Defer launchCheck to run AFTER LoginState.success() fires.
+    // launchCheck sets up FCM, reads pinHash from Sheets, updates Firestore
+    // device doc, writes QR seeds -- none of which blocks home rendering.
+    // On failure, log but do not strand the user; the same work runs on next
+    // warm-reopen (main.dart already calls launchCheck via readSettingsStart).
+    unawaited(launchCheck().then((launchOk) {
+      if (launchOk > 0) {
+        debugPrint('[LOGINPERF] deferred launchCheck returned $launchOk');
+      }
+    }).catchError((e) {
+      debugPrint('[LOGINPERF] deferred launchCheck error: $e');
+    }));
+
+    if (sw != null) {
+      debugPrint('[LOGINPERF] reLogin.total = ${sw.elapsedMilliseconds}ms');
+    }
+    return 0; // login ok; launchCheck runs in background
   }
 
   Future<int> invitationLoginDemo(String inv) async {

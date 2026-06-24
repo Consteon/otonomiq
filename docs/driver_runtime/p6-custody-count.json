@@ -1,0 +1,60 @@
+[
+    {
+        "_doc": "P6 CustodyCount (REVISED-A, align dev feedback 2026-06-18). STEP 1/2 blind count. Struktur dev: CUSTODY_STEP_HEADER + note + 2× CUSTODY_COUNT_LIST (filter returnable/consumable, blind, writeField ip) + tombol → page custodyReveal (STEP 2/2: reveal+compare+branch). REVEAL = page TERPISAH (bukan in-place). matchRoute/mismatchRoute ADA DI custodyReveal, BUKAN di sini.",
+        "_types": "type = UPPERCASE_SNAKE (konvensi dev, konsisten ROUTE_PROGRESS_HEADER dst). Registry name col-A tetep camelCase.",
+        "_write": "ip[] = ARRAY → DSL updateEventRow/updateTableRow GAK support array. Jadi WRITE NATIVE (Flutter Firestore SDK doc.update({ip:[...]})). Config cuma declare target (table/search/writeField); HOW = native widget code. Tombol 'Lihat Catatan Warehouse' HARUS persist ip[] (native) ke opening doc SEBELUM nav ke custodyReveal (else reveal gak bisa baca ip). dp[]/rs ditulis di custodyReveal (native). cst di P7/P8.",
+        "_seed": "ip KOSONG di opening sebelum P6 (driver isi). ie[] pre-seed gudang. cst opening = awaiting_custody.",
+
+        "driverCustodyCount": [
+            {
+                "type": "CUSTODY_STEP_HEADER",
+                "vidtable": "20342033315492",
+                "vehicleTable": "84214220504259//stock_location",
+                "vehicleSearch": "lv◼{vehicleId}",
+                "plateField": "ln",
+                "text": "KONFIRMASI PENERIMAAN◆STEP 1/2"
+            },
+            { "type": "TXT", "afterSpacing": 0, "size": 4, "data": " " },
+            { "type": "TXT", "size": 18, "data": "Hitung independen · angka warehouse belum diperlihatkan" },
+            { "type": "TXT", "size": 18, "data": "RETURNABLE" },
+            {
+                "type": "CUSTODY_COUNT_LIST",
+                "vidtable": "20342033315492",
+                "table": "84214220504259//vehicle_check",
+                "search": "cty◼opening⭘vv◼{vehicleId}⭘cdt◼{today}",
+                "itemsField": "ie",
+                "joinTable": "84214220504259//item",
+                "joinKey": "ii",
+                "labelField": "in",
+                "filter": "ic◼returnable",
+                "blind": "TRUE",
+                "writeField": "ip",
+                "text": ""
+            },
+            { "type": "TXT", "size": 18, "data": "CONSUMABLE" },
+            {
+                "type": "CUSTODY_COUNT_LIST",
+                "vidtable": "20342033315492",
+                "table": "84214220504259//vehicle_check",
+                "search": "cty◼opening⭘vv◼{vehicleId}⭘cdt◼{today}",
+                "itemsField": "ie",
+                "joinTable": "84214220504259//item",
+                "joinKey": "ii",
+                "labelField": "in",
+                "filter": "ic◼consumable",
+                "blind": "TRUE",
+                "writeField": "ip",
+                "text": ""
+            },
+            {
+                "type": "CUSTODY_COUNT_SUBMIT",
+                "_note": "WRITE-then-nav send-button (replaces plain RBT). Reactive n/N label from the count store; on tap persists ip[] (native) to the opening doc BEFORE routing to custodyReveal. table/search/writeField mirror the count lists (same opening doc).",
+                "vidtable": "20342033315492",
+                "table": "84214220504259//vehicle_check",
+                "search": "cty◼opening⭘vv◼{vehicleId}⭘cdt◼{today}",
+                "writeField": "ip",
+                "route": "custodyReveal"
+            }
+        ]
+    }
+]

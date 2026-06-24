@@ -20,6 +20,7 @@ import '../model/connection_data.dart';
 import '../model/otq_state.dart';
 import '../redux/screen_transaction.dart';
 import 'do_chain.dart';
+import 'driver_home_support.dart';
 
 // display a row of buttons
 
@@ -610,6 +611,14 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
                       // await executeWidgets(scrName,
                       //     (buttonData['exe'] ?? emptyString).toLowerCase());
 
+                      // -- routeParams: dispatch resolved params into screenTx
+                      // before any action (route / savesend / resetvid) so the
+                      // destination page can resolve {key} tokens.
+                      writeRouteParams(
+                        buttonData['routeParams']?.toString(),
+                        scrName,
+                      );
+
                       switch ((buttonData['action'] ?? emptyString)
                           .toString()
                           .trim()
@@ -1040,12 +1049,42 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
 
                         case 'signout':
                           {
-                            await ConnectionData().getConnection(false, false);
+                            // No blocking ConnectionData().getConnection(false,
+                            // false) here: that call did a synchronous
+                            // InternetAddress.lookup('google.com') DNS probe plus
+                            // sendImagesInImageMap() + historySync() (verified in
+                            // lib/model/connection_data.dart), stalling the logout
+                            // 1-3s before the login page appeared. Logout safety
+                            // does NOT depend on it — the dataOk() guard below
+                            // (transactionOK() → #DATA_OK) already blocks logout
+                            // while local history is unsynced; image/history sync
+                            // run on their own triggers (connectivity listener,
+                            // app resume, timer).
                             if (await dataOk(context)) {
                               actionLock('signout case ftz_row_of_button');
-                              BlocProvider.of<AuthenticationBloc>(context)
-                                  .add(LoggedOut());
-                              signOut();
+                              // Order matters. signOut() resets the shell to the
+                              // login page (guest-snapshot swap → showSignInPage)
+                              // while keeping the CURRENT page visible until it
+                              // completes. add(LoggedOut()) yields Unauthenticated,
+                              // which rebuilds LinkReduxApp → MainPage(UniqueKey())
+                              // → a FRESH MainPageState whose pageName field-inits
+                              // to `home`. Firing it FIRST would paint the
+                              // authenticated home page for a beat (before
+                              // screenUIComponent is swapped to the guest UI) — the
+                              // "jumps to home before login" flash. So swap the UI
+                              // first, THEN trigger the auth-state rebuild (which
+                              // also does the real FirebaseAuth/Google signOut via
+                              // systemSignOut()), landing straight on login.
+                              //
+                              // Capture the bloc BEFORE awaiting: signOut()'s
+                              // showSignInPage() swaps this page's widgets out,
+                              // unmounting this button's `context`. The
+                              // AuthenticationBloc is provided above MainPage
+                              // (main.dart), so the captured ref stays valid.
+                              final authBloc =
+                                  BlocProvider.of<AuthenticationBloc>(context);
+                              await signOut();
+                              authBloc.add(LoggedOut());
                             }
                           }
                           break;

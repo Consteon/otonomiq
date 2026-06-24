@@ -41,12 +41,22 @@ import 'login/api/user_repository.dart';
 import 'model/function_body.dart';
 import 'model/general_get_controller.dart';
 import 'model/otq_state.dart';
+import 'page/main_page.dart';
 import 'part/build_part/channel.dart';
 import 'redux/screen_transaction.dart';
 import 'widget/build_theme.dart';
+import 'widget/custody_count_list.dart';
+import 'widget/custody_reveal.dart';
+import 'widget/driver_home_support.dart';
 import 'widget/ftz_webview.dart';
+import 'widget/item_execution_list.dart';
+import 'widget/logout_transition_support.dart';
 import 'widget/photo_camera.dart';
 import 'widget/ui_component.dart';
+
+/// Login perf instrumentation. Mirrors UserRepository.loginPerfTrace.
+/// Set to false (or remove) after root-cause confirmation.
+bool _loginPerfTrace = true;
 
 Future apiTest() async {
   bool testNow = true;
@@ -88,8 +98,11 @@ int getTableVid(String? com) {
 Future<void> callEventFunction() async {
   if (internetConnected()) {
     const String functionName = 'callEventFunction';
-    String? currentSsid =
-        await waitUntilNotNullScreenTx(functionName, '#INTERFACE_KEY', 20);
+    String? currentSsid = await waitUntilNotNullScreenTx(
+      functionName,
+      '#INTERFACE_KEY',
+      20,
+    );
     if (currentSsid != loginSsid) {
       Timer(const Duration(seconds: 3), () async {
         if (currentSsid != null) {
@@ -100,7 +113,8 @@ Future<void> callEventFunction() async {
             callHttpPost(uri, qParams);
           } catch (eHttp) {
             debugPrint(
-                'Error in calling $eventCollectionName: $eHttp'); // do nothing
+              'Error in calling $eventCollectionName: $eHttp',
+            ); // do nothing
           }
         }
       });
@@ -172,8 +186,9 @@ Future<void> startGettingGpsData() async {
   if (gpsEnabled &
       ((gpsPermission == LocationPermission.always) |
           (gpsPermission == LocationPermission.whileInUse))) {
-    positionStream =
-        Geolocator.getPositionStream(locationSettings: locationSettings);
+    positionStream = Geolocator.getPositionStream(
+      locationSettings: locationSettings,
+    );
     positionStreamSubs = positionStream.listen((Position position) {
       // update app gps
       int currentEpoch = DateTime.now().millisecondsSinceEpoch;
@@ -205,7 +220,9 @@ Future<dynamic> getAppGps() async {
   //devPrint(
   //    'gpsTime= ${gpsTime.value}, lat=${gpsData.latitude}, alt=${gpsData.altitude}');
   if (gpsTime.value <= 0) {
-    await gpsTime.stream.firstWhere((value) => value > 0).timeout(
+    await gpsTime.stream
+        .firstWhere((value) => value > 0)
+        .timeout(
           const Duration(seconds: getGpsDataWaitTime),
           onTimeout: () => 0, // Do nothing on timeout
         ); // wait until get location for max 5 seconds
@@ -215,8 +232,10 @@ Future<dynamic> getAppGps() async {
     if (internetConnected()) {
       // devPrint('--get placemark from gps');
       try {
-        List<Placemark> temp =
-            await placemarkFromCoordinates(gpsData.latitude, gpsData.longitude);
+        List<Placemark> temp = await placemarkFromCoordinates(
+          gpsData.latitude,
+          gpsData.longitude,
+        );
         gpsPlaceMark = placeMarkCopy(temp[0]);
       } catch (e) {
         gpsPlaceMark = placeMarkCopy(null);
@@ -230,12 +249,18 @@ Future<dynamic> getAppGps() async {
     secureWrite(key: 'gpsPlaceMark', value: json.encode(gpsPlaceMark));
     prefs.setInt('@lastGpsTime', gpsTime.value);
     String gpsDataStream = positionToGpsString(gpsData);
-    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-        {'#GPSDATA': gpsDataStream, '#LASTGPSTIME': gpsTime.value})));
+    transactionStore.dispatch(
+      UpdateScreenTxAction(
+        ScreenTransaction({
+          '#GPSDATA': gpsDataStream,
+          '#LASTGPSTIME': gpsTime.value,
+        }),
+      ),
+    );
     returnValue = {
       'gpsData': gpsData,
       'gpsTime': gpsTime.value,
-      'gpsPlaceMark': gpsPlaceMark
+      'gpsPlaceMark': gpsPlaceMark,
     };
   } else {
     // when gps data is not updated return invalid gps data
@@ -255,7 +280,7 @@ Future<dynamic> getAppGps() async {
         headingAccuracy: 0.0,
       ), // gpsdData wi,
       'gpsTime': 0,
-      'gpsPlaceMark': placeMarkCopy(null)
+      'gpsPlaceMark': placeMarkCopy(null),
     };
   } // end if (gpsTime.value > 0)
   dynamic currentLat = returnValue['gpsData'].latitude;
@@ -263,9 +288,8 @@ Future<dynamic> getAppGps() async {
       returnValue['gpsData'].longitude == invalidLocation) {
     // Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high).then((Position position) {
     await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-      accuracy: LocationAccuracy.high,
-    )).then((Position position) async {
+      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+    ).then((Position position) async {
       try {
         gpsData = positionCopy(position);
         gpsTime.value = gpsData.timestamp.millisecondsSinceEpoch;
@@ -273,17 +297,24 @@ Future<dynamic> getAppGps() async {
         returnValue['gpsData'] = position;
         storage.write(key: 'gpsData', value: json.encode(position));
         String gpsDataStream = positionToGpsString(position);
-        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-          '#GPSDATA': gpsDataStream,
-          '#LASTGPSTIME': position.timestamp.millisecondsSinceEpoch
-        })));
+        transactionStore.dispatch(
+          UpdateScreenTxAction(
+            ScreenTransaction({
+              '#GPSDATA': gpsDataStream,
+              '#LASTGPSTIME': position.timestamp.millisecondsSinceEpoch,
+            }),
+          ),
+        );
         prefs.setInt('@lastGpsTime', position.timestamp.millisecondsSinceEpoch);
         List<Placemark> myPL = await placemarkFromCoordinates(
-            position.latitude, position.longitude);
+          position.latitude,
+          position.longitude,
+        );
         returnValue['gpsPlaceMark'] = placeMarkCopy(myPL[0]);
         secureWrite(
-            key: 'gpsPlaceMark',
-            value: json.encode(returnValue['gpsPlaceMark']));
+          key: 'gpsPlaceMark',
+          value: json.encode(returnValue['gpsPlaceMark']),
+        );
       } catch (e) {
         try {
           returnValue['gpsData'] = position;
@@ -309,7 +340,9 @@ Future<dynamic> getAppGps() async {
         } // end try gpsTime
         try {
           List<Placemark> myPL2 = await placemarkFromCoordinates(
-              position.latitude, position.longitude);
+            position.latitude,
+            position.longitude,
+          );
           returnValue['gpsPlaceMark'] = placeMarkCopy(myPL2[0]);
         } catch (e3) {
           returnValue['gpsPlaceMark'] = placeMarkCopy(null);
@@ -402,9 +435,10 @@ Future<bool> internetConnectedCheck({bool forceTest = false}) async {
   // check internet connection flag
   // use https://pub.dev/packages/internet_connection_checker_plus
   if (forceTest) {
-    bool nowConnected = await internetConnection.hasConnection
-        .timeout(const Duration(seconds: 5),
-            onTimeout: () => false); //.InternetConnection().hasInternetAccess;
+    bool nowConnected = await internetConnection.hasConnection.timeout(
+      const Duration(seconds: 5),
+      onTimeout: () => false,
+    ); //.InternetConnection().hasInternetAccess;
     if (nowConnected != internetConnectionFlag.value) {
       internetConnectionFlag.value = nowConnected;
     } // end if (nowConnected != internetConnectionFlag.value)
@@ -477,17 +511,20 @@ Future<String> replaceLocalImageToUrl(String input) async {
         List<String> fileArray = match.group(1)!.split('___');
         String rawFolder = Uri.decodeComponent(fileArray[0]);
         String folder = rawFolder.substring(
-            rawFolder.lastIndexOf('$localImageBeginningFolderDivider/') +
-                localImageBeginningFolderDivider.length +
-                1);
+          rawFolder.lastIndexOf('$localImageBeginningFolderDivider/') +
+              localImageBeginningFolderDivider.length +
+              1,
+        );
         futures.add(uploadImageToCloud(match.group(1)!));
         // futures.add(saveImageToCloud(
         //     imagePath: match.group(1)!,
         //     folder: folder,
         //     rawFileName: fileArray[1]));
         String pointer = '$pointerPrefix${(++c).toString().padLeft(3, '0')}';
-        newInput =
-            newInput.replaceFirst(match.group(0) ?? emptyString, pointer);
+        newInput = newInput.replaceFirst(
+          match.group(0) ?? emptyString,
+          pointer,
+        );
       } // end for (RegExpMatch match in matches)
       List<dynamic> urls = await Future.wait(futures);
       for (int i = 0; i < urls.length; i++) {
@@ -506,14 +543,18 @@ Future<String> replaceLocalImageToUrl(String input) async {
   return result;
 } // end of replaceLocalImagetoUrl
 
-Future<String> prepareImageAsLocal(
-    {required String imagePath,
-    required String folder,
-    required String fileName}) async {
+Future<String> prepareImageAsLocal({
+  required String imagePath,
+  required String folder,
+  required String fileName,
+}) async {
   // prepare image as local file, rename it with local name standard
   String result = emptyString;
   String finalImagePath = await renamePath(
-      originalImagePath: imagePath, folder: folder, fileName: fileName);
+    originalImagePath: imagePath,
+    folder: folder,
+    fileName: fileName,
+  );
   // finalImagePath = finalImagePath.replaceAll('.jpg', '');
   result = '$localImagePrefix$finalImagePath$localImagePostfix';
   return result;
@@ -522,8 +563,9 @@ Future<String> prepareImageAsLocal(
 Future saveImagePutInImageMap(String url) async {
   // put url entry in tableContent[imageMapName]
   // if connected to internet then try to send the image to cloud
-  String localPath =
-      url.replaceAll(localImagePrefix, '').replaceAll((localImagePostfix), '');
+  String localPath = url
+      .replaceAll(localImagePrefix, '')
+      .replaceAll((localImagePostfix), '');
   dynamic imageMapEntry = imageMapGet(localPath);
   if (imageMapEntry == null) {
     imageMapEntry = [
@@ -531,7 +573,7 @@ Future saveImagePutInImageMap(String url) async {
       emptyString,
       false,
       0,
-      0
+      0,
     ];
     await imageMapUpdateUrl(localPath, emptyString);
   } // end if (imageMapEntry == null)
@@ -541,17 +583,24 @@ Future saveImagePutInImageMap(String url) async {
       List<String> fileArray = localPath.split('___');
       String rawFolder = Uri.decodeComponent(fileArray[0]);
       String folder = rawFolder.substring(
-          rawFolder.lastIndexOf('$localImageBeginningFolderDivider/') +
-              localImageBeginningFolderDivider.length +
-              1);
+        rawFolder.lastIndexOf('$localImageBeginningFolderDivider/') +
+            localImageBeginningFolderDivider.length +
+            1,
+      );
       await saveImageToCloud(
-          imagePath: localPath, folder: folder, rawFileName: fileArray[1]);
+        imagePath: localPath,
+        folder: folder,
+        rawFileName: fileArray[1],
+      );
     }
   } // end if (await internetConnectedCheck())
 } // end of saveImagePutInImageMap
 
 Future replaceAumImageInHistoryUnUsed(
-    String oldImage, String folder, String fileName) async {
+  String oldImage,
+  String folder,
+  String fileName,
+) async {
   // replace relevant oldImage  in all history records with newImage from _IMAGEMap table
   String imagePath = oldImage
       .replaceAll(localImagePrefix, '')
@@ -561,8 +610,8 @@ Future replaceAumImageInHistoryUnUsed(
     await historyLock('replaceAumImageInHistory');
     for (int i = 0; i < tableContent[historyName].length; i++) {
       if (tableContent[historyName][i][2].contains(oldImage)) {
-        tableContent[historyName][i][2] =
-            tableContent[historyName][i][2].replaceAll(oldImage, url);
+        tableContent[historyName][i][2] = tableContent[historyName][i][2]
+            .replaceAll(oldImage, url);
       } // end if (tableContent[historyName][i][2].includes(oldImage))
     } // end for (int i = 0; i < tableContent[historyName].length)
     historyUnLock('replaceImageInHistory');
@@ -570,33 +619,39 @@ Future replaceAumImageInHistoryUnUsed(
   } // end if (url != emptyImageUrl)
 } // end of replaceImageInHistory
 
-Future<List<String>> saveImageToCloud(
-    {required String imagePath,
-    required String folder,
-    required String rawFileName}) async {
+Future<List<String>> saveImageToCloud({
+  required String imagePath,
+  required String folder,
+  required String rawFileName,
+}) async {
   String fileName = rawFileName.replaceAll('.jpg', '');
   List<String> result = [emptyString, emptyString];
   String finalImagePath = await renamePath(
-      originalImagePath: imagePath, folder: folder, fileName: fileName);
+    originalImagePath: imagePath,
+    folder: folder,
+    fileName: fileName,
+  );
   dynamic state = transactionStore.state.screenTx;
   try {
     if (await internetConnectedCheck()) {
       if (File(finalImagePath).existsSync()) {
-        String tempResult =
-            await uploadToCloudStorage(finalImagePath, "$folder/$fileName.jpg");
+        String tempResult = await uploadToCloudStorage(
+          finalImagePath,
+          "$folder/$fileName.jpg",
+        );
         if (isValidImageUrl(tempResult)) {
           result = [finalImagePath, tempResult];
           await imageMapUpdateUrl(finalImagePath, tempResult);
         } else {
           result = [
             finalImagePath,
-            '${invalidPathPrefix}01$invalidPathPostfix'
+            '${invalidPathPrefix}01$invalidPathPostfix',
           ]; // not a valid url
         }
       } else {
         result = [
           finalImagePath,
-          '${invalidPathPrefix}02$invalidPathPostfix'
+          '${invalidPathPrefix}02$invalidPathPostfix',
         ]; // file not exist
       } // end if (file.existsSync())
     } // end if (transactionStore.state.screenTx['#INTERNET'] ?? false)
@@ -604,24 +659,28 @@ Future<List<String>> saveImageToCloud(
     // result = '$localImagePrefix$finalImagePath$localImagePostfix';
     result = [
       finalImagePath,
-      '${invalidPathPrefix}03:${e.toString()}$invalidPathPostfix'
+      '${invalidPathPrefix}03:${e.toString()}$invalidPathPostfix',
     ]; // general error
   }
   return result;
 } // end of saveImageToCloud
 
-Future<String> renamePath(
-    {required String originalImagePath,
-    required String folder,
-    required String fileName}) async {
+Future<String> renamePath({
+  required String originalImagePath,
+  required String folder,
+  required String fileName,
+}) async {
   String tempImagePath = originalImagePath.replaceFirst(localImagePrefix, "");
   tempImagePath = tempImagePath.endsWith(localImagePostfix)
       ? tempImagePath.substring(
-          0, tempImagePath.length - localImagePostfix.length)
+          0,
+          tempImagePath.length - localImagePostfix.length,
+        )
       : tempImagePath;
   String finalImagePath = tempImagePath;
-  bool originalPath =
-      tempImagePath.contains(localImageArtifact); // original path from camera
+  bool originalPath = tempImagePath.contains(
+    localImageArtifact,
+  ); // original path from camera
   if (originalPath) {
     String finalFolder = folder;
     if (finalFolder.endsWith('/')) {
@@ -641,7 +700,8 @@ Future<String> renamePath(
       } catch (e2) {
         finalImagePath = tempImagePath;
         debugPrint(
-            'Cannot move $tempImagePath to $finalImagePath :${e2.toString()}');
+          'Cannot move $tempImagePath to $finalImagePath :${e2.toString()}',
+        );
       }
     }
   } else {
@@ -660,16 +720,19 @@ Widget displayImage({String imageUrl = defaultImage, bool cached = true}) {
   try {
     if (finalUrl.startsWith(localImagePrefix)) {
       String localImage = finalUrl.substring(
-          localImagePrefix.length, finalUrl.length - localImagePostfix.length);
+        localImagePrefix.length,
+        finalUrl.length - localImagePostfix.length,
+      );
       File localFile = File(localImage);
       if (!localFile.existsSync()) {
         result = CachedNetworkImage(
-            imageUrl: defaultImage,
-            placeholder: (context, url) => Container(
-                  color: Colors.transparent, // Set transparency
-                  width: double.infinity, // Match image size
-                  height: double.infinity, // Match image size
-                )); // default image
+          imageUrl: defaultImage,
+          placeholder: (context, url) => Container(
+            color: Colors.transparent, // Set transparency
+            width: double.infinity, // Match image size
+            height: double.infinity, // Match image size
+          ),
+        ); // default image
       } else {
         result = Image.file(localFile, fit: BoxFit.contain);
       } // end if (!localFile.existsSync())
@@ -684,14 +747,16 @@ Widget displayImage({String imageUrl = defaultImage, bool cached = true}) {
           ), // Placeholder while loading
           errorWidget: (context, url, error) =>
               const Icon(Icons.error), // Error widget
-          fadeInDuration:
-              const Duration(milliseconds: duration), // Fade-in effect
+          fadeInDuration: const Duration(
+            milliseconds: duration,
+          ), // Fade-in effect
         );
       } else {
         result = FadeInImage.memoryNetwork(
-            fit: BoxFit.contain,
-            placeholder: kTransparentImage,
-            image: finalUrl);
+          fit: BoxFit.contain,
+          placeholder: kTransparentImage,
+          image: finalUrl,
+        );
       } // end if(cached)
     }
   } catch (e) {
@@ -717,7 +782,11 @@ String getAppVid(String ssid) {
 } // end of getAppVid
 
 String getLocationString(
-    String locId, String imageUrl, String position3, OtqState locSensor) {
+  String locId,
+  String imageUrl,
+  String position3,
+  OtqState locSensor,
+) {
   final diamond = separator[1];
   String result = diamond; //1
   result += locSensor.nowTime.millisecondsSinceEpoch.toString() + diamond; //2
@@ -751,12 +820,14 @@ String myCountryCode() {
 } // end of getCountryCode
 
 String phoneWithoutCC(String inp) {
-  String result =
-      inp.replaceAllMapped(RegExp(r'( |\.|-|\+|\(|\)|\[|\])'), (match) {
+  String result = inp.replaceAllMapped(RegExp(r'( |\.|-|\+|\(|\)|\[|\])'), (
+    match,
+  ) {
     return '';
   });
-  String result1 =
-      result.replaceAllMapped(RegExp(r'^' + myCountryCode()), (match) {
+  String result1 = result.replaceAllMapped(RegExp(r'^' + myCountryCode()), (
+    match,
+  ) {
     return '';
   });
   String result2 = result1.replaceAllMapped(RegExp(r'^0'), (match) {
@@ -770,12 +841,13 @@ String phoneWithCC(String inp) {
 } // end of String phoneWithCC
 
 Future<String> getQRContent(
-    String qrType,
-    String rawText,
-    Position? position,
-    String? rawTableString,
-    String? negativeTableString,
-    List<int>? refClusters) async {
+  String qrType,
+  String rawText,
+  Position? position,
+  String? rawTableString,
+  String? negativeTableString,
+  List<int>? refClusters,
+) async {
   /*
      qrType L = location qr; U = user qr; G|other = no conversion
      output with prefix '#ErrorXX' indicate error number XX
@@ -787,8 +859,9 @@ Future<String> getQRContent(
      98 = qr not recognized
      99 = generic error
   */
-  String tableString =
-      normalizeTableName(autheniumDecode(rawTableString) ?? '');
+  String tableString = normalizeTableName(
+    autheniumDecode(rawTableString) ?? '',
+  );
   final String errString = textList["ErrorPrefix"];
   dynamic result = '${errString}99';
   dynamic refTable;
@@ -796,27 +869,27 @@ Future<String> getQRContent(
   List<String> tableCodeArray = tableString.split(separator[1]) ?? [];
   String? tableCode = tableCodeArray.isNotEmpty ? tableCodeArray[0] : null;
   int tableColumn = max(
-      0,
-      ((tableCodeArray.length > 1) ? int.tryParse(tableCodeArray[1]) ?? 1 : 1) -
-          1);
+    0,
+    ((tableCodeArray.length > 1) ? int.tryParse(tableCodeArray[1]) ?? 1 : 1) -
+        1,
+  );
   List<String> negativeTableCodeArray =
       negativeTableString?.split(separator[1]) ?? [];
-  String? negativeTableCode =
-      negativeTableCodeArray.isNotEmpty ? negativeTableCodeArray[0] : null;
+  String? negativeTableCode = negativeTableCodeArray.isNotEmpty
+      ? negativeTableCodeArray[0]
+      : null;
   int negativeTableColumn = max(
-      0,
-      ((negativeTableCodeArray.length > 1)
-              ? int.tryParse(negativeTableCodeArray[1]) ?? 1
-              : 1) -
-          1);
+    0,
+    ((negativeTableCodeArray.length > 1)
+            ? int.tryParse(negativeTableCodeArray[1]) ?? 1
+            : 1) -
+        1,
+  );
   try {
     if (qrType == 'L') {
       dynamic p;
       dynamic q;
-      await Future.wait([
-        omLqrReaderP(),
-        osLqrMakerQ(),
-      ]).then((res) {
+      await Future.wait([omLqrReaderP(), osLqrMakerQ()]).then((res) {
         p = res[0];
         q = res[1];
       });
@@ -837,9 +910,12 @@ Future<String> getQRContent(
           int tol = (refTable[lqr][3] ?? 0).round();
           num finalTolerance =
               (position == null ? 0 : (position.accuracy ?? 0).round()) + tol;
-          num d = (distanceM(position!.latitude, position.longitude,
-                  refTable[lqr][1], refTable[lqr][2]))
-              .round();
+          num d = (distanceM(
+            position!.latitude,
+            position.longitude,
+            refTable[lqr][1],
+            refTable[lqr][2],
+          )).round();
           if (d > finalTolerance) {
             result = '${errString}01';
           } else {
@@ -887,8 +963,9 @@ Future<String> getQRContent(
           } else {
             dynamic negativeList =
                 transactionStore.state.screenTx['#TABLE$negativeTableCode'];
-            resultOk =
-                (negativeList[universalCode]) != null ? universalCode : empty;
+            resultOk = (negativeList[universalCode]) != null
+                ? universalCode
+                : empty;
             if (resultOk == empty || resultOk == errorString) {
               result = universalCode; // not in negative list
             } else {
@@ -940,7 +1017,9 @@ Future syncLocaleTable() async {
         } // end if isNotEmpty
       } // end for response[0]
       prefs.setString(
-          '@localeText', stringCompress(jsonEncode(localeText)) ?? emptyString);
+        '@localeText',
+        stringCompress(jsonEncode(localeText)) ?? emptyString,
+      );
       prefs.setInt('@localeCheckSum', wholeCS);
       int ddd = 1;
     } else {
@@ -985,9 +1064,13 @@ Future<List> proxyRead(dynamic ranges) async {
   List result = [];
   try {
     FunctionBody functionBody = getFunctionBody(
-        transactionStore.state.screenTx['#INTERFACE_KEY'], ranges);
-    dynamic response =
-        await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+      transactionStore.state.screenTx['#INTERFACE_KEY'],
+      ranges,
+    );
+    dynamic response = await http.post(
+      Uri.parse(functionBody.url),
+      body: functionBody.body,
+    );
     result = jsonDecode(response.body);
     int d = 1;
   } catch (e) {
@@ -1002,7 +1085,7 @@ List<dynamic> getCurrencyFormat(String? inp) {
   List<dynamic> result = [
     "",
     defaultLang,
-    0
+    0,
   ]; // symbol, thousand separator, mantissa
   String decodedInp = autheniumDecode(inp) ?? '';
   if (inp != null && inp.isNotEmpty) {
@@ -1046,8 +1129,12 @@ List<dynamic> getCurrencyFormat(String? inp) {
   return result;
 } // end of getCurrencyFormat
 
-Future<String> dataProcess(BuildContext context, String inputText,
-    String screenName, dynamic component) async {
+Future<String> dataProcess(
+  BuildContext context,
+  String inputText,
+  String screenName,
+  dynamic component,
+) async {
   String resultOk = empty;
   String finalQrText = empty;
   List<dynamic> tArray = diamondTextToList(component['text'] ?? empty);
@@ -1076,8 +1163,8 @@ Future<String> dataProcess(BuildContext context, String inputText,
         if (transactionStore.state.screenTx['#LQR_LIST'] == null) {
           resultOk = empty;
         } else {
-          resultOk = (transactionStore.state.screenTx['#LQR_LIST']
-                      [finalQrText]) !=
+          resultOk =
+              (transactionStore.state.screenTx['#LQR_LIST'][finalQrText]) !=
                   null
               ? transactionStore.state.screenTx['#LQR_LIST'][finalQrText][0]
               : empty;
@@ -1098,10 +1185,12 @@ Future<String> dataProcess(BuildContext context, String inputText,
         // Vibration.vibrate(duration: 50);
         if (component['position'] != null) {
           txfController[screenName]![getPosition(component['position'])]!
-              .controller
-              .text = textList["LocNotListed"];
+                  .controller
+                  .text =
+              textList["LocNotListed"];
           txfController[screenName]![getPosition(component['position'])]!
-              .finalData = finalQrText;
+                  .finalData =
+              finalQrText;
         } // end if (widget.component['position'] != null)
         break;
 
@@ -1113,10 +1202,12 @@ Future<String> dataProcess(BuildContext context, String inputText,
         // Vibration.vibrate(duration: 50);
         if (component['position'] != null) {
           txfController[screenName]![getPosition(component['position'])]!
-              .controller
-              .text = "";
+                  .controller
+                  .text =
+              "";
           txfController[screenName]![getPosition(component['position'])]!
-              .finalData = "";
+                  .finalData =
+              "";
         } // end  if (widget.component['position'] != null)
         break;
 
@@ -1124,10 +1215,12 @@ Future<String> dataProcess(BuildContext context, String inputText,
         // Vibration.vibrate(duration: 100);
         if (component['position'] != null) {
           txfController[screenName]![getPosition(component['position'])]!
-              .controller
-              .text = resultOk;
+                  .controller
+                  .text =
+              resultOk;
           txfController[screenName]![getPosition(component['position'])]!
-              .finalData = finalQrText;
+                  .finalData =
+              finalQrText;
         } // end if (widget.component['position'] != null)
     } // end of switch(resultOk)
   } catch (e) {
@@ -1151,18 +1244,20 @@ String getThousandSeparator(String lang) {
 } // end of getThousandSeparator
 
 Future<void> openInWebView(
-    BuildContext context, String url, String? title) async {
+  BuildContext context,
+  String url,
+  String? title,
+) async {
   Navigator.of(context).push(
     MaterialPageRoute(
       builder: (ctx) => Scaffold(
         appBar: AppBar(
-            backgroundColor: Theme.of(context).primaryColor,
-            title: Text(title ?? url)),
+          backgroundColor: Theme.of(context).primaryColor,
+          title: Text(title ?? url),
+        ),
         body: Builder(
           builder: (BuildContext context) {
-            return WebView(
-              url: url,
-            );
+            return WebView(url: url);
           }, // end of builder
         ),
       ),
@@ -1192,17 +1287,21 @@ String dateTimeToGSheet(DateTime myDate, bool utc) {
   result = utc
       ? NumberFormat("##0").format(myDate.millisecondsSinceEpoch)
       : NumberFormat("##0").format(
-          myDate.millisecondsSinceEpoch + myDate.timeZoneOffset.inMilliseconds);
+          myDate.millisecondsSinceEpoch + myDate.timeZoneOffset.inMilliseconds,
+        );
   return result;
 } // end of dateTimeToGSheet
 
 String timeOfDayToGSheet(TimeOfDay myTime, bool utc) {
   String result = utc
-      ? NumberFormat("##0").format(myTime.hour * 3600000 +
-          myTime.minute * 60000 -
-          DateTime.now().timeZoneOffset.inMilliseconds)
-      : NumberFormat("##0")
-          .format(myTime.hour * 3600000 + myTime.minute * 60000);
+      ? NumberFormat("##0").format(
+          myTime.hour * 3600000 +
+              myTime.minute * 60000 -
+              DateTime.now().timeZoneOffset.inMilliseconds,
+        )
+      : NumberFormat(
+          "##0",
+        ).format(myTime.hour * 3600000 + myTime.minute * 60000);
   return result;
 } // end of dateTimeToGSheet
 
@@ -1211,11 +1310,13 @@ void getLqrList(String? proxySsid) async {
   String? lqrString;
   try {
     lqrString = await secureRead(
-        key: "lqrList"); //= get documentID of entry in msg_xxxx collection
+      key: "lqrList",
+    ); //= get documentID of entry in msg_xxxx collection
     if (lqrString != null) {
       lqr = json.decode(lqrString);
       transactionStore.dispatch(
-          UpdateScreenTxAction(ScreenTransaction({'#LQR_LIST': lqr})));
+        UpdateScreenTxAction(ScreenTransaction({'#LQR_LIST': lqr})),
+      );
       debugPrint('[getLqrList] cache #LQR_LIST=$lqr');
     }
   } catch (er) {
@@ -1229,8 +1330,10 @@ void getLqrList(String? proxySsid) async {
       int d = 1;
     }
     FunctionBody functionBody = getFunctionBody(proxySsid!, [locRange]);
-    dynamic locString =
-        await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+    dynamic locString = await http.post(
+      Uri.parse(functionBody.url),
+      body: functionBody.body,
+    );
     dynamic lqrArray = json.decode(locString.body)[0];
     lqr = {};
 
@@ -1239,14 +1342,15 @@ void getLqrList(String? proxySsid) async {
         lqrArray[i][2],
         lqrArray[i][0],
         lqrArray[i][1],
-        lqrArray[i][4]
+        lqrArray[i][4],
       ];
     } // end for in lqrArray
   } catch (eLoc) {
     errorReport(eLoc);
   }
-  transactionStore
-      .dispatch(UpdateScreenTxAction(ScreenTransaction({'#LQR_LIST': lqr})));
+  transactionStore.dispatch(
+    UpdateScreenTxAction(ScreenTransaction({'#LQR_LIST': lqr})),
+  );
   debugPrint('[getLqrList] net #LQR_LIST=$lqr');
   storage.write(key: "lqrList", value: json.encode(lqr));
 } //end of getLqrList
@@ -1278,8 +1382,11 @@ void getCountryCodeList() async {
   // } on PlatformException catch (e) {
   //   devPrint("Failed to get mobile number because of '${e.message}'");
   // }
-  transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-      {'#SIM_COUNTRY_CODES': cCodes, '#COUNTRY': cCodes[0]})));
+  transactionStore.dispatch(
+    UpdateScreenTxAction(
+      ScreenTransaction({'#SIM_COUNTRY_CODES': cCodes, '#COUNTRY': cCodes[0]}),
+    ),
+  );
 }
 
 Future setStatus(msgId, status) async {
@@ -1297,9 +1404,7 @@ Future setStatus(msgId, status) async {
     var currentUnread = (docSnapshot.data()!['urd'] - 1) >= 0
         ? docSnapshot.data()!['urd'] - 1
         : 0;
-    var updateData = {
-      "urd": currentUnread,
-    };
+    var updateData = {"urd": currentUnread};
     tx.update(notifRef, updateData);
   }); // end of firebase transaction
 }
@@ -1308,12 +1413,13 @@ Future sendMessage(mTo, mFrom, mDisplay, mData, mIn, mStatus) async {
   var tStamp = DateTime.now().millisecondsSinceEpoch;
   String msgId;
   var toVid = jsonDecode(mTo);
-//  var myState = transactionStore.state.screenTx;
+  //  var myState = transactionStore.state.screenTx;
   for (var i = 0; i < toVid.length; i++) {
     var val = toVid[i];
     var sendCollection = "$fsMsgCollection/$val/io/$mFrom";
-    var messageCollection =
-        FirebaseFirestore.instance.collection("$sendCollection/msg");
+    var messageCollection = FirebaseFirestore.instance.collection(
+      "$sendCollection/msg",
+    );
     var msg = {
       "to": val,
       "fr": mFrom,
@@ -1327,9 +1433,7 @@ Future sendMessage(mTo, mFrom, mDisplay, mData, mIn, mStatus) async {
     };
     await messageCollection.add(msg).then((doc) {
       msgId = doc.id;
-      var updateData = {
-        "id": msgId,
-      };
+      var updateData = {"id": msgId};
       FirebaseFirestore.instance
           .collection("$sendCollection/msg")
           .doc(msgId)
@@ -1337,17 +1441,14 @@ Future sendMessage(mTo, mFrom, mDisplay, mData, mIn, mStatus) async {
     });
 
     try {
-      DocumentSnapshot docSnap =
-          await FirebaseFirestore.instance.doc(sendCollection).get();
+      DocumentSnapshot docSnap = await FirebaseFirestore.instance
+          .doc(sendCollection)
+          .get();
       final postRef = FirebaseFirestore.instance.doc(sendCollection);
       await FirebaseFirestore.instance.runTransaction((Transaction tx) async {
         final docSnapshot = await tx.get<Map<String, dynamic>>(postRef);
         var currentUnread = docSnapshot.data()!['urd'] + 1;
-        var updateData = {
-          "lm": mDisplay,
-          "urd": currentUnread,
-          "lt": tStamp,
-        };
+        var updateData = {"lm": mDisplay, "urd": currentUnread, "lt": tStamp};
         tx.update(postRef, updateData);
       }); // end of firebase transaction
     } catch (eTrans) {
@@ -1367,14 +1468,8 @@ Future<int> resetVid(List<dynamic> targets) async {
   // reset all dvc :
   //  user => e : "-" ; u : "-"
   //  dvc => did : "TBD" ; in : false
-  Map<String, dynamic> dvcData = {
-    'did': 'TBD',
-    'in': false,
-  };
-  Map<String, dynamic> userData = {
-    'e': '-',
-    'u': '-',
-  };
+  Map<String, dynamic> dvcData = {'did': 'TBD', 'in': false};
+  Map<String, dynamic> userData = {'e': '-', 'u': '-'};
 
   try {
     for (dynamic target in targets) {
@@ -1384,36 +1479,34 @@ Future<int> resetVid(List<dynamic> targets) async {
           .where('vid', isEqualTo: target[0]) // vid
           .get()
           .then((res) {
-        String proxy = '';
-        if (target[1] != null && target[1].isNotEmpty) {
-          userData = {
-            'e': '-',
-            'u': '-',
-            'i': phoneWithoutCC(target[1]),
-          };
-          operationString = 'reset-device-update-phone-number';
-        } else {
-          userData = {
-            'e': '-',
-            'u': '-',
-          };
-          operationString = 'reset-device';
-        } // end if (target[1] != null && target[1].isNotEmpty)
-        bool parentUpdated = false;
-        for (dynamic dvc in res.docs) {
-          dynamic dvcRef = dvc.reference;
-          proxy = dvc.data()['lif'];
-          dvcRef.update(dvcData); //= write updated data to user dvc
-          if (!parentUpdated) {
-            dvcRef.parent.parent
-                .update(userData); //= write updated data to user
-            parentUpdated = true;
-          } // if (!parentUpdated)
-        } // end for (dynamic dvc in dvcDocs)
-        registerDeviceOperation(
-            proxy, target[2], operationString, phoneWithCC(target[1]));
-        return 1;
-      });
+            String proxy = '';
+            if (target[1] != null && target[1].isNotEmpty) {
+              userData = {'e': '-', 'u': '-', 'i': phoneWithoutCC(target[1])};
+              operationString = 'reset-device-update-phone-number';
+            } else {
+              userData = {'e': '-', 'u': '-'};
+              operationString = 'reset-device';
+            } // end if (target[1] != null && target[1].isNotEmpty)
+            bool parentUpdated = false;
+            for (dynamic dvc in res.docs) {
+              dynamic dvcRef = dvc.reference;
+              proxy = dvc.data()['lif'];
+              dvcRef.update(dvcData); //= write updated data to user dvc
+              if (!parentUpdated) {
+                dvcRef.parent.parent.update(
+                  userData,
+                ); //= write updated data to user
+                parentUpdated = true;
+              } // if (!parentUpdated)
+            } // end for (dynamic dvc in dvcDocs)
+            registerDeviceOperation(
+              proxy,
+              target[2],
+              operationString,
+              phoneWithCC(target[1]),
+            );
+            return 1;
+          });
     } // end for (String vid in vids)
   } catch (e) {
     result = -5;
@@ -1454,10 +1547,12 @@ void getLinkInterfaceKey(BuildContext context, String vid, String pin) {
 
   Future.wait([
     // TODO get from Firebase (get data from vidKey).
-    sheetApi.spreadsheets.values.batchGet(vidKey,
-        ranges: [vidRange],
-        dateTimeRenderOption: "SERIAL_NUMBER",
-        valueRenderOption: "UNFORMATTED_VALUE"),
+    sheetApi.spreadsheets.values.batchGet(
+      vidKey,
+      ranges: [vidRange],
+      dateTimeRenderOption: "SERIAL_NUMBER",
+      valueRenderOption: "UNFORMATTED_VALUE",
+    ),
   ]).then((entryList) {
     vidList = entryList[0].valueRanges![0].values;
     bool found = false;
@@ -1472,13 +1567,18 @@ void getLinkInterfaceKey(BuildContext context, String vid, String pin) {
       // if vid found
       if (vidList[foundRow][4] == pin || // check for pin
           vidList[foundRow][4] == int.parse(pin)) {
-        transactionStore.dispatch(UpdateScreenTxAction(//   if pin ok then
-            ScreenTransaction({'#VID': int.parse(vid)}))); //     set state #VID
+        transactionStore.dispatch(
+          UpdateScreenTxAction(
+            //   if pin ok then
+            ScreenTransaction({'#VID': int.parse(vid)}),
+          ),
+        ); //     set state #VID
         result = vidList[foundRow][2]; //     put interface key as result
         storage.write(key: 'myLif', value: result).then((val) {
           // put interface key in secure storage
-          transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-              {'#INTERFACE_KEY': result}))); //     set state #INTERFACE_KEY
+          transactionStore.dispatch(
+            UpdateScreenTxAction(ScreenTransaction({'#INTERFACE_KEY': result})),
+          ); //     set state #INTERFACE_KEY
           readSettings(result, 1).then((_) {
             rootThis.setState(() {
               rootThis.key = UniqueKey(); //     refresh page
@@ -1487,43 +1587,46 @@ void getLinkInterfaceKey(BuildContext context, String vid, String pin) {
         }); // store in secure & persistent storage
       } else {
         showDialog(
-            context: context,
-            builder: (BuildContext context) {
-              return AlertDialog(
-                //   else (pin not match)
-                title: const Text("User not found"),
-                content: const Text(
-                    "Pin salah, masukan sekali lagi."), // show dialog
-                actions: <Widget>[
-                  TextButton(
-                    child: const Text("OK"),
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                    },
-                  )
-                ],
-              );
-            });
-      }
-    } else {
-      // else (vid not found
-      showDialog(
           context: context,
           builder: (BuildContext context) {
             return AlertDialog(
-              //   show dialog (vid not found)
+              //   else (pin not match)
               title: const Text("User not found"),
-              content: const Text("Vid tidak ditemukan."),
+              content: const Text(
+                "Pin salah, masukan sekali lagi.",
+              ), // show dialog
               actions: <Widget>[
                 TextButton(
                   child: const Text("OK"),
                   onPressed: () {
                     Navigator.of(context).pop();
                   },
-                )
+                ),
               ],
             );
-          });
+          },
+        );
+      }
+    } else {
+      // else (vid not found
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            //   show dialog (vid not found)
+            title: const Text("User not found"),
+            content: const Text("Vid tidak ditemukan."),
+            actions: <Widget>[
+              TextButton(
+                child: const Text("OK"),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                },
+              ),
+            ],
+          );
+        },
+      );
     }
   });
 } // end of getLinkInterfaceKey
@@ -1537,8 +1640,11 @@ Future setDataOK(String iNumber) async {
   String desc = '';
   dynamic state = transactionStore.state;
   setTransactionOK('setDataOK $iNumber');
-  transactionStore.dispatch(UpdateScreenTxAction(
-      ScreenTransaction({'#DATA_OK': true, '#REFRESH': false})));
+  transactionStore.dispatch(
+    UpdateScreenTxAction(
+      ScreenTransaction({'#DATA_OK': true, '#REFRESH': false}),
+    ),
+  );
   switch (iNumber) {
     case '1': // reload from proxy
       desc = '1=>reload from proxy';
@@ -1619,8 +1725,9 @@ Future setDataOK(String iNumber) async {
       } // end if (rootThis != null)
       break;
   }
-  transactionStore
-      .dispatch(UpdateScreenTxAction(ScreenTransaction({'#CAMERA': false})));
+  transactionStore.dispatch(
+    UpdateScreenTxAction(ScreenTransaction({'#CAMERA': false})),
+  );
   debugPrint('setDataOK $desc');
   // devPrint(
   //     "Updating Done! #DATA_OK:${transactionStore.state.screenTx['#DATA_OK']}");
@@ -1629,23 +1736,26 @@ Future setDataOK(String iNumber) async {
 Future<dynamic> getDataFromCloud() async {
   // get data from functionName['appSettings'] ~ /appSettings3
   dynamic returnValue = [
-    {body: jsonEncode(defaultCloudConfig)}
+    {body: jsonEncode(defaultCloudConfig)},
   ];
   if (internetConnected()) {
     try {
       dynamic qParams = {"app": appsCode};
-      dynamic uri =
-          Uri.https(autsorzFunctionDomain, appSettingFunctionName, qParams);
+      dynamic uri = Uri.https(
+        autsorzFunctionDomain,
+        appSettingFunctionName,
+        qParams,
+      );
       dynamic rawReturnValue = await Future.wait([
         http.post(uri).timeout(const Duration(seconds: 15)),
-//      getServiceAccountCredential(), //= TODO uncomment this
+        //      getServiceAccountCredential(), //= TODO uncomment this
       ]);
       returnValue = [
-        {'body': rawReturnValue[0].body}
+        {'body': rawReturnValue[0].body},
       ];
     } catch (e) {
       returnValue = [
-        {body: jsonEncode(defaultCloudConfig)}
+        {body: jsonEncode(defaultCloudConfig)},
       ];
     }
   }
@@ -1655,7 +1765,7 @@ Future<dynamic> getDataFromCloud() async {
 Future settingUp() async {
   // TODO call function in nearest server & use function callable. Still problem with firebase function
   dynamic r = [
-    {body: jsonEncode(defaultCloudConfig)}
+    {body: jsonEncode(defaultCloudConfig)},
   ];
   String? storedAppSettings = await secureRead(key: 'appSettings');
   if (storedAppSettings == null || storedAppSettings == emptyString) {
@@ -1672,7 +1782,7 @@ Future settingUp() async {
       r.add({body: data ?? emptyString});
     } catch (eCloud) {
       r = [
-        {body: jsonEncode(defaultCloudConfig)}
+        {body: jsonEncode(defaultCloudConfig)},
       ];
       locRange = defaultCloudConfig['locRange'].toString();
     }
@@ -1680,7 +1790,7 @@ Future settingUp() async {
     dynamic j = json.decode(storedAppSettings);
     locRange = j['locRange'];
     r = [
-      {'body': storedAppSettings}
+      {'body': storedAppSettings},
     ];
     if (internetConnected()) {
       try {
@@ -1725,10 +1835,25 @@ Future<bool> newUpdateApp() async {
 /// Persist the current home/system page maps to SharedPreferences so the next
 /// (warm) startup renders the home shell from cache instead of re-fetching.
 /// Guarded so an encode failure can't crash startup.
-void _persistUiCache() {
+///
+/// Each map is encoded exactly ONCE. When [alsoGuest] is true the same two
+/// encoded strings are ALSO written to the guest snapshot keys
+/// (`@guestScreenUI`/`@guestSystemUI`) for the instant logout→login restore —
+/// avoiding a second large-map `json.encode` on the pre-`runApp` critical path.
+void _persistUiCache({bool alsoGuest = false}) {
   try {
-    prefs.setString('@screenUI', json.encode(screenUIComponent));
-    prefs.setString('@systemUI', json.encode(systemUIComponent));
+    final String screenJson = json.encode(screenUIComponent);
+    final String systemJson = json.encode(systemUIComponent);
+    prefs.setString('@screenUI', screenJson);
+    prefs.setString('@systemUI', systemJson);
+    if (alsoGuest) {
+      // Guest snapshot reuses the SAME encoded strings — no re-encode. Gated by
+      // the caller on signInProcess so only guest bootstrap pages are captured,
+      // never an authenticated user's UI. At call time screenUIComponent['home']
+      // already points to the guest login page, so the snapshot is self-contained.
+      prefs.setString('@guestScreenUI', screenJson);
+      prefs.setString('@guestSystemUI', systemJson);
+    }
   } catch (e) {
     devPrint('save screenUI/systemUI failed: $e');
   }
@@ -1758,8 +1883,9 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
   userKey = settingKey;
   String localeString = Platform.localeName;
   debugCount = 526;
-  transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-      {'#INTERFACE_KEY': settingKey}))); // set state #INTERFACE_KEY
+  transactionStore.dispatch(
+    UpdateScreenTxAction(ScreenTransaction({'#INTERFACE_KEY': settingKey})),
+  ); // set state #INTERFACE_KEY
   dynamic response;
   String lastPages = '';
   // Always reuse the cached pages on the startup-critical loader (opt 1) when
@@ -1814,8 +1940,11 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
         debugCount = 52121;
         trace(debugCount);
         try {
-          FunctionBody functionBody = getFunctionBody(
-              settingKey, [systemJsonRange, guestRange, lifSetting]);
+          FunctionBody functionBody = getFunctionBody(settingKey, [
+            systemJsonRange,
+            guestRange,
+            lifSetting,
+          ]);
           response = await http
               .post(Uri.parse(functionBody.url), body: functionBody.body)
               .timeout(const Duration(seconds: 15));
@@ -1830,11 +1959,13 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
         debugCount = 5215;
         trace(debugCount);
         //systemUIComponent.clear();
-        for (var i = 0;
-            i < getResult[0].length &&
-                getResult[0][i].length > 0 &&
-                getResult[0][i][0].length > 0;
-            i++) {
+        for (
+          var i = 0;
+          i < getResult[0].length &&
+              getResult[0][i].length > 0 &&
+              getResult[0][i][0].length > 0;
+          i++
+        ) {
           var combination = combineJson(getResult[0][i]);
           systemUIComponent[getResult[0][i][0]] = json.decode(combination);
         }
@@ -1857,14 +1988,14 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
         trace(debugCount);
         if (signInProcess) {
           asHome = getResult[1][0][0];
-          screenUIComponent[home] = screenUIComponent[
-              asHome]; // if in sign in process, copy this page as home
+          screenUIComponent[home] =
+              screenUIComponent[asHome]; // if in sign in process, copy this page as home
           debugCount = 5219;
           trace(debugCount);
         } else if (needUpgrade != empty) {
           asHome = getResult[1][0][0];
-          screenUIComponent[home] = screenUIComponent[
-              asHome]; // if in sign in process, copy this page as home
+          screenUIComponent[home] =
+              screenUIComponent[asHome]; // if in sign in process, copy this page as home
           debugCount = 5220;
           trace(debugCount);
         }
@@ -1872,7 +2003,8 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
         if (getResult[2][0][0].toString().isNotEmpty) {
           var currentVid = getResult[2][0][0];
           transactionStore.dispatch(
-              UpdateScreenTxAction(ScreenTransaction({'#VID': currentVid})));
+            UpdateScreenTxAction(ScreenTransaction({'#VID': currentVid})),
+          );
           String myCluster = (await secureRead(key: "myCluster"))!;
           String myMsgId = (await secureRead(key: "myMsgId"))!;
           firestoreIO = '$msgPrefix$myCluster/$myMsgId/io';
@@ -1882,23 +2014,35 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
         }
         debugCount = 5223;
         if (getResult[2][1][0].length > 0) {
-          transactionStore.dispatch(UpdateScreenTxAction(
-              ScreenTransaction({'#NAME': getResult[2][1][0]})));
+          transactionStore.dispatch(
+            UpdateScreenTxAction(
+              ScreenTransaction({'#NAME': getResult[2][1][0]}),
+            ),
+          );
         }
         debugCount = 5224;
         if (getResult[2][2][0].length > 0) {
-          transactionStore.dispatch(UpdateScreenTxAction(
-              ScreenTransaction({'#EMAIL': getResult[2][2][0]})));
+          transactionStore.dispatch(
+            UpdateScreenTxAction(
+              ScreenTransaction({'#EMAIL': getResult[2][2][0]}),
+            ),
+          );
         }
         debugCount = 5225;
         if (getResult[2][3][0].toString().isNotEmpty) {
-          transactionStore.dispatch(UpdateScreenTxAction(
-              ScreenTransaction({'#PHONE': getResult[2][3][0].toString()})));
+          transactionStore.dispatch(
+            UpdateScreenTxAction(
+              ScreenTransaction({'#PHONE': getResult[2][3][0].toString()}),
+            ),
+          );
         }
         debugCount = 5226;
         if (getResult[2][4][0].length > 0) {
-          transactionStore.dispatch(UpdateScreenTxAction(
-              ScreenTransaction({'#TYPE': getResult[2][4][0]})));
+          transactionStore.dispatch(
+            UpdateScreenTxAction(
+              ScreenTransaction({'#TYPE': getResult[2][4][0]}),
+            ),
+          );
         }
         debugCount = 5227;
         trace(debugCount);
@@ -1907,7 +2051,15 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
         // inside the same try, so a readUIPages timeout (~15s) threw and SKIPPED
         // the save → @screenUI stayed empty → every reopen re-fetched (the slow
         // "Loading…"). Saving here breaks that cycle.
-        _persistUiCache();
+        // Persist the home/system pages AND (when signInProcess) snapshot the
+        // guest UI for an instant logout→login restore — both from a SINGLE
+        // encode of each map. Gating on signInProcess (== settingKey matches
+        // #GUEST_LIF) means only guest bootstrap pages are captured, never an
+        // authenticated user's UI. At this point screenUIComponent['home']
+        // already points to the guest login page (assigned above when
+        // signInProcess), so the snapshot is self-contained: signOut() can
+        // restore it and show login with no fetch.
+        _persistUiCache(alsoGuest: signInProcess);
         // #2 On the startup-critical loader (opt 1) DON'T block home on the
         // full all-pages fetch — the home page is already in screenUIComponent
         // from the first fetch. The background loader (asyncAppStartup2 / opt 2,
@@ -1920,10 +2072,7 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
           // only the timeout (debug log); still surface genuine server/parse
           // failures so they remain visible in Crashlytics.
           try {
-            await readUIPages(
-              settingKey,
-              guestIndex,
-            );
+            await readUIPages(settingKey, guestIndex);
           } on TimeoutException catch (e) {
             devPrint('readUIPages timed out (background refresh): $e');
           } catch (e) {
@@ -1995,8 +2144,9 @@ Future<void> readUIPages(String lifKey, int guestIndex) async {
   });
   if (guestIndex > 0) {
     // this is sign in process
-    screenUIComponent[home] = screenUIComponent[entryList[0][guestIndex - 51]
-        [0]]; // change home with dedicated signin page
+    screenUIComponent[home] =
+        screenUIComponent[entryList[0][guestIndex -
+            51][0]]; // change home with dedicated signin page
   }
   // await prefs.setString('@systemUI', jsonEncode(systemUIComponent));
   // await prefs.setString('@screenUI', jsonEncode(screenUIComponent));
@@ -2027,33 +2177,62 @@ Future<void> readSettings(String lifKey, int opt) async {
   //     {'#INTERFACE_KEY': userKey}))); // set state #INTERFACE_KEY
   userKey = settingKey;
   String tempVidKey = res['vidKey'];
-  transactionStore.dispatch(UpdateScreenTxAction(
-      ScreenTransaction({'#VID_KEY': tempVidKey, '#INTERFACE_KEY': userKey})));
+  transactionStore.dispatch(
+    UpdateScreenTxAction(
+      ScreenTransaction({'#VID_KEY': tempVidKey, '#INTERFACE_KEY': userKey}),
+    ),
+  );
 
-  late http.Response response;
+  http.Response? response;
   try {
     FunctionBody functionBody;
     if (opt == 1) {
-      functionBody = getFunctionBody(
-          settingKey, [systemJsonRange, screenJsonRange, lifSetting]);
+      functionBody = getFunctionBody(settingKey, [
+        systemJsonRange,
+        screenJsonRange,
+        lifSetting,
+      ]);
     } else {
       //opt == 2
       functionBody = getFunctionBody(settingKey, [screenJsonRange]);
     }
+    if (_loginPerfTrace) {
+      debugPrint(
+        '[LOGINPERF] readSettings.req body=${functionBody.body.toString().length}b ranges=[$systemJsonRange | $screenJsonRange]',
+      );
+    }
+    final swRS = _loginPerfTrace ? (Stopwatch()..start()) : null;
     response = await http
         .post(Uri.parse(functionBody.url), body: functionBody.body)
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 8));
+    if (swRS != null) {
+      debugPrint(
+        '[LOGINPERF] readSettings.http = ${swRS.elapsedMilliseconds}ms',
+      );
+    }
   } catch (e) {
-    errorReport(e);
+    reportNonTimeout(e);
+  }
+  if (response == null) {
+    // F1: HTTP timeout or network error. The in-memory screenUIComponent
+    // survives; return normally so .then() callers rebuild from it.
+    if (_loginPerfTrace) {
+      debugPrint(
+        '[LOGINPERF] readSettings FAILED (response null), returning early',
+      );
+    }
+    return;
   }
   var getResult = jsonDecode(response.body);
   if (opt == 1) {
     // systemUIComponent.clear();
-    for (var i = 0;
-        i < getResult[0].length &&
-            getResult[0][i].length > 0 &&
-            getResult[0][i][0].length > 0;
-        i++) {
+    for (
+      var i = 0;
+      i < getResult[0].length &&
+          getResult[0][i].length > 0 &&
+          getResult[0][i][0].length > 0;
+      i++
+    ) {
       var combination = combineJson(getResult[0][i]);
       systemUIComponent[getResult[0][i][0]] = json.decode(combination);
     }
@@ -2085,25 +2264,38 @@ Future<void> readSettings(String lifKey, int opt) async {
     if (getResult[2][0].toString().isNotEmpty) {
       var currentVid = getResult[2][0][0];
       transactionStore.dispatch(
-          UpdateScreenTxAction(ScreenTransaction({'#VID': currentVid})));
+        UpdateScreenTxAction(ScreenTransaction({'#VID': currentVid})),
+      );
       // firestoreIO = '$firestoreCollection/$currentVid/io';
       // firestoreMsg = firestoreIO;
       //  firestoreMsg = 'users/922250226073/io/vid1111/msg';
       if (getResult[2][1][0].length > 0) {
-        transactionStore.dispatch(UpdateScreenTxAction(
-            ScreenTransaction({'#NAME': getResult[2][1][0]})));
+        transactionStore.dispatch(
+          UpdateScreenTxAction(
+            ScreenTransaction({'#NAME': getResult[2][1][0]}),
+          ),
+        );
       }
       if (getResult[2][2][0].length > 0) {
-        transactionStore.dispatch(UpdateScreenTxAction(
-            ScreenTransaction({'#EMAIL': getResult[2][2][0]})));
+        transactionStore.dispatch(
+          UpdateScreenTxAction(
+            ScreenTransaction({'#EMAIL': getResult[2][2][0]}),
+          ),
+        );
       }
       if (getResult[2][3][0].toString().isNotEmpty) {
-        transactionStore.dispatch(UpdateScreenTxAction(
-            ScreenTransaction({'#PHONE': getResult[2][3][0].toString()})));
+        transactionStore.dispatch(
+          UpdateScreenTxAction(
+            ScreenTransaction({'#PHONE': getResult[2][3][0].toString()}),
+          ),
+        );
       }
       if (getResult[2][4][0].length > 0) {
-        transactionStore.dispatch(UpdateScreenTxAction(
-            ScreenTransaction({'#TYPE': getResult[2][4][0]})));
+        transactionStore.dispatch(
+          UpdateScreenTxAction(
+            ScreenTransaction({'#TYPE': getResult[2][4][0]}),
+          ),
+        );
       }
     }
     constructAllPageElements();
@@ -2128,6 +2320,14 @@ Future<void> readSettings(String lifKey, int opt) async {
     var saveLast = <Future>[];
     saveLast.add(prefs.setString('@systemUI', json.encode(systemUIComponent)));
     saveLast.add(prefs.setString('@screenUI', json.encode(screenUIComponent)));
+    // Persist the authed system snapshot for cache-first navbar restore on the
+    // next login. Gated on non-guest settingKey so the guest bootstrap pages
+    // never overwrite the last authenticated session's bottomBar.
+    if (settingKey != myState['#GUEST_LIF']) {
+      saveLast.add(
+        prefs.setString('@authedSystemUI', json.encode(systemUIComponent)),
+      );
+    }
     await Future.wait(saveLast);
   } catch (e) {
     errorReport("Error in saving to shared preferences (readSettings): $e");
@@ -2137,7 +2337,10 @@ Future<void> readSettings(String lifKey, int opt) async {
 } // end of readSettings
 
 Future<void> readSettingsContext(
-    BuildContext context, String lifKey, int opt) async {
+  BuildContext context,
+  String lifKey,
+  int opt,
+) async {
   // opt 1 = Load as usual from JSON etc; 2 = load from JSON2 only
   // then constructPageElement of the respective screen
 
@@ -2161,25 +2364,35 @@ Future<void> readSettingsContext(
   //     {'#INTERFACE_KEY': userKey}))); // set state #INTERFACE_KEY
   userKey = settingKey;
   String tempVidKey = res['vidKey'];
-  transactionStore.dispatch(UpdateScreenTxAction(
-      ScreenTransaction({'#VID_KEY': tempVidKey, '#INTERFACE_KEY': userKey})));
+  transactionStore.dispatch(
+    UpdateScreenTxAction(
+      ScreenTransaction({'#VID_KEY': tempVidKey, '#INTERFACE_KEY': userKey}),
+    ),
+  );
 
   http.Response? response;
   try {
     FunctionBody functionBody;
     if (opt == 1) {
-      functionBody = getFunctionBody(
-          settingKey, [systemJsonRange, screenJsonRange, lifSetting]);
+      functionBody = getFunctionBody(settingKey, [
+        systemJsonRange,
+        screenJsonRange,
+        lifSetting,
+      ]);
     } else {
       //opt == 2
       functionBody = getFunctionBody(settingKey, [screenJsonRange]);
     }
-    response =
-        await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+    response = await http.post(
+      Uri.parse(functionBody.url),
+      body: functionBody.body,
+    );
   } catch (e) {
     errorReport(e);
     showAlert(
-        context, textList["ErrorLoading"] + " [readSettingsContext] : $e");
+      context,
+      textList["ErrorLoading"] + " [readSettingsContext] : $e",
+    );
   }
   if (response != null) {
     var getResult = [];
@@ -2187,11 +2400,13 @@ Future<void> readSettingsContext(
       getResult = jsonDecode(response.body);
       if (opt == 1) {
         // systemUIComponent.clear();
-        for (var i = 0;
-            i < getResult[0].length &&
-                getResult[0][i].length > 0 &&
-                getResult[0][i][0].length > 0;
-            i++) {
+        for (
+          var i = 0;
+          i < getResult[0].length &&
+              getResult[0][i].length > 0 &&
+              getResult[0][i][0].length > 0;
+          i++
+        ) {
           var combination = combineJson(getResult[0][i]);
           systemUIComponent[getResult[0][i][0]] = json.decode(combination);
         }
@@ -2207,8 +2422,10 @@ Future<void> readSettingsContext(
             }
           } catch (e) {
             errorReport(e);
-            showAlert(context,
-                textList["ErrorLoading"] + " : $e : scr[0] = ${scr[0]}");
+            showAlert(
+              context,
+              textList["ErrorLoading"] + " : $e : scr[0] = ${scr[0]}",
+            );
             screenUIComponent[scr[0]] = json.decode(errorPage);
           }
         });
@@ -2228,25 +2445,38 @@ Future<void> readSettingsContext(
         if (getResult[2][0].toString().isNotEmpty) {
           var currentVid = getResult[2][0][0];
           transactionStore.dispatch(
-              UpdateScreenTxAction(ScreenTransaction({'#VID': currentVid})));
+            UpdateScreenTxAction(ScreenTransaction({'#VID': currentVid})),
+          );
           // firestoreIO = '$firestoreCollection/$currentVid/io';
           // firestoreMsg = firestoreIO;
           //  firestoreMsg = 'users/922250226073/io/vid1111/msg';
           if (getResult[2][1][0].length > 0) {
-            transactionStore.dispatch(UpdateScreenTxAction(
-                ScreenTransaction({'#NAME': getResult[2][1][0]})));
+            transactionStore.dispatch(
+              UpdateScreenTxAction(
+                ScreenTransaction({'#NAME': getResult[2][1][0]}),
+              ),
+            );
           }
           if (getResult[2][2][0].length > 0) {
-            transactionStore.dispatch(UpdateScreenTxAction(
-                ScreenTransaction({'#EMAIL': getResult[2][2][0]})));
+            transactionStore.dispatch(
+              UpdateScreenTxAction(
+                ScreenTransaction({'#EMAIL': getResult[2][2][0]}),
+              ),
+            );
           }
           if (getResult[2][3][0].toString().isNotEmpty) {
-            transactionStore.dispatch(UpdateScreenTxAction(
-                ScreenTransaction({'#PHONE': getResult[2][3][0].toString()})));
+            transactionStore.dispatch(
+              UpdateScreenTxAction(
+                ScreenTransaction({'#PHONE': getResult[2][3][0].toString()}),
+              ),
+            );
           }
           if (getResult[2][4][0].length > 0) {
-            transactionStore.dispatch(UpdateScreenTxAction(
-                ScreenTransaction({'#TYPE': getResult[2][4][0]})));
+            transactionStore.dispatch(
+              UpdateScreenTxAction(
+                ScreenTransaction({'#TYPE': getResult[2][4][0]}),
+              ),
+            );
           }
         }
         constructAllPageElements();
@@ -2271,10 +2501,18 @@ Future<void> readSettingsContext(
 
       try {
         var saveLast = <Future>[];
-        saveLast
-            .add(prefs.setString('@systemUI', json.encode(systemUIComponent)));
-        saveLast
-            .add(prefs.setString('@screenUI', json.encode(screenUIComponent)));
+        saveLast.add(
+          prefs.setString('@systemUI', json.encode(systemUIComponent)),
+        );
+        saveLast.add(
+          prefs.setString('@screenUI', json.encode(screenUIComponent)),
+        );
+        // Persist authed system snapshot (same gate as readSettings).
+        if (settingKey != myState['#GUEST_LIF']) {
+          saveLast.add(
+            prefs.setString('@authedSystemUI', json.encode(systemUIComponent)),
+          );
+        }
         await Future.wait(saveLast);
       } catch (e) {
         errorReport(e);
@@ -2290,22 +2528,23 @@ Future<void> readSettingsContext(
 
 void showAlert(BuildContext context, String msg) {
   showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          //   else (pin not match)
-          title: const Text("Alert"),
-          content: Text(msg), // show dialog
-          actions: <Widget>[
-            TextButton(
-              child: const Text("OK"),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-            )
-          ],
-        );
-      });
+    context: context,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        //   else (pin not match)
+        title: const Text("Alert"),
+        content: Text(msg), // show dialog
+        actions: <Widget>[
+          TextButton(
+            child: const Text("OK"),
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+          ),
+        ],
+      );
+    },
+  );
 } // end of ShowAlert
 
 String combineJson(var j) {
@@ -2314,23 +2553,26 @@ String combineJson(var j) {
 
 Future getServiceAccountCredential() async {
   var scopes = [
-//    'https://www.googleapis.com/auth/drive',
-//    'https://www.googleapis.com/auth/drive.appdata',
+    //    'https://www.googleapis.com/auth/drive',
+    //    'https://www.googleapis.com/auth/drive.appdata',
     'https://www.googleapis.com/auth/spreadsheets',
   ];
   var client = http.Client();
   return auth.obtainAccessCredentialsViaServiceAccount(
-      auth.ServiceAccountCredentials.fromJson(
-          await rootBundle.loadStructuredData("start.sct", (jsonStr) async {
+    auth.ServiceAccountCredentials.fromJson(
+      await rootBundle.loadStructuredData("start.sct", (jsonStr) async {
         return json.decode(jsonStr);
-      })),
-      scopes,
-      client);
+      }),
+    ),
+    scopes,
+    client,
+  );
 }
 
 String getSettingKey() {
   int idx = 4;
-  String rKey = vSetting[idx].substring(0, 14) +
+  String rKey =
+      vSetting[idx].substring(0, 14) +
       vSetting[idx].substring(17, vSetting[idx].length);
   return rKey;
 }
@@ -2338,8 +2580,11 @@ String getSettingKey() {
 Future getSetting() {
   dynamic result;
   var qParams = {"app": appsCode};
-  var uri = Uri.https("us-central1-collanium1-4babc.cloudfunctions.net",
-      "/getPoxSettings", qParams);
+  var uri = Uri.https(
+    "us-central1-collanium1-4babc.cloudfunctions.net",
+    "/getPoxSettings",
+    qParams,
+  );
   // devPrint("api.getSetting; ${uri.toString()}");
   return http.post(uri).then((res) {
     result = json.decode(res.body);
@@ -2375,8 +2620,9 @@ Future<void> handleSignIn() async {
 Future<String> appendToSheetOld(dynamic val) async {
   var state = transactionStore.state.screenTx;
   try {
-    FunctionBody functionBody =
-        appendSSA1(state['#INTERFACE_KEY'], [val], defaultCluster);
+    FunctionBody functionBody = appendSSA1(state['#INTERFACE_KEY'], [
+      val,
+    ], defaultCluster);
     await http
         .post(Uri.parse(functionBody.url), body: functionBody.body)
         .timeout(const Duration(seconds: 10));
@@ -2420,7 +2666,7 @@ Future runSheetStartup(String lif, String clt) async {
       "hg": physicalHeight.round().toString(),
       "lc": lang,
       "cc": country,
-      "dvc": info
+      "dvc": info,
     };
 
     try {
@@ -2444,35 +2690,45 @@ Future getVidData() async {
     String docId = (await secureRead(key: "myDoc"))!;
     // String myMsgId = (await storage.read(key: "myMsgId"))!;
     String myCluster = (await secureRead(key: "myCluster"))!;
-    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-      '#FS_PATH': fsCollection,
-      '#CLUSTER': myCluster,
-      '#FS_IO': firestoreIO,
-    })));
+    transactionStore.dispatch(
+      UpdateScreenTxAction(
+        ScreenTransaction({
+          '#FS_PATH': fsCollection,
+          '#CLUSTER': myCluster,
+          '#FS_IO': firestoreIO,
+        }),
+      ),
+    );
     fsMsgCollection =
         "$msgPrefix$myCluster"; //= set singleton for whole project
     var myVid = transactionStore.state.screenTx['#VID'].toString();
 
     var futures = <Future>[];
-    futures.add(firestoreDb //= get user data from firestore
-        .collection(fsCollection)
-        .doc(docId)
-        .get());
+    futures.add(
+      firestoreDb //= get user data from firestore
+          .collection(fsCollection)
+          .doc(docId)
+          .get(),
+    );
 
     futures.add(getFirestoreMessageRef(myVid));
 
     //https://alvinalexander.com/dart/how-run-multiple-dart-futures-in-parallel/
-    await Future.wait(futures)
-        .timeout(const Duration(seconds: 12))
-        .then((List<dynamic> res) {
+    await Future.wait(futures).timeout(const Duration(seconds: 12)).then((
+      List<dynamic> res,
+    ) {
       ref = res[0];
       messageRef = res[1];
     });
-    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-      '#FS_DOC': docId,
-      '#FS_REF': ref.reference,
-      '#MSG_REF': messageRef,
-    })));
+    transactionStore.dispatch(
+      UpdateScreenTxAction(
+        ScreenTransaction({
+          '#FS_DOC': docId,
+          '#FS_REF': ref.reference,
+          '#MSG_REF': messageRef,
+        }),
+      ),
+    );
   } catch (e) {
     ref = null;
   }
@@ -2484,10 +2740,9 @@ Future updateVidData(String key, var val) async {
   try {
     var state = transactionStore.state.screenTx;
     var myVid = state['#VID'].toString();
-    await FirebaseFirestore.instance
-        .collection(fsCollection)
-        .doc(myVid)
-        .update({key: val}); // put back updated data
+    await FirebaseFirestore.instance.collection(fsCollection).doc(myVid).update(
+      {key: val},
+    ); // put back updated data
   } catch (_) {
     res = null;
   }
@@ -2510,8 +2765,9 @@ Future getGPSLoc() async {
   }
   // });
   transactionStore.dispatch(
-      // UpdateScreenTxAction(ScreenTransaction({'#LOCATION': latLang})));
-      UpdateScreenTxAction(ScreenTransaction({'#LOCATION': geoPos})));
+    // UpdateScreenTxAction(ScreenTransaction({'#LOCATION': latLang})));
+    UpdateScreenTxAction(ScreenTransaction({'#LOCATION': geoPos})),
+  );
   //devPrint('Latitude:${latLang.lat}, Longitude : ${latLang.lng}');
   return geoPos;
 }
@@ -2524,7 +2780,8 @@ Future getMyImei() async {
     errorReport(erImei);
   }
   transactionStore.dispatch(
-      UpdateScreenTxAction(ScreenTransaction({'#DID': myImei}))); //  set #IMEI
+    UpdateScreenTxAction(ScreenTransaction({'#DID': myImei})),
+  ); //  set #IMEI
   return myImei;
 }
 
@@ -2569,10 +2826,11 @@ Future signOut() async {
     storage.write(key: 'myLif', value: signUpKey);
     storage.write(key: 'myMsgId', value: null);
     storage.write(key: 'lqrList', value: null); // delete location qr list
-    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-      '#INTERFACE_KEY': signUpKey,
-      '#LQR_LIST': {}
-    }))); // set state #INTERFACE_KEY
+    transactionStore.dispatch(
+      UpdateScreenTxAction(
+        ScreenTransaction({'#INTERFACE_KEY': signUpKey, '#LQR_LIST': {}}),
+      ),
+    ); // set state #INTERFACE_KEY
     await historyLock(functionName);
     tableContent[historyName].clear();
     await storage.write(key: historyName, value: 'null');
@@ -2581,7 +2839,7 @@ Future signOut() async {
     await storage.write(key: imageMapSecureName, value: 'null');
     // devPrint("After in = false; try to signOut from firebaseAuth");
     if (!demoApp) {
-//        FirebaseAuth.instance.signOut(); // signOut from firebase
+      //        FirebaseAuth.instance.signOut(); // signOut from firebase
       // TODO signOut from google, facebook, twitter
     }
     unSubscribeToEvent(); // unsubscribe to proxy event listener
@@ -2597,24 +2855,145 @@ Future signOut() async {
     void showSignInPage() {
       try {
         transactionStore.dispatch(
-            UpdateScreenTxAction(ScreenTransaction({'#REFRESH': false})));
+          UpdateScreenTxAction(ScreenTransaction({'#REFRESH': false})),
+        );
         List<Widget> newElementList = reloadPage(pgName);
         rootThis.setState(() {
+          // Clearing the cold-path logout spinner here means it lifts on BOTH
+          // the success and failure branches that call showSignInPage(). On the
+          // warm path the flag is already false, so this is a harmless no-op.
+          MainPageState.logoutInProgress = false;
           rootThis.pageName = pgName;
           rootThis.pageElements = newElementList;
         });
       } catch (e) {
         devPrint('signOut showSignInPage failed: $e');
+        // setState above may have thrown before clearing the flag — clear it
+        // directly so the spinner can never get stuck on screen.
+        MainPageState.logoutInProgress = false;
       }
       setDataOK('2');
     }
 
-    readSettings(signUpKey, 1).then((_) => showSignInPage()).catchError((e) {
-      devPrint('signOut readSettings failed: $e');
-      showSignInPage();
-    });
+    // Attempt an instant restore from the guest UI snapshotted at bootstrap.
+    // shouldRestoreGuestSnapshot() (the same pure helper unit-tested in
+    // test/logout_transition_test.dart) returns true only when BOTH snapshots
+    // exist, are non-empty, and JSON-decode to a Map.
+    final String? guestScreen = prefs.getString('@guestScreenUI');
+    final String? guestSystem = prefs.getString('@guestSystemUI');
+
+    if (shouldRestoreGuestSnapshot(guestScreen, guestSystem)) {
+      // Warm cache: restore the guest UI and show the login page NOW — no
+      // network, no spinner. The globals are dynamic, so reassigning them with
+      // the decoded snapshot is valid (no .clear() needed).
+      try {
+        systemUIComponent = json.decode(guestSystem!);
+        screenUIComponent = json.decode(guestScreen!);
+        buildTheme(systemUIComponent[theme]);
+        constructAllPageElements();
+        showSignInPage();
+      } catch (e) {
+        devPrint(
+          'signOut guest snapshot restore failed: $e — falling back to network',
+        );
+        // Snapshot decoded by the gate but failed to rebuild the UI: fall into
+        // the cold/corrupt path (spinner + network re-fetch) below.
+        rootThis.setState(() {
+          MainPageState.logoutInProgress = true;
+        });
+        readSettings(signUpKey, 1).then((_) => showSignInPage()).catchError((
+          e,
+        ) {
+          devPrint('signOut readSettings failed: $e');
+          showSignInPage();
+        });
+        return; // do not also run the background refresh below
+      }
+      // Background refresh: reconcile any server-side guest-page changes since
+      // the snapshot was taken. Fire-and-forget — the login page is already
+      // visible from the snapshot (showSignInPage ran above), so the @screenUI/
+      // @systemUI cache refresh ALWAYS runs, but the *visual* rebuild is gated:
+      // only re-render when the refreshed pages actually DIFFER from the
+      // snapshot already on screen. Re-encoding the two maps and comparing them
+      // byte-for-byte against the rendered snapshot strings (guestScreen/
+      // guestSystem) avoids the double-render flicker when the server returned
+      // identical guest pages (the common case).
+      readSettings(signUpKey, 1)
+          .then((_) {
+            // Guard: if the user has already re-logged-in (the #INTERFACE_KEY has
+            // changed away from signUpKey), this background refresh is stale —
+            // skip the reconcile to avoid overwriting authed data / re-rendering
+            // the sign-in page over the just-loaded authed shell.
+            final currentKey =
+                transactionStore.state.screenTx['#INTERFACE_KEY'];
+            if (currentKey != null && currentKey != signUpKey) {
+              devPrint('signOut background refresh skipped: user re-logged-in');
+              return;
+            }
+            try {
+              final String refreshedScreen = json.encode(screenUIComponent);
+              final String refreshedSystem = json.encode(systemUIComponent);
+              final bool screenChanged = refreshedScreen != guestScreen;
+              final bool systemChanged = refreshedSystem != guestSystem;
+              if (!screenChanged && !systemChanged) {
+                // Identical to what's already rendered — skip reloadPage+setState
+                // entirely (no flicker). The cache is still refreshed by the fetch.
+                return;
+              }
+              // Server-side drift (plan R5): reconcile. Re-run buildTheme BEFORE the
+              // rebuild only when the system/theme map changed, so a server theme
+              // tweak takes effect; then rebuild via the showSignInPage() closure.
+              if (systemChanged) {
+                buildTheme(systemUIComponent[theme]);
+              }
+              showSignInPage();
+            } catch (e) {
+              devPrint('signOut background refresh reconcile failed: $e');
+              // Reconcile failed mid-flight — fall back to a plain rebuild so the
+              // refreshed pages still take effect rather than stranding on stale.
+              showSignInPage();
+            }
+          })
+          .catchError((e) {
+            devPrint('signOut background readSettings failed: $e');
+            // A failed refresh must not strand the shell (iOS dual-call invariant);
+            // the snapshot is already up, but re-run showSignInPage() defensively.
+            showSignInPage();
+          });
+    } else {
+      // Cold/corrupt cache: no usable guest snapshot. Show a "logging out…"
+      // spinner overlay (scoped MainPageState.logoutInProgress flag) while the
+      // login page is re-fetched over the network, then swap to it on BOTH
+      // success and failure (showSignInPage clears the spinner in either case).
+      rootThis.setState(() {
+        MainPageState.logoutInProgress = true;
+      });
+      readSettings(signUpKey, 1)
+          .then((_) {
+            // Same staleness guard as the warm-path background refresh (T8): if the
+            // user re-logged-in while this cold-path re-fetch was in flight, do not
+            // swap the shell back to the sign-in page over the authed shell.
+            final currentKey =
+                transactionStore.state.screenTx['#INTERFACE_KEY'];
+            if (currentKey != null && currentKey != signUpKey) {
+              devPrint('signOut cold-path refresh skipped: user re-logged-in');
+              // Spinner must still lift so it can never strand on screen.
+              MainPageState.logoutInProgress = false;
+              return;
+            }
+            showSignInPage();
+          })
+          .catchError((e) {
+            devPrint('signOut readSettings failed: $e');
+            showSignInPage();
+          });
+    }
   } catch (err) {
     // devPrint("Error writing to firestore :" + err.toString());
+    // Clear the cold-path logout spinner here too: if setting the flag (or any
+    // cleanup after it) threw, showSignInPage may not have run, so guarantee the
+    // overlay can never strand on screen.
+    MainPageState.logoutInProgress = false;
     await Future.wait([
       prefs.remove('@systemUI'),
       prefs.remove('@screenUI'),
@@ -2640,9 +3019,14 @@ Future<int> userIntegrityCheck() async {
       // no #FIREBASE_USER. This can happen when user close the app but not signed out
       // This is default state for most user. User is not recommended to log out
       cUser = await getFirebaseUser();
-      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-        '#FIREBASE_USER': cUser, // #FIREBASE_USER should be available afterward
-      })));
+      transactionStore.dispatch(
+        UpdateScreenTxAction(
+          ScreenTransaction({
+            '#FIREBASE_USER':
+                cUser, // #FIREBASE_USER should be available afterward
+          }),
+        ),
+      );
     }
 
     if ((vidData['in'] != null && vidData['in']) &&
@@ -2672,61 +3056,83 @@ Future<int> userIntegrityCheck() async {
             .doc(myVid)
             .update(updateData); // write updated data to firestore
 
-        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-          '#EMAIL': cUser.email,
-        })));
+        transactionStore.dispatch(
+          UpdateScreenTxAction(ScreenTransaction({'#EMAIL': cUser.email})),
+        );
 
         try {
-          secureRead(key: 'pinHash').then((myPinHash) {
-            // TODO check pin hash integrity with lif
-            if (myPinHash == null) {
-              sheetApi.spreadsheets.values
-                  .batchGet(settingKey, // read from Link Interface
+          secureRead(key: 'pinHash')
+              .then((myPinHash) {
+                // TODO check pin hash integrity with lif
+                if (myPinHash == null) {
+                  sheetApi.spreadsheets.values
+                      .batchGet(
+                        settingKey, // read from Link Interface
+                        ranges: ['Settings!G10'],
+                        dateTimeRenderOption: "SERIAL_NUMBER",
+                        valueRenderOption: "UNFORMATTED_VALUE",
+                      )
+                      .then((entryList) {
+                        if (entryList.valueRanges![0].values == null) {
+                          transactionStore.dispatch(
+                            UpdateScreenTxAction(
+                              ScreenTransaction({'#NEED_PINHASH': true}),
+                            ),
+                          );
+                        } else {
+                          var lifHash = entryList.valueRanges![0].values![0][0];
+                          storage.write(
+                            key: 'pinHash',
+                            value: lifHash.toString(),
+                          ); // store pinHash in secure & persistent storage
+                          transactionStore.dispatch(
+                            UpdateScreenTxAction(
+                              ScreenTransaction({'#NEED_PINHASH': false}),
+                            ),
+                          );
+                        }
+                      });
+                } else {
+                  transactionStore.dispatch(
+                    UpdateScreenTxAction(
+                      ScreenTransaction({'#NEED_PINHASH': false}),
+                    ),
+                  );
+                }
+              })
+              .catchError((_) {
+                sheetApi.spreadsheets.values
+                    .batchGet(
+                      settingKey, // read from Link Interface
                       ranges: ['Settings!G10'],
                       dateTimeRenderOption: "SERIAL_NUMBER",
-                      valueRenderOption: "UNFORMATTED_VALUE")
-                  .then((entryList) {
-                if (entryList.valueRanges![0].values == null) {
-                  transactionStore.dispatch(UpdateScreenTxAction(
-                      ScreenTransaction({'#NEED_PINHASH': true})));
-                } else {
-                  var lifHash = entryList.valueRanges![0].values![0][0];
-                  storage.write(
-                      key: 'pinHash',
-                      value: lifHash
-                          .toString()); // store pinHash in secure & persistent storage
-                  transactionStore.dispatch(UpdateScreenTxAction(
-                      ScreenTransaction({'#NEED_PINHASH': false})));
-                }
+                      valueRenderOption: "UNFORMATTED_VALUE",
+                    )
+                    .then((entryList) {
+                      var lifHash = entryList.valueRanges![0].values![0][0];
+                      if (lifHash == null) {
+                        transactionStore.dispatch(
+                          UpdateScreenTxAction(
+                            ScreenTransaction({'#NEED_PINHASH': true}),
+                          ),
+                        );
+                      } else {
+                        storage.write(
+                          key: 'pinHash',
+                          value: lifHash.toString(),
+                        ); // store pinHash in secure & persistent storage
+                        transactionStore.dispatch(
+                          UpdateScreenTxAction(
+                            ScreenTransaction({'#NEED_PINHASH': false}),
+                          ),
+                        );
+                      }
+                    });
               });
-            } else {
-              transactionStore.dispatch(UpdateScreenTxAction(
-                  ScreenTransaction({'#NEED_PINHASH': false})));
-            }
-          }).catchError((_) {
-            sheetApi.spreadsheets.values
-                .batchGet(settingKey, // read from Link Interface
-                    ranges: ['Settings!G10'],
-                    dateTimeRenderOption: "SERIAL_NUMBER",
-                    valueRenderOption: "UNFORMATTED_VALUE")
-                .then((entryList) {
-              var lifHash = entryList.valueRanges![0].values![0][0];
-              if (lifHash == null) {
-                transactionStore.dispatch(UpdateScreenTxAction(
-                    ScreenTransaction({'#NEED_PINHASH': true})));
-              } else {
-                storage.write(
-                    key: 'pinHash',
-                    value: lifHash
-                        .toString()); // store pinHash in secure & persistent storage
-                transactionStore.dispatch(UpdateScreenTxAction(
-                    ScreenTransaction({'#NEED_PINHASH': false})));
-              }
-            });
-          });
         } catch (erLif) {
           transactionStore.dispatch(
-              UpdateScreenTxAction(ScreenTransaction({'#NEED_PINHASH': true})));
+            UpdateScreenTxAction(ScreenTransaction({'#NEED_PINHASH': true})),
+          );
         }
         result = 0;
       }
@@ -2740,17 +3146,20 @@ Future<int> userIntegrityCheck() async {
 
 Future getLifProfileData(String lifKey) async {
   Map<String, dynamic> profileData = {};
-  FunctionBody functionBody =
-      getFunctionBody(lifKey, [lifSetting, lifSetting2]);
-  var response =
-      await http.post(Uri.parse(functionBody.url), body: functionBody.body);
+  FunctionBody functionBody = getFunctionBody(lifKey, [
+    lifSetting,
+    lifSetting2,
+  ]);
+  var response = await http
+      .post(Uri.parse(functionBody.url), body: functionBody.body)
+      .timeout(const Duration(seconds: 15));
   var getResult = jsonDecode(response.body);
 
-//  var getResult = await sheetApi.spreadsheets.values
-//      .batchGet(lifKey, // read from Link Interface
-//          ranges: [lifSetting, lifSetting2],
-//          dateTimeRenderOption: "SERIAL_NUMBER",
-//          valueRenderOption: "UNFORMATTED_VALUE");
+  //  var getResult = await sheetApi.spreadsheets.values
+  //      .batchGet(lifKey, // read from Link Interface
+  //          ranges: [lifSetting, lifSetting2],
+  //          dateTimeRenderOption: "SERIAL_NUMBER",
+  //          valueRenderOption: "UNFORMATTED_VALUE");
   profileData['vid'] = getResult[0][0][0];
   profileData['imei'] = getResult[1][0][0];
   profileData['pinHash'] = getResult[1][9][0];
@@ -2768,130 +3177,205 @@ Future<int> launchCheck() async {
   int result = 99; // return > 0 when something wrong
   dynamic state;
   Map<String, dynamic> updateData = {};
+  final swLC = _loginPerfTrace ? (Stopwatch()..start()) : null;
   try {
     // historyLoadFromSecureStorage();
+    final sw1 = _loginPerfTrace ? (Stopwatch()..start()) : null;
     await FirebaseNotifications()
         .setUpFirebase(); // setup fcm notification for app
+    if (sw1 != null) {
+      debugPrint(
+        '[LOGINPERF] launchCheck.setUpFirebase = ${sw1.elapsedMilliseconds}ms',
+      );
+    }
     result = 991;
     //-- user integrity check
     state = transactionStore.state.screenTx;
     // subscribeToProxy(state['#INTERFACE_KEY']); // subscribe to firebase proxy
+    final sw2 = _loginPerfTrace ? (Stopwatch()..start()) : null;
     var vidData = await getVidData(); // get vid data plus uid
+    if (sw2 != null) {
+      debugPrint(
+        '[LOGINPERF] launchCheck.getVidData = ${sw2.elapsedMilliseconds}ms',
+      );
+    }
     var cUser = state['#FIREBASE_USER'];
     if (cUser == null) {
       // no #FIREBASE_USER. This can happen when user close the app but not signed out
       // This is default state for most user. User is not recommended to log out
       cUser = await getFirebaseUser();
       result = 992;
-      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-        '#FIREBASE_USER': cUser, // #FIREBASE_USER should be available afterward
-      })));
+      transactionStore.dispatch(
+        UpdateScreenTxAction(
+          ScreenTransaction({
+            '#FIREBASE_USER':
+                cUser, // #FIREBASE_USER should be available afterward
+          }),
+        ),
+      );
     }
+    final sw3 = _loginPerfTrace ? (Stopwatch()..start()) : null;
     try {
-      await secureRead(key: 'pinHash').then((myPinHash) async {
-        // Checking pinhash with Lif. Pinhash in Lif is the main data.
-        result = 993;
-        if (myPinHash == null || myPinHash == "") {
-          updateData["ph1"] = empty;
-          result = 994;
-          FunctionBody functionBody =
-              getFunctionBody(settingKey, ['Settings!G10']);
-          result = 995;
-          var response = await http
-              .post(Uri.parse(functionBody.url), body: functionBody.body)
-              .timeout(const Duration(seconds: 15));
-          result = 996;
-          var entryList = jsonDecode(response.body);
-          result = 997;
-          if (entryList[0][0][0] == null) {
-            transactionStore.dispatch(UpdateScreenTxAction(
-                ScreenTransaction({'#NEED_PINHASH': true})));
-            result = 998;
-          } else {
-            var lifHash = entryList[0][0][0];
-            storage.write(
+      await secureRead(key: 'pinHash')
+          .then((myPinHash) async {
+            // Checking pinhash with Lif. Pinhash in Lif is the main data.
+            result = 993;
+            if (myPinHash == null || myPinHash == "") {
+              updateData["ph1"] = empty;
+              result = 994;
+              FunctionBody functionBody = getFunctionBody(settingKey, [
+                'Settings!G10',
+              ]);
+              result = 995;
+              final swHTTP = _loginPerfTrace ? (Stopwatch()..start()) : null;
+              var response = await http
+                  .post(Uri.parse(functionBody.url), body: functionBody.body)
+                  .timeout(const Duration(seconds: 15));
+              if (swHTTP != null) {
+                debugPrint(
+                  '[LOGINPERF] launchCheck.pinHashHTTP = ${swHTTP.elapsedMilliseconds}ms',
+                );
+              }
+              result = 996;
+              var entryList = jsonDecode(response.body);
+              result = 997;
+              if (entryList[0][0][0] == null) {
+                transactionStore.dispatch(
+                  UpdateScreenTxAction(
+                    ScreenTransaction({'#NEED_PINHASH': true}),
+                  ),
+                );
+                result = 998;
+              } else {
+                var lifHash = entryList[0][0][0];
+                storage.write(
+                  key: 'pinHash',
+                  value: lifHash,
+                ); // store pinHash in secure & persistent storage
+                updateData["ph1"] = lifHash;
+                transactionStore.dispatch(
+                  UpdateScreenTxAction(
+                    ScreenTransaction({'#NEED_PINHASH': false}),
+                  ),
+                );
+                result = 999;
+              }
+              //          });
+            } else {
+              result = 9910;
+              updateData["ph1"] = myPinHash;
+              FunctionBody functionBody = getFunctionBody(settingKey, [
+                'Settings!G10',
+              ]);
+              result = 9911;
+              final swHTTP = _loginPerfTrace ? (Stopwatch()..start()) : null;
+              var response = await http
+                  .post(Uri.parse(functionBody.url), body: functionBody.body)
+                  .timeout(const Duration(seconds: 15));
+              if (swHTTP != null) {
+                debugPrint(
+                  '[LOGINPERF] launchCheck.pinHashHTTP = ${swHTTP.elapsedMilliseconds}ms',
+                );
+              }
+              result = 9912;
+              var entryList = jsonDecode(response.body);
+              result = 9913;
+              //          await sheetApi.spreadsheets.values
+              //              .batchGet(settingKey, // read from Link Interface
+              //                  ranges: ['Settings!G10'],
+              //                  dateTimeRenderOption: "SERIAL_NUMBER",
+              //                  valueRenderOption: "UNFORMATTED_VALUE")
+              //              .then((entryList) {
+              if (entryList[0][0][0] == null) {
+                storage.write(
+                  key: 'pinHash',
+                  value: '--',
+                ); //= delete storage.pinhash if pinhash in lif = null
+                transactionStore.dispatch(
+                  UpdateScreenTxAction(
+                    ScreenTransaction({'#NEED_PINHASH': true}),
+                  ),
+                );
+                result = 9914;
+              } else {
+                result = 9915;
+                var lifHash = entryList[0][0][0];
+                storage.write(
+                  key: 'pinHash',
+                  value: lifHash,
+                ); // store pinHash in secure & persistent storage
+                updateData["ph1"] = lifHash;
+                transactionStore.dispatch(
+                  UpdateScreenTxAction(
+                    ScreenTransaction({'#NEED_PINHASH': false}),
+                  ),
+                );
+                result = 9916;
+              }
+              //          }); // end of sheetApi
+            }
+          })
+          .catchError((er) async {
+            if (_loginPerfTrace) {
+              debugPrint(
+                '[LOGINPERF] launchCheck.pinHashHTTP CAUGHT ERROR, entering retry: $er',
+              );
+            }
+            result = 9917;
+            //  retry read pinhash in LIF
+            FunctionBody functionBody = getFunctionBody(settingKey, [
+              'Settings!G10',
+            ]);
+            result = 9918;
+            final swRetry = _loginPerfTrace ? (Stopwatch()..start()) : null;
+            var response = await http
+                .post(Uri.parse(functionBody.url), body: functionBody.body)
+                .timeout(const Duration(seconds: 15));
+            if (swRetry != null) {
+              debugPrint(
+                '[LOGINPERF] launchCheck.pinHashRetry = ${swRetry.elapsedMilliseconds}ms',
+              );
+            }
+            result = 9919;
+            var entryList = jsonDecode(response.body);
+            result = 9920;
+            if (entryList[0][0][0] == null) {
+              storage.write(
                 key: 'pinHash',
-                value: lifHash); // store pinHash in secure & persistent storage
-            updateData["ph1"] = lifHash;
-            transactionStore.dispatch(UpdateScreenTxAction(
-                ScreenTransaction({'#NEED_PINHASH': false})));
-            result = 999;
-          }
-//          });
-        } else {
-          result = 9910;
-          updateData["ph1"] = myPinHash;
-          FunctionBody functionBody =
-              getFunctionBody(settingKey, ['Settings!G10']);
-          result = 9911;
-          var response = await http
-              .post(Uri.parse(functionBody.url), body: functionBody.body)
-              .timeout(const Duration(seconds: 15));
-          result = 9912;
-          var entryList = jsonDecode(response.body);
-          result = 9913;
-//          await sheetApi.spreadsheets.values
-//              .batchGet(settingKey, // read from Link Interface
-//                  ranges: ['Settings!G10'],
-//                  dateTimeRenderOption: "SERIAL_NUMBER",
-//                  valueRenderOption: "UNFORMATTED_VALUE")
-//              .then((entryList) {
-          if (entryList[0][0][0] == null) {
-            storage.write(
+                value: '--',
+              ); //= delete storage.pinhash if pinhash in lif = null
+              transactionStore.dispatch(
+                UpdateScreenTxAction(
+                  ScreenTransaction({'#NEED_PINHASH': true}),
+                ),
+              );
+              result = 9921;
+            } else {
+              result = 9922;
+              var lifHash = entryList[0][0][0];
+              storage.write(
                 key: 'pinHash',
-                value:
-                    '--'); //= delete storage.pinhash if pinhash in lif = null
-            transactionStore.dispatch(UpdateScreenTxAction(
-                ScreenTransaction({'#NEED_PINHASH': true})));
-            result = 9914;
-          } else {
-            result = 9915;
-            var lifHash = entryList[0][0][0];
-            storage.write(
-                key: 'pinHash',
-                value: lifHash); // store pinHash in secure & persistent storage
-            updateData["ph1"] = lifHash;
-            transactionStore.dispatch(UpdateScreenTxAction(
-                ScreenTransaction({'#NEED_PINHASH': false})));
-            result = 9916;
-          }
-//          }); // end of sheetApi
-        }
-      }).catchError((er) async {
-        result = 9917;
-        //  retry read pinhash in LIF
-        FunctionBody functionBody =
-            getFunctionBody(settingKey, ['Settings!G10']);
-        result = 9918;
-        var response = await http
-            .post(Uri.parse(functionBody.url), body: functionBody.body)
-            .timeout(const Duration(seconds: 15));
-        result = 9919;
-        var entryList = jsonDecode(response.body);
-        result = 9920;
-        if (entryList[0][0][0] == null) {
-          storage.write(
-              key: 'pinHash',
-              value: '--'); //= delete storage.pinhash if pinhash in lif = null
-          transactionStore.dispatch(
-              UpdateScreenTxAction(ScreenTransaction({'#NEED_PINHASH': true})));
-          result = 9921;
-        } else {
-          result = 9922;
-          var lifHash = entryList[0][0][0];
-          storage.write(
-              key: 'pinHash',
-              value: lifHash); // store pinHash in secure & persistent storage
-          updateData["ph1"] = lifHash;
-          transactionStore.dispatch(UpdateScreenTxAction(
-              ScreenTransaction({'#NEED_PINHASH': false})));
-          result = 9923;
-        }
-      });
+                value: lifHash,
+              ); // store pinHash in secure & persistent storage
+              updateData["ph1"] = lifHash;
+              transactionStore.dispatch(
+                UpdateScreenTxAction(
+                  ScreenTransaction({'#NEED_PINHASH': false}),
+                ),
+              );
+              result = 9923;
+            }
+          });
     } catch (erLif) {
       result = 9924;
       transactionStore.dispatch(
-          UpdateScreenTxAction(ScreenTransaction({'#NEED_PINHASH': true})));
+        UpdateScreenTxAction(ScreenTransaction({'#NEED_PINHASH': true})),
+      );
+    }
+    if (sw3 != null) {
+      debugPrint(
+        '[LOGINPERF] launchCheck.pinHashBlock = ${sw3.elapsedMilliseconds}ms',
+      );
     }
     // end of integrity check
 
@@ -2902,8 +3386,9 @@ Future<int> launchCheck() async {
       //= if deviceId is not read
       myDid = await getDeviceId(); //= get deviceID
       result = 9926;
-      transactionStore
-          .dispatch(UpdateScreenTxAction(ScreenTransaction({'#DID': myDid})));
+      transactionStore.dispatch(
+        UpdateScreenTxAction(ScreenTransaction({'#DID': myDid})),
+      );
     }
     updateData["did"] = myDid;
     updateData["in"] = true;
@@ -2936,8 +3421,9 @@ Future<int> launchCheck() async {
       tx.update(docRef, updateMsg);
       result = 9936;
     }); // end of firebase transaction
-//    docRef.updateData(updateData); //= write updated data to message doc
+    //    docRef.updateData(updateData); //= write updated data to message doc
     // write user qr seed to secure storage
+    final sw4 = _loginPerfTrace ? (Stopwatch()..start()) : null;
     bool secureWrite = true;
     try {
       String? sd1 = await secureRead(key: 'sd1');
@@ -2949,8 +3435,9 @@ Future<int> launchCheck() async {
     } // end try
     if (secureWrite) {
       await storage.write(
-          key: 'sd1',
-          value: ftzSecretOneSeed); //   put Account key in secure storage
+        key: 'sd1',
+        value: ftzSecretOneSeed,
+      ); //   put Account key in secure storage
     } // end if (write)
     secureWrite = true;
     try {
@@ -2963,13 +3450,22 @@ Future<int> launchCheck() async {
     } // end try
     if (secureWrite) {
       await storage.write(
-          key: 'sd2',
-          value: ftzSecretOneSeed2R); //   put Account key in secure storage
+        key: 'sd2',
+        value: ftzSecretOneSeed2R,
+      ); //   put Account key in secure storage
     } // end if (write)
+    if (sw4 != null) {
+      debugPrint(
+        '[LOGINPERF] launchCheck.secureWriteBlock = ${sw4.elapsedMilliseconds}ms',
+      );
+    }
     result = 0;
     apiTest();
   } catch (e) {
     errorReport(e);
+  }
+  if (swLC != null) {
+    debugPrint('[LOGINPERF] launchCheck.total = ${swLC.elapsedMilliseconds}ms');
   }
   if (result == 0) {
     storage.write(key: 'lastVersion', value: '$version$subVersion');
@@ -3008,7 +3504,11 @@ Future getDeviceId() async {
 } // end of getDeviceId
 
 Future getFirestoreUserData(
-    String myUid, String myEmail, String county, String inv) async {
+  String myUid,
+  String myEmail,
+  String county,
+  String inv,
+) async {
   /*
         output :
         is not String = login successful
@@ -3016,14 +3516,16 @@ Future getFirestoreUserData(
   */
   dynamic result;
   String myDevice = await getDeviceId();
-  transactionStore
-      .dispatch(UpdateScreenTxAction(ScreenTransaction({'#DID': myDevice})));
+  transactionStore.dispatch(
+    UpdateScreenTxAction(ScreenTransaction({'#DID': myDevice})),
+  );
   Map<String, dynamic> user;
   var invitationStatus = 0; // 0 = init, 1 = found, 901 = not found
   bool needToRegisterInvLogin = false;
   var uidUser = await FirebaseFirestore.instance
       .collection(
-          topCollection) // search data in firebase with corresponding uid
+        topCollection,
+      ) // search data in firebase with corresponding uid
       .where('u', isEqualTo: myUid)
       .get();
   var recFound = uidUser.docs.length;
@@ -3031,7 +3533,8 @@ Future getFirestoreUserData(
     // Uid not found in firebase
     uidUser = await FirebaseFirestore.instance
         .collection(
-            topCollection) // search data in firebase with corresponding uid
+          topCollection,
+        ) // search data in firebase with corresponding uid
         .where('e', isEqualTo: myEmail)
         .where('u', isEqualTo: 'TBD')
         .get();
@@ -3047,8 +3550,10 @@ Future getFirestoreUserData(
       // var nowTime = DateTime.now().millisecondsSinceEpoch;
       uidUser = await FirebaseFirestore.instance
           .collection(topCollection) // search data in firebase with invitation
-          .where('i',
-              isEqualTo: inv == "" ? "OtonomiqInvitationNotExist..." : inv)
+          .where(
+            'i',
+            isEqualTo: inv == "" ? "OtonomiqInvitationNotExist..." : inv,
+          )
           // .where('e', isEqualTo: "-") // Find invitation that is not used
           // .where('x', isGreaterThan: nowTime)
           .get();
@@ -3066,7 +3571,7 @@ Future getFirestoreUserData(
           var data = {
             // "x": FieldValue.delete(),
             "e": myEmail,
-            "u": myUid
+            "u": myUid,
           }; // set as used
           await docRef.update(data);
           needToRegisterInvLogin = true; // put flag to register invLogin
@@ -3086,7 +3591,7 @@ Future getFirestoreUserData(
           var data = {
             // "x": FieldValue.delete(),
             "e": myEmail,
-            "u": myUid
+            "u": myUid,
           }; // set as used
           await docRef.update(data);
           invitationStatus = 1;
@@ -3109,81 +3614,81 @@ Future getFirestoreUserData(
           .limit(1)
           .get()
           .then((results) async {
-        user = results.docs[0].data();
-        if (results.docs.length == 1) {
-          if (user['in'] && user["did"] != myDevice) {
-            // TODO handle situation when user deny imei access
-            result = 802;
-            // TODO call function to send reset email
-            //   add prefix ";R"(reset) firebaseDocName
-            // "Login fail. You already signed in with other device, or you deny access to phone."; //= return result
-          } else {
-            result = results.docs[0]; //= return result
-          }
-        } else {
-          //= for some reason user was registered but no data in dvc. Treat like new user.
-          // TODO add new vid to user
-          result = 809;
-        }
-      });
+            user = results.docs[0].data();
+            if (results.docs.length == 1) {
+              if (user['in'] && user["did"] != myDevice) {
+                // TODO handle situation when user deny imei access
+                result = 802;
+                // TODO call function to send reset email
+                //   add prefix ";R"(reset) firebaseDocName
+                // "Login fail. You already signed in with other device, or you deny access to phone."; //= return result
+              } else {
+                result = results.docs[0]; //= return result
+              }
+            } else {
+              //= for some reason user was registered but no data in dvc. Treat like new user.
+              // TODO add new vid to user
+              result = 809;
+            }
+          });
     } else if (user["d"] < 1) {
       //= uid registered but no data, check dvc
       await ref2 //= get dvc entry
           .collection(fsDeviceSubCollection) // search data dvc sub collection
           .get()
           .then((results) async {
-        if (results.docs.length == 1) {
-          if (user['in'] && user["did"] != myDevice) {
-            // TODO handle situation when user deny imei access
-            result = 802; // error 802
-            // "Login fail. You already signed in with other device, or you deny access to phone."; //= return result
-          } else {
-            result = results.docs[0]; //= return result
-          }
-        } else if (results.docs.isEmpty) {
-          //= for some reason user was registered but no data in dvc. Treat like new user.
-          // TODO add new vid to user
-          result = 809;
-        } else {
-          //= multiple entry. Found demo or dev account
-          bool deviceFound = false;
-          int idx = 0;
-          for (int i = 0; i < results.docs.length && !deviceFound; i++) {
-            if (results.docs[i].data()["did"] == myDevice ||
-                results.docs[i].data()["did"] == "TBD") {
-              deviceFound = true;
-              idx = i;
+            if (results.docs.length == 1) {
+              if (user['in'] && user["did"] != myDevice) {
+                // TODO handle situation when user deny imei access
+                result = 802; // error 802
+                // "Login fail. You already signed in with other device, or you deny access to phone."; //= return result
+              } else {
+                result = results.docs[0]; //= return result
+              }
+            } else if (results.docs.isEmpty) {
+              //= for some reason user was registered but no data in dvc. Treat like new user.
+              // TODO add new vid to user
+              result = 809;
+            } else {
+              //= multiple entry. Found demo or dev account
+              bool deviceFound = false;
+              int idx = 0;
+              for (int i = 0; i < results.docs.length && !deviceFound; i++) {
+                if (results.docs[i].data()["did"] == myDevice ||
+                    results.docs[i].data()["did"] == "TBD") {
+                  deviceFound = true;
+                  idx = i;
+                }
+              }
+              if (deviceFound) {
+                result = results.docs[idx]; //= return result
+              } else {
+                result = 809; //"This device id is not registered.";
+              }
             }
-          }
-          if (deviceFound) {
-            result = results.docs[idx]; //= return result
-          } else {
-            result = 809; //"This device id is not registered.";
-          }
-        }
-      });
+          });
     } else {
       //= more than 1 dvc entry => demo | dev user
       await ref2 //= get dvc entry
           .collection(fsDeviceSubCollection) // search data dvc sub collection
           .get()
           .then((results) async {
-        bool deviceFound = false;
-        int idx = 0;
-        for (int i = 0; i < results.docs.length && !deviceFound; i++) {
-          if (results.docs[i].data()["did"] == myDevice ||
-              results.docs[i].data()["did"] == "TBD") {
-            deviceFound = true;
-            idx = i;
-          }
-        }
-        if (deviceFound) {
-          result = results.docs[idx]; //= return result
-        } else {
-          result = 809;
-          // "This device id is not registered. Deleted?"; //= return result
-        }
-      });
+            bool deviceFound = false;
+            int idx = 0;
+            for (int i = 0; i < results.docs.length && !deviceFound; i++) {
+              if (results.docs[i].data()["did"] == myDevice ||
+                  results.docs[i].data()["did"] == "TBD") {
+                deviceFound = true;
+                idx = i;
+              }
+            }
+            if (deviceFound) {
+              result = results.docs[idx]; //= return result
+            } else {
+              result = 809;
+              // "This device id is not registered. Deleted?"; //= return result
+            }
+          });
     }
   } else {
     //= not found, try to search email in e field (in case she is a new predefined user)
@@ -3217,12 +3722,19 @@ void registerNewInvitationLogin(String proxy, String email) {
 } //end of registerNewInvitationLogin
 
 void registerDeviceOperation(
-    String proxy, String email, String operation, String phone) {
+  String proxy,
+  String email,
+  String operation,
+  String phone,
+) {
   const jsonEncoder = JsonEncoder();
   String data = jsonEncoder.convert([proxy, email, operation, phone]);
   var qParams = {"d": ";0$data"};
   var uri = Uri.https(
-      autsorzFunctionDomain, functionName['deviceOperation'], qParams);
+    autsorzFunctionDomain,
+    functionName['deviceOperation'],
+    qParams,
+  );
   try {
     http.post(uri);
   } catch (e) {
@@ -3233,7 +3745,8 @@ void registerDeviceOperation(
 Future updateFirestore(var data) async {
   // update user's firestore data.
   var docRef = transactionStore
-      .state.screenTx["#FS_REF"]; //= get this user firestore reference
+      .state
+      .screenTx["#FS_REF"]; //= get this user firestore reference
   return docRef.updateData(data);
 }
 
@@ -3249,7 +3762,8 @@ Future getFirestoreMessageRef(String myVid) async {
   dynamic myMessageId;
   try {
     myMessageId = await secureRead(
-        key: "myMsgId"); //= get documentID of entry in msg_xxxx collection
+      key: "myMsgId",
+    ); //= get documentID of entry in msg_xxxx collection
   } catch (er) {
     errorReport(er);
   }
@@ -3258,7 +3772,8 @@ Future getFirestoreMessageRef(String myVid) async {
     try {
       messageDocument = await FirebaseFirestore.instance //= try to get anyway
           .collection(
-              fsMsgCollection) //= search data in firebase with corresponding uid
+            fsMsgCollection,
+          ) //= search data in firebase with corresponding uid
           .where('v', isEqualTo: myVid)
           .limit(1)
           .get();
@@ -3292,18 +3807,17 @@ Future getFirestoreMessageRef(String myVid) async {
 } // end of getFirestoreMessageRef
 
 Future createNewMessageDocument(String myVid, String myUid) async {
-  var data = {
-    "u": myUid,
-    "v": myVid,
-  };
-  var newDoc =
-      await FirebaseFirestore.instance.collection(fsMsgCollection).add(data);
+  var data = {"u": myUid, "v": myVid};
+  var newDoc = await FirebaseFirestore.instance
+      .collection(fsMsgCollection)
+      .add(data);
   return newDoc;
 } // end of createNewMessageDocument
 
 String otqStateToGpsString(dynamic position) {
   String result = "";
-  result = position.latitude.toString() +
+  result =
+      position.latitude.toString() +
       separator[3] +
       position.longitude.toString() +
       separator[3] +
@@ -3343,7 +3857,8 @@ String otqStateToGpsString(dynamic position) {
 
 String positionToGpsString(dynamic position) {
   String result = "";
-  result = position.latitude.toString() +
+  result =
+      position.latitude.toString() +
       separator[3] +
       position.longitude.toString() +
       separator[3] +
@@ -3426,18 +3941,23 @@ Future serverSetup() async {
   debugCount = 215;
   trace(debugCount);
   FirebaseStorage storageBucket = FirebaseStorage.instanceFor(
-      bucket: 'gs://otq-01-ase2'); //= TODO move to procedure after sign in
+    bucket: 'gs://otq-01-ase2',
+  ); //= TODO move to procedure after sign in
   debugCount = 216;
   trace(debugCount);
-  transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-    '#GUEST_LIF': res['signupLif'],
-    '#GUEST_INDEX': res['signupIdx'],
-    '#GUEST_UPGRADE_INDEX': res['guestUpgradeIdx'],
-    '#VM_UPGRADE_INDEX': res['vmUpgradeIdx'],
-    '#SETTINGS': aRes,
-    '#DEMO_SIGNUP_KEY': signUpDemo,
-    '#STORAGE_BUCKET': storageBucket,
-  }))); // set result of settingUp (function getPoxSettings as state #SETTING
+  transactionStore.dispatch(
+    UpdateScreenTxAction(
+      ScreenTransaction({
+        '#GUEST_LIF': res['signupLif'],
+        '#GUEST_INDEX': res['signupIdx'],
+        '#GUEST_UPGRADE_INDEX': res['guestUpgradeIdx'],
+        '#VM_UPGRADE_INDEX': res['vmUpgradeIdx'],
+        '#SETTINGS': aRes,
+        '#DEMO_SIGNUP_KEY': signUpDemo,
+        '#STORAGE_BUCKET': storageBucket,
+      }),
+    ),
+  ); // set result of settingUp (function getPoxSettings as state #SETTING
   debugCount = 217;
   trace(debugCount);
 } // end of serverSetup
@@ -3453,6 +3973,14 @@ String getEventDocName(String vidTime) {
 
 void clearData(String scrName) {
   // clear all data in a page
+
+  // Clear per-scrName custody stores unconditionally -- custody pages have no
+  // txfController entries, so the early-return below would skip them.
+  // These are idempotent no-ops for non-custody pages.
+  CustodyCountList.clearCountStore(scrName);
+  CustodyReveal.clearEditState(scrName);
+  ItemExecutionList.clearExecutionStore(scrName);
+
   if (txfController[scrName] == null) return;
 
   final List<String> widgetsToUpdate = [];
@@ -3471,17 +3999,22 @@ void clearData(String scrName) {
 
       widgetsToUpdate.add(wId);
 
-      dynamic theController =
-          GeneralGetXController.to.getController(scrName, input.position);
+      dynamic theController = GeneralGetXController.to.getController(
+        scrName,
+        input.position,
+      );
       if (theController is TextEditingController) {
         theController.text = input.initialValue;
         devPrint(
-            'clearing input controller for txf myController $wId initialValue = ${input.initialValue}');
+          'clearing input controller for txf myController $wId initialValue = ${input.initialValue}',
+        );
       }
 
       devPrint('clearing GetXController $wId');
-      GeneralGetXController.to
-          .deleteAllWidget(scrName, input.position); // for images
+      GeneralGetXController.to.deleteAllWidget(
+        scrName,
+        input.position,
+      ); // for images
       devPrint('GetXController $wId cleared');
     } catch (e) {
       // do nothing
@@ -3570,8 +4103,13 @@ String _resolveScreenTxMarkers(String text) {
 }
 
 void saveSend(
-    int? timeStamp, String scrName, var component, String locString, int appVid,
-    {bool send = true}) {
+  int? timeStamp,
+  String scrName,
+  var component,
+  String locString,
+  int appVid, {
+  bool send = true,
+}) {
   int currentTableVid = appVid;
   if (component['com'] == 'con') {
     currentTableVid = consteonVid;
@@ -3593,11 +4131,14 @@ void saveSend(
     }))); // set state #NEXTROUTE route that will be displayed after waitScreen
     */
     dynamic state = transactionStore.state.screenTx;
-    String flag = component['flag'] ??
+    String flag =
+        component['flag'] ??
         emptyString; // flag to be written with ⬤ separator at the end
     List<dynamic> row = List<dynamic>.filled(
-        sheetSystemLength + txfController[scrName]!.length, null,
-        growable: true);
+      sheetSystemLength + txfController[scrName]!.length,
+      null,
+      growable: true,
+    );
     int maxPosition = 0;
     row[0] = null;
     row[1] = scrName;
@@ -3618,31 +4159,44 @@ void saveSend(
           if (input.table != null) {
             // if table is not null or empty
             input.table!.forEach((documentName, content) {
-              String finalName =
-                  replacePlaceHoldersFromTxfController(scrName, documentName);
+              String finalName = replacePlaceHoldersFromTxfController(
+                scrName,
+                documentName,
+              );
               writeToStaticTable(currentTableVid, finalName, content);
             });
           } // end if (input.table != null && input.table != emptyString)
           int pos = input.position + sheetSystemLength - 1;
-          maxPosition =
-              input.position > maxPosition ? input.position : maxPosition;
+          maxPosition = input.position > maxPosition
+              ? input.position
+              : maxPosition;
           if (pos >= row.length) {
             int dif = pos - row.length;
             for (var ii = 0; ii < dif; ii++) {
               row.add('');
             }
-            row.add(input.finalData == emptyString
-                ? (stringCleanUp(input.controller.text) ?? "")
-                    .replaceAll("\n", "\\n")
-                : (stringCleanUp(input.finalData) ?? '')
-                    .replaceAll("\n", "\\n")); // get data from txf controller
+            row.add(
+              input.finalData == emptyString
+                  ? (stringCleanUp(input.controller.text) ?? "").replaceAll(
+                      "\n",
+                      "\\n",
+                    )
+                  : (stringCleanUp(input.finalData) ?? '').replaceAll(
+                      "\n",
+                      "\\n",
+                    ),
+            ); // get data from txf controller
             int d = 1;
           } else {
             row[pos] = input.finalData == emptyString
-                ? (stringCleanUp(input.controller.text) ?? '')
-                    .replaceAll("\n", "\\n")
-                : (stringCleanUp(input.finalData) ?? '')
-                    .replaceAll("\n", "\\n"); // get data from txf controller
+                ? (stringCleanUp(input.controller.text) ?? '').replaceAll(
+                    "\n",
+                    "\\n",
+                  )
+                : (stringCleanUp(input.finalData) ?? '').replaceAll(
+                    "\n",
+                    "\\n",
+                  ); // get data from txf controller
           } // end if if (pos >= row.length)
         } // end if input.position > 0
       } catch (eEach) {
@@ -3650,7 +4204,9 @@ void saveSend(
       } // end try
     }); // end for each txfController
     row = row.sublist(
-        0, (maxPosition + 15 < row.length) ? maxPosition + 15 : row.length);
+      0,
+      (maxPosition + 15 < row.length) ? maxPosition + 15 : row.length,
+    );
     List<List<dynamic>> ref = [];
     ref.add(row.sublist(0, 14));
     ref.add(row.sublist(14));
@@ -3677,8 +4233,10 @@ void saveSend(
       String raw = component['updateTableRow'] ?? '';
       if (raw.isNotEmpty) {
         updateString = autheniumDecode(raw) ?? '';
-        updateString =
-            updateString.replaceAll("◼D⭘", "◼D⭘tableVid◼$currentTableVid⭘");
+        updateString = updateString.replaceAll(
+          "◼D⭘",
+          "◼D⭘tableVid◼$currentTableVid⭘",
+        );
         updateString = replacePlaceholders(updateString, ref);
         updateString = _resolveScreenTxMarkers(updateString);
       }
@@ -3691,8 +4249,10 @@ void saveSend(
       String raw = component['deleteFromTable'] ?? '';
       if (raw.isNotEmpty) {
         deleteString = autheniumDecode(raw) ?? '';
-        deleteString =
-            deleteString.replaceAll("◼D⭘", "◼D⭘tableVid◼$currentTableVid⭘");
+        deleteString = deleteString.replaceAll(
+          "◼D⭘",
+          "◼D⭘tableVid◼$currentTableVid⭘",
+        );
         deleteString = replacePlaceholders(deleteString, ref);
         deleteString = _resolveScreenTxMarkers(deleteString);
       }
@@ -3705,6 +4265,7 @@ void saveSend(
       String raw = component['addToEvent'] ?? '';
       if (raw.isNotEmpty) {
         eventString = autheniumDecode(raw) ?? '';
+        eventString = resolveDriverCurlyTokens(eventString, scrName);
         eventString = replacePlaceholders(eventString, ref);
         eventString = _resolveScreenTxMarkers(eventString);
       }
@@ -3717,6 +4278,10 @@ void saveSend(
       String raw = component['updateEventRow'] ?? '';
       if (raw.isNotEmpty) {
         updateEventString = autheniumDecode(raw) ?? '';
+        updateEventString = resolveDriverCurlyTokens(
+          updateEventString,
+          scrName,
+        );
         updateEventString = replacePlaceholders(updateEventString, ref);
         updateEventString = _resolveScreenTxMarkers(updateEventString);
       }
@@ -3741,8 +4306,18 @@ void saveSend(
     }
     setTransactionOK('saveSend');
     if (send) {
-      saveSendRows(scrName, '', row, flag, timeStamp, locString, tableString,
-          currentTableVid, component['desc'] ?? '', component['type'] ?? '');
+      saveSendRows(
+        scrName,
+        '',
+        row,
+        flag,
+        timeStamp,
+        locString,
+        tableString,
+        currentTableVid,
+        component['desc'] ?? '',
+        component['type'] ?? '',
+      );
     } // end if (send)
     // setTransactionOK('setDataOK');
   } catch (err) {
@@ -3752,16 +4327,17 @@ void saveSend(
 } // end of saveSend
 
 Future saveSendRows(
-    String screenName,
-    String tail,
-    List<dynamic> row,
-    String flag,
-    int? timeStamp,
-    String locString,
-    String? tableString,
-    int appVid,
-    String desc,
-    String widgetType) async {
+  String screenName,
+  String tail,
+  List<dynamic> row,
+  String flag,
+  int? timeStamp,
+  String locString,
+  String? tableString,
+  int appVid,
+  String desc,
+  String widgetType,
+) async {
   if (timeStamp == null) {
     row[0] = await getRealTime();
   } else {
@@ -3814,8 +4390,11 @@ Future<void> createApprovalEvent({
         : (row.length > 2 ? row[2].toString() : '');
 
     int totalPositions = 28;
-    List<dynamic> eventRow =
-        List<dynamic>.filled(sheetSystemLength + totalPositions, '', growable: true);
+    List<dynamic> eventRow = List<dynamic>.filled(
+      sheetSystemLength + totalPositions,
+      '',
+      growable: true,
+    );
     eventRow[0] = null;
     eventRow[1] = scrName;
     eventRow[2] = approverVid;
@@ -3847,8 +4426,9 @@ Future<void> createApprovalEvent({
 
     // Positions 24-28: Approval level data (cumulative)
     String wd = separator[5];
-    String formattedNow = DateFormat('dd MMM yyyy HH:mm')
-        .format(DateTime.fromMillisecondsSinceEpoch(nowMs));
+    String formattedNow = DateFormat(
+      'dd MMM yyyy HH:mm',
+    ).format(DateTime.fromMillisecondsSinceEpoch(nowMs));
 
     for (int lvl = 0; lvl < 5 && lvl < steps.length; lvl++) {
       List<String> step = steps[lvl];
@@ -3868,12 +4448,21 @@ Future<void> createApprovalEvent({
         ts = step.length > 4 ? step[4].trim() : '';
         epoch = step.length > 5 ? step[5].trim() : '';
       }
-      eventRow[38 + lvl] =
-          '$levelNum$wd$status$wd$name$wd$vid$wd$ts$wd$epoch';
+      eventRow[38 + lvl] = '$levelNum$wd$status$wd$name$wd$vid$wd$ts$wd$epoch';
     }
 
-    saveSendRows(scrName, '', eventRow, eventFlag, timeStamp, locString, null,
-        appVid, '', 'approval');
+    saveSendRows(
+      scrName,
+      '',
+      eventRow,
+      eventFlag,
+      timeStamp,
+      locString,
+      null,
+      appVid,
+      '',
+      'approval',
+    );
     debugPrint('[Approval] event created: flag=$eventFlag');
   } catch (e) {
     debugPrint('[Approval] event creation error: $e');
@@ -3903,7 +4492,10 @@ Future<void> buildAndSaveEventFromDSL({
 
     int totalPositions = 28;
     List<dynamic> eventRow = List<dynamic>.filled(
-        sheetSystemLength + totalPositions, '', growable: true);
+      sheetSystemLength + totalPositions,
+      '',
+      growable: true,
+    );
     eventRow[0] = null;
     eventRow[1] = scrName;
     eventRow[2] = approverVid;
@@ -3927,8 +4519,7 @@ Future<void> buildAndSaveEventFromDSL({
       } else if (source == 'levels') {
         _expandEventLevels(updatedRow, eventRow, eventIdx);
       } else if (RegExp(r'^<\d+>$').hasMatch(source)) {
-        final fieldIdx =
-            int.parse(source.substring(1, source.length - 1));
+        final fieldIdx = int.parse(source.substring(1, source.length - 1));
         eventRow[eventIdx] = fieldIdx < updatedRow.length
             ? updatedRow[fieldIdx].toString()
             : '';
@@ -3937,8 +4528,18 @@ Future<void> buildAndSaveEventFromDSL({
       }
     }
 
-    saveSendRows(scrName, '', eventRow, flag, timeStamp, locString, null,
-        appVid, '', 'approval');
+    saveSendRows(
+      scrName,
+      '',
+      eventRow,
+      flag,
+      timeStamp,
+      locString,
+      null,
+      appVid,
+      '',
+      'approval',
+    );
     debugPrint('[Approval] DSL event created: flag=$flag');
   } catch (e) {
     debugPrint('[Approval] DSL event creation error: $e');
@@ -3947,7 +4548,10 @@ Future<void> buildAndSaveEventFromDSL({
 }
 
 void _expandEventLevels(
-    List<dynamic> updatedRow, List<dynamic> eventRow, int startEventIdx) {
+  List<dynamic> updatedRow,
+  List<dynamic> eventRow,
+  int startEventIdx,
+) {
   String chainStr = '';
   for (int i = 0; i < updatedRow.length; i++) {
     String s = updatedRow[i].toString().trim();
@@ -3981,13 +4585,18 @@ void _expandEventLevels(
     String epoch = step.length > 5 ? step[5].trim() : '';
 
     // Output: level◇status◇name◇vid◇timestamp◇epoch (name before vid)
-    eventRow[targetIdx] =
-        '$levelNum$wd$status$wd$name$wd$vid$wd$ts$wd$epoch';
+    eventRow[targetIdx] = '$levelNum$wd$status$wd$name$wd$vid$wd$ts$wd$epoch';
   }
 }
 
-Future<String> appendToSheet(dynamic val, int appVid, String flag, String desc,
-    String wType, String? tableString) async {
+Future<String> appendToSheet(
+  dynamic val,
+  int appVid,
+  String flag,
+  String desc,
+  String wType,
+  String? tableString,
+) async {
   var state = transactionStore.state.screenTx;
   try {
     String c = jsonEncode(val);
@@ -3998,20 +4607,24 @@ Future<String> appendToSheet(dynamic val, int appVid, String flag, String desc,
         '${state['#VID']}${(Random.secure().nextDouble() * 1000).toString()}';
     SubmitBloc submitBloc = state['#SUBMIT_BLOC'];
     // SubmitBloc submitBloc = BlocProvider.of<SubmitBloc>(context);
-    submitBloc.add(AddSubmit(Submit(
-      st: 0,
-      ss: ss,
-      c: c,
-      id: id,
-      appVid: appVid,
-      t: val[0],
-      p: val[1],
-      c2: val[2],
-      d: desc,
-      f: flag,
-      w: wType,
-      tb: tableString,
-    ))); // append to firestore
+    submitBloc.add(
+      AddSubmit(
+        Submit(
+          st: 0,
+          ss: ss,
+          c: c,
+          id: id,
+          appVid: appVid,
+          t: val[0],
+          p: val[1],
+          c2: val[2],
+          d: desc,
+          f: flag,
+          w: wType,
+          tb: tableString,
+        ),
+      ),
+    ); // append to firestore
     submitBloc.add(LoadSubmit()); // refresh cache
     TimerBloc timerBloc = state['#TIMER_BLOC'];
     timerBloc.add(Start(duration: state['#TIMER_DURATION']));
@@ -4048,7 +4661,7 @@ Future getRealTime() async {
       // }
     } // end if internetConnected()
   } catch (e) {
-    errorReport(e);
+    reportNonTimeout(e);
   }
   // devPrint('Ntp returning : ${n.millisecondsSinceEpoch}');
   return retVal;
@@ -4066,12 +4679,12 @@ FunctionBody getFunctionBody(String ssid, var range) {
   Map<String, String> qParams = {
     "eData": "--",
     "clt": defaultCluster,
-    "job": job
+    "job": job,
   };
   var url = "https://$autsorzFunctionDomain${functionName['readSS']}";
   FunctionBody result = FunctionBody(url, qParams);
   return result;
-//  return http.post(url, body: qParams);
+  //  return http.post(url, body: qParams);
 }
 
 FunctionBody appendSSA1(String ssid, var rowData, String clt) {
@@ -4086,12 +4699,12 @@ FunctionBody appendSSA1(String ssid, var rowData, String clt) {
     "eData": "--",
     "clt": clt,
     "ver": version,
-    "job": jobStr
+    "job": jobStr,
   };
   var url = "https://$autsorzFunctionDomain${functionName['addFL']}";
   FunctionBody result = FunctionBody(url, qParams);
   return result;
-//  return http.post(url, body: qParams);
+  //  return http.post(url, body: qParams);
 }
 
 Future<Position?> getLocation() async {
@@ -4109,8 +4722,10 @@ int exp2Epoch(String? inp) {
   if (inp != null) {
     dynamic inpArray = inp.split("/");
     if (inpArray.length == 2) {
-      result = DateTime(2000 + int.parse(inpArray[1]), int.parse(inpArray[0]))
-          .millisecondsSinceEpoch;
+      result = DateTime(
+        2000 + int.parse(inpArray[1]),
+        int.parse(inpArray[0]),
+      ).millisecondsSinceEpoch;
     }
   }
   return result;
@@ -4122,7 +4737,11 @@ bool locationToleranceCheck(Position position, var locArray, int tolerance) {
   var finalTolerance = tolerance + accuracy;
   for (int i = 0; i < locArray.length && !found; i++) {
     var d = distanceM(
-        position.latitude, position.longitude, locArray[i][0], locArray[i][1]);
+      position.latitude,
+      position.longitude,
+      locArray[i][0],
+      locArray[i][1],
+    );
     found = d <= finalTolerance; //? true : false;
   } // end for locArray
   return found;
@@ -4145,8 +4764,12 @@ Future locationVerify(var locArray, var tolerance, OtqState? otqData) async {
         var accuracy = position.accuracy;
         var finalTolerance = tolerance + accuracy;
         for (int i = 0; i < locArray.length && !found; i++) {
-          var d = distanceM(position.latitude, position.longitude,
-              locArray[i][0], locArray[i][1]);
+          var d = distanceM(
+            position.latitude,
+            position.longitude,
+            locArray[i][0],
+            locArray[i][1],
+          );
           found = d <= finalTolerance; //? true : false;
         } // end for i
       } // end if position.gpsDone
@@ -4183,11 +4806,21 @@ Future<String> getPhotoCameraImage(
   double? width,
 ) async {
   final String pickedFileUrl = await acquireCamera(
-      cameras, title, lens, maxsize, quality, height, width);
+    cameras,
+    title,
+    lens,
+    maxsize,
+    quality,
+    height,
+    width,
+  );
   // String url = await saveImageToCloud(
   //     imagePath: pickedFileUrl, folder: folder, fileName: fileName);
   String url = await prepareImageAsLocal(
-      imagePath: pickedFileUrl, folder: folder, fileName: fileName);
+    imagePath: pickedFileUrl,
+    folder: folder,
+    fileName: fileName,
+  );
   await saveImagePutInImageMap(url);
   // var state = transactionStore.state.screenTx;
   // var storageBucket = state['#STORAGE_BUCKET'];
@@ -4199,7 +4832,12 @@ Future<String> getPhotoCameraImage(
 } // end of getPhotoCameraImage
 
 Future<String> getCameraImageNotUsed(
-    double w, double h, int quality, String folder, String rawFileName) async {
+  double w,
+  double h,
+  int quality,
+  String folder,
+  String rawFileName,
+) async {
   /*
   String fileName = rawFileName.replaceAll(".jpg", "");
   final picker = ImagePicker();
@@ -4251,9 +4889,11 @@ List totp(String keycode, int len, int sec) {
   m1 = 54427511; // TODO delete this for production
   Uint8List k3 = hexToUInt8(base32ToHex(keycode.replaceAll(" ", "")));
   final hmac1 = uInt8ToHex(
-      hmacSha1(k3, hexToUInt8(m1.toRadixString(16).padLeft(16, "0"))));
+    hmacSha1(k3, hexToUInt8(m1.toRadixString(16).padLeft(16, "0"))),
+  );
   final hmac2 = uInt8ToHex(
-      hmacSha1(k3, hexToUInt8((m1 - 1).toRadixString(16).padLeft(16, "0"))));
+    hmacSha1(k3, hexToUInt8((m1 - 1).toRadixString(16).padLeft(16, "0"))),
+  );
   int position =
       int.parse(hmac2.substring(hmac2.length - 1, hmac2.length), radix: 16) * 2;
   String s1 =
@@ -4264,9 +4904,10 @@ List totp(String keycode, int len, int sec) {
   retArray.add(s1); // older number goes first
   position =
       int.parse(hmac1.substring(hmac1.length - 1, hmac1.length), radix: 16) * 2;
-  s1 = (BigInt.parse((hmac1.substring(position, position + 8)), radix: 16) &
-          BigInt.from(2147483647))
-      .toString();
+  s1 =
+      (BigInt.parse((hmac1.substring(position, position + 8)), radix: 16) &
+              BigInt.from(2147483647))
+          .toString();
   s1 = len < s1.length ? s1.substring(s1.length - len, s1.length) : s1;
   retArray.add(s1); // latest number goes second
   return retArray;
@@ -4327,8 +4968,11 @@ String getOtqK(int o) {
 Future asyncAppStartup2() async {
   // debugPrint('start asyncAppStartup2');
   actionUnLock('asyncAppStartup2');
-  String? myLif =
-      await waitUntilNotNullScreenTx('asyncAppStartup2', '#INTERFACE_KEY', 20);
+  String? myLif = await waitUntilNotNullScreenTx(
+    'asyncAppStartup2',
+    '#INTERFACE_KEY',
+    20,
+  );
   if (myLif != null) {
     await readSettingsStart(myLif, 2);
   } else {

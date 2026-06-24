@@ -190,6 +190,8 @@ const Map<String, IconData> _panelIcons = {
   'clipboard-check': Icons.fact_check_rounded,
   'map-pin': Icons.location_on_rounded,
   'clock': Icons.schedule_rounded,
+  'info': Icons.info_outline_rounded,
+  'alert': Icons.warning_amber_rounded,
 };
 
 /// Map a spec icon name (e.g. "users", "clipboard-check") to an IconData.
@@ -281,6 +283,10 @@ Color statusColor(String status) {
       return const Color(0xFFDC2626);
     case 'warn':
       return const Color(0xFFD97706);
+    case 'ok':
+      return const Color(0xFF16A34A);
+    case 'info':
+      return const Color(0xFF2563EB);
     default:
       return const Color(0xFF16A34A);
   }
@@ -293,6 +299,10 @@ Color statusBgColor(String status) {
       return const Color(0xFFFEE2E2);
     case 'warn':
       return const Color(0xFFFEF3C7);
+    case 'ok':
+      return const Color(0xFFDCFCE7);
+    case 'info':
+      return const Color(0xFFDBEAFE);
     default:
       return const Color(0xFFDCFCE7);
   }

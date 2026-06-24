@@ -34,14 +34,37 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | Widget | File | Status | Description |
 |---|---|---|---|
 | BuildDisplayComponent | [build_display_component.md](build_display_component.md) | todo | Dynamic display builder |
+| CirculationSummary | [circulation_summary.md](circulation_summary.md) | draft | Per-item cross-route circulation totals (Muat/Drop/Pickup) for P5 CustodyNotification |
+| CustodyCountList | [custody_count_list.md](custody_count_list.md) | draft | Blind stepper list for P6 CustodyCount, filtered by item category |
+| CustodyStepHeader | [custody_step_header.md](custody_step_header.md) | draft | Title + plate + STEP badge header and vehicleId publisher for P6 CustodyCount |
+| CustodyCountSubmit | [custody_count_submit.md](custody_count_submit.md) | draft | P6 send-button: writes ip[] natively then navigates to custodyReveal |
+| CustodyReveal | [custody_reveal.md](custody_reveal.md) | draft | STEP 2/2 reveal + compare + branch (match/mismatch/recount) |
+| CustodyConfirmedList | [custody_confirmed_list.md](custody_confirmed_list.md) | draft | P7 read-only list of driver-confirmed items (ip[] + item JOIN) |
+| CustodyDiscrepancyList | [custody_discrepancy_list.md](custody_discrepancy_list.md) | draft | P8 read-only discrepancy grid (dp[] Warehouse/Lo Hitung/Selisih) |
+| CustodyEventSubmit | [custody_event_submit.md](custody_event_submit.md) | draft | P7/P8 pre-resolve submit (curly tokens) then updateEventRow/addToEvent |
+| EvidenceRow | [evidence_row.md](evidence_row.md) | draft | Two toggle buttons (note/photo) for P11 DeliveryWorkspace |
 | DisplayList | [display_list.md](display_list.md) | todo | List display |
 | DisplayList2 | [display_list_2.md](display_list_2.md) | todo | List display v2 (source file currently empty — doc is a placeholder) |
 | DisplayCard | [display_card.md](display_card.md) | todo | Card display |
+| DriverStopCard | [driver_stop_card.md](driver_stop_card.md) | draft | Stop list + progress card (pending locked-preview / confirmed active) for DriverHome P4 |
+| InventoryBucketCard | [inventory_bucket_card.md](inventory_bucket_card.md) | draft | Vehicle stock per condition bucket for DriverHome P4 |
+| ItemExecutionList | [item_execution_list.md](item_execution_list.md) | draft | Per-item drop/pickup stepper list with status state-machine for P11 DeliveryWorkspace |
 | ListMultiplePanelCard | [list_multiple_panel_card.md](list_multiple_panel_card.md) | draft | Reusable card-list with N nav panels, config-driven layout/labels |
 | ListStatisticCard | [list_statistic_card.md](list_statistic_card.md) | draft | Per-point patrol/cleaning statistic list with optional typed-location merge |
+| NavActionCard | [nav_action_card.md](nav_action_card.md) | draft | Return-vehicle CTA card (muted/active by allClosed) for DriverHome P4 |
+| NoticeBar | [notice_bar.md](notice_bar.md) | draft | Notification strip/callout with variant-driven colors, optional icon, up to 3 text tiers |
+| ReturnHeader | [return_header.md](return_header.md) | draft | Back arrow + label + title header for P12 ReturnVehicle |
+| PreconditionGateCard | [precondition_gate_card.md](precondition_gate_card.md) | draft | Custody gate card (pending/confirmed) for DriverHome P4 |
+| RouteFeedHeader | [route_feed_header.md](route_feed_header.md) | draft | Sticky 3-row route header (identity, progress, drop/pickup stats) and vehicleId publisher for P10 TaskFeed |
+| RouteProgressHeader | [route_progress_header.md](route_progress_header.md) | draft | Driver identity header with workforce lookup and vehicle publish |
+| TaskFeedList | [task_feed_list.md](task_feed_list.md) | draft | Grouped task card list (assigned/failed/completed) with allDone footer for P10 TaskFeed |
+| TaskManifestList | [task_manifest_list.md](task_manifest_list.md) | draft | Per-task accordion list with drop/pickup aggregates for P5 CustodyNotification |
+| VehicleCargoSummary | [vehicle_cargo_summary.md](vehicle_cargo_summary.md) | draft | Intro paragraph + cargo card (Sisa di Kendaraan) and vehicleId publisher for P12 ReturnVehicle |
 | TimelinePeriodic | [timeline_periodic.md](timeline_periodic.md) | draft | Config-driven event timeline (TIMELINE variant periodic) with period selector, badge chips, gap pills, image gallery |
 | OtqFormattedText | [otq_formatted_text.md](otq_formatted_text.md) | todo | Text with formatter |
 | TimePresence | [time_presence.md](time_presence.md) | done | Check-in time, live elapsed counter, and last action in 3-column card |
+| VehicleCustodyHeader | [vehicle_custody_header.md](vehicle_custody_header.md) | draft | Vehicle custody card (plate/event/loader/loadtime) and vehicleId publisher for P5 CustodyNotification |
+| WorkspaceHeader | [workspace_header.md](workspace_header.md) | draft | Task identity top-bar (stop/customer/Berjalan chip/address) for P11 DeliveryWorkspace |
 
 ### Image / Media
 | Widget | File | Status | Description |
@@ -57,6 +80,8 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | QrScan | [qr_scan.md](qr_scan.md) | todo | QR scanner |
 | FtzMultiScan | [ftz_multi_scan.md](ftz_multi_scan.md) | todo | Multi-scan QR |
 | FtzScannerScreen | [ftz_scanner_screen.md](ftz_scanner_screen.md) | todo | Scanner screen |
+| Scanner | [scanner.md](scanner.md) | draft | In-page live-camera card: auto-detect QR, writes event via saveSend, navigates to route |
+| SignaturePad | [signature_pad.md](signature_pad.md) | draft | Hand-drawn stroke capture via CustomPaint for P11 DeliveryWorkspace |
 
 ### Location / GPS
 | Widget | File | Status | Description |

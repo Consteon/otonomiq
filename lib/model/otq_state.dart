@@ -158,7 +158,7 @@ class OtqState {
           nowTime = currentTime;
           trueTime = true;
         } catch (eNtp) {
-          errorReport(eNtp);
+          reportNonTimeout(eNtp);
         }
       } // end if internetOn
     } catch (e) {

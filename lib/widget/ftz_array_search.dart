@@ -37,6 +37,15 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
   Worker? _tableWorker;
   late String _tableCode;
 
+  /// In DISPLAY mode (no resultController), use the raw component filter
+  /// string — mirrors display_list.dart:108 searchTable grammar.
+  /// In PICKER mode, use the existing autheniumDecode + separator[8] split
+  /// result (finalFilter). The autheniumDecode asymmetry is deliberate:
+  /// display-mode filters are raw free-text, not server-encoded search fields.
+  String get _activeFilter => widget.resultController == null
+      ? (widget.component['filter'] ?? '').toString()
+      : (finalFilter ?? '');
+
   @override
   void initState() {
     try {
@@ -88,7 +97,10 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
       if (source.isEmpty) {
         source = List.from(widget.localTable);
       }
-      initialTable = searchTable(finalFilter ?? '', source);
+      initialTable = searchTable(_activeFilter, source);
+      if (widget.resultController == null) {
+        initialTable = _applySort(initialTable); // DISPLAY mode: sort on first paint
+      }
       pickTable = searchTable(searchValue, initialTable);
     } catch (e) {
       // do nothing}
@@ -107,15 +119,15 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
     }
   }
 
-  void _rebuildTableData() {
-    List<dynamic> currentTableData =
-        List.from(tableContent[_tableCode] ?? []);
-    List<dynamic> newInitial = searchTable(finalFilter ?? '', currentTableData);
+  /// Sort [rows] in place by the integer key at index 0 per the component's
+  /// `sort` param ('asc'/'desc'). No-op when sort is unset/other, or when keys
+  /// are non-integer (mirrors the block previously inline in _rebuildTableData).
+  List<dynamic> _applySort(List<dynamic> rows) {
     String sortParam = widget.component['sort'] ?? '';
     if (sortParam == 'asc' || sortParam == 'desc') {
       int sortFactor = sortParam == 'asc' ? 1 : -1;
       try {
-        newInitial.sort((a, b) =>
+        rows.sort((a, b) =>
             sortFactor *
             int.parse(a[0].toString())
                 .compareTo(int.parse(b[0].toString())));
@@ -123,6 +135,14 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
         devPrint(e);
       }
     }
+    return rows;
+  }
+
+  void _rebuildTableData() {
+    List<dynamic> currentTableData =
+        List.from(tableContent[_tableCode] ?? []);
+    List<dynamic> newInitial = searchTable(_activeFilter, currentTableData);
+    newInitial = _applySort(newInitial);
     if (mounted) {
       setState(() {
         initialTable = newInitial;
@@ -258,7 +278,7 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
                           ? const Text('\n--\n\n')
                           : Text(
                               displayObject['content'] == null
-                                  ? '${pickTable.first[0].value}\n${pickTable.first[1].value}\n${pickTable.first[5].value}'
+                                  ? '${pickTable.first[0]}\n${pickTable.first[1]}\n${pickTable.first.length > 5 ? pickTable.first[5] : ''}'
                                   : replaceMarkerPrototype(
                                       displayObject['content'],
                                       pickTable.first,

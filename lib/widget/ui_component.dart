@@ -141,6 +141,12 @@ List<Widget> buildPage(var componentList, String scrName,
   } // end if (txfController[scrName] == null
   if (clear) {
     ApproverStickyBar.clearConfigs(scrName);
+    clearDriverHomeState(scrName);
+    TaskManifestList.clearExpandState(scrName);
+    CustodyCountList.clearCountStore(scrName);
+    CustodyReveal.clearEditState(scrName);
+    CustodyEventSubmit.clearState(scrName);
+    ItemExecutionList.clearExecutionStore(scrName);
   }
 
   dynamic userRepository = myState['#USER_REPOSITORY'];

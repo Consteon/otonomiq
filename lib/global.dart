@@ -33,6 +33,7 @@ import 'redux/screen_transaction.dart';
 import 'redux/screen_transaction_reducers.dart';
 import 'route_stack.dart';
 import 'states/app_code_controller.dart';
+import 'widget/driver_home_support.dart';
 
 // import 'crypto/auth_crypto.dart';
 //import 'package:pointycastle/pointycastle.dart';  // full registry
@@ -871,6 +872,22 @@ Future<int> globalInit() async {
       '#CAMS': value,
     })));
   });
+  // ---- Restore persisted driver login (secure storage -> Redux) ----
+  // I2: placed strictly AFTER transactionStore is non-null (created just
+  // above). Read the driverLogin key; if non-empty, seed #has_user_login so the
+  // scanner self-skip gate sees the session before the first route is built.
+  // Local secure-storage read (no network) — safe in the serial bootstrap path.
+  // The later main.dart bootstrap dispatch is a per-key merge and preserves
+  // #has_user_login.
+  try {
+    final String? driverVid = await readDriverLogin();
+    if (driverVid != null && driverVid.isNotEmpty) {
+      transactionStore.dispatch(UpdateScreenTxAction(
+          ScreenTransaction({'#has_user_login': driverVid})));
+    }
+  } catch (e) {
+    devPrint('globalInit driverLogin restore error: $e');
+  }
   getCountryCodeList(); // put country code list in #SIM_COUNTRY_CODES
   getTimeDifference();
   Get.put(GeneralGetXController());
@@ -1459,7 +1476,9 @@ bool routeExist(String? page) {
 }
 
 List<Widget> reloadPage(String page) {
-  clearData(page);
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    clearData(page);
+  });
   List<Widget> newPageElement =
       []; //List<Widget>.empty(); // create output List
   if (linkElement[page] != null) {
@@ -1495,7 +1514,6 @@ void gotoRoute(String routeName) {
             rootThis.pageName = newRoute;
             rootThis.pageElements = newElementList;
             rootThis.wait = false;
-            rootThis.touch = !rootThis.touch;
           });
         });
       });
@@ -1507,7 +1525,6 @@ void gotoRoute(String routeName) {
           rootThis.pageName = newRoute;
           rootThis.pageElements = newElementList;
           rootThis.wait = false;
-          rootThis.touch = !rootThis.touch;
         });
       }
     }
@@ -1893,6 +1910,18 @@ void devPrint(dynamic e) {
     debugPrint(e.toString());
   }
 } // end of devPrint
+
+/// Forward [e] to [errorReport] (Crashlytics non-fatal) UNLESS it is a handled
+/// [TimeoutException] from a best-effort read / time fetch. Those recover
+/// gracefully (UI re-renders from cache, clock falls back to the device), so
+/// reporting them is pure noise — log debug-only and skip Crashlytics.
+void reportNonTimeout(dynamic e, [StackTrace? stack]) {
+  if (e is TimeoutException) {
+    devPrint('handled timeout (crash report skipped): $e');
+    return;
+  }
+  errorReport(e, stack);
+}
 
 void trace(int debugNum) {
   int nowTime = DateTime.now().millisecondsSinceEpoch;

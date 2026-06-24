@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:bloc/bloc.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart'; // debugPrint for [LOGINPERF] logs
 //import 'package:rxdart/rxdart.dart';
 import '../../login/page/login/login.dart';
 import '../../login/api/user_repository.dart';
@@ -145,7 +146,13 @@ class LoginBloc extends Bloc<LoginEvent, LoginState> {
     User? user;
     try {
       yield LoginState.loading(state.signInMethod);
+      final sw1 =
+          UserRepository.loginPerfTrace ? (Stopwatch()..start()) : null;
       user = await _userRepository.signInWithGoogle();
+      if (sw1 != null) {
+        debugPrint(
+            '[LOGINPERF] signInWithGoogle = ${sw1.elapsedMilliseconds}ms');
+      }
     } catch (err) {
       // Genuine sign-in error (network, Firebase credential, etc.).
       yield LoginState.firebaseLoginFailure(state.signInMethod, state.loginUid,
@@ -159,8 +166,13 @@ class LoginBloc extends Bloc<LoginEvent, LoginState> {
       return;
     }
     try {
+      final sw2 =
+          UserRepository.loginPerfTrace ? (Stopwatch()..start()) : null;
       var loginResult = await _userRepository.aumLogin(
           country, inv); // vertriz login procedure
+      if (sw2 != null) {
+        debugPrint('[LOGINPERF] aumLogin = ${sw2.elapsedMilliseconds}ms');
+      }
       switch (loginResult) {
         case 0:
           yield LoginState.success(-1, state.signInMethod, user.uid);

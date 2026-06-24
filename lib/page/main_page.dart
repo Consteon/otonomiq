@@ -20,6 +20,7 @@ import '../model/connection_data.dart';
 import '../different_code/different_code.dart';
 import '../otq_icons.dart';
 import '../widget/approver_sticky_bar.dart';
+import '../widget/logout_transition_support.dart';
 import '../widget/build_theme.dart';
 import '../widget/otq_bottom_nav_bar.dart';
 import 'package:get/get.dart';
@@ -42,8 +43,23 @@ class MainPageState extends State<MainPage> {
   List<Widget> pageElements =
       List<Widget>.of(linkElement[home]!.map((widget) => widget));
   bool wait = false; // if true, display wait screen (circular or other)
+  // Scoped logout spinner flag. Set true by signOut()'s cold/corrupt-snapshot
+  // path (no warm guest UI cached → it must re-fetch the login page over the
+  // network) and cleared inside showSignInPage() on BOTH success and failure.
+  // Gates ONLY the overlay below — deliberately NOT the broad `|| this.wait`
+  // TimerBloc gate, whose `wait` field is driven live by
+  // image_upload/qr_gps/invitation and is out of scope here. The warm-cache
+  // restore path leaves this false (instant, spinner-free).
+  static bool logoutInProgress = false;
+  // One-shot flag: true once the cache-first navbar restore has been attempted
+  // for this MainPageState instance. Reset implicitly by auth-state changes
+  // (Authenticated creates a new MainPage(key: UniqueKey()) -> new State, so a
+  // fresh instance field starts false again). Instance (NOT static) on purpose:
+  // the restore must run once per shell, and each new auth shell re-attempts it.
+  bool _navbarCacheRestored = false;
   ScrollController scrollController = ScrollController();
   bool touch = false;
+  String _lastScrolledPage = home;
   late LoginBloc _loginBloc;
   // late MainBloc _mainBloc;
   bool toggle = true;
@@ -173,11 +189,18 @@ class MainPageState extends State<MainPage> {
       // do nothing
     }
     if (title.substring(0, 1) == '_') title = '';
-    // Guard with hasClients: during the first build no scroll view is attached
-    // yet, so an unguarded jumpTo throws '_positions.isNotEmpty' (ScrollController
-    // not attached). hasClients is true only once a position is attached.
-    if (scrollController.hasClients) {
-      scrollController.jumpTo(0.0);
+    // Scroll-to-top on page change only (not every rebuild). Deferred to a
+    // post-frame callback so it runs after the new content is laid out, and
+    // gated on actual page change so unrelated rebuilds (wait toggle, dataColor)
+    // skip it. Reads the already-set `pageName` field, so it catches every page
+    // change regardless of which setState site triggered it.
+    if (pageName != _lastScrolledPage) {
+      _lastScrolledPage = pageName;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (scrollController.hasClients) {
+          scrollController.jumpTo(0.0);
+        }
+      });
     }
 
     void handleNavTap(int i) {
@@ -406,11 +429,23 @@ class MainPageState extends State<MainPage> {
                       title: pageName == home
                           ? Text(
                               '$title $versionShown',
-                              style: const TextStyle(color: Colors.white),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              // Android (Roboto) renders titleLarge wider than
+                              // iOS (SF); pin 18sp on Android, keep iOS default.
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: andrew ? 18 : null,
+                              ),
                             )
                           : Text(
                               title,
-                              style: const TextStyle(color: Colors.white),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: andrew ? 18 : null,
+                              ),
                             ),
                       actions: <Widget>[
                         // IconButton( // archive history for debugging
@@ -567,6 +602,48 @@ class MainPageState extends State<MainPage> {
                         if (authState is Unauthenticated) {
                           return const SizedBox.shrink();
                         }
+                        // --- cache-first navbar restore (one-shot) ---
+                        // On the first authenticated frame the in-memory
+                        // systemUIComponent may still hold the guest snapshot
+                        // (signOut replaced it + removed @systemUI). Restore the
+                        // last authed snapshot from @authedSystemUI synchronously
+                        // (prefs reads are sync after init) so the full bottomBar
+                        // paints immediately instead of staggering in after the
+                        // live readSettings round-trip.
+                        if (!_navbarCacheRestored) {
+                          _navbarCacheRestored = true;
+                          try {
+                            final cachedAuthed =
+                                prefs.getString('@authedSystemUI');
+                            if (shouldRestoreAuthedSystemUI(cachedAuthed)) {
+                              final cachedSystem = json.decode(cachedAuthed!);
+                              final cachedBar =
+                                  cachedSystem[mobile]?['bottomBar'];
+                              final currentBar =
+                                  systemUIComponent[mobile]?['bottomBar'];
+                              // Restore only when the cache has MORE items than
+                              // the current in-memory data (i.e. in-memory is
+                              // stale/guest). If the in-memory data already has
+                              // the full bar (readSettings succeeded before this
+                              // frame), skip — no work needed.
+                              //
+                              // ASSUMPTION (QA note): the guest bottomBar is
+                              // strictly SHORTER than the authed one (guest =
+                              // home-only, authed = full). A tenant whose guest
+                              // bar happens to equal the authed item count would
+                              // NOT trigger the restore (length gate fails) and
+                              // would still see the one-frame stagger.
+                              if (cachedBar is List &&
+                                  currentBar is List &&
+                                  cachedBar.length > currentBar.length) {
+                                systemUIComponent = cachedSystem;
+                              }
+                            }
+                          } catch (e) {
+                            devPrint('navbar cache-first restore failed: $e');
+                          }
+                        }
+                        // --- end cache-first restore ---
                         if (screenUIComponent[pageName]?['hideBottomBar'] ==
                             true) {
                           return const SizedBox.shrink();
@@ -1021,6 +1098,16 @@ class MainPageState extends State<MainPage> {
                               // fired in the live flow. The login_form /
                               // invitation_form modal dialog (PopScope, blocks
                               // back) is the real single spinner.
+                              // Logout spinner overlay: shown only while
+                              // signOut() is re-fetching the login page over the
+                              // network (cold/corrupt guest snapshot). Gated on
+                              // the scoped MainPageState.logoutInProgress flag,
+                              // which signOut() toggles via rootThis.setState.
+                              // The warm-cache restore never sets it, so the
+                              // common logout stays instant (no overlay). Last in
+                              // the Stack so it paints over the stale home body.
+                              if (MainPageState.logoutInProgress)
+                                const WaitScreen(),
                             ],
                           ), // Stack closure=========
                   ),
@@ -1140,6 +1227,20 @@ class MainPageState extends State<MainPage> {
                       value: jsonEncode(
                           newItem)); // store systems in secure storage
                   buildTheme(systemUIComponent[theme]);
+                  // Persist authed system snapshot for cache-first navbar
+                  // restore. Gated on the guest signup ssid (mirrors the
+                  // readSettings/readSettingsContext non-guest gate) so a guest
+                  // proxy refresh — the same case the Page block handles at
+                  // `ssid == state['#SIGNUP_KEY']` below — never overwrites the
+                  // last authenticated session's bottomBar in @authedSystemUI.
+                  if (ssid != state['#SIGNUP_KEY']) {
+                    try {
+                      prefs.setString(
+                          '@authedSystemUI', json.encode(systemUIComponent));
+                    } catch (e) {
+                      devPrint('proxy persist @authedSystemUI failed: $e');
+                    }
+                  }
                 }); // end of system then
 
                 // check and update pages
@@ -1205,6 +1306,7 @@ class MainPageState extends State<MainPage> {
   } // end of subscribeToProxy
 
   void rePaintScreen(String source) {
+    if (!mounted) return;
     if (pageName == home || asHomeArray.contains(pageName)) {
       List<Widget> newElementList = reloadPage(pageName);
       setState(() {

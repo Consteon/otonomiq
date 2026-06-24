@@ -66,7 +66,7 @@ class ConnectionData {
         try {
           n = await NTP.now().timeout(const Duration(seconds: 2));
         } catch (e) {
-          errorReport(e);
+          reportNonTimeout(e);
         }
         result.time = result.time == 0 ? n.millisecondsSinceEpoch : 0;
       } catch (eNtp) {

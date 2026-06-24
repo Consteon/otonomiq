@@ -263,6 +263,9 @@ Error when executing method get() from document reference. Should be gone when a
     '#UNREAD' = int # of unread messages
     '#TX_LOCK' = bool lock semaphore for transaction. For writing + deleting
     '#LOGIN_OK' = bool is this user log in
+    '#has_user_login' = string, decrypted (qr:uqr) or raw scanned driver VID from the scanner widget; set on a valid scan, cleared when the VID is not in the workforce table. Mirrored to secure-storage key 'driverLogin' for persistence across app restarts (restored at globalInit; cleared on Keluar logout).
+    '#ACTIVE_TASK' = string, tnm VID of the task doc currently being executed on P11 DeliveryWorkspace. Set by P10 TaskFeedList on card tap (before routing to P11). Read by resolveDriverCurlyTokens to resolve {activeTaskVid} and {tnm} (alias) in search/event strings. NOT cleared on P11 exit (stale value harmless; pending-safe guard).
+    '#REJECT_TASK' = string, tnm VID of the task doc being rejected on the RejectTaskSheet. Set by DriverStopCard on Tolak tap (before routing). Read by resolveDriverCurlyTokens to resolve {rejectTaskVid} in search/event strings. NOT cleared on exit (stale value harmless; pending-safe guard).
     '#GOOGLE_OK' = bool is this user already log in in google
     '#RECEIVE_LOG_OK' = bool is this user already specify at least 1 receive location
     '#PROFILE_OK' = bool is all needed profile entered
@@ -349,6 +352,7 @@ Error when executing method get() from document reference. Should be gone when a
     'gpsData' = last gps data. Format = <latitude>◆<longitude>◆<accuracy>◆<timestamp>◆<altitude>◆<speed>◆<speedAccuracy>.
     'gpsPlaceMark' = last gps place mark.
     'appSettings' = last result from GCF functionName['appSettings'] ~ /appSettings3.
+    'driverLogin' = persisted driver VID (mirrors #has_user_login in transactionStore). Written on a successful scanner VID scan, deleted on Keluar logout (and on a workforce not-found scan). Read at globalInit to restore the driver session.
 
 # Shared Persistence Keys:
     '@pages' = deprecated 1 Feb 2024,last all pages. Get from readSettings.Deleted when logout.
@@ -356,6 +360,9 @@ Error when executing method get() from document reference. Should be gone when a
     '@localeText' = compressed localeText string.
     '@localeCheckSum' = checksum of proxy's Locale text. Location cell defined in appSettings function.
     '@lastGpsTime' = last gps time. Persistent version of gpsTime state. 
+    '@guestScreenUI' = guest/login screenUIComponent snapshot. Written at guest bootstrap, restored on signOut for instant login page render.
+    '@guestSystemUI' = guest/login systemUIComponent snapshot. Written at guest bootstrap, restored on signOut for instant login page render.
+    '@authedSystemUI' = last authenticated systemUIComponent snapshot. Written by readSettings/readSettingsContext/proxy System refresh when settingKey (or proxy ssid) is not the guest/signup key. NOT cleared on signOut; survives across sessions. Used for cache-first navbar restore on login so the full bottomBar paints on the first authenticated frame.
 
 # GetX State management
 ## Directory
