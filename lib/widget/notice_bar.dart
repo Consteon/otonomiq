@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../global.dart';
+import 'admin_home_support.dart';
 import 'panel_card_support.dart';
 
 /// A notification strip/callout rendered from server JSON.
@@ -11,7 +12,10 @@ import 'panel_card_support.dart';
 /// supports inline **bold** and *italic*).
 ///
 /// Colors are determined by [variant] via [statusColor]/[statusBgColor].
-/// This widget is pure display: no txfController, no Redux, no navigation.
+/// Pure display except for an optional trailing CTA: when both `actionText`
+/// and `actionRoute` are set, a compact violet [TextButton] renders to the
+/// right of the text and navigates via `routeStack.push` + `gotoRoute`
+/// (dead-route guarded). No txfController, no Redux.
 class NoticeBar extends StatelessWidget {
   const NoticeBar({
     super.key,
@@ -40,6 +44,11 @@ class NoticeBar extends StatelessWidget {
     final String label = (component['label'] ?? '').toString().trim();
     final String title = (component['title'] ?? '').toString().trim();
     final String text = (component['text'] ?? '').toString().trim();
+    final String actionText =
+        (component['actionText'] ?? '').toString().trim();
+    final String actionRoute =
+        (component['actionRoute'] ?? '').toString().trim();
+    final bool hasAction = actionText.isNotEmpty && actionRoute.isNotEmpty;
 
     // If all display content is empty, render nothing.
     if (label.isEmpty && title.isEmpty && text.isEmpty) {
@@ -100,7 +109,32 @@ class NoticeBar extends StatelessWidget {
       children: tiers,
     );
 
-    // -- Build icon + text row (if icon present) ---------------------------
+    // -- Build trailing CTA (if configured) --------------------------------
+    Widget? ctaButton;
+    if (hasAction) {
+      ctaButton = TextButton(
+        onPressed: () {
+          if (!routeExist(actionRoute)) return;
+          routeStack.push(actionRoute);
+          gotoRoute(actionRoute);
+        },
+        style: TextButton.styleFrom(
+          minimumSize: const Size(0, 44),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          tapTargetSize: MaterialTapTargetSize.padded,
+        ),
+        child: Text(
+          actionText,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: AdminTierColors.warnBadgeText, // violet 0xFF7C3AED
+          ),
+        ),
+      );
+    }
+
+    // -- Build icon + text row (if icon present) + trailing CTA -----------
     final Widget content;
     if (hasIcon) {
       content = Row(
@@ -117,10 +151,23 @@ class NoticeBar extends StatelessWidget {
             ),
           ),
           Expanded(child: textColumn),
+          if (ctaButton != null) ...[
+            const SizedBox(width: 8),
+            ctaButton,
+          ],
         ],
       );
     } else {
-      content = textColumn;
+      content = hasAction
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(child: textColumn),
+                const SizedBox(width: 8),
+                ctaButton!,
+              ],
+            )
+          : textColumn;
     }
 
     // -- Build accent bar + content row (if bar present) -------------------

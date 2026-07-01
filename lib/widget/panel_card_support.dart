@@ -192,6 +192,8 @@ const Map<String, IconData> _panelIcons = {
   'clock': Icons.schedule_rounded,
   'info': Icons.info_outline_rounded,
   'alert': Icons.warning_amber_rounded,
+  'truck': Icons.local_shipping_rounded,
+  'vehicle': Icons.local_shipping_rounded,
 };
 
 /// Map a spec icon name (e.g. "users", "clipboard-check") to an IconData.

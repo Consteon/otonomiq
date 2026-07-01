@@ -176,4 +176,80 @@ void main() {
       expect(arr.length > 1 ? arr[1] : 'default', 'default');
     });
   });
+
+  // ── warehouse vehicleId resolution (O1/C1 #ACTIVE_VEHICLE hand-off) ────
+  //
+  // Pure mirror of _resolveWarehouseVehicleId: prefer a published per-screen
+  // vehicleId, else fall back to screenTx['#ACTIVE_VEHICLE']. O1/C1 have no
+  // publisher (warehouse vehicle dv empty) -> a direct dhState read was always
+  // empty, so the opening/closing doc wrote vv:"" + cnm:"CHK--{date}".
+
+  group('warehouse vehicleId resolution', () {
+    String resolveWarehouseVehicleId(
+        String published, Map<String, dynamic> screenTx) {
+      final String p = published.trim();
+      if (p.isNotEmpty) return p;
+      return (screenTx['#ACTIVE_VEHICLE'] ?? '').toString().trim();
+    }
+
+    test('published value wins (driver P6 / forward-compat)', () {
+      expect(
+        resolveWarehouseVehicleId('VEH-PUB', {'#ACTIVE_VEHICLE': 'VEH-ACT'}),
+        'VEH-PUB',
+      );
+    });
+
+    test('falls back to #ACTIVE_VEHICLE when unpublished (warehouse O1/C1)', () {
+      expect(
+        resolveWarehouseVehicleId('', {'#ACTIVE_VEHICLE': 'F629GD0000099'}),
+        'F629GD0000099',
+      );
+    });
+
+    test('both empty -> empty (pending-safe)', () {
+      expect(resolveWarehouseVehicleId('', <String, dynamic>{}), '');
+    });
+
+    test('fallback value is trimmed', () {
+      expect(
+        resolveWarehouseVehicleId('', {'#ACTIVE_VEHICLE': '  F629GD0000099  '}),
+        'F629GD0000099',
+      );
+    });
+
+    test('whitespace-only published falls through to fallback', () {
+      expect(
+        resolveWarehouseVehicleId('   ', {'#ACTIVE_VEHICLE': 'VEH-ACT'}),
+        'VEH-ACT',
+      );
+    });
+  });
+
+  // ── cnm format: the empty-vv double-dash regression ───────────────────
+  //
+  // genOpeningCnm/genClosingCnm build CHK-{vv}-{date}. With vv empty the doc id
+  // collapses to "CHK--{date}", which H1's openingGate (vv◼{lv}) cannot link.
+  // The submit fix guarantees vv is non-empty; these lock the format.
+
+  group('cnm format guards the empty-vv double-dash bug', () {
+    const int fixedNow = 1782000000000; // fixed epoch -> deterministic stamp
+
+    test('non-empty vv -> CHK-{vv}-{date}, no double dash', () {
+      final cnm = genOpeningCnm('F629GD0000099', nowMs: fixedNow);
+      expect(cnm.startsWith('CHK-F629GD0000099-'), isTrue);
+      expect(cnm.contains('CHK--'), isFalse);
+    });
+
+    test('empty vv reproduces the CHK--{date} defect (what the fix prevents)',
+        () {
+      final cnm = genOpeningCnm('', nowMs: fixedNow);
+      expect(cnm.startsWith('CHK--'), isTrue);
+    });
+
+    test('closing cnm carries the vv too', () {
+      final cnm = genClosingCnm('F629GD0000099', nowMs: fixedNow);
+      expect(cnm.contains('F629GD0000099'), isTrue);
+      expect(cnm.contains('CHK--'), isFalse);
+    });
+  });
 }

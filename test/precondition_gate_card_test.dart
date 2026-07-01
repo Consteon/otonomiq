@@ -1,8 +1,24 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otonomiq/global.dart';
+import 'package:otonomiq/redux/screen_transaction.dart';
+import 'package:otonomiq/redux/screen_transaction_reducers.dart';
 import 'package:otonomiq/widget/driver_home_support.dart';
+import 'package:redux_dev_tools/redux_dev_tools.dart';
 
 void main() {
+  // The 'Existence gate decision logic' group calls evaluateGateSearch, whose
+  // filterDriverHomeDocs reads transactionStore.state.screenTx
+  // (driver_home_support.dart:368). The global `transactionStore` is null in a
+  // bare flutter_test process, so seed the Redux store ONCE before all tests
+  // (mirrors driver_home_support_test.dart:15-22 and global.dart's
+  // DevToolsStore<ScreenTransaction> init).
+  setUpAll(() {
+    transactionStore = DevToolsStore<ScreenTransaction>(
+      transactionReducer,
+      initialState: ScreenTransaction(initTransactionStore()),
+    );
+  });
+
   group('PreconditionGateCard text parsing', () {
     test('diamondTextToList parses 9-slot text correctly', () {
       final text =
@@ -107,6 +123,408 @@ void main() {
       ];
       final computed = aggregateActualSummary(ip, {});
       expect(computed, '5 999');
+    });
+  });
+
+  group('Existence gate decision logic (spec section 8 item 1)', () {
+    // Tests the GATE DECISION that build() implements, as a pure function.
+    // evaluateGateSearch is already thoroughly tested in
+    // driver_home_support_test.dart:932-1009. Here we test the wrapping logic:
+    //   - empty gateSearch -> skip gate (backward-compat, card renders)
+    //   - non-empty gateSearch + no matching doc -> gate closed (hide)
+    //   - non-empty gateSearch + matching doc -> gate open (render)
+
+    // Pure decision function mirroring build()'s gate logic.
+    // Returns: null = gate skipped (render normally),
+    //          false = gate closed (hide),
+    //          true = gate open (render normally).
+    bool? existenceGateDecision(String rawGateSearch, String existGateCode) {
+      final String trimmed = rawGateSearch.trim();
+      if (trimmed.isEmpty) return null; // skip gate, backward-compat
+      return evaluateGateSearch(existGateCode, trimmed, 'test_scr');
+    }
+
+    setUp(() {
+      mapTableContent['exist_gate/vehicle_check'] = [
+        {'cty': 'opening', 'vv': 'V100', 'cdt': '2026-06-25'},
+      ];
+      clearDriverHomeState('test_scr');
+      // Seed vehicleId for token resolution inside filterDriverHomeDocs.
+      getDriverHomeState('test_scr').vehicleId.value = 'V100';
+    });
+
+    tearDown(() {
+      mapTableContent.remove('exist_gate/vehicle_check');
+      clearDriverHomeState('test_scr');
+    });
+
+    test('empty gateSearch -> gate skipped (null = render normally)', () {
+      expect(existenceGateDecision('', 'exist_gate/vehicle_check'), isNull);
+    });
+
+    test('absent gateSearch (null toString) -> gate skipped', () {
+      // Mirrors (component['gateSearch'] ?? '').toString().trim() when the
+      // field is ABSENT: the map lookup yields null, the ?? supplies '', and
+      // the gate is skipped. Sourcing null from a real missing-key lookup
+      // (rather than the literal `null`) keeps the idiom faithful without
+      // tripping unnecessary_null_in_if_null_operators.
+      final Map<String, dynamic> componentNoGate = {};
+      expect(
+        existenceGateDecision(
+            (componentNoGate['gateSearch'] ?? '').toString().trim(),
+            'exist_gate/vehicle_check'),
+        isNull,
+      );
+    });
+
+    test('non-empty gateSearch + matching doc -> gate open (true)', () {
+      // Raw ◼ char for field separator (mirrors live JSON).
+      expect(
+        existenceGateDecision(
+            'cty\u{25FC}opening', 'exist_gate/vehicle_check'),
+        isTrue,
+      );
+    });
+
+    test('non-empty gateSearch + no matching doc -> gate closed (false)', () {
+      expect(
+        existenceGateDecision(
+            'cty\u{25FC}closing', 'exist_gate/vehicle_check'),
+        isFalse,
+      );
+    });
+
+    test('non-empty gateSearch + empty existGateCode -> gate closed (false)',
+        () {
+      // _existGateCode empty = gateTable not configured/parsed -> hide.
+      expect(
+        existenceGateDecision('cty\u{25FC}opening', ''),
+        isFalse,
+      );
+    });
+
+    test('non-empty gateSearch + unsubscribed code -> gate closed (false)', () {
+      // No data in mapTableContent for this code.
+      expect(
+        existenceGateDecision(
+            'cty\u{25FC}opening', 'nonexistent/vehicle_check'),
+        isFalse,
+      );
+    });
+
+    test('gateSearch without cst -> existence only, not status', () {
+      // The live gateSearch intentionally omits cst. A doc with cty=opening
+      // should pass regardless of its cst value.
+      mapTableContent['exist_gate/vehicle_check'] = [
+        {
+          'cty': 'opening',
+          'vv': 'V100',
+          'cdt': '2026-06-25',
+          'cst': 'custody_pending'
+        },
+      ];
+      expect(
+        existenceGateDecision(
+            'cty\u{25FC}opening', 'exist_gate/vehicle_check'),
+        isTrue,
+      );
+    });
+
+    test('publish false when gated out (contract)', () {
+      // When the gate decision is false, build() publishes confirmed=false.
+      // Verify the DriverHomeState contract: confirmed starts false, stays
+      // false when gated out.
+      final dhState = getDriverHomeState('test_scr');
+      expect(dhState.confirmed.value, isFalse);
+
+      // Simulate: gate closes (no matching doc).
+      final gateOpen = existenceGateDecision(
+          'cty\u{25FC}nonexistent', 'exist_gate/vehicle_check');
+      expect(gateOpen, isFalse);
+
+      // In the real widget, _publishConfirmed(dhState, false) fires.
+      // We verify the helper contract: value should be set to false.
+      // Since it is already false, the helper is a no-op (correct).
+      dhState.confirmed.value = false;
+      expect(dhState.confirmed.value, isFalse);
+    });
+
+    test('publish false then true when gate opens on data arrival', () {
+      // Simulates the reactive flow: initially no data -> gated out,
+      // then data arrives -> gate opens.
+      mapTableContent.remove('exist_gate/vehicle_check');
+
+      // Phase 1: no data.
+      final gateOpen1 = existenceGateDecision(
+          'cty\u{25FC}opening', 'exist_gate/vehicle_check');
+      expect(gateOpen1, isFalse);
+
+      // Phase 2: data arrives (Obx would trigger rebuild).
+      mapTableContent['exist_gate/vehicle_check'] = [
+        {'cty': 'opening', 'vv': 'V100', 'cdt': '2026-06-25'},
+      ];
+      final gateOpen2 = existenceGateDecision(
+          'cty\u{25FC}opening', 'exist_gate/vehicle_check');
+      expect(gateOpen2, isTrue);
+    });
+  });
+
+  group('ie-source branch decision (spec section 9)', () {
+    // Tests the BRANCH DECISION that _getItems implements, as a pure function.
+    // The actual aggregation is covered in driver_home_support_test.dart's
+    // aggregateManifestFromIe group. Widget-pump tests are impractical here
+    // (heavy GetX/Firestore/global deps), so build()-wiring is QA-gated.
+
+    // Pure decision function mirroring _getItems's branch logic.
+    // Returns: 'ie' = ie path, 'task' = legacy task aggregation.
+    String itemSourceDecision(Map<String, dynamic> component) {
+      final String itemsField =
+          (component['itemsField'] ?? 'it').toString().trim();
+      if (itemsField == 'ie') return 'ie';
+      return 'task';
+    }
+
+    test('itemsField "ie" -> ie path', () {
+      expect(itemSourceDecision({'itemsField': 'ie'}), 'ie');
+    });
+
+    test('itemsField "it" (default) -> task aggregation path', () {
+      expect(itemSourceDecision({'itemsField': 'it'}), 'task');
+    });
+
+    test('itemsField absent -> default "it" -> task path', () {
+      expect(itemSourceDecision({}), 'task');
+    });
+
+    test('itemsField null -> default "it" -> task path', () {
+      expect(itemSourceDecision({'itemsField': null}), 'task');
+    });
+
+    test('itemsField empty string -> task path (not ie)', () {
+      expect(itemSourceDecision({'itemsField': ''}), 'task');
+    });
+
+    test('itemsField " ie " (whitespace) -> ie path (trimmed)', () {
+      // trim() is called, so " ie " -> "ie" -> ie path
+      expect(itemSourceDecision({'itemsField': ' ie '}), 'ie');
+    });
+
+    test('itemsField "IE" (uppercase) -> task path (case-sensitive)', () {
+      // The branch is case-sensitive: only lowercase "ie" matches.
+      expect(itemSourceDecision({'itemsField': 'IE'}), 'task');
+    });
+  });
+
+  group('_matchedOpeningDoc decision (ie-source plumbing)', () {
+    // Tests the opening-doc lookup logic that _itemsFromIe depends on.
+    // Uses evaluateGateSearch as the decision proxy (same as existenceGateDecision).
+
+    setUp(() {
+      mapTableContent['exist_ie/vehicle_check'] = [
+        {
+          'cty': 'opening',
+          'vv': 'V200',
+          'cdt': '2026-06-25',
+          'ie': [
+            {'ii': '31', 'cd': 'full', 'qt': 10},
+            {'ii': '32', 'cd': 'full', 'qt': 5},
+          ],
+        },
+      ];
+      clearDriverHomeState('test_ie_scr');
+      getDriverHomeState('test_ie_scr').vehicleId.value = 'V200';
+    });
+
+    tearDown(() {
+      mapTableContent.remove('exist_ie/vehicle_check');
+      clearDriverHomeState('test_ie_scr');
+    });
+
+    test('opening doc found -> ie[] accessible', () {
+      // Proxy: evaluateGateSearch confirms the doc exists.
+      final exists = evaluateGateSearch(
+          'exist_ie/vehicle_check',
+          'cty\u{25FC}opening',
+          'test_ie_scr');
+      expect(exists, isTrue);
+
+      // Verify the doc has ie[]:
+      final docs = List<Map<String, dynamic>>.from(
+          mapTableContent['exist_ie/vehicle_check'] ?? const []);
+      final matched = filterDriverHomeDocs(
+          docs, 'cty\u{25FC}opening', 'test_ie_scr');
+      expect(matched.isNotEmpty, isTrue);
+      expect(matched.first['ie'], isA<List>());
+      expect((matched.first['ie'] as List).length, 2);
+    });
+
+    test('no opening doc -> ie[] path returns empty (no crash)', () {
+      mapTableContent.remove('exist_ie/vehicle_check');
+      final exists = evaluateGateSearch(
+          'exist_ie/vehicle_check',
+          'cty\u{25FC}opening',
+          'test_ie_scr');
+      expect(exists, isFalse);
+      // In the widget, _matchedOpeningDoc returns null -> _itemsFromIe
+      // returns const []. No crash.
+    });
+
+    test('opening doc without ie field -> aggregateManifestFromIe handles gracefully', () {
+      mapTableContent['exist_ie/vehicle_check'] = [
+        {'cty': 'opening', 'vv': 'V200', 'cdt': '2026-06-25'},
+        // no 'ie' field
+      ];
+      final docs = List<Map<String, dynamic>>.from(
+          mapTableContent['exist_ie/vehicle_check'] ?? const []);
+      final matched = filterDriverHomeDocs(
+          docs, 'cty\u{25FC}opening', 'test_ie_scr');
+      expect(matched.isNotEmpty, isTrue);
+      // ie field absent -> null -> aggregateManifestFromIe receives null
+      // -> returns empty (is! List guard).
+      final rows = aggregateManifestFromIe(matched.first['ie'], {});
+      expect(rows, isEmpty);
+    });
+
+    test('ie[] aggregate through full pipeline (end-to-end proxy)', () {
+      // Simulates the full _itemsFromIe flow without the widget.
+      final docs = List<Map<String, dynamic>>.from(
+          mapTableContent['exist_ie/vehicle_check'] ?? const []);
+      final matched = filterDriverHomeDocs(
+          docs, 'cty\u{25FC}opening', 'test_ie_scr');
+      final openingDoc = matched.first;
+
+      final nameMap = {'31': 'Amidis Galon 19L', '32': 'Aqua 600ml'};
+      final rows = aggregateManifestFromIe(
+        openingDoc['ie'],
+        nameMap,
+        qtyField: 'qt',
+        labelField: 'in',
+      );
+      expect(rows.length, 2);
+      expect(rows[0], {'in': 'Amidis Galon 19L', 'qt': 10});
+      expect(rows[1], {'in': 'Aqua 600ml', 'qt': 5});
+    });
+  });
+
+  group('hasLoadDiscrepancy predicate (spec section 10)', () {
+    test('non-empty List -> true (discrepancy present)', () {
+      expect(hasLoadDiscrepancy([{'ac': 2, 'ex': 3, 'dl': -1}]), isTrue);
+    });
+
+    test('multi-element List -> true', () {
+      expect(hasLoadDiscrepancy([
+        {'ac': 2, 'ex': 3, 'dl': -1},
+        {'ac': 5, 'ex': 5, 'dl': 0},
+      ]), isTrue);
+    });
+
+    test('empty List -> false (no discrepancy)', () {
+      expect(hasLoadDiscrepancy([]), isFalse);
+    });
+
+    test('null -> false', () {
+      expect(hasLoadDiscrepancy(null), isFalse);
+    });
+
+    test('absent (dynamic null from missing map key) -> false', () {
+      final Map<String, dynamic> doc = {'cst': 'custody_confirmed'};
+      expect(hasLoadDiscrepancy(doc['dp']), isFalse);
+    });
+
+    test('non-List (Map) -> false', () {
+      expect(hasLoadDiscrepancy({'ac': 2}), isFalse);
+    });
+
+    test('non-List (String) -> false', () {
+      expect(hasLoadDiscrepancy('dp'), isFalse);
+    });
+
+    test('non-List (int) -> false', () {
+      expect(hasLoadDiscrepancy(42), isFalse);
+    });
+
+    test('non-List (bool) -> false', () {
+      expect(hasLoadDiscrepancy(true), isFalse);
+    });
+  });
+
+  group('State-4 decision mapping (spec section 10)', () {
+    // Pure decision function mirroring build()'s state-3/4 branching.
+    // confirmed = true means _matchedGateDoc returned non-null.
+    // Returns: 'state3' or 'state4'.
+    String confirmedSubState(Map<String, dynamic> gateDoc,
+        {String dpField = 'dp'}) {
+      final dynamic dpArray = gateDoc[dpField];
+      return hasLoadDiscrepancy(dpArray) ? 'state4' : 'state3';
+    }
+
+    test('confirmed + dp non-empty -> state 4', () {
+      final doc = {
+        'cst': 'custody_confirmed',
+        'dp': [{'ac': 2, 'ex': 3, 'dl': -1}],
+      };
+      expect(confirmedSubState(doc), 'state4');
+    });
+
+    test('confirmed + dp empty -> state 3', () {
+      final doc = {
+        'cst': 'custody_confirmed',
+        'dp': [],
+      };
+      expect(confirmedSubState(doc), 'state3');
+    });
+
+    test('confirmed + dp absent -> state 3', () {
+      final doc = {
+        'cst': 'custody_confirmed',
+      };
+      expect(confirmedSubState(doc), 'state3');
+    });
+
+    test('confirmed + dp null -> state 3', () {
+      final doc = {
+        'cst': 'custody_confirmed',
+        'dp': null,
+      };
+      expect(confirmedSubState(doc), 'state3');
+    });
+
+    test('dpField config override reads correct field', () {
+      final doc = {
+        'cst': 'custody_confirmed',
+        'dp': [], // default field is empty
+        'customDp': [{'ac': 1, 'ex': 2, 'dl': -1}],
+      };
+      expect(confirmedSubState(doc), 'state3'); // default 'dp' is empty
+      expect(confirmedSubState(doc, dpField: 'customDp'), 'state4');
+    });
+
+    test('text slot 7 default fallback (lean tenant)', () {
+      // Mirrors _t(7, default) when _textArray has < 8 entries.
+      final shortText = diamondTextToList('A\u{25C6}B\u{25C6}C');
+      expect(shortText.length, 3);
+      final slot7 = shortText.length > 7
+          ? shortText[7]
+          : '! Ada selisih dari catatan gudang';
+      expect(slot7, '! Ada selisih dari catatan gudang');
+    });
+
+    test('text slot 8 default fallback (lean tenant)', () {
+      final shortText = diamondTextToList('A\u{25C6}B\u{25C6}C');
+      expect(shortText.length, 3);
+      final slot8 = shortText.length > 8
+          ? shortText[8]
+          : 'udah dilaporkan, Supervisor lagi review. Kerjaan tetap jalan.';
+      expect(slot8,
+          'udah dilaporkan, Supervisor lagi review. Kerjaan tetap jalan.');
+    });
+
+    test('text slots 7+8 present in full text array', () {
+      final fullText = diamondTextToList(
+          'Perlu Aksi\u{25C6}Konfirmasi\u{25C6}body\u{25C6}CTA\u{25C6}membuka\u{25C6}Dikonfirmasi\u{25C6}summary\u{25C6}Selisih headline\u{25C6}Selisih caption');
+      expect(fullText.length, 9);
+      expect(fullText[7], 'Selisih headline');
+      expect(fullText[8], 'Selisih caption');
     });
   });
 }

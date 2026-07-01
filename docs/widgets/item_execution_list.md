@@ -41,6 +41,36 @@ Items without a `tx` field (or `tx` empty) render as deliver for backward compat
 | condOutField | `cdo` | Outbound condition key |
 | condInField | `cdi` | Inbound condition key |
 | waterField | `wt` | Water type key |
+| `variant` | `"fields"` (default) or `"pivot"` | Structural variant. `fields` = existing behavior (1 record/item, field-pair steppers). `pivot` = N records/item grouped by `groupKey`, stepper per `pivotField` value. |
+
+### Pivot-specific config (variant:"pivot")
+
+| Field | Example | Description |
+|-------|---------|-------------|
+| `groupKey` | `ii` | Docs with same value in this field become one card |
+| `pivotField` | `cd` | Discriminator field for pivoting docs into slots |
+| `slots` | `full^Penuh~empty^Kosong` | `value^Label` pairs, `~`-separated. Order = stepper order. Labels are config-driven. |
+| `valueField` | `qt` | Expected quantity field per slot |
+| `writeField` | `ip` | Nominal write key (closing submit reads countStore directly) |
+| `joinTable` | `84214220504259//item` | Table for item name + category JOIN |
+| `joinKey` | `ii` | JOIN key field |
+
+### Pivot text slots (diamondTextToList, 0-based)
+
+| Index | Content | Default |
+|-------|---------|---------|
+| 0 | Hint caption | `''` |
+| 1 | Plan label | `'Ekspektasi'` |
+| 2 | Match label | `'✓ Sesuai'` |
+| 3 | Mismatch template (`<delta>` replaced) | `'Selisih · <delta>'` |
+| 4 | Returnable chip label | `'Returnable'` |
+| 5 | Consumable chip label | `'Consumable'` |
+
+### Submit integration (pivot)
+
+The pivot path writes counted values to `CustodyCountList.countStore[scrName]`
+keyed `'${ii}__${slotValue}'` as `CountEntry{ii, cd:slotValue, qty, planQty}`.
+The existing `CUSTODY_COUNT_SUBMIT mode:closing` reads this store unchanged.
 
 ### Text slots (24, 0-based)
 

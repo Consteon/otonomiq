@@ -6,6 +6,7 @@ import '../global.dart';
 import 'custody_stepper.dart';
 import 'driver_home_support.dart';
 import 'panel_card_support.dart';
+import 'custody_count_list.dart';
 
 /// ITEM_EXECUTION_LIST -- per-item drop/pickup stepper list for P11.
 ///
@@ -53,15 +54,35 @@ class ItemExecutionList extends StatefulWidget {
   /// Revision counter: bumped on stepper taps (off build phase).
   static final RxInt executionRev = 0.obs;
 
+  /// Per-scrName drop cap map: `{scrName: {itemId: capQty}}`.
+  /// Built from asset_cache docs filtered by dropCapSearch.
+  /// Plain Map (not RxMap -- rebuilt inside Obx from mapTableContent).
+  /// Cleared alongside executionStore on route change.
+  static final Map<String, Map<String, int>> capStore =
+      <String, Map<String, int>>{};
+
+  /// Guards one-shot devPrint per scrName when cap mode is active but
+  /// unresolved. Cleared on route change via [clearExecutionStore].
+  static final Set<String> _capUnresolvedLogged = <String>{};
+
+  /// Per-scrName LIST component reference for the saveSend actual-write hook.
+  /// The saveSend RBT reads this to decide whether actual-write is needed
+  /// and to source the table/search/field config. Registered in build (and
+  /// initState for first paint); cleared on route change via [clearExecutionStore].
+  static final Map<String, dynamic> submitComponentByScr = <String, dynamic>{};
+
   /// Get or create the execution map for a screen.
   static Map<String, ExecutionEntry> getExecMap(String scrName) {
     return executionStore.putIfAbsent(
         scrName, () => <String, ExecutionEntry>{});
   }
 
-  /// Clear execution store for a screen.
+  /// Clear execution store and cap store for a screen.
   static void clearExecutionStore(String scrName) {
     executionStore.remove(scrName);
+    capStore.remove(scrName);
+    _capUnresolvedLogged.remove(scrName);
+    submitComponentByScr.remove(scrName);
     executionRev.value++;
   }
 
@@ -93,12 +114,22 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
 
   List<String> _textArray = [];
   String _taskCode = '';
+  String _capCode = ''; // dropCapTable subscription code ('' = no-cap mode)
+  String _pivotCode = ''; // pivot variant: table (asset_cache) subscription code
+  String _joinCode = ''; // pivot variant: joinTable (item) subscription code
 
   @override
   void initState() {
     super.initState();
     _parseText();
     _subscribe();
+    // Register for saveSend actual-write hook (fields variant only).
+    // Pivot uses CustodyCountSubmit, not the actual-write hook.
+    final String initVariant =
+        (widget.component['variant'] ?? 'fields').toString().trim();
+    if (initVariant != 'pivot') {
+      ItemExecutionList.submitComponentByScr[widget.scrName] = widget.component;
+    }
   }
 
   void _parseText() {
@@ -140,6 +171,12 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
 
   void _subscribe() {
     final String appVid = resolveAppVid(widget.component);
+    final String variant =
+        (widget.component['variant'] ?? 'fields').toString().trim();
+    if (variant == 'pivot') {
+      _subscribePivot(appVid);
+      return;
+    }
     final String rawTable =
         (widget.component['table'] ?? '').toString().trim();
     if (rawTable.isNotEmpty) {
@@ -147,6 +184,46 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
       if (tp.tableDocId.isNotEmpty) {
         _taskCode = '${tp.tableDocId}/${tp.subColl}';
         subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _taskCode);
+      }
+    }
+
+    // Cap table subscription (asset_cache for drop stock-cap)
+    final String rawCapTable =
+        (widget.component['dropCapTable'] ?? '').toString().trim();
+    if (rawCapTable.isNotEmpty) {
+      final TablePath ctp = parseTablePath(rawCapTable);
+      if (ctp.tableDocId.isNotEmpty) {
+        _capCode = '${ctp.tableDocId}/${ctp.subColl}';
+        subscribeToMapCollection(appVid, ctp.tableDocId, ctp.subColl, _capCode);
+      }
+    }
+  }
+
+  /// Subscribe to pivot-variant data sources (asset_cache + item table).
+  ///
+  /// Keeps _taskCode and _capCode empty so the fields-path reactive touches
+  /// in build() are no-ops.
+  void _subscribePivot(String appVid) {
+    // Pivot data source (asset_cache)
+    final String rawTable =
+        (widget.component['table'] ?? '').toString().trim();
+    if (rawTable.isNotEmpty) {
+      final TablePath tp = parseTablePath(rawTable);
+      if (tp.tableDocId.isNotEmpty) {
+        _pivotCode = '${tp.tableDocId}/${tp.subColl}';
+        subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _pivotCode);
+      }
+    }
+
+    // JOIN table (item names + categories)
+    final String rawJoinTable =
+        (widget.component['joinTable'] ?? '').toString().trim();
+    if (rawJoinTable.isNotEmpty) {
+      final TablePath jtp = parseTablePath(rawJoinTable);
+      if (jtp.tableDocId.isNotEmpty) {
+        _joinCode = '${jtp.tableDocId}/${jtp.subColl}';
+        subscribeToMapCollection(
+            appVid, jtp.tableDocId, jtp.subColl, _joinCode);
       }
     }
   }
@@ -181,7 +258,14 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
   }
 
   /// Build item rows from the it[] array, seeding the execution store.
-  List<_ItemRow> _buildRows(List<Map<String, dynamic>> items) {
+  ///
+  /// Never-blank: deliver rows always seed (at plan when the drop-cap is
+  /// unresolved, so the widget never hides during loading). Once the cap
+  /// resolves, the post-putIfAbsent clamp-down lowers any stored value that
+  /// exceeds the cap, so the once-only putIfAbsent seed can never lock in an
+  /// uncapped value.
+  List<_ItemRow> _buildRows(
+      List<Map<String, dynamic>> items, Map<String, dynamic>? taskDoc) {
     final String labelField =
         (widget.component['labelField'] ?? 'in').toString().trim();
     final String planDropField =
@@ -210,6 +294,68 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
     final String roSlot = _t(22, 'RO');
     final String isiUlangSlot = _t(23, 'Isi Ulang');
 
+    // ── Drop-cap resolution ────────────────────────────────────────────
+    // Cap config fields (read by NAME from component, never hardcoded).
+    final String capKeyField =
+        (widget.component['dropCapKey'] ?? 'ii').toString().trim();
+    final String capValueField =
+        (widget.component['dropCapField'] ?? 'qt').toString().trim();
+    final String rawCapSearch =
+        (widget.component['dropCapSearch'] ?? '').toString().trim();
+
+    final bool capModeActive = _capCode.isNotEmpty;
+
+    // Resolve cap predicate:
+    //   capModeActive AND task.vv present AND cap snapshot arrived.
+    // (vehicle id comes from the task doc's vv field, NOT the session
+    // {vehicleId} token -- P11 has no vehicleId publisher.)
+    // Until all three hold, rowCap stays null -> rows seed at plan (no-cap)
+    // and clamp-down re-corrects once the cap resolves.
+    bool capResolved = false;
+    Map<String, int> capMap = const <String, int>{};
+
+    if (capModeActive) {
+      // Resolve vehicle id from the active task doc (not session {vehicleId}
+      // publisher -- P11 has no publisher; task.vv IS the vehicle id).
+      final String vehicleField =
+          (widget.component['vehicleField'] ?? 'vv').toString().trim();
+      final String taskVv =
+          (taskDoc?[vehicleField] ?? '').toString().trim();
+
+      final bool snapshotArrived = mapTableContent[_capCode] != null;
+      capResolved = taskVv.isNotEmpty && snapshotArrived;
+
+      if (capResolved) {
+        // Build cap map from filtered docs.
+        final List<Map<String, dynamic>> allCapDocs =
+            List<Map<String, dynamic>>.from(
+                mapTableContent[_capCode] ?? const []);
+        final String resolvedCapSearch =
+            rawCapSearch.replaceAll('{vehicleId}', taskVv);
+        final List<Map<String, dynamic>> filteredCapDocs =
+            resolvedCapSearch.isNotEmpty
+                ? filterDriverHomeDocs(
+                    allCapDocs, resolvedCapSearch, widget.scrName)
+                : allCapDocs;
+        capMap = buildDropCapMap(
+          filteredCapDocs,
+          capKeyField: capKeyField,
+          capValueField: capValueField,
+        );
+        // Store for access by _buildItemCard (per-row cap lookup).
+        ItemExecutionList.capStore[widget.scrName] = capMap;
+      }
+      if (!capResolved &&
+          !ItemExecutionList._capUnresolvedLogged
+              .contains(widget.scrName)) {
+        ItemExecutionList._capUnresolvedLogged.add(widget.scrName);
+        devPrint(
+            'ITEM_EXECUTION_LIST: cap unresolved for ${widget.scrName}'
+            ' -> rendering no-cap (plan) until task.vv'
+            ' + asset_cache snapshot ready');
+      }
+    }
+
     final Map<String, ExecutionEntry> execMap =
         ItemExecutionList.getExecMap(widget.scrName);
     final int sizeBefore = execMap.length;
@@ -224,22 +370,46 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
           classifyTxKind((item[txField] ?? '').toString().trim().toLowerCase());
 
       if (txKind == 'deliver') {
-        // ── Deliver: existing path (seed execution store) ──
+        // ── Deliver: seed execution store with cap-aware seed ──
+        // When cap is unresolved, rowCap=null -> seed at plan (never blank).
+        // Clamp-down re-corrects once cap resolves.
+
         final int planDrop =
             int.tryParse((item[planDropField] ?? '0').toString().trim()) ?? 0;
         final int planPickup =
             int.tryParse((item[planPickupField] ?? '0').toString().trim()) ?? 0;
         final bool isReturnable = planPickup > 0;
 
+        // Resolve per-item cap: non-null ONLY when cap mode is active AND
+        // resolved. null -> no-cap behavior (seed at plan, [+] free).
+        final String itemIi = (item[capKeyField] ?? '').toString().trim();
+        final int? rowCap = (capModeActive && capResolved)
+            ? (capMap[itemIi] ?? 0)
+            : null;
+        final int seedDrop = (rowCap == null)
+            ? planDrop
+            : (planDrop < rowCap ? planDrop : rowCap);
+
         // Seed execution store (putIfAbsent -- once per item per session).
         execMap.putIfAbsent(
             key,
             () => ExecutionEntry(
-                  dropActual: planDrop,
+                  dropActual: seedDrop,
                   pickupActual: planPickup,
                   dropPlan: planDrop,
                   pickupPlan: planPickup,
                 ));
+
+        // Clamp-down: re-correct a stale plan-seed once cap is known.
+        // putIfAbsent seeds once. On the first (unresolved) build it seeds
+        // at plan; when cap later resolves, putIfAbsent no-ops but
+        // clamp-down lowers the stored value to cap.
+        // Plain-Map mutate; value is read later THIS build; NO
+        // executionRev bump, NO setState (Prior Correction #3).
+        final ExecutionEntry? seeded = execMap[key];
+        if (seeded != null && rowCap != null && seeded.dropActual > rowCap) {
+          seeded.dropActual = rowCap;
+        }
 
         rows.add(_ItemRow(
           index: i,
@@ -249,6 +419,8 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
           isReturnable: isReturnable,
           planDrop: planDrop,
           planPickup: planPickup,
+          itemIi: itemIi,
+          dropCap: rowCap,
         ));
       } else {
         // ── Sale / Purchase / Refill: read-only, NO execution store ──
@@ -310,7 +482,27 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
         ItemExecutionList.getExecMap(widget.scrName);
     final ExecutionEntry? entry = map[key];
     if (entry != null) {
-      entry.dropActual = newValue;
+      // Defense-in-depth: clamp to cap if cap mode is active.
+      int clamped = newValue;
+      if (_capCode.isNotEmpty) {
+        final Map<String, int> capMap =
+            ItemExecutionList.capStore[widget.scrName] ?? const <String, int>{};
+        // Derive the item's ii from the current task doc.
+        final String capKeyField =
+            (widget.component['dropCapKey'] ?? 'ii').toString().trim();
+        final Map<String, dynamic>? taskDoc = _findActiveTask();
+        final List<Map<String, dynamic>> items = _extractItems(taskDoc);
+        final int idx = int.tryParse(key) ?? -1;
+        if (idx >= 0 && idx < items.length) {
+          final String itemIi =
+              (items[idx][capKeyField] ?? '').toString().trim();
+          final int? cap = capMap[itemIi];
+          if (cap != null && clamped > cap) {
+            clamped = cap;
+          }
+        }
+      }
+      entry.dropActual = clamped;
       ItemExecutionList.executionRev.value++;
       setState(() {});
     }
@@ -325,6 +517,26 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
       ItemExecutionList.executionRev.value++;
       setState(() {});
     }
+  }
+
+  /// Stepper tap callback for pivot variant.
+  ///
+  /// Updates CustodyCountList.countStore (the submit contract), bumps countRev
+  /// for cross-widget Obx reactivity, and calls setState for local rebuild.
+  void _onPivotCountChanged(
+      String countKey, int newValue, String ii, String cd) {
+    final Map<String, CountEntry> map =
+        CustodyCountList.getCountMap(widget.scrName);
+    final CountEntry? entry = map[countKey];
+    if (entry != null) {
+      entry.qty = newValue;
+    } else {
+      // Defensive: seed if somehow missing (should never happen -- seeded in
+      // _buildPivotVariant before render).
+      map[countKey] = CountEntry(ii: ii, cd: cd, qty: newValue);
+    }
+    CustodyCountList.countRev.value++;
+    setState(() {});
   }
 
   /// Derive per-cell status.
@@ -356,9 +568,46 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
     }
   }
 
+  /// Derive per-cell status for pivot variant.
+  ///
+  /// delta == 0 -> emerald ('complete', text[2] "Sesuai").
+  /// delta < 0 -> amber ('partial', text[3] with signed delta).
+  /// delta > 0 -> violet ('extra', text[3] with signed delta).
+  _CellStatus _pivotCellStatus(int counted, int expected) {
+    final int delta = counted - expected;
+    if (delta == 0) {
+      return _CellStatus('complete', _t(2, '\u{2713} Sesuai'));
+    }
+    // Non-zero delta: signed string (e.g. "+3" or "-2").
+    final String sign = delta > 0 ? '+$delta' : '$delta';
+    final String template = _t(3, 'Selisih \u{00B7} <delta>');
+    final String label = template.replaceAll('<delta>', sign);
+    if (delta < 0) {
+      return _CellStatus('partial', label); // amber
+    }
+    return _CellStatus('extra', label); // violet
+  }
+
   @override
   Widget build(BuildContext context) {
     return Obx(() {
+      // ── Variant dispatch ─────────────────────────────────────────────
+      final String variant =
+          (widget.component['variant'] ?? 'fields').toString().trim();
+      if (variant == 'pivot') return _buildPivotVariant();
+
+      // Re-register for the saveSend actual-write hook on EVERY build, not just
+      // initState. saveSend -> clearData -> clearExecutionStore removes this
+      // entry on every submit (api.dart:4309 -> 3985 ->
+      // item_execution_list.dart:85), and the cached widget's initState does
+      // not re-run on re-visit, so an initState-only registration is wiped
+      // after stop #1 and the hook guard goes false -> ad/ap null on every
+      // later stop. Idempotent re-register here (plain Map assignment, no
+      // setState) keeps the hook live for every stop, mirroring
+      // executionStore's re-seed-in-build self-healing.
+      ItemExecutionList.submitComponentByScr[widget.scrName] = widget.component;
+
+      // ── EXISTING fields variant (below is unchanged) ─────────────────
       // Touch vehicleId + executionRev for Obx dependency.
       final DriverHomeState dhState = getDriverHomeState(widget.scrName);
       dhState.vehicleId.value;
@@ -367,10 +616,15 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
       // Touch mapTableContent for reactive rebuild.
       mapTableContent[_taskCode];
 
+      // Touch cap subscription for reactive rebuild (no-op if _capCode empty).
+      if (_capCode.isNotEmpty) {
+        mapTableContent[_capCode];
+      }
+
       // Find active task and extract items.
       final Map<String, dynamic>? taskDoc = _findActiveTask();
       final List<Map<String, dynamic>> items = _extractItems(taskDoc);
-      final List<_ItemRow> rows = _buildRows(items);
+      final List<_ItemRow> rows = _buildRows(items, taskDoc);
       final Map<String, ExecutionEntry> execMap =
           ItemExecutionList.getExecMap(widget.scrName);
 
@@ -443,6 +697,322 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
     });
   }
 
+  /// Build the complete pivot variant UI.
+  ///
+  /// Called from Obx in build() when variant == 'pivot'. Groups asset_cache
+  /// docs by [groupKey], pivots [valueField] into N stepper cells per distinct
+  /// [pivotField] value listed in [slots]. Writes counted values to
+  /// CustodyCountList.countStore for submit integration.
+  Widget _buildPivotVariant() {
+    // ── Touch reactive deps for Obx tracking ───────────────────────────
+    final DriverHomeState dhState = getDriverHomeState(widget.scrName);
+    dhState.vehicleId.value; // {activeVehicle} token resolution
+    CustodyCountList.countRev.value; // cross-widget stepper reactivity
+
+    if (_pivotCode.isNotEmpty) mapTableContent[_pivotCode];
+    if (_joinCode.isNotEmpty) mapTableContent[_joinCode];
+
+    // ── Parse pivot config ─────────────────────────────────────────────
+    final String groupKey =
+        (widget.component['groupKey'] ?? '').toString().trim();
+    final String pivotField =
+        (widget.component['pivotField'] ?? '').toString().trim();
+    final String valueField =
+        (widget.component['valueField'] ?? '').toString().trim();
+    final String rawSlots =
+        (widget.component['slots'] ?? '').toString().trim();
+    final List<PivotSlot> slots = parsePivotSlots(rawSlots);
+
+    if (groupKey.isEmpty || pivotField.isEmpty || slots.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    // ── Get and filter pivot docs (asset_cache) ────────────────────────
+    final List<Map<String, dynamic>> pivotDocs =
+        List<Map<String, dynamic>>.from(
+            mapTableContent[_pivotCode] ?? const <Map<String, dynamic>>[]);
+    final String rawSearch =
+        (widget.component['search'] ?? '').toString().trim();
+    final List<Map<String, dynamic>> filtered = rawSearch.isNotEmpty
+        ? filterDriverHomeDocs(pivotDocs, rawSearch, widget.scrName)
+        : pivotDocs;
+
+    // ── Build item detail map (JOIN for name + category) ───────────────
+    final String joinKey =
+        (widget.component['joinKey'] ?? 'ii').toString().trim();
+    final String labelField =
+        (widget.component['labelField'] ?? 'in').toString().trim();
+    final String catField =
+        (widget.component['catField'] ?? 'ic').toString().trim();
+    final List<Map<String, dynamic>> joinDocs =
+        List<Map<String, dynamic>>.from(
+            mapTableContent[_joinCode] ?? const <Map<String, dynamic>>[]);
+    final Map<String, ItemDetail> itemDetailMap = buildItemDetailMap(
+      joinDocs,
+      idField: joinKey,
+      nameField: labelField,
+      categoryField: catField,
+    );
+
+    // ── Group filtered docs by groupKey ────────────────────────────────
+    final Map<String, List<Map<String, dynamic>>> groups =
+        groupDocsByKey(filtered, groupKey);
+
+    if (groups.isEmpty) return const SizedBox.shrink();
+
+    // ── Seed CustodyCountList.countStore for submit integration ────────
+    final Map<String, CountEntry> countMap =
+        CustodyCountList.getCountMap(widget.scrName);
+    final int sizeBefore = countMap.length;
+
+    final List<_PivotCardData> cards = <_PivotCardData>[];
+    for (final MapEntry<String, List<Map<String, dynamic>>> entry
+        in groups.entries) {
+      final String ii = entry.key;
+      final List<Map<String, dynamic>> group = entry.value;
+      final ItemDetail? detail = itemDetailMap[ii];
+      final String name =
+          (detail != null && detail.name.isNotEmpty) ? detail.name : ii;
+      final String category = detail?.category ?? '';
+
+      final List<_PivotSlotData> slotData = <_PivotSlotData>[];
+      for (final PivotSlot slot in slots) {
+        final int expected =
+            pivotExpected(group, pivotField, slot.value, valueField);
+        final String countKey = '${ii}__${slot.value}';
+
+        // Seed count store (putIfAbsent for once-only seed at qty 0).
+        final CountEntry ce = countMap.putIfAbsent(
+          countKey,
+          () => CountEntry(ii: ii, cd: slot.value, qty: 0, planQty: expected),
+        );
+        // Always update planQty (asset_cache may reload with new data).
+        ce.planQty = expected;
+
+        slotData.add(_PivotSlotData(
+          slot: slot,
+          expected: expected,
+          countKey: countKey,
+        ));
+      }
+
+      cards.add(_PivotCardData(
+        ii: ii,
+        name: name,
+        category: category,
+        slots: slotData,
+      ));
+    }
+
+    // Bump countRev post-frame if store grew (avoids build-time notification).
+    if (countMap.length > sizeBefore) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        CustodyCountList.countRev.value++;
+      });
+    }
+
+    // ── Render ──────────────────────────────────────────────────────────
+    final String hintCaption = _t(0, '');
+    final String planLabel = _t(1, 'Ekspektasi');
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          widget.lPad, widget.tPad, widget.rPad, widget.bPad),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Hint caption
+          if (hintCaption.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                hintCaption.toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.8,
+                  color: _caption,
+                ),
+              ),
+            ),
+
+          // Item cards
+          for (int i = 0; i < cards.length; i++) ...[
+            if (i > 0) const SizedBox(height: 12),
+            _buildPivotCard(
+              cards[i],
+              countMap,
+              planLabel: planLabel,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Build a single pivot card: item name (once) + category chip + N stepper
+  /// cells (one per pivot slot).
+  ///
+  /// Mirrors [_buildItemCard] layout (white rounded card, header row, stepper
+  /// cells). For exactly 2 slots, renders side-by-side Row of Expanded cells
+  /// (matching DROP|PICKUP layout). For other counts, renders a vertical Column.
+  Widget _buildPivotCard(
+    _PivotCardData card,
+    Map<String, CountEntry> countMap, {
+    required String planLabel,
+  }) {
+    // Category chip.
+    final bool isReturnable =
+        card.category.toLowerCase() == 'returnable';
+    final String chipLabel =
+        isReturnable ? _t(4, 'Returnable') : _t(5, 'Consumable');
+    final Color chipBg = isReturnable ? _accentBg : _neutralBg;
+    final Color chipFg = isReturnable ? _accent : _neutralFg;
+
+    // ── Build stepper layout ─────────────────────────────────────────
+    Widget stepperLayout;
+
+    if (card.slots.length == 2) {
+      // Side-by-side: mirrors the DROP|PICKUP Row in _buildItemCard.
+      final _PivotSlotData s0 = card.slots[0];
+      final _PivotSlotData s1 = card.slots[1];
+      final int counted0 = countMap[s0.countKey]?.qty ?? 0;
+      final int counted1 = countMap[s1.countKey]?.qty ?? 0;
+
+      stepperLayout = Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: _buildStepperCell(
+              label: s0.slot.label.toUpperCase(),
+              planValue: s0.expected,
+              actualValue: counted0,
+              status: _pivotCellStatus(counted0, s0.expected),
+              planLabel: planLabel,
+              isPickup: false,
+              onDecrement: counted0 > 0
+                  ? () => _onPivotCountChanged(
+                      s0.countKey, counted0 - 1, card.ii, s0.slot.value)
+                  : null,
+              onIncrement: () => _onPivotCountChanged(
+                  s0.countKey, counted0 + 1, card.ii, s0.slot.value),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _buildStepperCell(
+              label: s1.slot.label.toUpperCase(),
+              planValue: s1.expected,
+              actualValue: counted1,
+              status: _pivotCellStatus(counted1, s1.expected),
+              planLabel: planLabel,
+              isPickup: false,
+              onDecrement: counted1 > 0
+                  ? () => _onPivotCountChanged(
+                      s1.countKey, counted1 - 1, card.ii, s1.slot.value)
+                  : null,
+              onIncrement: () => _onPivotCountChanged(
+                  s1.countKey, counted1 + 1, card.ii, s1.slot.value),
+            ),
+          ),
+        ],
+      );
+    } else {
+      // Vertical stack for 1 or 3+ slots.
+      stepperLayout = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (int s = 0; s < card.slots.length; s++) ...[
+            if (s > 0) const SizedBox(height: 10),
+            Builder(builder: (_) {
+              final _PivotSlotData sd = card.slots[s];
+              final int counted = countMap[sd.countKey]?.qty ?? 0;
+              return _buildStepperCell(
+                label: sd.slot.label.toUpperCase(),
+                planValue: sd.expected,
+                actualValue: counted,
+                status: _pivotCellStatus(counted, sd.expected),
+                planLabel: planLabel,
+                isPickup: false,
+                onDecrement: counted > 0
+                    ? () => _onPivotCountChanged(
+                        sd.countKey, counted - 1, card.ii, sd.slot.value)
+                    : null,
+                onIncrement: () => _onPivotCountChanged(
+                    sd.countKey, counted + 1, card.ii, sd.slot.value),
+              );
+            }),
+          ],
+        ],
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _hair),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x08000000), // ~3% black -- subtle card lift
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── Header: name + category chip ──────────────────────
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Flexible(
+                child: Text(
+                  card.name,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    height: 1.2,
+                    color: _ink,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: chipBg,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  chipLabel.toUpperCase(),
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: chipFg,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // ── Stepper cells ────────────────────────────────────
+          stepperLayout,
+        ],
+      ),
+    );
+  }
+
   Widget _buildItemCard(
     _ItemRow row,
     Map<String, ExecutionEntry> execMap, {
@@ -456,11 +1026,39 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
     final int dropActual = entry?.dropActual ?? row.planDrop;
     final int pickupActual = entry?.pickupActual ?? row.planPickup;
 
-    final _CellStatus dropStatus =
-        _cellStatus(dropActual, row.planDrop, false);
+    // ── Drop cap resolution ──────────────────────────────────────────
+    // Resolved-aware: null during loading (unresolved) or no-cap mode,
+    // non-null (possibly 0) once cap is known. Threaded from _buildRows.
+    final int? dropCap = row.dropCap;
+
+    // capLabel config (read from component, with default).
+    final String rawCapLabel =
+        (widget.component['capLabel'] ?? 'Maks <max>').toString();
+
+    // ── Status derivation ────────────────────────────────────────────
+    // Cap status overrides plan-relative status when value == cap.
+    final _CellStatus dropStatus;
+    if (dropCap != null && dropActual == dropCap) {
+      final String resolvedCapLabel =
+          rawCapLabel.replaceAll('<max>', '$dropCap');
+      dropStatus = _CellStatus('capped', resolvedCapLabel);
+    } else {
+      dropStatus = _cellStatus(dropActual, row.planDrop, false);
+    }
     final _CellStatus pickupStatus = row.isReturnable
         ? _cellStatus(pickupActual, row.planPickup, true)
         : _CellStatus('complete', '');
+
+    // ── Drop stepper callbacks ───────────────────────────────────────
+    // [+] disabled when cap != null && dropActual >= cap.
+    final bool dropIncrementDisabled =
+        dropCap != null && dropActual >= dropCap;
+    final VoidCallback? dropOnIncrement = dropIncrementDisabled
+        ? null
+        : () => _onDropChanged(row.key, dropActual + 1);
+    final VoidCallback? dropOnDecrement = dropActual > 0
+        ? () => _onDropChanged(row.key, dropActual - 1)
+        : null;
 
     // Type chip
     final String chipLabel =
@@ -539,11 +1137,8 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
                     status: dropStatus,
                     planLabel: planLabel,
                     isPickup: false,
-                    onDecrement: dropActual > 0
-                        ? () => _onDropChanged(row.key, dropActual - 1)
-                        : null,
-                    onIncrement: () =>
-                        _onDropChanged(row.key, dropActual + 1),
+                    onDecrement: dropOnDecrement,
+                    onIncrement: dropOnIncrement,
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -575,10 +1170,8 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
               status: dropStatus,
               planLabel: planLabel,
               isPickup: false,
-              onDecrement: dropActual > 0
-                  ? () => _onDropChanged(row.key, dropActual - 1)
-                  : null,
-              onIncrement: () => _onDropChanged(row.key, dropActual + 1),
+              onDecrement: dropOnDecrement,
+              onIncrement: dropOnIncrement,
             ),
         ],
       ),
@@ -607,6 +1200,12 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
         frameBorder = const Color(0xFFFCD34D); // amber-300
         numberColor = const Color(0xFFB45309); // amber-700
         statusColor = const Color(0xFFD97706); // amber-600
+        break;
+      case 'capped':
+        frameBg = const Color(0xFFFFF7ED); // orange-50
+        frameBorder = const Color(0xFFFDBA74); // orange-300
+        numberColor = const Color(0xFFC2410C); // orange-700
+        statusColor = const Color(0xFFEA580C); // orange-600
         break;
       case 'opportunistic':
       case 'extra':
@@ -897,6 +1496,8 @@ class _ItemRow {
   final bool isReturnable;
   final int planDrop;
   final int planPickup;
+  final String itemIi; // item id for cap lookup
+  final int? dropCap; // resolved cap (null = no cap / unresolved)
   // sale/purchase/refill-specific (read-only qty + sub-label)
   final int txQty; // ps/pb/pr depending on txKind
   final String subLabel; // condition or water display label (may be '')
@@ -908,6 +1509,8 @@ class _ItemRow {
     this.isReturnable = false,
     this.planDrop = 0,
     this.planPickup = 0,
+    this.itemIi = '',
+    this.dropCap,
     this.txQty = 0,
     this.subLabel = '',
   });
@@ -979,4 +1582,140 @@ String waterLabel(
   if (v == 'ro') return roSlot;
   // Any other non-empty value -> isi ulang (degrade-safe).
   return isiUlangSlot;
+}
+
+/// Build a per-item drop cap map from filtered asset_cache docs.
+///
+/// Iterates [capDocs] (already filtered by dropCapSearch via
+/// filterDriverHomeDocs), reads [capKeyField] (item id, e.g. 'ii') and
+/// [capValueField] (cap quantity, e.g. 'qt') from each doc, and builds
+/// a `{itemId -> capQty}` map.
+///
+/// Duplicate item ids: last-write-wins (asset_cache docs are unique per
+/// lv+ii+cd by doc-id convention, so duplicates are unexpected; last-write
+/// is a safe degrade).
+///
+/// Pure function for testability -- no Rx, no global state.
+Map<String, int> buildDropCapMap(
+  List<Map<String, dynamic>> capDocs, {
+  required String capKeyField,
+  required String capValueField,
+}) {
+  final Map<String, int> result = <String, int>{};
+  for (final Map<String, dynamic> doc in capDocs) {
+    final String itemId = (doc[capKeyField] ?? '').toString().trim();
+    if (itemId.isEmpty) continue;
+    final int qty =
+        int.tryParse((doc[capValueField] ?? '0').toString().trim()) ?? 0;
+    result[itemId] = qty;
+  }
+  return result;
+}
+
+/// Intermediate data for one pivot card (one grouped item).
+class _PivotCardData {
+  final String ii;
+  final String name;
+  final String category;
+  final List<_PivotSlotData> slots;
+  const _PivotCardData({
+    required this.ii,
+    required this.name,
+    required this.category,
+    required this.slots,
+  });
+}
+
+/// Intermediate data for one slot within a pivot card.
+class _PivotSlotData {
+  final PivotSlot slot;
+  final int expected;
+  final String countKey;
+  const _PivotSlotData({
+    required this.slot,
+    required this.expected,
+    required this.countKey,
+  });
+}
+
+/// One slot in a pivot variant's stepper layout.
+///
+/// Parsed from the component's `slots` config string.
+/// Format: `value^Label` entries separated by `~`.
+/// Example: `"full^Penuh~empty^Kosong"` -> two PivotSlots.
+///
+/// Public for testability (imported by test/item_execution_list_test.dart).
+class PivotSlot {
+  /// The raw value matched against the pivot field (e.g. `"full"`, `"empty"`).
+  final String value;
+
+  /// The display label for this slot (e.g. `"Penuh"`, `"Kosong"`).
+  final String label;
+
+  const PivotSlot({required this.value, required this.label});
+}
+
+/// Parse a pivot `slots` config string into a list of [PivotSlot].
+///
+/// Format: `value^Label` entries separated by `~`.
+/// Malformed entries (no `^`, empty value) are skipped.
+/// Empty/whitespace-only input returns an empty list.
+///
+/// Pure function for testability.
+List<PivotSlot> parsePivotSlots(String raw) {
+  if (raw.trim().isEmpty) return const <PivotSlot>[];
+  final List<PivotSlot> result = <PivotSlot>[];
+  final List<String> entries = raw.split('~');
+  for (final String entry in entries) {
+    final String trimmed = entry.trim();
+    if (trimmed.isEmpty) continue;
+    final int caret = trimmed.indexOf('^');
+    if (caret < 0) continue; // malformed: no ^ separator
+    final String value = trimmed.substring(0, caret).trim();
+    final String label = trimmed.substring(caret + 1).trim();
+    if (value.isEmpty) continue; // value is required
+    result.add(PivotSlot(value: value, label: label));
+  }
+  return result;
+}
+
+/// Group a list of docs by a key field, preserving insertion order.
+///
+/// Docs with an empty/absent key are skipped. Returns a plain `Map` (Dart maps
+/// are insertion-ordered by default).
+///
+/// Pure function for testability.
+Map<String, List<Map<String, dynamic>>> groupDocsByKey(
+  List<Map<String, dynamic>> docs,
+  String groupKey,
+) {
+  final Map<String, List<Map<String, dynamic>>> result =
+      <String, List<Map<String, dynamic>>>{};
+  for (final Map<String, dynamic> doc in docs) {
+    final String key = (doc[groupKey] ?? '').toString().trim();
+    if (key.isEmpty) continue;
+    result.putIfAbsent(key, () => <Map<String, dynamic>>[]).add(doc);
+  }
+  return result;
+}
+
+/// Resolve the expected quantity for one pivot slot within a group of docs.
+///
+/// Finds the first doc where `doc[pivotField] == slotValue` and returns
+/// `coerceNum(doc[valueField]).toInt()`. Returns 0 if no matching doc exists.
+///
+/// Pure function for testability.
+int pivotExpected(
+  List<Map<String, dynamic>> group,
+  String pivotField,
+  String slotValue,
+  String valueField,
+) {
+  for (final Map<String, dynamic> doc in group) {
+    final String pv = (doc[pivotField] ?? '').toString().trim();
+    if (pv == slotValue) {
+      return coerceNum(doc[valueField]).toInt();
+    }
+  }
+  return 0;
 }

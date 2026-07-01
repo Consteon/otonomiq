@@ -2,7 +2,7 @@
 
 **Buat:** Flutter dev. Benerin daftar item di card **"Konfirmasi Penerimaan Muatan"** (DriverHome) supaya: (B) ngitung item jual/tukar, (A) ngurang otomatis pas task ditolak, (C) sembunyiin item nol.
 
-**Status:** DRAFT, 2026-06-23. Config udah ditambah live di Widget!J201 (proxy `18v3w5YJ…`).
+**Status:** DRAFT, 2026-06-23. Config udah ditambah live di Widget!J201 (proxy `18v3w5YJ…`). **Update 2026-06-25:** existence gate + `itemsSearch` (date-scope) ditambah live — lihat **§8 (DEV WAJIB)**.
 
 ---
 
@@ -68,6 +68,31 @@ Reject Indomaret (`tst=load_rejected`) → agregasi skip task itu → **Aqua 15 
 > Catatan: tanpa perilaku **B**, reject Indomaret = **0 perubahan keliatan** (Indomaret gak punya `pd`). B + A wajib bareng biar reject sale/tukar keliatan.
 
 ## 7. Open
-1. **Filter task implisit** — agregasi item belum punya `itemsSearch` eksplisit; sekarang renderer (asumsi) scope ke `vv={vehicleId}` + hari ini. Konfirmasi, atau tambah `itemsSearch:"vv◼{vehicleId}⭘tdt◼{today}"`.
+1. ✅ **RESOLVED 2026-06-25** → `itemsSearch` ditambah, lihat §8.
 2. **vehicle_check.ie[] vs agregasi task** — `ie[]` (manifest gudang, statis) udah = `pd+ps+pr`. Card sengaja agregasi `task.it[]` (live) biar bisa react ke reject. Dua-duanya harus konsisten; kalau beda, `ie[]` = baseline gudang, agregasi task = rencana live.
-3. **`search` punya `cst◼custody_confirmed`** tapi card kelihatan di state "Perlu Aksi" (belum confirmed) — perlu dicek terpisah (kemungkinan morph harus nemu doc regardless `cst`, lalu state dari `statusField`).
+3. ✅ **RESOLVED 2026-06-25** → existence gate (`gateSearch`) misahin "ada doc hari ini" dari "state cst", lihat §8.
+
+## 8. Date-scope: existence gate + itemsSearch (DEV WAJIB) — 2026-06-25
+
+**Bug ketemu (seed lintas-hari):** seed dibikin H-1, gak di-re-seed. Besoknya **"Rute Hari Ini" = 0 tujuan** (driverStopCard `tdt◼{today}` no-match karena `tdt` firebase = kemarin) **TAPI card "Konfirmasi Penerimaan Muatan" tetap nongol + nampilin item kemarin** (Amidis ×3). Inkonsisten: konfirmasi muatan tanpa rute gak masuk akal.
+
+**Akar:** card ini gak honor date di 2 tempat —
+1. **Existence**: renderer nentuin card muncul dari `search` (`…cdt◼{today}⭘cst◼custody_confirmed`). Pas kosong, gak bisa bedain **"gak ada doc hari ini"** vs **"ada tapi belum confirmed"** → dua-duanya jatoh ke state "Perlu Aksi" → card nongol walau gak ada opening doc hari ini.
+2. **Item list**: agregasi `task.it[]` di-scope `vv` doang (date-agnostic) → ketarik task kemarin.
+
+**Fix config (LIVE — Widget!J201 + op1Screen D1011):** 3 field baru di `PRECONDITION_GATE_CARD`:
+```json
+"gateTable":"84214220504259//vehicle_check",
+"gateSearch":"cty◼opening⭘vv◼{vehicleId}⭘cdt◼{today}",
+"itemsSearch":"vv◼{vehicleId}⭘tdt◼{today}"
+```
+- `gateTable`/`gateSearch` = **existence gate**, `cst`-agnostic (sengaja TANPA `cst◼…`). Mirror pola `INVENTORY_BUCKET_CARD`/`DRIVER_STOP_CARD`.
+- `itemsSearch` = scope agregasi item, **sama persis** kaya `search`-nya driverStopCard/taskManifestList.
+
+**Dev WAJIB:**
+1. **Existence (hide kalau no-match):** cari opening doc pakai `gateSearch` (honor `cdt◼{today}`, **abaikan `cst`**). **KOSONG → HIDE seluruh card** (jangan render "Perlu Aksi"). KETEMU → render; state badge (Perlu Aksi / Dikonfirmasi / Selisih) tetap dari `statusField` (`cst`) via `search`+`reconcileField`. Ini misahin **ada-load-hari-ini** dari **status-confirm** — fix §7 #3.
+2. **Item scope:** agregasi `itemsTable` pakai **`itemsSearch`** (`vv◼{vehicleId}⭘tdt◼{today}`), BUKAN `vv`-only. Hasil = mirror route. Fix §7 #1.
+
+**Efek:** besoknya (data basi / gak ada task hari ini) card **ilang barengan** sama route — konsisten. Re-seed → dua-dua balik muncul.
+
+> Backward-compat: kalau `gateSearch`/`itemsSearch` kosong/absent → fallback perilaku lama (jangan gate / scope vv-only). Opt-in, sama kaya `excludeStatus`.

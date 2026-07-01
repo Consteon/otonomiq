@@ -708,17 +708,21 @@ class MainPageState extends State<MainPage> {
                                       ),
                                     );
                                   }
-                                  return Container(
-                                    padding: EdgeInsets.fromLTRB(
-                                        lPad, tPad, rPad, bPad),
-                                    child: Builder(
-                                      builder: (context) => ListView.builder(
-                                        controller: scrollController,
-                                        itemCount: pageElements.length,
-                                        itemBuilder: (context, position) {
-                                          return pageElements[position];
-                                        },
-                                      ),
+                                  // Padding sits on the ListView (not a wrapping
+                                  // Container) so the list clips to the FULL
+                                  // viewport. Inset items look identical; items
+                                  // that opt out via a negative margin (e.g. the
+                                  // full-bleed admin header) can reach the screen
+                                  // edge / AppBar without being re-clipped.
+                                  return Builder(
+                                    builder: (context) => ListView.builder(
+                                      controller: scrollController,
+                                      padding: EdgeInsets.fromLTRB(
+                                          lPad, tPad, rPad, bPad),
+                                      itemCount: pageElements.length,
+                                      itemBuilder: (context, position) {
+                                        return pageElements[position];
+                                      },
                                     ),
                                   );
                                 },

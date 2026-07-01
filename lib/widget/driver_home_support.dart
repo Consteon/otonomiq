@@ -109,6 +109,14 @@ Future<String?> readDriverLogin() async {
 ///   {activeTaskVid} -> screenTx['#ACTIVE_TASK'] (tapped task VID from P10)
 ///   {tnm}        -> screenTx['#ACTIVE_TASK'] (alias of {activeTaskVid}; task doc id per spec section 4)
 ///   {rejectTaskVid} -> screenTx['#REJECT_TASK'] (task VID being rejected from P4 stop card)
+///   {checkerVid}    -> screenTx['#VID'] (logged-in checker VID from main auth)
+///   {userVid}       -> screenTx['#VID'] (logged-in user VID; role-agnostic)
+///   {userName}      -> screenTx['#NAME'] (logged-in user display name; role-agnostic)
+///   {activeVehicle}  -> screenTx['#ACTIVE_VEHICLE'] (tapped vehicle lv from H1)
+///   {chosenVid}     -> screenTx['#CHOSEN_DRIVER_VID'] (driver chosen on O1)
+///   {chosenName}    -> screenTx['#CHOSEN_DRIVER_NAME'] (driver name chosen on O1)
+///   {warehouseId}   -> screenTx['#ACTIVE_WAREHOUSE'] (gudang from task gl)
+///   {now}           -> getNowMillisecondFromEpoch().toString() (epoch-ms now)
 ///   {today}      -> todayEpochMidnightWib() (epoch-ms of WIB midnight)
 ///
 /// Runs BEFORE `resolveScreenTxTokens` in the filterDriverHomeDocs pipeline.
@@ -148,14 +156,38 @@ String resolveDriverCurlyTokens(String raw, String scrName) {
         case 'rejectTaskVid':
           final String v = (screenTx['#REJECT_TASK'] ?? '').toString();
           return v.isNotEmpty ? v : m.group(0)!;
+        case 'checkerVid':
+          final String v = (screenTx['#VID'] ?? '').toString();
+          return v.isNotEmpty ? v : m.group(0)!;
+        case 'userVid':
+          final String v = (screenTx['#VID'] ?? '').toString();
+          return v.isNotEmpty ? v : m.group(0)!;
+        case 'userName':
+          final String v = (screenTx['#NAME'] ?? '').toString();
+          return v.isNotEmpty ? v : m.group(0)!;
+        case 'activeVehicle':
+          final String v = (screenTx['#ACTIVE_VEHICLE'] ?? '').toString();
+          return v.isNotEmpty ? v : m.group(0)!;
+        case 'chosenVid':
+          final String v = (screenTx['#CHOSEN_DRIVER_VID'] ?? '').toString();
+          return v.isNotEmpty ? v : m.group(0)!;
+        case 'chosenName':
+          final String v = (screenTx['#CHOSEN_DRIVER_NAME'] ?? '').toString();
+          return v.isNotEmpty ? v : m.group(0)!;
+        case 'warehouseId':
+          final String v = (screenTx['#ACTIVE_WAREHOUSE'] ?? '').toString();
+          return v.isNotEmpty ? v : m.group(0)!;
+        case 'now':
+          return getNowMillisecondFromEpoch().toString();
         case 'today':
           return todayEpochMidnightWib();
         default:
           // routeParams fallback: resolve from bare screenTx key if present
           // and non-empty. Otherwise leave literal for resolveScreenTxTokens.
           // Reserved tokens (vehicleId, driverName, tnm, today, driverVid,
-          // activeTaskVid, rejectTaskVid) are handled by switch cases above
-          // and never reach here.
+          // activeTaskVid, rejectTaskVid, checkerVid, userVid, userName,
+          // activeVehicle, chosenVid, chosenName, warehouseId, now) are
+          // handled by switch cases above and never reach here.
           final String bareVal = (screenTx[name] ?? '').toString();
           return bareVal.isNotEmpty ? bareVal : m.group(0)!;
       }
@@ -411,6 +443,35 @@ Map<String, String> buildItemNameMap(
   return map;
 }
 
+/// Build a `Map<String, String>` mapping item-id -> unit/satuan (`un`) from a
+/// list of item-collection docs.
+///
+/// Sibling of [buildItemNameMap]: same shape and conventions, but resolves the
+/// unit field (`un`, e.g. "Tabung"/"Galon"/"Karton") instead of the name. Used
+/// by P12 vehicleCargoSummary to prefix each condition row ("{un} isi {qty}")
+/// per spec §2 — replacing the hardcoded "Tabung" label so galon/karton items
+/// are labelled correctly.
+///
+/// Convention #7: itemDocs originate from firestoreDb (dynamic); each doc is
+/// `Map<String, dynamic>`. Field reads use `.toString().trim()` to handle
+/// null / non-string gracefully. Entries with empty `ii` are skipped; a doc
+/// with no `un` maps to `''` (degrades to a bare condition label downstream).
+///
+/// Returns an explicitly typed `Map<String, String>` (never a dynamic map).
+Map<String, String> buildItemUnitMap(
+  List<Map<String, dynamic>> itemDocs, {
+  String idField = 'ii',
+  String unitField = 'un',
+}) {
+  final Map<String, String> map = <String, String>{};
+  for (final Map<String, dynamic> doc in itemDocs) {
+    final String id = (doc[idField] ?? '').toString().trim();
+    if (id.isEmpty) continue;
+    map[id] = (doc[unitField] ?? '').toString().trim();
+  }
+  return map;
+}
+
 // ─── Per-item cargo rows (P12 vehicleCargoSummary) ─────────────────────────
 
 /// One row of the per-item vehicle cargo card: an item (resolved name + raw
@@ -428,6 +489,13 @@ class CargoItemRow {
   /// item master is absent or has an empty / missing name for it.
   final String displayName;
 
+  /// Resolved unit / satuan (item master `un`, e.g. "Tabung"/"Galon"/
+  /// "Karton"), or `''` when the item master has no `un` for it. Rendered as
+  /// the per-condition prefix in P12 ("{unit} isi {qty}"); blank degrades to a
+  /// bare "isi {qty}". Defaults to `''` so callers that do not resolve units
+  /// (and existing tests) keep working unchanged.
+  final String unit;
+
   /// Summed quantity for the `full` condition (0 when absent).
   final int fullQty;
 
@@ -437,6 +505,7 @@ class CargoItemRow {
   const CargoItemRow({
     required this.itemId,
     required this.displayName,
+    this.unit = '',
     required this.fullQty,
     required this.emptyQty,
   });
@@ -467,6 +536,7 @@ class CargoItemRow {
 List<CargoItemRow> computePerItemCargoRows(
   List<Map<String, dynamic>> cacheDocs,
   Map<String, String> itemNameMap, {
+  Map<String, String> itemUnitMap = const <String, String>{},
   String itemField = 'ii',
   String conditionField = 'cd',
   String qtyField = 'qt',
@@ -505,9 +575,14 @@ List<CargoItemRow> computePerItemCargoRows(
   for (final String itemId in sortedIds) {
     final String displayName =
         itemNameMap[itemId]?.isNotEmpty == true ? itemNameMap[itemId]! : itemId;
+    // Unit / satuan (item master `un`) for the per-condition prefix. Absent
+    // entry -> '' (degrades to a bare condition label). itemUnitMap defaults
+    // empty, so callers that do not resolve units get '' for every row.
+    final String unit = (itemUnitMap[itemId] ?? '').trim();
     rows.add(CargoItemRow(
       itemId: itemId,
       displayName: displayName,
+      unit: unit,
       fullQty: grouped[itemId]?[conditionFull] ?? 0,
       emptyQty: grouped[itemId]?[conditionEmpty] ?? 0,
     ));
@@ -628,8 +703,9 @@ List<Map<String, dynamic>> aggregateItems(
 }
 
 /// Numeric coercion for Firestore dynamic fields: handles int, double, String,
-/// null. Returns the numeric value or 0.
-num _coerceNum(dynamic v) {
+/// null. Returns the numeric value or 0. Public so custody_count_list can
+/// reuse it (was file-private _coerceNum; renamed to avoid duplication).
+num coerceNum(dynamic v) {
   if (v == null) return 0;
   if (v is num) return v;
   return num.tryParse(v.toString().trim()) ?? 0;
@@ -654,7 +730,7 @@ num _coerceNum(dynamic v) {
 /// existing pending-card render (which reads `row[labelField]` / `row[qtyField]`
 /// where qtyField == deliverField) works unchanged.
 ///
-/// Convention #7: dynamic guards throughout (is List, is Map, _coerceNum).
+/// Convention #7: dynamic guards throughout (is List, is Map, coerceNum).
 List<Map<String, dynamic>> aggregateManifestItems(
   List<Map<String, dynamic>> taskDocs, {
   required String itemsField,
@@ -684,9 +760,9 @@ List<Map<String, dynamic>> aggregateManifestItems(
       if (label.isEmpty) continue;
 
       // B: sum deliver + sale + refill
-      final int lineQty = (_coerceNum(entry[deliverField]) +
-              _coerceNum(entry[saleField]) +
-              _coerceNum(entry[refillField]))
+      final int lineQty = (coerceNum(entry[deliverField]) +
+              coerceNum(entry[saleField]) +
+              coerceNum(entry[refillField]))
           .toInt();
 
       if (!totals.containsKey(label)) {
@@ -708,6 +784,132 @@ List<Map<String, dynamic>> aggregateManifestItems(
     });
   }
   return out;
+}
+
+/// Aggregate a vehicle_check `ie[]` array into display rows for the
+/// pending-card item list.
+///
+/// The `ie` array on an opening doc records the manifest per item/condition:
+/// each entry is `{ii: <item-id>, cd: <condition>, qt: <qty>}`. This groups
+/// by [idField] (default `ii`), SUMS [qtyField] (default `qt`) across ALL
+/// `cd` values (full + empty = total per item), resolves `ii` -> item name
+/// via [nameMap] (built by `buildItemNameMap`), and returns one row per
+/// distinct item in first-seen order.
+///
+/// Output rows are shaped `{<labelField>: name, <qtyField>: total}` so the
+/// pending-card render (which reads `row[labelField]` / `row[qtyField]`)
+/// works unchanged.
+///
+/// [ieArray] -- the raw `ie` field from the opening doc (dynamic from
+///   Firestore). Must be a List; non-List returns empty.
+/// [nameMap] -- item-id -> display name map (from `buildItemNameMap`).
+///   Unknown ids fall back to the raw id string.
+/// [idField] -- key for item id in each ie entry (default `ii`).
+/// [qtyField] -- key for quantity in each ie entry AND the output row key
+///   (default `qt`). This MUST match the resolved `component['qtyField']` so
+///   the render loop reads the correct key.
+/// [labelField] -- key for the output row's name (default `in`). This MUST
+///   match the resolved `component['labelField']`.
+/// [hideZero] -- when true, drop items whose summed total is 0.
+///
+/// Convention #7: `ieArray` is `dynamic` from Firestore. Guarded: `is List`,
+/// each entry `is Map`, qt via `int.tryParse(...) ?? 0`. Returns an
+/// explicitly typed `List<Map<String, dynamic>>`.
+List<Map<String, dynamic>> aggregateManifestFromIe(
+  dynamic ieArray,
+  Map<String, String> nameMap, {
+  String idField = 'ii',
+  String qtyField = 'qt',
+  String labelField = 'in',
+  bool hideZero = false,
+}) {
+  if (ieArray is! List) return const [];
+
+  // Preserve first-seen order: ordered list of ids + an id->totalQty map.
+  final List<String> order = <String>[];
+  final Map<String, int> totals = <String, int>{};
+
+  for (final dynamic entry in ieArray) {
+    if (entry is! Map) continue;
+    final String id = (entry[idField] ?? '').toString().trim();
+    if (id.isEmpty) continue;
+    final int qty =
+        int.tryParse((entry[qtyField] ?? '0').toString().trim()) ?? 0;
+    if (!totals.containsKey(id)) {
+      order.add(id);
+      totals[id] = 0;
+    }
+    totals[id] = totals[id]! + qty;
+  }
+
+  final List<Map<String, dynamic>> out = <Map<String, dynamic>>[];
+  for (final String id in order) {
+    final int total = totals[id]!;
+    if (hideZero && total == 0) continue;
+    final String name =
+        nameMap[id]?.isNotEmpty == true ? nameMap[id]! : id;
+    out.add(<String, dynamic>{
+      labelField: name,
+      qtyField: total,
+    });
+  }
+  return out;
+}
+
+/// Aggregate plan qty per item-id across task docs.
+///
+/// O1 count-list source: walks each task's [itemsField] array, sums
+/// [deliverField]+[saleField]+[refillField] per distinct `ii` (item id).
+/// Excludes tasks whose `tst` matches [excludeStatus].
+///
+/// Returns a [PlanAggregate] with ii-order list and per-ii totals.
+/// Pure -- no Flutter/Obx deps, directly testable.
+///
+/// Convention #7: dynamic guards throughout (is List, is Map, coerceNum).
+PlanAggregate aggregatePlanByItem(
+  List<Map<String, dynamic>> taskDocs, {
+  required String itemsField,
+  required String deliverField,
+  required String saleField,
+  required String refillField,
+  String excludeStatus = '',
+}) {
+  final List<String> iiOrder = <String>[];
+  final Map<String, int> totals = <String, int>{};
+
+  for (final Map<String, dynamic> doc in taskDocs) {
+    if (excludeStatus.isNotEmpty) {
+      final String tst = (doc['tst'] ?? '').toString().trim();
+      if (tst == excludeStatus) continue;
+    }
+    final dynamic rawItems = doc[itemsField];
+    if (rawItems is! List) continue;
+    for (final dynamic entry in rawItems) {
+      if (entry is! Map) continue;
+      final String ii = (entry['ii'] ?? '').toString().trim();
+      if (ii.isEmpty) continue;
+      final int lineQty = (coerceNum(entry[deliverField]) +
+              coerceNum(entry[saleField]) +
+              coerceNum(entry[refillField]))
+          .toInt();
+      if (!totals.containsKey(ii)) {
+        iiOrder.add(ii);
+        totals[ii] = 0;
+      }
+      totals[ii] = totals[ii]! + lineQty;
+    }
+  }
+  return PlanAggregate(iiOrder: iiOrder, totals: totals);
+}
+
+/// Result of [aggregatePlanByItem]: per-item-id plan totals in first-seen order.
+class PlanAggregate {
+  /// Item ids in first-seen order.
+  final List<String> iiOrder;
+
+  /// Summed plan qty per item id.
+  final Map<String, int> totals;
+  const PlanAggregate({required this.iiOrder, required this.totals});
 }
 
 // ─── Bucket parsing (inventoryBucketCard) ─────────────────────────────────
@@ -1056,6 +1258,145 @@ CirculationResult aggregateItemCirculation(
   );
 }
 
+// ─── Per-tx item circulation (P12 circulationSummary "Opsi A") ─────────────
+
+/// One row of the tx-driven circulation summary: an item name with its summed
+/// quantity per transaction flow. Unlike [ItemCirculation] (drop/pickup only),
+/// this carries all four flows so sale/refill/purchase items no longer render
+/// 0/0/0 (spec `driver-return-vehicle-p12-dev-spec (2).md` §3). Each task
+/// `it[]` line contributes to exactly ONE flow, chosen by its `tx`
+/// discriminator (empty/unknown `tx` == `deliver`).
+class TxItemCirculation {
+  final String itemName;
+  final int drop; // Σ pd  (tx == deliver)
+  final int pickup; // Σ pp  (tx == deliver)
+  final int sale; // Σ ps  (tx == sale)
+  final int refill; // Σ pr  (tx == refill)
+  final int buy; // Σ pb  (tx == purchase)
+  const TxItemCirculation({
+    required this.itemName,
+    this.drop = 0,
+    this.pickup = 0,
+    this.sale = 0,
+    this.refill = 0,
+    this.buy = 0,
+  });
+
+  /// True when every flow is zero (item contributes no visible metric).
+  bool get isEmpty =>
+      drop == 0 && pickup == 0 && sale == 0 && refill == 0 && buy == 0;
+}
+
+/// Result of tx-driven circulation aggregation: per-item rows (first-seen
+/// order) + grand totals per flow.
+class TxCirculationResult {
+  final List<TxItemCirculation> items;
+  final int grandDrop;
+  final int grandPickup;
+  final int grandSale;
+  final int grandRefill;
+  final int grandBuy;
+  const TxCirculationResult({
+    required this.items,
+    this.grandDrop = 0,
+    this.grandPickup = 0,
+    this.grandSale = 0,
+    this.grandRefill = 0,
+    this.grandBuy = 0,
+  });
+}
+
+/// Aggregate ALL tasks' it[] entries by item name, routing each line's qty to
+/// the flow named by its `tx` ([txField]) per spec `(2).md` §3 "Opsi A":
+///
+///   tx == deliver (or empty/unknown) -> drop += pd, pickup += pp
+///   tx == sale                       -> sale += ps
+///   tx == refill                     -> refill += pr
+///   tx == purchase                   -> buy += pb
+///
+/// Returns [TxCirculationResult] (per-item rows in first-seen order + grand
+/// totals per flow). Mirrors [aggregateItemCirculation] conventions: dynamic
+/// guards (is List, is Map, int.tryParse), label trimmed, empty labels skipped.
+TxCirculationResult aggregateTxCirculation(
+  List<Map<String, dynamic>> taskDocs, {
+  String itemsField = 'it',
+  String labelField = 'in',
+  String txField = 'tx',
+  String dropField = 'pd',
+  String pickupField = 'pp',
+  String saleField = 'ps',
+  String refillField = 'pr',
+  String buyField = 'pb',
+}) {
+  final List<String> order = <String>[];
+  final Map<String, int> drop = <String, int>{};
+  final Map<String, int> pickup = <String, int>{};
+  final Map<String, int> sale = <String, int>{};
+  final Map<String, int> refill = <String, int>{};
+  final Map<String, int> buy = <String, int>{};
+
+  int readInt(Map<dynamic, dynamic> entry, String f) =>
+      int.tryParse((entry[f] ?? '0').toString().trim()) ?? 0;
+
+  for (final Map<String, dynamic> doc in taskDocs) {
+    final dynamic rawItems = doc[itemsField];
+    if (rawItems is! List) continue;
+    for (final dynamic entry in rawItems) {
+      if (entry is! Map) continue;
+      final String label = (entry[labelField] ?? '').toString().trim();
+      if (label.isEmpty) continue;
+      if (!drop.containsKey(label)) {
+        order.add(label);
+        drop[label] = 0;
+        pickup[label] = 0;
+        sale[label] = 0;
+        refill[label] = 0;
+        buy[label] = 0;
+      }
+      // Empty / unknown tx == deliver: old it[] lines carry no tx and represent
+      // a delivery, so they route to drop/pickup (backward-compatible).
+      final String tx = (entry[txField] ?? '').toString().trim().toLowerCase();
+      switch (tx) {
+        case 'sale':
+          sale[label] = sale[label]! + readInt(entry, saleField);
+          break;
+        case 'refill':
+          refill[label] = refill[label]! + readInt(entry, refillField);
+          break;
+        case 'purchase':
+          buy[label] = buy[label]! + readInt(entry, buyField);
+          break;
+        default: // deliver (incl. empty/unknown tx)
+          drop[label] = drop[label]! + readInt(entry, dropField);
+          pickup[label] = pickup[label]! + readInt(entry, pickupField);
+      }
+    }
+  }
+
+  int sumValues(Map<String, int> m) =>
+      m.values.fold<int>(0, (int a, int b) => a + b);
+
+  final List<TxItemCirculation> items = <TxItemCirculation>[];
+  for (final String label in order) {
+    items.add(TxItemCirculation(
+      itemName: label,
+      drop: drop[label]!,
+      pickup: pickup[label]!,
+      sale: sale[label]!,
+      refill: refill[label]!,
+      buy: buy[label]!,
+    ));
+  }
+  return TxCirculationResult(
+    items: items,
+    grandDrop: sumValues(drop),
+    grandPickup: sumValues(pickup),
+    grandSale: sumValues(sale),
+    grandRefill: sumValues(refill),
+    grandBuy: sumValues(buy),
+  );
+}
+
 // ---- Item detail FK resolution (P6 custodyCountList) ---------------------
 
 /// Detail fields for a single item, resolved from the item collection.
@@ -1114,10 +1455,121 @@ class CountEntry {
   final String cd;
   int qty;
 
-  CountEntry({required this.ii, required this.cd, this.qty = 0});
+  /// Expected quantity (plan). Set by O1 aggregate or C1 asset_cache source.
+  /// Default 0 for P6 blind mode (planQty unused). The submit reads this to
+  /// build the reconciliation expected map without re-subscribing to the data
+  /// source.
+  ///
+  /// NOT emitted by [toIpMap] -- ip[] entries carry only ii/cd/qt (counted).
+  int planQty;
+
+  CountEntry({
+    required this.ii,
+    required this.cd,
+    this.qty = 0,
+    this.planQty = 0,
+  });
 
   /// Build the Firestore-ready map for one ip[] element.
   Map<String, dynamic> toIpMap() => {'ii': ii, 'cd': cd, 'qt': qty};
+}
+
+// ─── Shared reconciliation helper (custody_reveal + C1 submit) ─────────────
+
+/// Result of reconciliation: dp[] discrepancy array + rs status string.
+class ReconciliationResult {
+  /// Discrepancy entries: only items where expected != actual.
+  /// Each entry: `{ii, cd, ex, ac, dl}`.
+  final List<Map<String, dynamic>> dp;
+
+  /// Reconcile status: `'matched'` (all equal) or `'discrepancy_detected'`.
+  final String rs;
+
+  const ReconciliationResult({required this.dp, required this.rs});
+}
+
+/// Build reconciliation from expected vs actual quantity maps.
+///
+/// For each key in the union of [expected] and [actual] (keyed by `ii__cd`),
+/// computes `dl = actual - expected`. Keys where `dl == 0` are omitted from
+/// dp[]. Returns [ReconciliationResult] with dp[] and rs.
+///
+/// Key iteration order is STABLE (insertion order): expected-keys first, then
+/// actual-only keys. This preserves custodyReveal's prior dp[] ordering (ie[]
+/// order first, then count-store-only keys) after the refactor.
+///
+/// Pure function, no Flutter/Obx deps, directly testable.
+/// Used by custodyReveal (refactored) and C1 CustodyCountSubmit closing mode.
+ReconciliationResult buildReconciliation({
+  required Map<String, int> expected,
+  required Map<String, int> actual,
+}) {
+  // LinkedHashSet preserves insertion order: expected keys (in their map's
+  // iteration order) first, then any actual-only keys. Keep dp[] deterministic.
+  final Set<String> allKeys = <String>{...expected.keys, ...actual.keys};
+  final List<Map<String, dynamic>> dp = <Map<String, dynamic>>[];
+  for (final String key in allKeys) {
+    final int ex = expected[key] ?? 0;
+    final int ac = actual[key] ?? 0;
+    final int dl = ac - ex;
+    if (dl == 0) continue;
+    // Parse ii and cd from composite key "ii__cd"
+    final int sep = key.indexOf('__');
+    final String ii = sep >= 0 ? key.substring(0, sep) : key;
+    final String cd = sep >= 0 ? key.substring(sep + 2) : '';
+    dp.add(<String, dynamic>{
+      'ii': ii,
+      'cd': cd,
+      'ex': ex,
+      'ac': ac,
+      'dl': dl,
+    });
+  }
+  final String rs = dp.isEmpty ? 'matched' : 'discrepancy_detected';
+  return ReconciliationResult(dp: dp, rs: rs);
+}
+
+// ─── Deterministic check / investigation doc-id generators ─────────────────
+
+/// Format the WIB (UTC+7) date as `YYYYMMDD` for a given epoch-ms instant.
+/// Shared by [genOpeningCnm] / [genClosingCnm] / [genInvestigationVnm].
+String _wibDateStamp(int nowMs) {
+  const int wibOffsetMs = 25200000; // UTC+7
+  final DateTime wibNow =
+      DateTime.fromMillisecondsSinceEpoch(nowMs + wibOffsetMs, isUtc: true);
+  return '${wibNow.year}${wibNow.month.toString().padLeft(2, '0')}'
+      '${wibNow.day.toString().padLeft(2, '0')}';
+}
+
+/// Generate the deterministic OPENING vehicle_check doc id.
+///
+/// Format: `CHK-{vehicleId}-{YYYYMMDD}` (no suffix). Mirrors O1's private
+/// `_generateCnm` EXACTLY so the C1 closing flow can patch the same opening
+/// doc by id (W1: close `cst` via `createNativeDoc` set-merge, no search
+/// ambiguity). Uses WIB (UTC+7) date. Pure function; [nowMs] overridable.
+String genOpeningCnm(String vehicleId, {int? nowMs}) {
+  final int now = nowMs ?? getNowMillisecondFromEpoch();
+  return 'CHK-$vehicleId-${_wibDateStamp(now)}';
+}
+
+/// Generate the deterministic CLOSING vehicle_check doc id.
+///
+/// Format: `CHK-{vehicleId}-{YYYYMMDD}-C` (suffix `-C` distinguishes from
+/// the opening doc `CHK-{vehicleId}-{YYYYMMDD}` -- no collision).
+///
+/// Uses WIB (UTC+7) date. Pure function; [nowMs] overridable for tests.
+String genClosingCnm(String vehicleId, {int? nowMs}) {
+  final int now = nowMs ?? getNowMillisecondFromEpoch();
+  return 'CHK-$vehicleId-${_wibDateStamp(now)}-C';
+}
+
+/// Generate the deterministic investigation doc id.
+///
+/// Format: `INV-{vehicleId}-{YYYYMMDD}`. Pure function; [nowMs] overridable
+/// for tests.
+String genInvestigationVnm(String vehicleId, {int? nowMs}) {
+  final int now = nowMs ?? getNowMillisecondFromEpoch();
+  return 'INV-$vehicleId-${_wibDateStamp(now)}';
 }
 
 // ─── Native Firestore write (bypasses history queue) ───────────────────────
@@ -1166,14 +1618,13 @@ Future<bool> writeNativeFields({
     final Map<String, dynamic> screenTx = transactionStore.state.screenTx;
     final String fullyResolved = resolveScreenTxTokens(driverResolved, screenTx);
 
-    // 3. Parse search clauses and build Firestore query
+    // 3. Parse search clauses into (field, value) String pairs.
     if (fullyResolved.trim().isEmpty) {
       devPrint('[writeNativeFields] empty search after resolve');
       return false;
     }
-    final List<String> clauses = fullyResolved.split('\u{2B58}');
-    dynamic query = firestoreDb.collection(path);
-    for (final clause in clauses) {
+    final List<MapEntry<String, String>> pairs = <MapEntry<String, String>>[];
+    for (final clause in fullyResolved.split('\u{2B58}')) {
       final String trimmed = clause.trim();
       if (trimmed.isEmpty) continue;
       final int sep = trimmed.indexOf('\u{25FC}');
@@ -1184,39 +1635,157 @@ Future<bool> writeNativeFields({
         devPrint('[writeNativeFields] unresolved token in search: $rawValue');
         return false;
       }
-      // Type-coerce: num / bool / string (matches _parseSearchValue pattern)
-      dynamic typedValue;
-      final String lower = rawValue.toLowerCase();
-      if (lower == 'true') {
-        typedValue = true;
-      } else if (lower == 'false') {
-        typedValue = false;
-      } else {
-        typedValue = num.tryParse(rawValue) ?? rawValue;
-      }
-      query = query.where(field, isEqualTo: typedValue);
+      pairs.add(MapEntry(field, rawValue));
+    }
+    if (pairs.isEmpty) {
+      devPrint('[writeNativeFields] no valid clauses after resolve');
+      return false;
     }
 
-    // 4. Execute query + uniqueness guard
+    // 4. Type-agnostic query. Firestore `isEqualTo` matches by exact type, so
+    //    a String query misses a num-stored field and vice-versa. To read the
+    //    doc whether the matched field is stored as num OR String:
+    //      a) Anchor ONE clause on the server with `whereIn:[String, num]`
+    //         (a single disjunction -- the only one Firestore allows per query)
+    //         so it matches regardless of stored type. Prefer a numeric-valued
+    //         clause (selective id/date like `vv`/`cdt`); fall back to the
+    //         first clause.
+    //      b) Filter the REMAINING clauses client-side with String semantics
+    //         (`field.toString().trim() == value`) -- identical to the READ
+    //         path (filterByMultiClause), and type-agnostic because
+    //         num/bool/String all stringify predictably.
+    //    This keeps WRITE matching whatever READ matches, and fixes the P6
+    //    "Gagal menyimpan data" bug (numeric-looking `vv`/`cdt` stored as
+    //    String were missed by a num-coerced equality query).
+    MapEntry<String, String> anchor = pairs.first;
+    for (final p in pairs) {
+      if (num.tryParse(p.value) != null) {
+        anchor = p;
+        break;
+      }
+    }
+    final num? anchorNum = num.tryParse(anchor.value);
+    dynamic query = firestoreDb.collection(path);
+    query = anchorNum != null
+        ? query.where(anchor.key, whereIn: <Object>[anchor.value, anchorNum])
+        : query.where(anchor.key, isEqualTo: anchor.value);
+
+    // 5. Execute + client-side AND filter (String compare, type-agnostic).
     final snap = await query.get();
-    final docs = snap.docs;
-    if (docs.isEmpty) {
+    final List<dynamic> matched = snap.docs.where((d) {
+      final Map<String, dynamic> data =
+          Map<String, dynamic>.from(d.data() as Map);
+      for (final p in pairs) {
+        if ((data[p.key] ?? '').toString().trim() != p.value) return false;
+      }
+      return true;
+    }).toList();
+
+    if (matched.isEmpty) {
       devPrint('[writeNativeFields] 0 matches at $path; cannot write');
       return false;
     }
-    if (docs.length > 1) {
-      errorReport('[writeNativeFields] ${docs.length} matches at $path; '
+    if (matched.length > 1) {
+      errorReport('[writeNativeFields] ${matched.length} matches at $path; '
           'refusing to write (corrupt uniqueness)');
       return false;
     }
 
-    // 5. Set-merge
-    await docs.first.reference.set(patch, SetOptions(merge: true));
-    devPrint('[writeNativeFields] merged $patch into $path/${docs.first.id}');
+    // 6. Set-merge
+    await matched.first.reference.set(patch, SetOptions(merge: true));
+    devPrint('[writeNativeFields] merged $patch into $path/${matched.first.id}');
     return true;
   } catch (e, st) {
     devPrint('[writeNativeFields] error: $e\n$st');
     errorReport('[writeNativeFields] $e');
+    return false;
+  }
+}
+
+/// Create a new Firestore document natively with a DETERMINISTIC doc id.
+///
+/// Unlike [writeNativeFields] (which queries by search then merges), this
+/// creates the document directly by doc id. Used by O1 submit to atomically
+/// write the opening vehicle_check doc (scalars + ie[] array) in one call.
+///
+/// The Firestore SDK's offline persistence queues the write and syncs when
+/// online, so this is offline-safe (the Future completes immediately even
+/// offline).
+///
+/// [component] -- the widget's component map (for [resolveAppVid]).
+/// [rawTable] -- e.g. `84214220504259//vehicle_check`.
+/// [docId] -- the deterministic document id (e.g. the generated cnm).
+/// [docMap] -- the complete document map to write (scalars + arrays).
+///
+/// Uses `SetOptions(merge: true)` so a retry on the same cnm is idempotent
+/// (same fields, same values).
+///
+/// Returns `true` on success, `false` on failure (caller shows snackbar).
+Future<bool> createNativeDoc({
+  required dynamic component,
+  required String rawTable,
+  required String docId,
+  required Map<String, dynamic> docMap,
+}) async {
+  try {
+    final TablePath tp = parseTablePath(rawTable);
+    if (tp.tableDocId.isEmpty || tp.subColl.isEmpty) {
+      devPrint('[createNativeDoc] bad table path: $rawTable');
+      return false;
+    }
+    if (docId.isEmpty) {
+      devPrint('[createNativeDoc] empty docId');
+      return false;
+    }
+    final String appVid = resolveAppVid(component);
+    final String path =
+        '$mobileTable/$appVid/$mobileTableCollection/${tp.tableDocId}/${tp.subColl}';
+
+    await firestoreDb.collection(path).doc(docId).set(
+          docMap,
+          SetOptions(merge: true),
+        );
+    devPrint('[createNativeDoc] wrote $path/$docId');
+    return true;
+  } catch (e, st) {
+    devPrint('[createNativeDoc] error: $e\n$st');
+    errorReport('[createNativeDoc] $e');
+    return false;
+  }
+}
+
+/// Create a new Firestore document with an AUTO-GENERATED doc id.
+///
+/// Unlike [createNativeDoc] (which writes to a deterministic doc id),
+/// this creates a document with a Firestore-generated random id (matches
+/// the seed convention where vehicle_check/investigation docs have auto ids).
+/// The caller's business key (e.g. `cnm`, `vnm`) lives as a FIELD in the
+/// doc map, not as the doc id.
+///
+/// The Firestore SDK's offline persistence queues the write and syncs when
+/// online, so this is offline-safe.
+///
+/// Returns `true` on success, `false` on failure (caller shows snackbar).
+Future<bool> createNativeDocAutoId({
+  required dynamic component,
+  required String rawTable,
+  required Map<String, dynamic> docMap,
+}) async {
+  try {
+    final TablePath tp = parseTablePath(rawTable);
+    if (tp.tableDocId.isEmpty || tp.subColl.isEmpty) {
+      devPrint('[createNativeDocAutoId] bad table path: $rawTable');
+      return false;
+    }
+    final String appVid = resolveAppVid(component);
+    final String path =
+        '$mobileTable/$appVid/$mobileTableCollection/${tp.tableDocId}/${tp.subColl}';
+    await firestoreDb.collection(path).add(docMap);
+    devPrint('[createNativeDocAutoId] wrote auto-id doc to $path');
+    return true;
+  } catch (e, st) {
+    devPrint('[createNativeDocAutoId] error: $e\n$st');
+    errorReport('[createNativeDocAutoId] $e');
     return false;
   }
 }
@@ -1273,3 +1842,16 @@ List<Map<String, dynamic>> excludeByStatus(
           (doc[statusField] ?? '').toString().trim() != excludeStatus)
       .toList();
 }
+
+// ─── Load discrepancy detection (PRECONDITION_GATE_CARD state 4) ─────────
+
+/// Whether a vehicle_check doc carries load discrepancy entries.
+///
+/// [dpArray] is `gateDoc['dp']` (or `gateDoc[dpField]`), which is `dynamic`
+/// from Firestore. Returns `true` iff it is a non-empty `List`. The contents
+/// of the entries ({ac, ex, dl}) are NOT inspected -- the binary non-empty
+/// test is the whole signal (spec section 10).
+///
+/// Pure function, no Flutter deps, directly testable.
+bool hasLoadDiscrepancy(dynamic dpArray) =>
+    dpArray is List && dpArray.isNotEmpty;

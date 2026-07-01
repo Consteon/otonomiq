@@ -225,11 +225,40 @@ class _VehicleCargoSummaryState extends State<VehicleCargoSummary> {
       // Step 3: Get filtered asset_cache docs.
       final List<Map<String, dynamic>> cacheDocs = _getFilteredCacheDocs();
 
-      // CHANGED: Step 4: Build item name map from item subscription.
+      // Spec §2 config keys: item-join + condition field/value overrides.
+      // Defaults match the live asset_cache/item schema, so a JSON that omits
+      // any of these behaves exactly as before.
+      final String itemKey =
+          (widget.component['itemKey'] ?? VehicleCargoSummary.kItemField)
+              .toString()
+              .trim();
+      final String nameField =
+          (widget.component['nameField'] ?? 'in').toString().trim();
+      final String unitField =
+          (widget.component['unitField'] ?? 'un').toString().trim();
+      final String condField = (widget.component['condField'] ??
+              VehicleCargoSummary.kConditionField)
+          .toString()
+          .trim();
+      final String fullValue =
+          (widget.component['fullValue'] ?? VehicleCargoSummary.kConditionFull)
+              .toString()
+              .trim();
+      final String emptyValue = (widget.component['emptyValue'] ??
+              VehicleCargoSummary.kConditionEmpty)
+          .toString()
+          .trim();
+
+      // CHANGED: Step 4: Build item name + unit maps from item subscription
+      // (name FK: ii -> in; unit FK: ii -> un, per spec §2 — drives the
+      // per-condition "{un} isi {qty}" prefix instead of a hardcoded label).
       final List<Map<String, dynamic>> itemDocs =
           List<Map<String, dynamic>>.from(
               mapTableContent[_itemCode] ?? const []);
-      final Map<String, String> itemNameMap = buildItemNameMap(itemDocs);
+      final Map<String, String> itemNameMap =
+          buildItemNameMap(itemDocs, idField: itemKey, nameField: nameField);
+      final Map<String, String> itemUnitMap =
+          buildItemUnitMap(itemDocs, idField: itemKey, unitField: unitField);
 
       // CHANGED: Step 5: Compute per-item rows via the shared pure helper
       // (replaces the fixed bucket computation; aggregation lives in
@@ -237,11 +266,12 @@ class _VehicleCargoSummaryState extends State<VehicleCargoSummary> {
       final List<CargoItemRow> itemRows = computePerItemCargoRows(
         cacheDocs,
         itemNameMap,
-        itemField: VehicleCargoSummary.kItemField,
-        conditionField: VehicleCargoSummary.kConditionField,
+        itemUnitMap: itemUnitMap,
+        itemField: itemKey,
+        conditionField: condField,
         qtyField: VehicleCargoSummary.kQtyField,
-        conditionFull: VehicleCargoSummary.kConditionFull,
-        conditionEmpty: VehicleCargoSummary.kConditionEmpty,
+        conditionFull: fullValue,
+        conditionEmpty: emptyValue,
       );
 
       // Text slots with defaults
@@ -349,9 +379,12 @@ class _VehicleCargoSummaryState extends State<VehicleCargoSummary> {
                             // Condition sub-row: fullLabel qty   emptyLabel qty
                             Row(
                               children: [
-                                // Full (isi)
+                                // Full (isi) -- "{un} isi" per spec §2; the
+                                // unit degrades to a bare "isi" when absent.
                                 Text(
-                                  fullLabel,
+                                  itemRows[i].unit.isEmpty
+                                      ? fullLabel
+                                      : '${itemRows[i].unit} $fullLabel',
                                   style: const TextStyle(
                                     fontSize: 13,
                                     color: Color(0xFF6B7280), // gray-500
@@ -368,9 +401,12 @@ class _VehicleCargoSummaryState extends State<VehicleCargoSummary> {
                                   ),
                                 ),
                                 const SizedBox(width: 24),
-                                // Empty (kosong)
+                                // Empty (kosong) -- "{un} kosong" per spec §2;
+                                // the unit degrades to a bare "kosong" when absent.
                                 Text(
-                                  emptyLabel,
+                                  itemRows[i].unit.isEmpty
+                                      ? emptyLabel
+                                      : '${itemRows[i].unit} $emptyLabel',
                                   style: const TextStyle(
                                     fontSize: 13,
                                     color: Color(0xFF6B7280), // gray-500

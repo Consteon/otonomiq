@@ -71,20 +71,22 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
         : (_periods.isNotEmpty ? _periods.first.ms : 604800000);
     _evidenceField =
         (widget.component['evidenceField'] ?? '').toString().trim().isEmpty
-            ? 'lq'
-            : widget.component['evidenceField'].toString().trim();
-    final String sfRaw =
-        (widget.component['statusField'] ?? '').toString().trim();
+        ? 'lq'
+        : widget.component['evidenceField'].toString().trim();
+    final String sfRaw = (widget.component['statusField'] ?? '')
+        .toString()
+        .trim();
     _statusField = sfRaw.isEmpty ? null : sfRaw;
-    final String emptyRaw =
-        (widget.component['empty'] ?? '').toString().trim();
+    final String emptyRaw = (widget.component['empty'] ?? '').toString().trim();
     _emptyText = emptyRaw.isEmpty ? 'Belum ada kunjungan' : emptyRaw;
   }
 
   void _subscribe() {
     final String rawTable = (widget.component['table'] ?? '').toString().trim();
     final TablePath tp = parseTablePath(rawTable);
-    final String appVid = (widget.component['vidtable'] ?? '').toString().trim();
+    final String appVid = (widget.component['vidtable'] ?? '')
+        .toString()
+        .trim();
     if (tp.tableDocId.isEmpty || appVid.isEmpty) return;
     _eventCode = '${tp.tableDocId}/${tp.subColl}';
     subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _eventCode);
@@ -106,51 +108,62 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
   }
 
   void _showFullImage(BuildContext ctx, List<String> urls, int initial) {
-    Navigator.of(ctx).push(PageRouteBuilder(
-      opaque: false,
-      barrierColor: Colors.black87,
-      pageBuilder: (_, __, ___) =>
-          _FullImageViewer(urls: urls, initialIndex: initial),
-    ));
+    Navigator.of(ctx).push(
+      PageRouteBuilder(
+        opaque: false,
+        barrierColor: Colors.black87,
+        pageBuilder: (_, _, _) =>
+            _FullImageViewer(urls: urls, initialIndex: initial),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Obx(() {
-      final List<Map<String, dynamic>> events =
-          List<Map<String, dynamic>>.from(mapTableContent[_eventCode] ?? const []);
+      final List<Map<String, dynamic>> events = List<Map<String, dynamic>>.from(
+        mapTableContent[_eventCode] ?? const [],
+      );
       _nowMs = DateTime.now().millisecondsSinceEpoch;
       _windowStartMs = _nowMs - _selectedMs;
 
-      final String conditionsRaw =
-          (widget.component['conditions'] ?? '').toString();
-      final String conditions = autheniumDecode(conditionsRaw) ?? conditionsRaw;
-      final List<Map<String, dynamic>> matched =
-          filterEventsByConditions(events, conditions, _screenTx);
-      final List<Map<String, dynamic>> windowed = matched
-          .where((e) => eventEpoch(e) >= _windowStartMs)
-          .toList()
-        ..sort((a, b) => eventEpoch(b).compareTo(eventEpoch(a)));
-
-      final String pointName = (_screenTx['point'] ??
-              (windowed.isNotEmpty ? windowed.first['ln'] : '') ??
-              '')
+      final String conditionsRaw = (widget.component['conditions'] ?? '')
           .toString();
+      final String conditions = autheniumDecode(conditionsRaw) ?? conditionsRaw;
+      final List<Map<String, dynamic>> matched = filterEventsByConditions(
+        events,
+        conditions,
+        _screenTx,
+      );
+      final List<Map<String, dynamic>> windowed =
+          matched.where((e) => eventEpoch(e) >= _windowStartMs).toList()
+            ..sort((a, b) => eventEpoch(b).compareTo(eventEpoch(a)));
+
+      final String pointName =
+          (_screenTx['point'] ??
+                  (windowed.isNotEmpty ? windowed.first['ln'] : '') ??
+                  '')
+              .toString();
       final String title = resolveMapTokens(
-          (widget.component['title'] ?? '').toString(),
-          {'ln': pointName},
-          const {});
+        (widget.component['title'] ?? '').toString(),
+        {'ln': pointName},
+        const {},
+      );
       final String subtitle = resolveMapTokens(
-          (widget.component['subtitle'] ?? '').toString(),
-          const {},
-          {'visitCount': '${windowed.length}'});
+        (widget.component['subtitle'] ?? '').toString(),
+        const {},
+        {'visitCount': '${windowed.length}'},
+      );
 
       final List<Widget> entries = [];
       for (int i = 0; i < windowed.length; i++) {
         entries.add(_buildEntry(windowed[i]));
         if (i < windowed.length - 1) {
           final String gap = gapLabel(
-              eventEpoch(windowed[i]), eventEpoch(windowed[i + 1]), _gapMs);
+            eventEpoch(windowed[i]),
+            eventEpoch(windowed[i + 1]),
+            _gapMs,
+          );
           if (gap.isNotEmpty) entries.add(_buildGapPill(gap));
         }
       }
@@ -161,21 +174,32 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
         height: availableH,
         child: Padding(
           padding: EdgeInsets.fromLTRB(
-              widget.lPad, widget.tPad, widget.rPad, widget.bPad),
+            widget.lPad,
+            widget.tPad,
+            widget.rPad,
+            widget.bPad,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (title.isNotEmpty)
-                Text(title,
-                    style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF1A2233))),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF1A2233),
+                  ),
+                ),
               if (subtitle.isNotEmpty) ...[
                 const SizedBox(height: 2),
-                Text(subtitle,
-                    style:
-                        const TextStyle(fontSize: 14, color: Color(0xFF9AA1AD))),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF9AA1AD),
+                  ),
+                ),
               ],
               const SizedBox(height: 14),
               if (_periods.isNotEmpty) _buildPeriodTabs(),
@@ -217,25 +241,30 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color:
-                        p.ms == _selectedMs ? Colors.white : Colors.transparent,
+                    color: p.ms == _selectedMs
+                        ? Colors.white
+                        : Colors.transparent,
                     borderRadius: BorderRadius.circular(11),
                     boxShadow: p.ms == _selectedMs
                         ? const [
                             BoxShadow(
-                                color: Color(0x14000000),
-                                blurRadius: 6,
-                                offset: Offset(0, 2))
+                              color: Color(0x14000000),
+                              blurRadius: 6,
+                              offset: Offset(0, 2),
+                            ),
                           ]
                         : null,
                   ),
-                  child: Text(p.label,
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: p.ms == _selectedMs
-                              ? const Color(0xFF1A2233)
-                              : const Color(0xFF8A93A6))),
+                  child: Text(
+                    p.label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: p.ms == _selectedMs
+                          ? const Color(0xFF1A2233)
+                          : const Color(0xFF8A93A6),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -246,8 +275,10 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
 
   Widget _buildEmptyState() {
     return Center(
-      child: Text(_emptyText,
-          style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 14)),
+      child: Text(
+        _emptyText,
+        style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 14),
+      ),
     );
   }
 
@@ -260,7 +291,8 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
         children: [
           Positioned.fill(
             child: Center(
-                child: Container(width: 2, color: const Color(0xFFE5E7EB))),
+              child: Container(width: 2, color: const Color(0xFFE5E7EB)),
+            ),
           ),
           Padding(
             padding: const EdgeInsets.only(top: 18),
@@ -282,18 +314,16 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
   }
 
   Widget _buildEntry(Map<String, dynamic> e) {
-    final String textTemplate =
-        (widget.component['text'] ?? '').toString();
+    final String textTemplate = (widget.component['text'] ?? '').toString();
     final String badgeTemplate =
         (widget.component['badge'] ?? '').toString().trim().isEmpty
-            ? '{evidence}'
-            : widget.component['badge'].toString();
+        ? '{evidence}'
+        : widget.component['badge'].toString();
 
     final String rawLq = (e[_evidenceField] ?? '').toString();
     final String evidence = deriveEvidence(rawLq);
     final MethodInfo method = deriveMethod(rawLq);
-    final Color dotColor =
-        resolveStatusColor(_statusField, e, evidence);
+    final Color dotColor = resolveStatusColor(_statusField, e, evidence);
 
     final Map<String, String> computed = {
       'method': method.label,
@@ -301,11 +331,17 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
     };
     final Map<String, dynamic> doc = Map<String, dynamic>.from(e)
       ..['ts'] = relativeTimestamp(eventEpoch(e), _nowMs);
-    final List<String> seg =
-        diamondTextToList(resolveMapTokens(textTemplate, doc, computed));
+    final List<String> seg = diamondTextToList(
+      resolveMapTokens(textTemplate, doc, computed),
+    );
     String at(int i) => seg.length > i ? seg[i] : '';
-    final List<String> imageUrls = _splitImages(resolveMapTokens(
-        (widget.component['image'] ?? '').toString(), doc, const {}));
+    final List<String> imageUrls = _splitImages(
+      resolveMapTokens(
+        (widget.component['image'] ?? '').toString(),
+        doc,
+        const {},
+      ),
+    );
 
     final String resolvedBadge = resolveMapTokens(badgeTemplate, doc, computed);
     final bool showShieldIcons = badgeContainsEvidence(badgeTemplate);
@@ -332,13 +368,16 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(at(0),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w800,
-                                  color: Color(0xFF1A2233))),
+                          child: Text(
+                            at(0),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF1A2233),
+                            ),
+                          ),
                         ),
                         if (resolvedBadge.isNotEmpty) ...[
                           const SizedBox(width: 8),
@@ -354,35 +393,45 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
                     const SizedBox(height: 6),
                     Row(
                       children: [
-                        Text(at(1),
-                            style: const TextStyle(
-                                fontSize: 13, color: Color(0xFF6B7280))),
+                        Text(
+                          at(1),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF6B7280),
+                          ),
+                        ),
                         if (showMethodIcon) ...[
                           const SizedBox(width: 10),
                           Icon(
-                              method.isQr
-                                  ? Icons.qr_code_2
-                                  : Icons.text_fields,
-                              size: 15,
-                              color: const Color(0xFF9AA1AD)),
+                            method.isQr ? Icons.qr_code_2 : Icons.text_fields,
+                            size: 15,
+                            color: const Color(0xFF9AA1AD),
+                          ),
                         ],
                         const SizedBox(width: 4),
                         Flexible(
-                          child: Text(at(2),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontSize: 13, color: Color(0xFF6B7280))),
+                          child: Text(
+                            at(2),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFF6B7280),
+                            ),
+                          ),
                         ),
                       ],
                     ),
                     if (at(3).isNotEmpty) ...[
                       const SizedBox(height: 6),
-                      Text('"${at(3)}"',
-                          style: const TextStyle(
-                              fontSize: 13,
-                              fontStyle: FontStyle.italic,
-                              color: Color(0xFF9AA1AD))),
+                      Text(
+                        '"${at(3)}"',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontStyle: FontStyle.italic,
+                          color: Color(0xFF9AA1AD),
+                        ),
+                      ),
                     ],
                     if (imageUrls.isNotEmpty) ...[
                       const SizedBox(height: 10),
@@ -391,7 +440,7 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
                           itemCount: imageUrls.length,
-                          separatorBuilder: (_, __) => const SizedBox(width: 8),
+                          separatorBuilder: (_, _) => const SizedBox(width: 8),
                           itemBuilder: (ctx, idx) => GestureDetector(
                             onTap: () => _showFullImage(ctx, imageUrls, idx),
                             child: ClipRRect(
@@ -401,13 +450,16 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
                                 width: 96,
                                 height: 96,
                                 fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Container(
+                                errorBuilder: (_, _, _) => Container(
                                   width: 96,
                                   height: 96,
                                   color: const Color(0xFFF1F3F5),
                                   alignment: Alignment.center,
-                                  child: const Icon(Icons.broken_image_outlined,
-                                      size: 20, color: Color(0xFF9CA3AF)),
+                                  child: const Icon(
+                                    Icons.broken_image_outlined,
+                                    size: 20,
+                                    color: Color(0xFF9CA3AF),
+                                  ),
                                 ),
                               ),
                             ),
@@ -434,18 +486,20 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
           Padding(
             padding: const EdgeInsets.only(bottom: 14),
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
               decoration: BoxDecoration(
                 color: const Color(0xFFFEF3C7),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(color: const Color(0xFFF1D08A)),
               ),
-              child: Text(label,
-                  style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFFB45309))),
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFFB45309),
+                ),
+              ),
             ),
           ),
         ],
@@ -472,18 +526,22 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
         children: [
           if (showShieldIcons) ...[
             Icon(
-                evidence == 'Bukti kuat'
-                    ? Icons.verified_user_rounded
-                    : Icons.gpp_maybe_rounded,
-                size: 14,
-                color: fg),
+              evidence == 'Bukti kuat'
+                  ? Icons.verified_user_rounded
+                  : Icons.gpp_maybe_rounded,
+              size: 14,
+              color: fg,
+            ),
             const SizedBox(width: 4),
           ],
-          Text(resolvedText,
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: fg)),
+          Text(
+            resolvedText,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: fg,
+            ),
+          ),
         ],
       ),
     );
@@ -506,9 +564,14 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
           const Icon(Icons.lock_outline, size: 16, color: Color(0xFF9CA3AF)),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(footer,
-                style: const TextStyle(
-                    fontSize: 12, height: 1.4, color: Color(0xFF9CA3AF))),
+            child: Text(
+              footer,
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.4,
+                color: Color(0xFF9CA3AF),
+              ),
+            ),
           ),
         ],
       ),
@@ -562,10 +625,11 @@ class _FullImageViewerState extends State<_FullImageViewer> {
                   child: Image.network(
                     widget.urls[i],
                     fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const Icon(
-                        Icons.broken_image_outlined,
-                        size: 48,
-                        color: Colors.white54),
+                    errorBuilder: (_, _, _) => const Icon(
+                      Icons.broken_image_outlined,
+                      size: 48,
+                      color: Colors.white54,
+                    ),
                   ),
                 ),
               ),
@@ -586,14 +650,17 @@ class _FullImageViewerState extends State<_FullImageViewer> {
                 child: Center(
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black54,
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Text('${_current + 1} / ${widget.urls.length}',
-                        style:
-                            const TextStyle(color: Colors.white, fontSize: 13)),
+                    child: Text(
+                      '${_current + 1} / ${widget.urls.length}',
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                    ),
                   ),
                 ),
               ),

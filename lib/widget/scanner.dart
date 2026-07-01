@@ -209,6 +209,25 @@ class _ScannerState extends State<Scanner> with SingleTickerProviderStateMixin {
       final int vid = await getVidUQR(rawQR);
       if (!mounted) return;
 
+      // DIAGNOSTIC (kDebugMode-only via devPrint): a vid of -1 here surfaces to
+      // the user as "tidak dikenal". Logging the raw QR + format probes + the
+      // decrypt result tells the two failure modes apart:
+      //   - no `http` / no `/qr/` segment  -> malformed or non-user QR (format)
+      //   - well-formed http+/qr/ URL but vid == -1 -> the cipher did NOT
+      //     decrypt to the marker with THIS device's getSharedKey(1), i.e. the
+      //     tag was minted under a different sd1/sd2 secret-generation than the
+      //     device holds (a working tag of the same domain proves the device
+      //     key itself is valid).
+      // Scan a failing tag and a working tag; compare. Remove once the
+      // "tidak dikenal" reports are resolved.
+      final int qrSegIdx = rawQR.lastIndexOf('/qr/');
+      final String qrCipher =
+          qrSegIdx >= 0 ? rawQR.substring(qrSegIdx + 4) : '';
+      final bool hasHttp =
+          rawQR.length >= 4 && rawQR.substring(0, 4) == 'http';
+      devPrint('scanner UQR decode: vid=$vid hasHttp=$hasHttp '
+          'hasQrSeg=${qrSegIdx >= 0} cipherLen=${qrCipher.length} raw=$rawQR');
+
       if (vid == -1) {
         // Decrypt-fail: unrecognized QR (not a valid encrypted URL).
         // Do NOT store #has_user_login. Show "tidak dikenal" snackbar + rescan.

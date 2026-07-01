@@ -1,14 +1,15 @@
-import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:math';
-import 'package:flutter/cupertino.dart';
+import 'dart:typed_data';
 
-import '../global.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:pointycastle/export.dart'; // Replaced 'argon2' with 'pointycastle'
+
 // import 'package:argon2_ffi_base/argon2_ffi_base.dart';
 // full registry
 // import 'package:flutter_sodium/flutter_sodium.dart';
 import '../ftz_secret.dart';
-import 'package:pointycastle/export.dart'; // Replaced 'argon2' with 'pointycastle'
+import '../global.dart';
 // import 'package:encrypt/encrypt.dart' as encrypt; // Removed encrypt package
 
 typedef ClusterPosition = ({String vid, int cluster, int position});
@@ -17,7 +18,7 @@ typedef ClusterPosition = ({String vid, int cluster, int position});
 
 /// Creates a checksum based on the SHA3-256 hash of the input data.
 /// The output is a record containing the final integer checksum and the intermediate hash.
-({int checksum, String sha3_256_hash}) createChecksumSha3(dynamic data) {
+({int checksum, String sha256Hash}) createChecksumSha3(dynamic data) {
   // 1. Convert the entire data structure to a single, stable string.
   String stableString = _createStableString(data);
 
@@ -29,7 +30,7 @@ typedef ClusterPosition = ({String vid, int cluster, int position});
   final BigInt modulus = BigInt.from(10).pow(14);
   final int finalChecksum = (hashAsBigInt % modulus).toInt();
 
-  return (checksum: finalChecksum, sha3_256_hash: hashHex);
+  return (checksum: finalChecksum, sha256Hash: hashHex);
 } // end of createChecksumSha3
 
 /// Recursively traverses a data structure to create a single, stable string representation.
@@ -40,19 +41,20 @@ String _createStableString(dynamic element) {
   if (element is num || element is bool) return element.toString();
 
   if (element is List) {
-    return '[' + element.map(_createStableString).join(',') + ']';
+    return '[${element.map(_createStableString).join(',')}]';
   }
 
   if (element is Map) {
     // Sort keys to ensure map stability
     var sortedKeys = element.keys.toList()
       ..sort(
-              (a, b) => _createStableString(a).compareTo(_createStableString(b)));
+        (a, b) => _createStableString(a).compareTo(_createStableString(b)),
+      );
 
     var mapEntries = sortedKeys.map((key) {
       return '${_createStableString(key)}:${_createStableString(element[key])}';
     });
-    return '{' + mapEntries.join(',') + '}';
+    return '{${mapEntries.join(',')}}';
   }
 
   // Fallback for other types
@@ -72,8 +74,10 @@ Future<String> getSharedKey(int prefix) async {
     if (r[1] == null || r[0]!.length < 7) {
       r[1] = '22222222222';
     }
-    return sha3_256(r[0]!.substring(5) +
-        r[1]!.substring(0, r[1]!.length - 1).split('').reversed.join(''));
+    return sha3_256(
+      r[0]!.substring(5) +
+          r[1]!.substring(0, r[1]!.length - 1).split('').reversed.join(''),
+    );
   } else {
     return emptyString;
   } // end if (prefix == 1)
@@ -92,8 +96,9 @@ String passwordHashCreate(String password) {
   }
   try {
     String saltSeed = base64ForUrl(generateArgon2Salt());
-    Uint8List salt =
-    latin1.encode(sha3_256('hjJ$saltSeed${vid}s wA${String.fromCharCode(10)}23+=%'));
+    Uint8List salt = latin1.encode(
+      sha3_256('hjJ$saltSeed${vid}s wA${String.fromCharCode(10)}23+=%'),
+    );
     Argon2Parameters parameters = Argon2Parameters(
       Argon2Parameters.ARGON2_id,
       salt,
@@ -105,7 +110,9 @@ String passwordHashCreate(String password) {
     );
     final argon2 = KeyDerivator("Argon2"); // Use KeyDerivator factory
     argon2.init(parameters);
-    Uint8List passwordBytes = utf8.encode(password); // Changed from parameters.converter
+    Uint8List passwordBytes = utf8.encode(
+      password,
+    ); // Changed from parameters.converter
     Uint8List result = argon2.process(passwordBytes); // Use process()
     String hash64 = base64ForUrl(base64Encode(result));
     hashResult = '$saltSeed:$hash64'; // Concatenate salt and hash
@@ -116,7 +123,7 @@ String passwordHashCreate(String password) {
 } // end of passwordHashCreate
 
 bool passwordVerify(String password, String passwordHash) {
-//  var uid = transactionStore.state.screenTx['#FIREBASE_USER'].uid;
+  //  var uid = transactionStore.state.screenTx['#FIREBASE_USER'].uid;
   bool boolResult = false;
   final parts = passwordHash.split(':');
   if (parts.length != 2) {
@@ -130,8 +137,9 @@ bool passwordVerify(String password, String passwordHash) {
   }
   try {
     String saltSeed = parts[0];
-    Uint8List salt =
-    latin1.encode(sha3_256('hjJ$saltSeed${vid}s wA${String.fromCharCode(10)}23+=%')); // Fixed typo: sha3_2s.sha3_256 -> sha3_256
+    Uint8List salt = latin1.encode(
+      sha3_256('hjJ$saltSeed${vid}s wA${String.fromCharCode(10)}23+=%'),
+    ); // Fixed typo: sha3_2s.sha3_256 -> sha3_256
     Argon2Parameters parameters = Argon2Parameters(
       Argon2Parameters.ARGON2_id,
       salt,
@@ -143,7 +151,9 @@ bool passwordVerify(String password, String passwordHash) {
     );
     final argon2 = KeyDerivator("Argon2"); // Use KeyDerivator factory
     argon2.init(parameters);
-    Uint8List passwordBytes = utf8.encode(password); // Changed from parameters.converter
+    Uint8List passwordBytes = utf8.encode(
+      password,
+    ); // Changed from parameters.converter
     Uint8List result = argon2.process(passwordBytes); // Use process()
     String currentHash = base64ForUrl(base64Encode(result));
     boolResult = constantTimeComparison(currentHash, parts[1]);
@@ -249,7 +259,12 @@ String aesDec(String hexPayload, String hexKeyString, String variant) {
       // GCM default MAC size is 128 bits (16 bytes)
       // The 'encrypt' package uses 128-bit MAC by default.
       final macSizeInBits = 128;
-      final params = AEADParameters(keyParams, macSizeInBits, ivBytes, Uint8List(0));
+      final params = AEADParameters(
+        keyParams,
+        macSizeInBits,
+        ivBytes,
+        Uint8List(0),
+      );
       cipher.init(false, params); // 'false' for decryption
 
       // Allocate an output buffer.
@@ -263,7 +278,12 @@ String aesDec(String hexPayload, String hexKeyString, String variant) {
       // Process all bytes (ciphertext + tag) in one go.
       // pointycastle's GCM implementation handles splitting them.
       int bytesProcessed = cipher.processBytes(
-          ciphertextBytes, 0, ciphertextBytes.length, outputBuffer, 0);
+        ciphertextBytes,
+        0,
+        ciphertextBytes.length,
+        outputBuffer,
+        0,
+      );
 
       // doFinal will validate the tag (from the end of ciphertextBytes)
       // and write any remaining buffered bytes.
@@ -354,9 +374,9 @@ String createPrivateKey(String saltInput) {
   String salt = saltInput;
   int now = DateTime.now().millisecondsSinceEpoch;
   var state = transactionStore.state.screenTx;
-//  String seed =
-//      salt + state['#VID'] + now.toString() + state['#LOCATION'].lng.toString();
-//  seed += state['#IMEI'] + state['#LOCATION'].lat.toString();
+  //  String seed =
+  //      salt + state['#VID'] + now.toString() + state['#LOCATION'].lng.toString();
+  //  seed += state['#IMEI'] + state['#LOCATION'].lat.toString();
   return result;
 } // end of createPrivateKey
 
@@ -412,7 +432,8 @@ int getAddress(String input) {
   // Ensure the input string is long enough to prevent range errors.
   if (input.length < 14) {
     throw ArgumentError(
-        "Input string must be at least 14 characters long. Current length: ${input.length}");
+      "Input string must be at least 14 characters long. Current length: ${input.length}",
+    );
   }
 
   try {
@@ -446,11 +467,13 @@ int getAddress(String input) {
   } on FormatException catch (e) {
     // Handle cases where a substring is not a valid number.
     debugPrint(
-        "Error: A part of the input string could not be parsed as a number. Details: $e");
+      "Error: A part of the input string could not be parsed as a number. Details: $e",
+    );
     rethrow;
   } on RangeError catch (e) {
     debugPrint(
-        "Error: Index out of range when parsing input string. Please check input length. Details: $e");
+      "Error: Index out of range when parsing input string. Please check input length. Details: $e",
+    );
     rethrow;
   }
 } // end of getAddress
@@ -474,15 +497,17 @@ ClusterPosition getClusterAndPosition(String vid) {
     // Ensure the string is at least 12 characters long after padding.
     if (addressString.length < 12) {
       throw StateError(
-          'Address string must be at least 12 characters long after padding for cluster/position extraction.');
+        'Address string must be at least 12 characters long after padding for cluster/position extraction.',
+      );
     }
 
     // The cluster is the integer value of the first 7 digits.
     cluster = int.parse(addressString.substring(0, 7));
 
     // The position is the integer value of the remaining 5 digits.
-    position =
-        int.parse(addressString.substring(7, 12)); // Explicitly take 5 digits
+    position = int.parse(
+      addressString.substring(7, 12),
+    ); // Explicitly take 5 digits
   } catch (e) {
     result = errorString;
   }
@@ -618,9 +643,10 @@ String aec1h(String data) {
 
   for (int i = 0; i < o.length; i++) {
     hx = hashingPadding.substring(i * 4, i * 4 + 4);
-    o[i] = (data.codeUnitAt(0) *
-        data.codeUnitAt(l - 1) *
-        int.parse(hx, radix: 16)) %
+    o[i] =
+        (data.codeUnitAt(0) *
+            data.codeUnitAt(l - 1) *
+            int.parse(hx, radix: 16)) %
         65536;
   }
 
@@ -655,9 +681,10 @@ String aec1DC(String phKey, String cp, String inputData) {
 } // end of aec1d64c
 
 String aec1Q(String pk) {
-//   devPrint('AEC1q :');
+  //   devPrint('AEC1q :');
   const G =
-      '2c9f4f799eee3b335de8a42a6e51ef90d' '2c81bcbf5a514b0400318998583d39f';
+      '2c9f4f799eee3b335de8a42a6e51ef90d'
+      '2c81bcbf5a514b0400318998583d39f';
   int p = 13;
   int g = 2;
   String result = '';
@@ -666,7 +693,8 @@ String aec1Q(String pk) {
     int loop = 16;
     String dhKey = '';
     for (int c = 0; c < loop; c++) {
-      var n4 = int.parse(G.substring(c * 4, c * 4 + 4), radix: 16) *
+      var n4 =
+          int.parse(G.substring(c * 4, c * 4 + 4), radix: 16) *
           int.parse(pk.substring(c * 4, c * 4 + 4), radix: 16);
       var n5 = padZero(n4.toRadixString(16), 8);
       dhKey += n5;
@@ -684,7 +712,8 @@ String aec1Q(String pk) {
 String aec1S(String pk, String qk) {
   // Create shared key from private key and other's public key
   const G =
-      '2c9f4f799eee3b335de8a42a6e51ef90d' '2c81bcbf5a514b0400318998583d39f';
+      '2c9f4f799eee3b335de8a42a6e51ef90d'
+      '2c81bcbf5a514b0400318998583d39f';
   int p = 13;
   String result = '';
   int pLength = pk.length;
@@ -692,7 +721,8 @@ String aec1S(String pk, String qk) {
     int loop = 16;
     String dhKey = '';
     for (int c = 0; c < loop; c++) {
-      var n4 = int.parse(G.substring(c * 4, c * 4 + 4), radix: 16) *
+      var n4 =
+          int.parse(G.substring(c * 4, c * 4 + 4), radix: 16) *
           int.parse(pk.substring(c * 4, c * 4 + 4), radix: 16);
       var n5 = padZero(n4.toRadixString(16), 8);
       dhKey += n5;
@@ -755,13 +785,16 @@ String aec1E1(String key, String inputData) {
   int i = 0;
   int loop = ((rawData.length) / 2).round();
   for (int c = 0; c < loop; c++) {
-    i = int.parse(rawData.substring(c * 2, c * 2 + 2),
-        radix: 16); // take 2 input
+    i = int.parse(
+      rawData.substring(c * 2, c * 2 + 2),
+      radix: 16,
+    ); // take 2 input
     o = i ^ v;
     encrypted +=
         a64[(o / encodingVolume).floor()] + a64[(o % encodingVolume).floor()];
     if (c < loop - 1) {
-      v = (v * m1 + k[(c + 1) % keyByteSize] * m2 + i * m3 + o * m4) %
+      v =
+          (v * m1 + k[(c + 1) % keyByteSize] * m2 + i * m3 + o * m4) %
           encryptionModulo;
     }
   }
@@ -813,8 +846,9 @@ String aec1D(String key, String vEncryptedData, int nonceLength) {
         } else {
           v = (v * m1 + k[t] * m2 + o * m3 + i * m4) % encryptionModulo;
         }
-        i = base64ToDec(encryptedData.substring(c * 2, c * 2 + 1)) *
-            encodingVolume +
+        i =
+            base64ToDec(encryptedData.substring(c * 2, c * 2 + 1)) *
+                encodingVolume +
             base64ToDec(encryptedData.substring(c * 2 + 1, c * 2 + 2));
         o = i ^ v;
         output += padZero(o.toRadixString(16), 2);
@@ -845,25 +879,25 @@ String nonceGenerator(int bitLen) {
     nonce += randNumber.toRadixString(16);
   }
   nonce = nonce.substring(nonce.length - len, nonce.length);
-//   nonce = '9e611040623410122b82331e';
+  //   nonce = '9e611040623410122b82331e';
   return nonce;
 }
 
 // ======================= end of AEC1 family ======================
 
 String aecDecrypt(String input, String inputType) {
-//  aecDecrypt will try to decrypt with inputType specification
-//  When fail, will try to decrypt with other keys.
-//  inputString : raw string begin with encryption version
-//      0 : no encryption
-//      1 : encryption version 1 (Proprietary)
-//      2 : encryption version 2 (AEC)
-//  inputType : "l" : location  => "6"
-//              "d" : document  => "P"
-//              "u" : user      => "_"
+  //  aecDecrypt will try to decrypt with inputType specification
+  //  When fail, will try to decrypt with other keys.
+  //  inputString : raw string begin with encryption version
+  //      0 : no encryption
+  //      1 : encryption version 1 (Proprietary)
+  //      2 : encryption version 2 (AEC)
+  //  inputType : "l" : location  => "6"
+  //              "d" : document  => "P"
+  //              "u" : user      => "_"
 
-//   Usage : aecDecrypt(inputString, "l");
-//   final Map<String, String> key = getKeys();
+  //   Usage : aecDecrypt(inputString, "l");
+  //   final Map<String, String> key = getKeys();
   String result = '--';
   String version = input.substring(0, 1);
   String encrypted = input.substring(1, input.length);
@@ -900,8 +934,10 @@ String aecDecrypt(String input, String inputType) {
       if (!found) {
         try {
           // trying to decrypt with type = 1st character
-          result =
-              aec2Decrypt(getAecKey(encrypted.substring(0, 1))!, encrypted);
+          result = aec2Decrypt(
+            getAecKey(encrypted.substring(0, 1))!,
+            encrypted,
+          );
           found = true;
         } catch (e) {
           found = false;
@@ -945,7 +981,7 @@ String aec2Decrypt(String key, String encrypted) {
     int cursor = i * 2;
     int value =
         base64ToDec(encrypted.substring(cursor, cursor + 1)) * inputBase +
-            base64ToDec(encrypted.substring(cursor + 1, cursor + 2));
+        base64ToDec(encrypted.substring(cursor + 1, cursor + 2));
 
     inputVector.add(value);
     int value2 = 0;
@@ -954,10 +990,11 @@ String aec2Decrypt(String key, String encrypted) {
       value2 = (keyVector[i + 1] * m[1] * m[2]) % encryptionModulo;
       xorValue = value ^ value2;
     } else {
-      value2 = (lastPass * m[1] +
-          keyVector[keyCursor + 1] * m[2] +
-          lastXOr * m[3] +
-          inputVector[i] * m[4]) %
+      value2 =
+          (lastPass * m[1] +
+              keyVector[keyCursor + 1] * m[2] +
+              lastXOr * m[3] +
+              inputVector[i] * m[4]) %
           encryptionModulo;
       xorValue = value ^ value2;
     } // end if i == 0

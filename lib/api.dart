@@ -48,8 +48,10 @@ import 'widget/build_theme.dart';
 import 'widget/custody_count_list.dart';
 import 'widget/custody_reveal.dart';
 import 'widget/driver_home_support.dart';
+import 'widget/executor_designate_card.dart';
 import 'widget/ftz_webview.dart';
 import 'widget/item_execution_list.dart';
+import 'widget/item_execution_submit.dart';
 import 'widget/logout_transition_support.dart';
 import 'widget/photo_camera.dart';
 import 'widget/ui_component.dart';
@@ -3770,7 +3772,8 @@ Future getFirestoreMessageRef(String myVid) async {
   if (myMessageId == null) {
     //= do not have message id stored
     try {
-      messageDocument = await FirebaseFirestore.instance //= try to get anyway
+      messageDocument = await FirebaseFirestore
+          .instance //= try to get anyway
           .collection(
             fsMsgCollection,
           ) //= search data in firebase with corresponding uid
@@ -3979,7 +3982,9 @@ void clearData(String scrName) {
   // These are idempotent no-ops for non-custody pages.
   CustodyCountList.clearCountStore(scrName);
   CustodyReveal.clearEditState(scrName);
+  ExecutorDesignateCard.clearO1State(scrName);
   ItemExecutionList.clearExecutionStore(scrName);
+  ItemExecutionSubmit.clearState(scrName);
 
   if (txfController[scrName] == null) return;
 
@@ -4963,7 +4968,6 @@ String getOtqK(int o) {
       ? "7N4PUB2M6ZM56GXWHJTHTPSPYI36KZFKCTRQHQKI6LCU5HHPGDKPPFDYUPHAK527"
       : "32EGJUG5HNLDUMFR3FCX5T2NF7UVJOQ7C5JM27EN42ULLFBMMV4YSYUTLCAOR5CD";
 } // end of getOtqK
-//TODO:add flutter sound from ref : https://github.com/Canardoux/tau/blob/master/flutter_sound/example/lib/soundEffect/sound_effect.dart
 
 Future asyncAppStartup2() async {
   // debugPrint('start asyncAppStartup2');

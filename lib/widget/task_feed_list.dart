@@ -4,8 +4,11 @@ import 'package:get/get.dart';
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
 import '../redux/screen_transaction.dart';
+import 'admin_create_task_support.dart'; // AdminCreateTaskSupport.setCustomer
+import 'admin_home_support.dart'; // evaluateGate
 import 'driver_home_support.dart';
 import 'panel_card_support.dart';
+import 'task_item_builder.dart'; // TaskItemBuilder.draftRev
 
 /// TASK_FEED_LIST — grouped task card list for P10 TaskFeed.
 ///
@@ -15,6 +18,11 @@ import 'panel_card_support.dart';
 ///
 /// allDone (no assigned/on_delivery tasks) shows an emerald banner + sticky
 /// "Kembali ke Gudang" button.
+///
+/// MODE FLAT (groupField empty): self-contained search bar + count header +
+/// avatar cards + empty state. Config: iconField, searchHint, countLabel,
+/// emptyText. No status grouping, no delivery badges, no return-gate
+/// evaluation. Used for customer-picker in Admin P1.
 ///
 /// Read-only: no txfController, no saveSend, no history.
 class TaskFeedList extends StatefulWidget {
@@ -32,6 +40,51 @@ class TaskFeedList extends StatefulWidget {
   final String scrName;
   final double lPad, tPad, rPad, bPad;
 
+  /// Per-scrName search controllers for FLAT mode local search bar.
+  /// Cached SDUI widgets persist across nav; text cleared on route change
+  /// via [clearFlatSearch] (called from buildPage in ui_component.dart).
+  static final Map<String, TextEditingController> _flatSearchControllers = {};
+
+  /// Clear FLAT-mode search text for [scrName]. Called from buildPage
+  /// (ui_component.dart) on route change / screen reload.
+  static void clearFlatSearch(String scrName) {
+    _flatSearchControllers[scrName]?.clear();
+  }
+
+  /// Aggregate badge data for a single row in FLAT mode.
+  ///
+  /// SUMs [sumField] across [docs] matching [rawSearch] (with per-row token
+  /// `{idField}` replaced by [rowId]). Returns `({int rows, int sum})`:
+  /// - rows == 0: no matching docs (client not seeded).
+  /// - rows > 0, sum == 0: seeded but zero outstanding.
+  /// - rows > 0, sum > 0: outstanding count.
+  ///
+  /// Mirrors [PickerList.countForRow] shape: autheniumDecode, token substitution,
+  /// unresolved-token guard. Adds numeric summation via [coerceNum].
+  static ({int rows, int sum}) aggregateForRow(
+    List<Map<String, dynamic>> docs,
+    String rawSearch,
+    String idField,
+    String rowId,
+    String sumField,
+  ) {
+    final String trimmed = rawSearch.trim();
+    if (trimmed.isEmpty) return (rows: 0, sum: 0);
+    final String decoded = autheniumDecode(trimmed) ?? trimmed;
+    final String resolved = decoded.replaceAll('{$idField}', rowId);
+    // Unresolved row token (or empty rowId) -> bail.
+    if (resolved.contains('{') || rowId.isEmpty) return (rows: 0, sum: 0);
+    int matchedRows = 0;
+    int total = 0;
+    for (final Map<String, dynamic> d in docs) {
+      if (evaluateGate(d, resolved)) {
+        matchedRows++;
+        total += coerceNum(d[sumField]).toInt();
+      }
+    }
+    return (rows: matchedRows, sum: total);
+  }
+
   @override
   State<TaskFeedList> createState() => _TaskFeedListState();
 }
@@ -39,12 +92,31 @@ class TaskFeedList extends StatefulWidget {
 class _TaskFeedListState extends State<TaskFeedList> {
   List<String> _textArray = [];
   String _taskCode = '';
+  String _returnGateCode = ''; // return-CTA gate (vehicle_check rt) subscription
+  String _badgeCode = ''; // badge-table (asset_cache) subscription for FLAT mode
+  TextEditingController? _searchController;
 
   @override
   void initState() {
     super.initState();
     _parseText();
     _subscribe();
+    // Create search controller for FLAT mode (groupField empty).
+    // GROUPED screens skip this — controller stays null.
+    final String gf = (widget.component['groupField'] ?? 'tst').toString();
+    if (gf.isEmpty) {
+      _searchController = TaskFeedList._flatSearchControllers
+          .putIfAbsent(widget.scrName, () => TextEditingController());
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_searchController != null) {
+      TaskFeedList._flatSearchControllers.remove(widget.scrName);
+      _searchController!.dispose();
+    }
+    super.dispose();
   }
 
   void _parseText() {
@@ -83,6 +155,32 @@ class _TaskFeedListState extends State<TaskFeedList> {
       if (tp.tableDocId.isNotEmpty) {
         _taskCode = '${tp.tableDocId}/${tp.subColl}';
         subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _taskCode);
+      }
+    }
+
+    // Return-CTA gate table (vehicle_check) — spec (4).md §OPEN 3 option (a):
+    // self-gate the "Kembali ke Gudang" entry-point on rt=pending so it hides
+    // after handover (rt=returned). Mirrors navActionCard's gate subscription.
+    final String rawReturnGateTable =
+        (widget.component['returnGateTable'] ?? '').toString().trim();
+    if (rawReturnGateTable.isNotEmpty) {
+      final TablePath gtp = parseTablePath(rawReturnGateTable);
+      if (gtp.tableDocId.isNotEmpty) {
+        _returnGateCode = '${gtp.tableDocId}/${gtp.subColl}';
+        subscribeToMapCollection(
+            appVid, gtp.tableDocId, gtp.subColl, _returnGateCode);
+      }
+    }
+
+    // Badge table (asset_cache for outstanding/seed badge in FLAT mode).
+    final String rawBadgeTable =
+        (widget.component['badgeTable'] ?? '').toString().trim();
+    if (rawBadgeTable.isNotEmpty) {
+      final TablePath btp = parseTablePath(rawBadgeTable);
+      if (btp.tableDocId.isNotEmpty) {
+        _badgeCode = '${btp.tableDocId}/${btp.subColl}';
+        subscribeToMapCollection(
+            appVid, btp.tableDocId, btp.subColl, _badgeCode);
       }
     }
   }
@@ -126,6 +224,68 @@ class _TaskFeedListState extends State<TaskFeedList> {
     gotoRoute(returnRoute);
   }
 
+  /// Flat-mode card tap handler. When wizardKey is configured, captures
+  /// customer fields (kl/kn/al) into the wizard draft and dispatches kl into
+  /// screenTx for P2 _republishClient. When wizardKey is absent, delegates
+  /// to the original _onCardTap for backward-compat.
+  void _onFlatCardTap(Map<String, dynamic> task) {
+    final String route =
+        (widget.component['route'] ?? '').toString().trim();
+    if (route.isEmpty) return;
+
+    final String wizardKey =
+        (widget.component['wizardKey'] ?? '').toString().trim();
+    final String idField =
+        (widget.component['idField'] ?? 'tnm').toString();
+    final String titleField =
+        (widget.component['titleField'] ?? 'kn').toString();
+    final String addressField =
+        (widget.component['addressField'] ?? 'al').toString();
+    final String picField =
+        (widget.component['picField'] ?? 'pic').toString();
+
+    if (wizardKey.isNotEmpty) {
+      // Admin wizard: capture customer into draft
+      final String kl = (task[idField] ?? '').toString().trim();
+      final String kn = (task[titleField] ?? '').toString().trim();
+      final String al = (task[addressField] ?? '').toString().trim();
+      final String pic = (task[picField] ?? '').toString().trim();
+      // If the user picked a DIFFERENT customer (or this is the first pick),
+      // wipe stale items + vehicle from the previous customer's draft.
+      // Same-customer re-tap preserves in-progress items (resume).
+      final String priorKl =
+          (AdminCreateTaskSupport.getCustomer(wizardKey)?['kl'] ?? '')
+              .toString()
+              .trim();
+      if (priorKl != kl) {
+        AdminCreateTaskSupport.clearDraft(wizardKey);
+        // Also wipe the stale screenTx vehicle token ('vv') so a customer
+        // switch cannot carry the prior vehicle into the P3 pre-highlight or
+        // the submit fallback. Symmetric with the kl re-dispatch below.
+        transactionStore.dispatch(
+            UpdateScreenTxAction(ScreenTransaction({'vv': ''})));
+      }
+      AdminCreateTaskSupport.setCustomer(wizardKey,
+          kl: kl, kn: kn, al: al, pic: pic);
+      // Dispatch kl into screenTx bare key for P2 _republishClient
+      if (kl.isNotEmpty) {
+        transactionStore.dispatch(
+            UpdateScreenTxAction(ScreenTransaction({'kl': kl})));
+      }
+      TaskItemBuilder.draftRev.value++;
+    } else {
+      // Non-wizard flat mode: dispatch #ACTIVE_TASK (backward-compat)
+      final String taskVid = (task[idField] ?? '').toString().trim();
+      if (taskVid.isNotEmpty) {
+        transactionStore.dispatch(UpdateScreenTxAction(
+            ScreenTransaction({'#ACTIVE_TASK': taskVid})));
+      }
+    }
+
+    routeStack.push(route);
+    gotoRoute(route);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Obx(() {
@@ -144,6 +304,50 @@ class _TaskFeedListState extends State<TaskFeedList> {
           (widget.component['titleField'] ?? 'kn').toString();
       final String addressField =
           (widget.component['addressField'] ?? 'al').toString();
+      final String iconField =
+          (widget.component['iconField'] ?? '').toString();
+      final String searchHint =
+          (widget.component['searchHint'] ?? '').toString();
+      final String countLabel =
+          (widget.component['countLabel'] ?? '').toString();
+      final String emptyText =
+          (widget.component['emptyText'] ?? '').toString();
+
+      // ── FLAT mode (groupField empty) ─────────────────────────────────
+      // When groupField is present but empty in JSON, render a simple
+      // ungrouped card list with no status grouping, no delivery badges,
+      // no return-gate evaluation. Absent groupField defaults to 'tst'
+      // (GROUPED, backward-compatible with driver P10).
+      if (groupField.isEmpty) {
+        // Badge config (FLAT-only: per-row outstanding / seed chip).
+        final List<Map<String, dynamic>> badgeDocs = _badgeCode.isNotEmpty
+            ? List<Map<String, dynamic>>.from(
+                mapTableContent[_badgeCode] ?? const [])
+            : const [];
+        final String badgeSearch =
+            (widget.component['badgeSearch'] ?? '').toString().trim();
+        final String badgeField =
+            (widget.component['badgeField'] ?? '').toString().trim();
+        final String badgeLabel =
+            (widget.component['badgeLabel'] ?? '').toString().trim();
+        final String seedLabel =
+            (widget.component['seedLabel'] ?? '').toString().trim();
+
+        return _buildFlatList(tasks,
+            idField: idField,
+            titleField: titleField,
+            addressField: addressField,
+            iconField: iconField,
+            searchHint: searchHint,
+            countLabel: countLabel,
+            emptyText: emptyText,
+            badgeDocs: badgeDocs,
+            badgeSearch: badgeSearch,
+            badgeField: badgeField,
+            badgeLabel: badgeLabel,
+            seedLabel: seedLabel);
+      }
+
       final String typeField =
           (widget.component['typeField'] ?? 'tty').toString();
       final String itemsField =
@@ -182,6 +386,21 @@ class _TaskFeedListState extends State<TaskFeedList> {
       }
 
       final bool allDone = pendingTasks.isEmpty;
+
+      // Return-CTA gate (spec (4).md §OPEN 3 option a): opt-in. With
+      // returnGateSearch (+ table) configured, the "Kembali ke Gudang"
+      // entry-point shows ONLY while the gate matches (rt=pending); after
+      // handover (rt=returned) it stops matching -> CTA hidden so the driver
+      // can't re-return. Unconfigured -> always shown (backward-compatible).
+      // evaluateGateSearch reads mapTableContent[_returnGateCode], registering
+      // the reactive dependency so the CTA drops live when rt flips.
+      final String rawReturnGateSearch =
+          (widget.component['returnGateSearch'] ?? '').toString().trim();
+      final bool returnGated =
+          rawReturnGateSearch.isNotEmpty && _returnGateCode.isNotEmpty;
+      final bool returnGateOpen = !returnGated ||
+          evaluateGateSearch(
+              _returnGateCode, rawReturnGateSearch, widget.scrName);
 
       // Text slots
       final String assignedLabel = _t(0, 'Stop Berikutnya');
@@ -266,8 +485,8 @@ class _TaskFeedListState extends State<TaskFeedList> {
                 ),
             ],
 
-            // ── allDone banner ────────────────────────────────────
-            if (allDone && tasks.isNotEmpty) ...[
+            // ── allDone banner + return CTA (gated: hidden after handover) ──
+            if (allDone && tasks.isNotEmpty && returnGateOpen) ...[
               const SizedBox(height: 16),
               _buildAllDoneBanner(),
               const SizedBox(height: 12),
@@ -768,6 +987,318 @@ class _TaskFeedListState extends State<TaskFeedList> {
             fontWeight: FontWeight.w700,
             letterSpacing: 0.3,
           ),
+        ),
+      ),
+    );
+  }
+
+  // ── FLAT mode rendering ──────────────────────────────────────────────
+
+  Widget _buildFlatList(
+    List<Map<String, dynamic>> tasks, {
+    required String idField,
+    required String titleField,
+    required String addressField,
+    required String iconField,
+    required String searchHint,
+    required String countLabel,
+    required String emptyText,
+    List<Map<String, dynamic>> badgeDocs = const [],
+    String badgeSearch = '',
+    String badgeField = '',
+    String badgeLabel = '',
+    String seedLabel = '',
+  }) {
+    // Lazy-init: handles edge case where State persisted from GROUPED to FLAT
+    // (JSON changed without rebuilding State — initState skipped controller).
+    final TextEditingController ctrl = _searchController ??=
+        TaskFeedList._flatSearchControllers
+            .putIfAbsent(widget.scrName, () => TextEditingController());
+
+    // Local search filter (plain user text — NOT a server search field,
+    // so NO autheniumDecode). Config search was already decoded upstream
+    // by filterDriverHomeDocs.
+    final String query = ctrl.text.trim().toLowerCase();
+    final List<Map<String, dynamic>> filtered = query.isEmpty
+        ? tasks
+        : tasks.where((task) {
+            final String title =
+                (task[titleField] ?? '').toString().trim().toLowerCase();
+            final String address =
+                (task[addressField] ?? '').toString().trim().toLowerCase();
+            return title.contains(query) || address.contains(query);
+          }).toList();
+
+    final int count = filtered.length;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          widget.lPad, widget.tPad, widget.rPad, widget.bPad),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── Search bar ────────────────────────────────────────
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFFF3F4F6), // gray-100 (surfaceAlt)
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFE5E7EB)), // border
+            ),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                const Text(
+                  '\u{1F50D}', // magnifying glass emoji
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF9CA3AF), // textDim
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: ctrl,
+                    onChanged: (_) => setState(() {}),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF1F2937), // text
+                    ),
+                    decoration: InputDecoration(
+                      hintText: searchHint.isNotEmpty
+                          ? searchHint
+                          : 'Cari...',
+                      hintStyle: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF9CA3AF), // textDim
+                      ),
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
+                      border: InputBorder.none,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // ── Count header ──────────────────────────────────────
+          if (countLabel.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 8),
+              child: Text(
+                '$count $countLabel'.toUpperCase(),
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF9CA3AF), // textDim
+                  letterSpacing: 0.7,
+                ),
+              ),
+            ),
+
+          // ── Cards or empty state ──────────────────────────────
+          if (count == 0)
+            _buildFlatEmptyState(emptyText)
+          else
+            for (final task in filtered)
+              _buildFlatCard(
+                task,
+                titleField: titleField,
+                addressField: addressField,
+                iconField: iconField,
+                idField: idField,
+                badgeDocs: badgeDocs,
+                badgeSearch: badgeSearch,
+                badgeField: badgeField,
+                badgeLabel: badgeLabel,
+                seedLabel: seedLabel,
+              ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFlatCard(
+    Map<String, dynamic> task, {
+    required String titleField,
+    required String addressField,
+    required String iconField,
+    String idField = '',
+    List<Map<String, dynamic>> badgeDocs = const [],
+    String badgeSearch = '',
+    String badgeField = '',
+    String badgeLabel = '',
+    String seedLabel = '',
+  }) {
+    final String title = (task[titleField] ?? '').toString().trim();
+    final String address = (task[addressField] ?? '').toString().trim();
+
+    // Avatar content: iconField doc value -> first letter of title -> empty
+    String avatarContent = '';
+    if (iconField.isNotEmpty) {
+      avatarContent = (task[iconField] ?? '').toString().trim();
+    }
+    if (avatarContent.isEmpty && title.isNotEmpty) {
+      avatarContent = title[0].toUpperCase();
+    }
+
+    // Badge chip (outstanding or seed) -- only when badgeSearch configured.
+    Widget? badgeChip;
+    if (badgeSearch.isNotEmpty && idField.isNotEmpty) {
+      final String rowId = (task[idField] ?? '').toString().trim();
+      final ({int rows, int sum}) agg = TaskFeedList.aggregateForRow(
+          badgeDocs, badgeSearch, idField, rowId, badgeField);
+      if (agg.rows == 0 && seedLabel.isNotEmpty) {
+        // No matched docs = not seeded (amber chip).
+        badgeChip = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFEF3C7), // amber-100
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            seedLabel,
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFFB45309), // amber-700
+            ),
+          ),
+        );
+      } else if (agg.rows > 0) {
+        // Matched docs = seeded; show sum (violet chip).
+        badgeChip = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF5F3FF), // violet-50
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            '\u{2191} ${agg.sum} $badgeLabel'.trim(),
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF6D28D9), // violet-700
+            ),
+          ),
+        );
+      }
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: GestureDetector(
+        onTap: () => _onFlatCardTap(task),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white, // surface
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE5E7EB)), // border
+          ),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              // Avatar: 40x40, radius 10, slate-100 bg
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9), // slate-100
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  avatarContent,
+                  style: const TextStyle(fontSize: 20),
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Middle: title + subtitle (flex, minWidth 0 via Expanded)
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1F2937), // text
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (address.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        address,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF6B7280), // textMid
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    if (badgeChip != null) ...[
+                      const SizedBox(height: 6),
+                      badgeChip,
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Chevron
+              const Text(
+                '\u{203A}', // single right-pointing angle quotation mark
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Color(0xFF9CA3AF), // textDim
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFlatEmptyState(String emptyText) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '\u{1F50D}', // magnifying glass emoji
+              style: TextStyle(fontSize: 32),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              emptyText.isNotEmpty ? emptyText : 'Tidak ada data',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF6B7280), // textMid
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Coba kata kunci lain',
+              style: TextStyle(
+                fontSize: 12,
+                color: Color(0xFF9CA3AF), // textDim
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
         ),
       ),
     );

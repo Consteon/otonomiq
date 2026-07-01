@@ -52,6 +52,8 @@ NoticeBar({
 | `beforeSpacing` | `num?` | no | `0.0` | Top margin |
 | `afterSpacing` | `num?` | no | `0.0` | Bottom margin |
 | `margin` | `String?` | no | -- | Additional margins (top,bottom,left,right) -- comma-separated, split by `separator[4]` via `marginArray()` |
+| `actionText` | `String?` | no | `null` | CTA button label; renders trailing compact TextButton when both `actionText` and `actionRoute` are set |
+| `actionRoute` | `String?` | no | `null` | Route to navigate on CTA tap; dead-route guard skips navigation if page not built |
 
 ## Usage Examples
 
@@ -114,9 +116,11 @@ NoticeBar({
 
 ## State / Bloc / Dependencies
 
-- **None.** Pure display widget: no txfController slot, no Redux key, no GetX,
-  no Bloc, no navigation, no history/imageMap.
-- Color palette from `panel_card_support.dart` (`statusColor`, `statusBgColor`, `panelIcon`).
+- **Display-only** apart from an optional CTA: no txfController slot, no Redux
+  key, no GetX, no Bloc, no history/imageMap. The only navigation is the
+  trailing CTA (`actionText` + `actionRoute`), which uses `routeStack.push` +
+  `gotoRoute` and is dead-route guarded.
+- Color palette from `panel_card_support.dart` (`statusColor`, `statusBgColor`, `panelIcon`). The CTA label uses `AdminTierColors.warnBadgeText` (violet) from `admin_home_support.dart`.
 - Margin helper from `global.dart` (`marginArray`).
 
 ## Important Behavior
@@ -129,6 +133,11 @@ NoticeBar({
   statusBgColor, yielding green (ok). The widget still renders -- it never
   crashes on an unknown variant.
 - **All fields empty** (empty text, no label, no title) renders `SizedBox.shrink()`.
+- **Trailing CTA** renders ONLY when BOTH `actionText` and `actionRoute` are
+  non-empty: a compact violet `TextButton` to the right of the text (44pt min
+  touch target), NOT a full-width button. Absent either param = pure display
+  (no Row restructure). Tapping navigates `actionRoute` (`routeStack.push` then
+  `gotoRoute`); a dead route is inert.
 - No diamond-delimited fields. No fixed-index access. No `autheniumDecode` needed.
 
 ## See Also

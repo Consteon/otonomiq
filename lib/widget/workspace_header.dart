@@ -76,12 +76,17 @@ class _WorkspaceHeaderState extends State<WorkspaceHeader> {
   }
 
   /// text slot accessors (2 slots):
-  ///  [0] "Stop"     (stopNumber prefix label)
-  ///  [1] "Berjalan" (chip label)
+  ///  driver-stop: [0] "Stop" (stopNumber prefix) · [1] "Berjalan" (chip label)
+  ///  step variant: [0] title (bold) · [1] step subtitle (grey)
   String _t(int i, [String def = '']) =>
       _textArray.length > i ? _textArray[i] : def;
 
+  /// Config-driven variant: 'step' for admin wizard step header.
+  String get _variant =>
+      (widget.component['variant'] ?? '').toString().trim().toLowerCase();
+
   void _subscribe() {
+    if (_variant == 'step') return; // step header reads no collection
     final String appVid = resolveAppVid(widget.component);
     final String rawTable =
         (widget.component['table'] ?? '').toString().trim();
@@ -137,9 +142,61 @@ class _WorkspaceHeaderState extends State<WorkspaceHeader> {
     return 0;
   }
 
+  /// Step-header variant for admin wizard pages.
+  /// Renders title (bold) + step subtitle (grey). Back navigation is handled by
+  /// the app bar (pops routeStack) -- no in-header back arrow.
+  Widget _buildStepHeader(BuildContext context) {
+    final String title = _t(0, '');
+    final String step = _t(1, '');
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          widget.lPad, widget.tPad, widget.rPad, widget.bPad),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(
+            bottom: BorderSide(color: Color(0xFFE8EAED)),
+          ),
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (title.isNotEmpty)
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF0F172A),
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            if (step.isNotEmpty) ...[
+              if (title.isNotEmpty) const SizedBox(height: 2),
+              Text(
+                step,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: Color(0xFF6B7280),
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
+    if (_variant == 'step') return _buildStepHeader(context);
     return Obx(() {
       // Touch vehicleId to register Obx dependency (search uses {vehicleId}).
       final DriverHomeState dhState = getDriverHomeState(widget.scrName);

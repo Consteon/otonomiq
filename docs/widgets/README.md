@@ -34,7 +34,15 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | Widget | File | Status | Description |
 |---|---|---|---|
 | BuildDisplayComponent | [build_display_component.md](build_display_component.md) | todo | Dynamic display builder |
+| AdminActiveTripList | [admin_active_trip_list.md](admin_active_trip_list.md) | draft | Active trip cards (plate, driver, stop progress) for Admin H1 BERJALAN |
+| AdminCoordinationHeader | [admin_coordination_header.md](admin_coordination_header.md) | draft | Admin identity header (role, name+plate, translucent count chips) for H1 AdminHome |
+| AdminOutstandingList | [admin_outstanding_list.md](admin_outstanding_list.md) | draft | Collapsible outstanding client list with aging-tier badges for Admin H1 PRIORITAS |
+| AdminUpcomingTaskList | [admin_upcoming_task_list.md](admin_upcoming_task_list.md) | draft | Upcoming task cards with item roll-up and inline vehiclePicker for Admin H1 AKAN DATANG |
+| PickerList | [picker_list.md](picker_list.md) | draft | Generic single-select picker (any collection); capture id→token, optional per-row count badge + ad-hoc row; capture/navigate modes. SDUI `picker_list` (alias `vehicle_picker`) |
+| VehiclePickerSheet | [admin_vehicle_picker_sheet.md](admin_vehicle_picker_sheet.md) | draft | Reusable vehicle assign/reassign bottom-sheet (extracted from CoordinationSignalList) |
+| CoordinationSignalList | [coordination_signal_list.md](coordination_signal_list.md) | draft | Admin signal list (cross-collection derive + assign/cross-nav actions) for H1 AdminHome |
 | CirculationSummary | [circulation_summary.md](circulation_summary.md) | draft | Per-item cross-route circulation totals (Muat/Drop/Pickup) for P5 CustodyNotification |
+| ClosingContextRail | [closing_context_rail.md](closing_context_rail.md) | draft | C1 driver + category context strip (green-tint) for WarehouseClosingCheck |
 | CustodyCountList | [custody_count_list.md](custody_count_list.md) | draft | Blind stepper list for P6 CustodyCount, filtered by item category |
 | CustodyStepHeader | [custody_step_header.md](custody_step_header.md) | draft | Title + plate + STEP badge header and vehicleId publisher for P6 CustodyCount |
 | CustodyCountSubmit | [custody_count_submit.md](custody_count_submit.md) | draft | P6 send-button: writes ip[] natively then navigates to custodyReveal |
@@ -43,12 +51,14 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | CustodyDiscrepancyList | [custody_discrepancy_list.md](custody_discrepancy_list.md) | draft | P8 read-only discrepancy grid (dp[] Warehouse/Lo Hitung/Selisih) |
 | CustodyEventSubmit | [custody_event_submit.md](custody_event_submit.md) | draft | P7/P8 pre-resolve submit (curly tokens) then updateEventRow/addToEvent |
 | EvidenceRow | [evidence_row.md](evidence_row.md) | draft | Two toggle buttons (note/photo) for P11 DeliveryWorkspace |
+| ExecutorDesignateCard | [executor_designate_card.md](executor_designate_card.md) | draft | O1 driver-picker card (amber unset / teal set + workforce bottom-sheet) for WarehouseOpeningCheck |
 | DisplayList | [display_list.md](display_list.md) | todo | List display |
 | DisplayList2 | [display_list_2.md](display_list_2.md) | todo | List display v2 (source file currently empty — doc is a placeholder) |
 | DisplayCard | [display_card.md](display_card.md) | todo | Card display |
 | DriverStopCard | [driver_stop_card.md](driver_stop_card.md) | draft | Stop list + progress card (pending locked-preview / confirmed active) for DriverHome P4 |
 | InventoryBucketCard | [inventory_bucket_card.md](inventory_bucket_card.md) | draft | Vehicle stock per condition bucket for DriverHome P4 |
 | ItemExecutionList | [item_execution_list.md](item_execution_list.md) | draft | Per-item drop/pickup stepper list with status state-machine for P11 DeliveryWorkspace |
+| ItemExecutionSubmit | [item_execution_submit.md](item_execution_submit.md) | draft | Atomic P11 submit: persists stepper actuals to task it[] + tst/tce via writeNativeFields |
 | ListMultiplePanelCard | [list_multiple_panel_card.md](list_multiple_panel_card.md) | draft | Reusable card-list with N nav panels, config-driven layout/labels |
 | ListStatisticCard | [list_statistic_card.md](list_statistic_card.md) | draft | Per-point patrol/cleaning statistic list with optional typed-location merge |
 | NavActionCard | [nav_action_card.md](nav_action_card.md) | draft | Return-vehicle CTA card (muted/active by allClosed) for DriverHome P4 |
@@ -57,13 +67,20 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | PreconditionGateCard | [precondition_gate_card.md](precondition_gate_card.md) | draft | Custody gate card (pending/confirmed) for DriverHome P4 |
 | RouteFeedHeader | [route_feed_header.md](route_feed_header.md) | draft | Sticky 3-row route header (identity, progress, drop/pickup stats) and vehicleId publisher for P10 TaskFeed |
 | RouteProgressHeader | [route_progress_header.md](route_progress_header.md) | draft | Driver identity header with workforce lookup and vehicle publish |
+| TaskCreateSubmit | [task_create_submit.md](task_create_submit.md) | draft | Submit button for Admin create-task wizard (P4) |
+| TaskCreateSuccess | [task_create_success.md](task_create_success.md) | draft | P5 success confirmation screen for Admin create-task wizard |
+| TaskDraftSummary | [task_draft_summary.md](task_draft_summary.md) | draft | Read-only item preview for Admin create-task wizard (P4) |
+| TaskDraftInfo | [task_draft_info.md](task_draft_info.md) | draft | Read-only P4 customer + vehicle info card for Admin create-task wizard |
 | TaskFeedList | [task_feed_list.md](task_feed_list.md) | draft | Grouped task card list (assigned/failed/completed) with allDone footer for P10 TaskFeed |
+| TaskItemBuilder | [task_item_builder.md](task_item_builder.md) | draft | Item-line builder for Admin create-task wizard (P2) |
 | TaskManifestList | [task_manifest_list.md](task_manifest_list.md) | draft | Per-task accordion list with drop/pickup aggregates for P5 CustodyNotification |
 | VehicleCargoSummary | [vehicle_cargo_summary.md](vehicle_cargo_summary.md) | draft | Intro paragraph + cargo card (Sisa di Kendaraan) and vehicleId publisher for P12 ReturnVehicle |
 | TimelinePeriodic | [timeline_periodic.md](timeline_periodic.md) | draft | Config-driven event timeline (TIMELINE variant periodic) with period selector, badge chips, gap pills, image gallery |
 | OtqFormattedText | [otq_formatted_text.md](otq_formatted_text.md) | todo | Text with formatter |
 | TimePresence | [time_presence.md](time_presence.md) | done | Check-in time, live elapsed counter, and last action in 3-column card |
 | VehicleCustodyHeader | [vehicle_custody_header.md](vehicle_custody_header.md) | draft | Vehicle custody card (plate/event/loader/loadtime) and vehicleId publisher for P5 CustodyNotification |
+| VehicleFeedHeader | [vehicle_feed_header.md](vehicle_feed_header.md) | draft | Sticky checker identity + 3 snapshot count boxes for H1 Warehouse Vehicle Feed |
+| VehicleFeedList | [vehicle_feed_list.md](vehicle_feed_list.md) | draft | Tier-grouped vehicle card list with state chips + action buttons for H1 Warehouse Vehicle Feed |
 | WorkspaceHeader | [workspace_header.md](workspace_header.md) | draft | Task identity top-bar (stop/customer/Berjalan chip/address) for P11 DeliveryWorkspace |
 
 ### Image / Media

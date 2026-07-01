@@ -102,6 +102,15 @@ class _CirculationSummaryState extends State<CirculationSummary> {
 
       final List<Map<String, dynamic>> tasks = _getFilteredTasks();
 
+      // Opsi A (spec (2).md §3): per-item, tx-driven metrics (deliver->Drop+
+      // Pickup, sale->Jual, refill->Tukar, purchase->Beli) so sale/purchase
+      // items stop rendering 0/0/0. Opt-in: enabled when the config carries
+      // `nameField` (the denormalised it[].in). Without it, the legacy
+      // drop/pickup totals table renders unchanged (P5 1016).
+      final bool perTx =
+          (widget.component['nameField'] ?? '').toString().trim().isNotEmpty;
+      if (perTx) return _buildPerTx(tasks);
+
       final CirculationResult result = aggregateItemCirculation(
         tasks,
         itemsField:
@@ -350,6 +359,185 @@ class _CirculationSummaryState extends State<CirculationSummary> {
           ),
         ],
       ),
+    );
+  }
+
+  // ─── Opsi A: per-item tx-driven render ───────────────────────────────────
+  // text 7-seg: title◆Drop◆Pickup◆Jual◆Tukar◆Beli◆caption. Labels come ONLY
+  // from the segments (owner-reworded), never hardcoded (spec (2).md §3).
+
+  Widget _buildPerTx(List<Map<String, dynamic>> tasks) {
+    final TxCirculationResult result = aggregateTxCirculation(
+      tasks,
+      itemsField: (widget.component['itemsField'] ?? 'it').toString(),
+      labelField: (widget.component['nameField'] ?? 'in').toString(),
+      txField: (widget.component['txField'] ?? 'tx').toString(),
+      dropField: (widget.component['dropField'] ?? 'pd').toString(),
+      pickupField: (widget.component['pickupField'] ?? 'pp').toString(),
+      saleField: (widget.component['saleField'] ?? 'ps').toString(),
+      refillField: (widget.component['refillField'] ?? 'pr').toString(),
+      buyField: (widget.component['buyField'] ?? 'pb').toString(),
+    );
+
+    final String title = _t(0, 'Total Circulation');
+    final String dropLabel = _t(1, 'Drop');
+    final String pickupLabel = _t(2, 'Pickup');
+    final String saleLabel = _t(3, 'Jual');
+    final String refillLabel = _t(4, 'Tukar');
+    final String buyLabel = _t(5, 'Beli');
+    final String caption = _t(6, '');
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          widget.lPad, widget.tPad, widget.rPad, widget.bPad),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Title
+            Row(
+              children: [
+                const Icon(Icons.swap_horiz,
+                    size: 20, color: Color(0xFF4338CA)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1F2937),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Per-item rows (each shows only the flows it actually has)
+            if (result.items.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  'Belum ada sirkulasi hari ini.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF9CA3AF),
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              )
+            else
+              for (int i = 0; i < result.items.length; i++) ...[
+                if (i > 0)
+                  const Divider(
+                      height: 1, thickness: 1, color: Color(0xFFF0F1F3)),
+                _buildPerTxRow(result.items[i], dropLabel, pickupLabel,
+                    saleLabel, refillLabel, buyLabel),
+              ],
+            // Caption
+            if (caption.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                caption,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                  color: Color(0xFF9CA3AF), // gray-400
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPerTxRow(
+    TxItemCirculation item,
+    String dropLabel,
+    String pickupLabel,
+    String saleLabel,
+    String refillLabel,
+    String buyLabel,
+  ) {
+    // Build the metric chips for the flows this item actually has (non-zero).
+    final List<Widget> chips = <Widget>[];
+    void addChip(String label, int value, Color color) {
+      if (value == 0) return;
+      chips.add(_metricChip(label, value, color));
+    }
+
+    addChip(dropLabel, item.drop, const Color(0xFF16A34A)); // green-600
+    addChip(pickupLabel, item.pickup, const Color(0xFF4338CA)); // indigo-700
+    addChip(saleLabel, item.sale, const Color(0xFFD97706)); // amber-600
+    addChip(refillLabel, item.refill, const Color(0xFF7C3AED)); // violet-600
+    addChip(buyLabel, item.buy, const Color(0xFFE11D48)); // rose-600
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 3,
+            child: Text(
+              item.itemName,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF374151), // gray-700
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 4,
+            child: chips.isEmpty
+                ? const Text(
+                    '—', // em dash
+                    textAlign: TextAlign.right,
+                    style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+                  )
+                : Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: 12,
+                    runSpacing: 6,
+                    children: chips,
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _metricChip(String label, int value, Color color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '$label ',
+          style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+        ),
+        Text(
+          '$value',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            fontFamily: 'monospace',
+            color: color,
+          ),
+        ),
+      ],
     );
   }
 }

@@ -1,6 +1,6 @@
 # TaskFeedList
 
-Grouped task card list for the P10 TaskFeed screen with per-state sections and allDone footer.
+Grouped or flat task/entity card list with configurable `groupField` mode.
 
 - **File:** [lib/widget/task_feed_list.dart](../../lib/widget/task_feed_list.dart)
 - **Class:** `TaskFeedList` (StatefulWidget)
@@ -10,7 +10,13 @@ Grouped task card list for the P10 TaskFeed screen with per-state sections and a
 
 ## Purpose
 
-Replaces the abandoned `driverStopCardFull` type. Groups task docs by state (assigned+on_delivery / failed / completed), renders per-card layout with avatar, customer, state chip, drop/pickup badges, and state-specific footer. Shows allDone banner when all tasks are completed or failed.
+Replaces the abandoned `driverStopCardFull` type. Two modes selected by `groupField`:
+
+### MODE GROUPED (groupField non-empty, e.g. `"tst"`)
+Groups task docs by state (assigned+on_delivery / failed / completed), renders per-card layout with avatar, customer, state chip, drop/pickup badges, and state-specific footer. Shows allDone banner when all tasks are completed or failed. Used by driver P10 TaskFeed.
+
+### MODE FLAT (groupField empty `""`)
+Self-contained search bar + count header + avatar cards + empty state. Reads docs matching `search`, then locally filters by user-typed query (title OR address, case-insensitive substring). Card tap dispatches `idField` to `#ACTIVE_TASK` and navigates to `route`. No status grouping, no delivery badges, no return-gate evaluation. Used by Admin P1 customer picker.
 
 ## Signature / Constructor
 
@@ -23,44 +29,69 @@ TaskFeedList({
 
 ### `component` shape
 
-| Key | Type | Description |
-|---|---|---|
-| `vidtable` | `String` | Firestore container VID (`20342033315492`) |
-| `table` | `String` | Task table path (e.g. `84214220504259//task`) |
-| `search` | `String` | Task filter (e.g. `vv◼{vehicleId}⭘tdt◼{today}`) |
-| `groupField` | `String` | State field for grouping (default `tst`) |
-| `idField` | `String` | Task ID field (default `tnm`) |
-| `titleField` | `String` | Customer name field (default `kn`) |
-| `addressField` | `String` | Address field (default `al`) |
-| `typeField` | `String` | Task type field (default `tty`) |
-| `itemsField` | `String` | Items array field (default `it`) |
-| `dropField` | `String` | Planned drop field (default `pd`) |
-| `pickupField` | `String` | Planned pickup field (default `pp`) |
-| `actualDropField` | `String` | Actual drop field (default `ad`) |
-| `actualPickupField` | `String` | Actual pickup field (default `ap`) |
-| `route` | `String` | Card-tap navigation route (DeliveryWorkspace) |
-| `returnRoute` | `String` | allDone button route (ReturnVehicle) |
-| `text` | `String` | Diamond-separated labels (15 segments) |
+| Key | Type | Mode | Description |
+|---|---|---|---|
+| `vidtable` | `String` | Both | Firestore container VID (`20342033315492`) |
+| `table` | `String` | Both | Table path (e.g. `84214220504259//task` or `84214220504259//stock_location`) |
+| `search` | `String` | Both | Filter condition (e.g. `vv◼{vehicleId}⭘tdt◼{today}` or `lt◼client⭘lst◼active`) |
+| `groupField` | `String` | Both | State field for grouping. Non-empty (e.g. `tst`) = GROUPED. Empty `""` = FLAT. Absent = defaults to `tst` (GROUPED). |
+| `idField` | `String` | Both | Entity ID field (default `tnm`). Dispatched to `#ACTIVE_TASK` on card tap. |
+| `titleField` | `String` | Both | Display name field (default `kn`) |
+| `addressField` | `String` | Both | Address/subtitle field (default `al`) |
+| `iconField` | `String` | Flat | Avatar content field (default `''`). Non-empty: read `task[iconField]`. Empty or value empty: fall back to first character of `titleField` (uppercased). |
+| `searchHint` | `String` | Flat | Placeholder text for the built-in search bar (default `'Cari...'`). |
+| `countLabel` | `String` | Flat | Count header label (e.g. `"Customer"`). Renders as `"{N} {countLabel}"` uppercase. Empty = no count header. |
+| `emptyText` | `String` | Flat | Empty-state main line (e.g. `"Belum ada customer"`). Shown when filtered count = 0. Empty = `"Tidak ada data"`. |
+| `badgeTable` | `String` | Flat | Secondary table for the per-row outstanding badge (e.g. `84214220504259//asset_cache`). Subscribed in `_subscribe()`. Empty = no badge. |
+| `badgeSearch` | `String` | Flat | Per-row gate over `badgeTable`, `{idField}` substituted to the row's id (e.g. `lt◼client⭘lv◼{lv}`). `autheniumDecode`'d before matching. |
+| `badgeField` | `String` | Flat | Numeric field summed across matched `badgeTable` rows (e.g. `qt`). Coerced via `coerceNum`. |
+| `badgeLabel` | `String` | Flat | Suffix on the outstanding chip → "↑ {sum} {badgeLabel}" (e.g. `outstanding`). |
+| `seedLabel` | `String` | Flat | Amber chip text when `badgeSearch` matches **0** rows (client not seeded, e.g. `belum di-seed`). Matched rows with sum 0 still show "↑ 0 {badgeLabel}" (seeded), NOT this. |
+| `typeField` | `String` | Grouped | Task type field (default `tty`). Ignored in FLAT. |
+| `itemsField` | `String` | Grouped | Items array field (default `it`). Ignored in FLAT. |
+| `dropField` | `String` | Grouped | Planned drop field (default `pd`). Ignored in FLAT. |
+| `pickupField` | `String` | Grouped | Planned pickup field (default `pp`). Ignored in FLAT. |
+| `actualDropField` | `String` | Grouped | Actual drop field (default `ad`). Ignored in FLAT. |
+| `actualPickupField` | `String` | Grouped | Actual pickup field (default `ap`). Ignored in FLAT. |
+| `route` | `String` | Both | Card-tap navigation route |
+| `returnRoute` | `String` | Grouped | allDone button route. Ignored in FLAT. |
+| `returnGateTable` | `String` | Grouped | Return-CTA gate table. Ignored in FLAT. |
+| `returnGateSearch` | `String` | Grouped | Return-CTA gate search. Ignored in FLAT. |
+| `text` | `String` | Grouped | Diamond-separated labels. 15 segments (section headers, badges, banners). Unused in FLAT. |
 
 ## State / Dependencies
 
 - **GetX Obx** for reactive mapTableContent reads.
 - **DriverHomeState** (driver_home_support.dart) for vehicleId dependency.
-- **stopStatusOf** (driver_home_support.dart) for state normalization.
+- **stopStatusOf** (driver_home_support.dart) for state normalization (GROUPED only).
+- **Static `_flatSearchControllers`** per-scrName `TextEditingController` map. Cleared by `clearFlatSearch(scrName)` on route change (called from `buildPage` in `ui_component.dart`).
 
 ## Important Behavior
 
+### Both modes
+- Card tap: `_onCardTap` dispatches `task[idField]` to `#ACTIVE_TASK`, then `routeStack.push(route)` + `gotoRoute(route)`.
+- `filterDriverHomeDocs` decodes + resolves the config search (autheniumDecode, curly tokens, screenTx tokens, multi-clause AND filter).
+
+### GROUPED mode only
 - `on_delivery` tasks group with `assigned` (still-open).
 - `allDone` = pending group empty AND tasks non-empty.
-- Card tap on assigned/on_delivery: `routeStack.push(route)` then `gotoRoute(route)`.
-- allDone button: `routeStack.push(returnRoute)` then `gotoRoute(returnRoute)`.
-- Dead routes degrade gracefully (silent push+goto, no snackbar).
-- Distance line: HIDDEN (no GPS).
-- completedAt time: HIDDEN (no tce field).
-- customerConfirmed: HIDDEN (P11 deferred).
-- stopNumber: 1-based global doc-order index on assigned/on_delivery only.
+- Return-CTA gate: opt-in via `returnGateSearch` + `returnGateTable`.
+- Dead routes degrade gracefully (silent push+goto).
+- Distance line: HIDDEN. customerConfirmed: HIDDEN.
+- stopNumber: 1-based global doc-order index.
+
+### FLAT mode
+- **Search bar:** built-in, above cards. User-typed query filters loaded docs by `titleField` OR `addressField` (case-insensitive substring). Plain text -- no `autheniumDecode` (config search already decoded upstream).
+- **Count header:** `"{N} {countLabel}"` uppercase, where N = count after config search AND local search filters.
+- **Card anatomy:** avatar (40x40, iconField value or first-letter fallback) + title (14px bold) + subtitle (11px textMid) + chevron.
+- **Empty state:** shown when filtered count = 0. Emoji + emptyText + static secondary hint.
+- **Search reset:** `clearFlatSearch(scrName)` clears controller text on route change. State persists across nav (cached SDUI widget, same ObjectKey).
+- No status reading, no `stopStatusOf`, no grouping.
+- No delivery badges (drop/pickup/actual).
+- No return-gate subscription/evaluation.
+- No allDone banner or return button.
 
 ## See Also
 
-- [route_feed_header.md](route_feed_header.md) -- companion header widget
+- [route_feed_header.md](route_feed_header.md) -- companion header widget (GROUPED)
 - [driver_stop_card.md](driver_stop_card.md) -- P4 sibling card

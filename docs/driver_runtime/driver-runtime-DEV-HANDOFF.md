@@ -1,0 +1,70 @@
+# Driver Runtime — DEV HANDOFF (kirim ini ke dev)
+
+**Konteks:** semua **config sheet (op1Screen page + Widget template + DSL) = SELESAI** dan resolving. Yang tinggal = **renderer (Flutter)** baca config-nya, + **CF (backend)** derive data. App belum nampilin sebagian fitur karena renderer-nya belum dibangun (bukan karena config kurang).
+
+**Start here (baca dulu, urutan):**
+1. `docs/driver-runtime-widgets-MASTER-handoff.md` — peta flow P4→P12 + reject + failed, page→widget→spec.
+2. `docs/consteon-runtime-knowledge-base.md` — arsitektur op1Screen + DSL token + data model.
+3. `docs/driver-runtime-field-dictionary.md` — semua field + arti.
+
+---
+
+## A. RENDERER (Flutter) — config udah ada, app harus implement
+
+### A1. Yang bikin fitur BELUM jalan sekarang (prioritas)
+| widget / fitur | spec | catatan |
+|---|---|---|
+| **routeParams** (kirim data antar-route) | `rbt-route-params-dev-spec.md` | buat reject (driverStopCard Tolak: `rejectTaskVid◼{tnm}`) + failed (rbtCta P11: `activeTaskVid◼{activeTaskVid}`). Token login = session-global, BUKAN routeParams |
+| **PRECONDITION_GATE_CARD** agregasi manifest | `precondition-gate-card-manifest-dev-spec.md` | 3 perilaku: sum `pd+ps+pr`, exclude `load_rejected`, `hideZero`. **Ini penyebab manifest masih nampil 0** untuk item jual/tukar |
+| **DRIVER_STOP_CARD** Tolak + state | `driver-stop-card-dev-spec.md` | tombol Tolak (nav + routeParams), handle `tst=load_rejected` (drop/relabel dari route) |
+| **ITEM_EXECUTION_LIST** tx branch | `driver-delivery-workspace-p11-dev-spec.md` + `driver-runtime-transaction-delta.md` | sale/purchase/refill read-only |
+| **TASK_MANIFEST_LIST** + **CIRCULATION_SUMMARY** tx+exclude | `driver-custody-notification-p5-dev-spec.md` + `driver-runtime-transaction-delta.md` | sum tx + exclude load_rejected |
+
+### A2. Page/widget renderer lain
+| widget / page | spec |
+|---|---|
+| ROUTE_PROGRESS_HEADER | `driver-route-progress-header-dev-spec.md` |
+| DriverHome (P4) + state machine | `driverhome-p4-dev-spec.md`, `driver-home-state-machine-dev-spec.md` |
+| Custody P5/P6 + reveal | `driver-custody-notification-p5-dev-spec.md`, `driver-custody-count-p6-dev-spec.md`, `driver-custody-reveal-dev-spec.md` |
+| Custody P7/P8/P9 (success/mismatch) | `driver-custody-p7p8p9-dev-spec.md` |
+| TaskFeed (P10) | `driver-task-feed-p10-dev-spec.md` |
+| DeliveryWorkspace (P11) | `driver-delivery-workspace-p11-dev-spec.md` |
+| ReturnVehicle (P12) — RETURN_HEADER, VEHICLE_CARGO_SUMMARY (rebuild: per-item nama+satuan, fix `ii` mentah + "Tabung" hardcoded), CIRCULATION_SUMMARY (reuse, jual/beli) | `driver-return-vehicle-p12-dev-spec.md` §2/§3 |
+| RejectTask | `driver-reject-task-sheet-dev-spec.md` |
+| **FailedDelivery** (baru) — SELECTABLE_BTN positioned-input, evidence `ec` | `driver-failed-delivery-sheet-dev-spec.md` |
+| evidence / addToEvent | `driver-evidence-addToEvent-dev-spec.md` |
+| noticeBar / scanner (udah dibangun, verify) | `notice-bar-widget-dev-spec.md`, `scanner-widget-dev-spec.md` |
+| submit confirm sheet / stepper | `driver-submit-confirm-sheet-dev-spec.md`, `execution-stepper-dev-spec.md`, `stepper-widget-dev-spec.md` |
+
+---
+
+## B. CF (Go / backend)
+| fitur | spec |
+|---|---|
+| **asset_cache** CF (movement → stok per lokasi) | `driver-runtime-movement-cf-handoff.md`, `driver-runtime-movement-cf-dev-spec.md` |
+| **movement** derive task `it[].ad/ap` (DROP/PICKUP/SALE/PURCHASE/REFILL) | sama ↑ |
+
+Status asset_cache CF: Go Gen2 **udah dibangun, tinggal deploy** (`gcloud`, bukan firebase). Sementara CF belum live → `asset_cache` di-hand-seed.
+
+---
+
+## C. Schema / reference (buat dev paham, bukan dibangun)
+- `driver-runtime-field-dictionary.md` — field + arti.
+- `driver-runtime-tables-dev-spec.md` — collection + struktur.
+- `driver-runtime-transaction-delta.md` — model tx v2 (pd/ps/pr/pb, jual/beli/tukar/refill).
+- `driver-runtime-schema-changes.md` — perubahan schema.
+- evidence `ec` (Evidence Category) — field baru di dict, buat alasan failed/reject (schemaless, no code driver).
+
+---
+
+## D. JANGAN dikerjain dulu (draft / nunggu approval)
+- `redesign-movement-cache-item-techlead.md` — **DRAFT**, nunggu review tech-lead (double-entry movement, cache auto-id, dll). JANGAN implement sebelum diketok.
+- `op1screen-widget-refactor-handoff.md` — internal sheet refactor (gak ngubah output app), bukan kerjaan dev Flutter.
+- `asset-cache-reseed-startofday-spec.md` — buat seed/agent, bukan dev.
+
+---
+
+## Ringkas prioritas (deadline)
+1. **routeParams** + **DRIVER_STOP_CARD Tolak** → reject & failed bisa di-trigger.
+2. **PRECONDITION_GATE_CARD** + **TASK_MANIFEST_LIST/CIRCULATION_SUMMARY** + **ITEM_EXECUTION_LIST** tx aggregation → angka muatan & sirkulasi bener (sekarang masih pd-only / 0).
+3. Sisa page renderer (custody, return, feed) + CF deploy.

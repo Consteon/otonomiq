@@ -1,9 +1,12 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:get/get.dart';
-import '../global2.dart';
+
 import '../api.dart';
 import '../global.dart';
+import '../global2.dart';
 import '../otq_icons.dart';
 import 'ftz_horizontal_image_list.dart';
 // import 'dart:math';
@@ -70,7 +73,7 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
       if (widget.component['content'] != null) {
         displayObject = {
           "searchDisplayType": "text1",
-          "content": widget.component['content']
+          "content": widget.component['content'],
         };
         title = textArray[0];
         searchLabel = textArray[1];
@@ -92,14 +95,17 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
     try {
       searchValue = '';
       _tableCode = normalizeTableName(
-          autheniumDecode(widget.component['table'] ?? 'default') ?? '');
+        autheniumDecode(widget.component['table'] ?? 'default') ?? '',
+      );
       List<dynamic> source = List.from(tableContent[_tableCode] ?? []);
       if (source.isEmpty) {
         source = List.from(widget.localTable);
       }
       initialTable = searchTable(_activeFilter, source);
       if (widget.resultController == null) {
-        initialTable = _applySort(initialTable); // DISPLAY mode: sort on first paint
+        initialTable = _applySort(
+          initialTable,
+        ); // DISPLAY mode: sort on first paint
       }
       pickTable = searchTable(searchValue, initialTable);
     } catch (e) {
@@ -127,10 +133,11 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
     if (sortParam == 'asc' || sortParam == 'desc') {
       int sortFactor = sortParam == 'asc' ? 1 : -1;
       try {
-        rows.sort((a, b) =>
-            sortFactor *
-            int.parse(a[0].toString())
-                .compareTo(int.parse(b[0].toString())));
+        rows.sort(
+          (a, b) =>
+              sortFactor *
+              int.parse(a[0].toString()).compareTo(int.parse(b[0].toString())),
+        );
       } catch (e) {
         devPrint(e);
       }
@@ -139,8 +146,7 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
   }
 
   void _rebuildTableData() {
-    List<dynamic> currentTableData =
-        List.from(tableContent[_tableCode] ?? []);
+    List<dynamic> currentTableData = List.from(tableContent[_tableCode] ?? []);
     List<dynamic> newInitial = searchTable(_activeFilter, currentTableData);
     newInitial = _applySort(newInitial);
     if (mounted) {
@@ -169,44 +175,48 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
         ? [defaultImage]
         : getImageList(dataContent, widget.component['image']); // white diamond
     if ((widget.component['image'] ?? '') != '') {
-      detailContent.add(GestureDetector(
+      detailContent.add(
+        GestureDetector(
+          onTap: () {
+            Get.back();
+          },
+          child: HorizontalImageList(
+            imageUrls: imageList,
+            height: currentWidth - imageMargin,
+          ),
+        ),
+      );
+      detailContent.add(const SizedBox(height: 8));
+    } // end if ((widget.component['image'] ?? '') != '')
+    detailContent.add(
+      ListTile(
         onTap: () {
           Get.back();
         },
-        child: HorizontalImageList(
-          imageUrls: imageList,
-          height: currentWidth - imageMargin,
-        ),
-      ));
-      detailContent.add(const SizedBox(
-        height: 8,
-      ));
-    } // end if ((widget.component['image'] ?? '') != '')
-    detailContent.add(ListTile(
-      onTap: () {
-        Get.back();
-      },
-      subtitle: Text(
-        // stringContent.replaceAll('\n', '\n\n'),
-        // stringContent.replaceAll('\n', '--'),
-        stringContent,
-        style: TextStyle(color: Colors.black.withOpacity(0.6)),
-        // overflow: TextOverflow.,
-        softWrap: true,
-      ),
-    ));
-    return Get.dialog(AlertDialog(
-      content: SizedBox(
-        width: currentWidth,
-        child: ListView.builder(
-          shrinkWrap: true,
-          itemCount: detailContent.length,
-          itemBuilder: (context, position) {
-            return detailContent[position];
-          },
+        subtitle: Text(
+          // stringContent.replaceAll('\n', '\n\n'),
+          // stringContent.replaceAll('\n', '--'),
+          stringContent,
+          style: TextStyle(color: Colors.black.withValues(alpha: 0.6)),
+          // overflow: TextOverflow.,
+          softWrap: true,
         ),
       ),
-    ));
+    );
+    return Get.dialog(
+      AlertDialog(
+        content: SizedBox(
+          width: currentWidth,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: detailContent.length,
+            itemBuilder: (context, position) {
+              return detailContent[position];
+            },
+          ),
+        ),
+      ),
+    );
   } // end of detailDialog
 
   @override
@@ -230,15 +240,14 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
           //end of onChanged
           decoration: InputDecoration(
             prefixIcon: widget.component['icon'].toString().isNotEmpty
-                ? Icon(
-                    otqIcons[widget.component['icon'].toString()],
-                  )
+                ? Icon(otqIcons[widget.component['icon'].toString()])
                 : null,
             labelText: searchLabel,
             hintText: hint,
             border: const OutlineInputBorder(
-                borderRadius: BorderRadius.all(Radius.circular(4)),
-                borderSide: BorderSide()),
+              borderRadius: BorderRadius.all(Radius.circular(4)),
+              borderSide: BorderSide(),
+            ),
           ),
           style: TextStyle(
             color: (widget.component['color'] ?? 'default') != 'default'
@@ -246,8 +255,8 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
                 : Theme.of(context).textTheme.bodyLarge!.color,
             backgroundColor:
                 (widget.component['background'] ?? 'default') != 'default'
-                    ? Color(int.parse(widget.component['background']))
-                    : Theme.of(context).textTheme.bodyLarge!.backgroundColor,
+                ? Color(int.parse(widget.component['background']))
+                : Theme.of(context).textTheme.bodyLarge!.backgroundColor,
             // fontWeight: style[0],
             // fontStyle: style[1],
             // decoration: style[2],
@@ -256,68 +265,73 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
         ),
         const SizedBox(height: 8),
         Expanded(
-          child: Builder(builder: (context) {
-            debugPrint('pickTable length = ${pickTable.length}');
-            return ListView.builder(
-              itemCount: pickTable.length,
-              cacheExtent: 1000,
-              prototypeItem: Card(
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  children: [
-                    ListTile(
-                      leading: AspectRatio(
-                        aspectRatio: 1,
-                        child:
-                            displayImage(imageUrl: defaultImage, cached: true),
-                        // child: FadeInImage.memoryNetwork(
-                        //     placeholder: kTransparentImage,
-                        //     image: defaultImage),
-                      ),
-                      subtitle: pickTable.isEmpty
-                          ? const Text('\n--\n\n')
-                          : Text(
-                              displayObject['content'] == null
-                                  ? '${pickTable.first[0]}\n${pickTable.first[1]}\n${pickTable.first.length > 5 ? pickTable.first[5] : ''}'
-                                  : replaceMarkerPrototype(
-                                      displayObject['content'],
-                                      pickTable.first,
-                                      widget.component['indexStart'] ?? 0),
-                              style: TextStyle(
-                                  color: Colors.black.withOpacity(0.6)),
-                              overflow: TextOverflow.fade,
-                              softWrap: false,
-                            ),
-                    ),
-                    const SizedBox(height: 5), //bottom padding
-                  ],
-                ),
-              ),
-              itemBuilder: (context, index) {
-                // String? imageUrl;
-                // if (widget.component['image'] != null) {
-                //   try {
-                //     imageUrl = pickTable[index][int.parse(widget
-                //         .component['image']
-                //         .replaceAll('<', '')
-                //         .replaceAll('>', ''))];
-                //   } catch (e) {}
-                // } // end if (widget.component['image'] != null)
-                // if (imageUrl != null || imageUrl.toString().trim().isEmpty) {
-                //   imageUrl = null;
-                // }
-                return Card(
+          child: Builder(
+            builder: (context) {
+              debugPrint('pickTable length = ${pickTable.length}');
+              return ListView.builder(
+                scrollCacheExtent: ScrollCacheExtent.pixels(1000),
+                itemCount: pickTable.length,
+                prototypeItem: Card(
                   clipBehavior: Clip.antiAlias,
                   child: Column(
                     children: [
                       ListTile(
-                        onTap: () {
-                          if (widget.resultController != null) {
-                            widget.resultController!.text =
-                                pickTable[index][1].toString();
-                            Get.back();
-                          } else {
-                            detailDialog(
+                        leading: AspectRatio(
+                          aspectRatio: 1,
+                          child: displayImage(
+                            imageUrl: defaultImage,
+                            cached: true,
+                          ),
+                          // child: FadeInImage.memoryNetwork(
+                          //     placeholder: kTransparentImage,
+                          //     image: defaultImage),
+                        ),
+                        subtitle: pickTable.isEmpty
+                            ? const Text('\n--\n\n')
+                            : Text(
+                                displayObject['content'] == null
+                                    ? '${pickTable.first[0]}\n${pickTable.first[1]}\n${pickTable.first.length > 5 ? pickTable.first[5] : ''}'
+                                    : replaceMarkerPrototype(
+                                        displayObject['content'],
+                                        pickTable.first,
+                                        widget.component['indexStart'] ?? 0,
+                                      ),
+                                style: TextStyle(
+                                  color: Colors.black.withValues(alpha: 0.6),
+                                ),
+                                overflow: TextOverflow.fade,
+                                softWrap: false,
+                              ),
+                      ),
+                      const SizedBox(height: 5), //bottom padding
+                    ],
+                  ),
+                ),
+                itemBuilder: (context, index) {
+                  // String? imageUrl;
+                  // if (widget.component['image'] != null) {
+                  //   try {
+                  //     imageUrl = pickTable[index][int.parse(widget
+                  //         .component['image']
+                  //         .replaceAll('<', '')
+                  //         .replaceAll('>', ''))];
+                  //   } catch (e) {}
+                  // } // end if (widget.component['image'] != null)
+                  // if (imageUrl != null || imageUrl.toString().trim().isEmpty) {
+                  //   imageUrl = null;
+                  // }
+                  return Card(
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      children: [
+                        ListTile(
+                          onTap: () {
+                            if (widget.resultController != null) {
+                              widget.resultController!.text =
+                                  pickTable[index][1].toString();
+                              Get.back();
+                            } else {
+                              detailDialog(
                                 pickTable[index],
                                 displayObject['content'] == null
                                     ? '${pickTable.first[0]}\n${pickTable.first[1]}'
@@ -325,61 +339,69 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
                                         displayObject['content'],
                                         pickTable[index],
                                         widget.component['indexStart'] ?? 0,
-                                        false));
-                          }
-                        },
-                        leading: (widget.component['image'] ?? '') == ''
-                            ? null
-                            : AspectRatio(
-                                aspectRatio: 1,
-                                child: displayImage(
-                                    imageUrl: getImageList(pickTable[index],
-                                        widget.component['image'])[0],
-                                    cached: false),
-                                // child: FadeInImage.memoryNetwork(
-                                //   placeholder: kTransparentImage,
-                                //   image: getImageList(pickTable[index],
-                                //       widget.component['image'])[0],
-                                // ),
-                              ),
-                        // leading: AspectRatio(
-                        //   aspectRatio: 1,
-                        //   child: FadeInImage.memoryNetwork(
-                        //       placeholder: kTransparentImage,
-                        //       image:
-                        //       'https://firebasestorage.googleapis.com/v0/b/otq-01-ase2/o/vt%2F2020%2Fs%2Fkrusty-services%2Fattendance-selfie%2Fsurya-widjaja%2F60181816889090-2020-11-06-13-07-12.jpg?alt=media&token=d04a568d-5de5-4b98-bc9a-7dbdfacc58ae'),
-                        // ),
-                        subtitle:
-                            // FittedBox(
-                            // // fit: BoxFit.scaleDown,
-                            // fit: BoxFit.fitHeight,
-                            // clipBehavior: Clip.hardEdge,
-                            // alignment: Alignment.centerLeft,
-                            // child:
-                            pickTable.isEmpty
-                                ? const Text('--')
-                                : Text(
-                                    displayObject['content'] == null
-                                        ? '${pickTable.first[0]}\n${pickTable.first[1]}\n${pickTable.first[5]}'
-                                        : replaceMarker(
-                                            displayObject['content'],
-                                            pickTable[index],
-                                            widget.component['indexStart'] ?? 0,
-                                            false),
-                                    style: TextStyle(
-                                        color: Colors.black.withOpacity(0.6)),
-                                    overflow: TextOverflow.fade,
-                                    softWrap: false,
+                                        false,
+                                      ),
+                              );
+                            }
+                          },
+                          leading: (widget.component['image'] ?? '') == ''
+                              ? null
+                              : AspectRatio(
+                                  aspectRatio: 1,
+                                  child: displayImage(
+                                    imageUrl: getImageList(
+                                      pickTable[index],
+                                      widget.component['image'],
+                                    )[0],
+                                    cached: false,
                                   ),
-                        // ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            );
-          }),
-        ),  // Expanded
+                                  // child: FadeInImage.memoryNetwork(
+                                  //   placeholder: kTransparentImage,
+                                  //   image: getImageList(pickTable[index],
+                                  //       widget.component['image'])[0],
+                                  // ),
+                                ),
+                          // leading: AspectRatio(
+                          //   aspectRatio: 1,
+                          //   child: FadeInImage.memoryNetwork(
+                          //       placeholder: kTransparentImage,
+                          //       image:
+                          //       'https://firebasestorage.googleapis.com/v0/b/otq-01-ase2/o/vt%2F2020%2Fs%2Fkrusty-services%2Fattendance-selfie%2Fsurya-widjaja%2F60181816889090-2020-11-06-13-07-12.jpg?alt=media&token=d04a568d-5de5-4b98-bc9a-7dbdfacc58ae'),
+                          // ),
+                          subtitle:
+                              // FittedBox(
+                              // // fit: BoxFit.scaleDown,
+                              // fit: BoxFit.fitHeight,
+                              // clipBehavior: Clip.hardEdge,
+                              // alignment: Alignment.centerLeft,
+                              // child:
+                              pickTable.isEmpty
+                              ? const Text('--')
+                              : Text(
+                                  displayObject['content'] == null
+                                      ? '${pickTable.first[0]}\n${pickTable.first[1]}\n${pickTable.first[5]}'
+                                      : replaceMarker(
+                                          displayObject['content'],
+                                          pickTable[index],
+                                          widget.component['indexStart'] ?? 0,
+                                          false,
+                                        ),
+                                  style: TextStyle(
+                                    color: Colors.black.withValues(alpha: 0.6),
+                                  ),
+                                  overflow: TextOverflow.fade,
+                                  softWrap: false,
+                                ),
+                          // ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ), // Expanded
       ],
     );
   }

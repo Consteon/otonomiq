@@ -1557,6 +1557,20 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }
+  } else if (tip == 'closing_context_rail') {
+    try {
+      result = ClosingContextRail(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
   } else if (tip == 'route_feed_header') {
     try {
       result = RouteFeedHeader(
@@ -1613,6 +1627,21 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }
+  } else if (tip == 'item_execution_submit' ||
+      tip == 'itemexecutionsubmit') {
+    try {
+      result = ItemExecutionSubmit(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
   } else if (tip == 'signature_pad') {
     try {
       result = SignaturePad(
@@ -1658,6 +1687,247 @@ Widget buildDisplayComponent(
   } else if (tip == 'vehicle_cargo_summary') {
     try {
       result = VehicleCargoSummary(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'vehicle_feed_header') {
+    try {
+      result = VehicleFeedHeader(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'vehicle_feed_list') {
+    try {
+      result = VehicleFeedList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'adminactivetriplist') {
+    try {
+      result = AdminActiveTripList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'adminupcomingtasklist') {
+    try {
+      result = AdminUpcomingTaskList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'adminoutstandinglist') {
+    try {
+      result = AdminOutstandingList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'admin_coordination_header') {
+    try {
+      result = AdminCoordinationHeader(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'coordination_signal_list') {
+    try {
+      result = CoordinationSignalList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'executor_designate_card') {
+    try {
+      result = ExecutorDesignateCard(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'taskitembuilder' || tip == 'task_item_builder') {
+    try {
+      result = TaskItemBuilder(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'task_draft_summary') {
+    try {
+      result = TaskDraftSummary(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'task_draft_info') {
+    try {
+      result = TaskDraftInfo(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'task_create_submit') {
+    try {
+      result = TaskCreateSubmit(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'task_create_success') {
+    try {
+      result = TaskCreateSuccess(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'picker_list' ||
+      tip == 'pickerlist' ||
+      tip == 'vehicle_picker' ||
+      tip == 'vehiclepicker') {
+    try {
+      result = PickerList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'running_task_list') {
+    try {
+      result = AdminActiveTripList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'upcoming_task_list') {
+    try {
+      result = AdminUpcomingTaskList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'outstanding_panel') {
+    try {
+      result = AdminOutstandingList(
         key: txfKey,
         component: component,
         scrName: scrName,

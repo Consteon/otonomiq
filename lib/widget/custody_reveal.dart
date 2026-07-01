@@ -250,19 +250,29 @@ class _CustodyRevealState extends State<CustodyReveal> {
   }
 
   /// Build dp[] array from comparison items (only differing items).
+  ///
+  /// Delegates to the shared [buildReconciliation] helper. Output is
+  /// byte-identical to the prior inline implementation: for each item whose
+  /// delta != 0, emits `{ii, cd, ex, ac, dl}`. The `items`-order insertion of
+  /// the expected/actual maps + the helper's stable (insertion-order) key
+  /// iteration preserves the prior dp[] ordering.
+  ///
+  /// NOTE: the match/mismatch ROUTE decision still reads `_compare`'s own
+  /// `isMatch` (build method, line ~393); this helper's `rs` is intentionally
+  /// NOT used here -- only its dp[] output.
   List<Map<String, dynamic>> _buildDpArray(List<_CompareItem> items) {
-    final List<Map<String, dynamic>> dp = <Map<String, dynamic>>[];
+    final Map<String, int> expectedMap = <String, int>{};
+    final Map<String, int> actualMap = <String, int>{};
     for (final item in items) {
-      if (item.delta == 0) continue;
-      dp.add({
-        'ii': item.ii,
-        'cd': item.cd,
-        'ex': item.expected,
-        'ac': item.actual,
-        'dl': item.delta,
-      });
+      final String key = '${item.ii}__${item.cd}';
+      expectedMap[key] = item.expected;
+      actualMap[key] = item.actual;
     }
-    return dp;
+    final ReconciliationResult result = buildReconciliation(
+      expected: expectedMap,
+      actual: actualMap,
+    );
+    return result.dp;
   }
 
   /// Navigate to a route, stripping [ROUTE:...] wrapper if present.

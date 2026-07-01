@@ -35,6 +35,10 @@ class _SelectableBtnState extends State<SelectableBtn> {
   late String _iconKey;
   int _selectedIndex = -1;
 
+  late String _mode;
+  final List<String> _routeList = [];
+  final List<String> _iconList = [];
+
   // Grid variant: label + optional icon
   final List<_GridOption> _gridOptions = [];
 
@@ -56,6 +60,8 @@ class _SelectableBtnState extends State<SelectableBtn> {
     _iconKey = (widget.component['icon'] ?? '').toString().trim();
 
     _parseOptions();
+    _mode = (widget.component['mode'] ?? '').toString().trim().toLowerCase();
+    _parseLauncherConfig();
     _initController();
   }
 
@@ -84,7 +90,25 @@ class _SelectableBtnState extends State<SelectableBtn> {
     }
   }
 
+  void _parseLauncherConfig() {
+    if (_mode != 'launch') return;
+    // Parse routes (diamond-separated, index-aligned with text)
+    final String rawRoutes =
+        autheniumDecode(widget.component['routes'] ?? '') ?? '';
+    if (rawRoutes.isNotEmpty) {
+      _routeList.addAll(diamondTextToList(rawRoutes));
+    }
+    // Parse icons (diamond-separated, index-aligned with text)
+    // Per dev-spec section-4.1: icons:"emoji1◆emoji2◆emoji3"
+    final String rawIcons =
+        autheniumDecode(widget.component['icons'] ?? '') ?? '';
+    if (rawIcons.isNotEmpty) {
+      _iconList.addAll(diamondTextToList(rawIcons));
+    }
+  }
+
   void _initController() {
+    if (_mode == 'launch') return; // launcher mode does not use txfController
     if (_position == null) return;
     txfControllerCheck(widget.scrName, _position);
     if (canInitializePage(widget.scrName)) {
@@ -144,6 +168,17 @@ class _SelectableBtnState extends State<SelectableBtn> {
     }
   }
 
+  void _onLaunch(int index) {
+    // Length-guard: routes array may be shorter than text array
+    if (_routeList.length <= index) return;
+    final String route = _routeList[index].trim();
+    if (route.isEmpty) return;
+    // Dead-route guard
+    if (!routeExist(route)) return;
+    routeStack.push(route);
+    gotoRoute(route);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -200,26 +235,27 @@ class _SelectableBtnState extends State<SelectableBtn> {
                       ),
                     ),
                   ),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFEF2F2),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                        color: const Color(0xFFFECACA),
-                        width: 0.8,
+                  if (_mode != 'launch')
+                    Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: const Color(0xFFFECACA),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: const Text(
+                        'wajib',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFFDC2626),
+                        ),
                       ),
                     ),
-                    child: const Text(
-                      'wajib',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFFDC2626),
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ),
@@ -253,14 +289,22 @@ class _SelectableBtnState extends State<SelectableBtn> {
   }
 
   Widget _buildGridButton(int index, double width) {
-    final bool isSelected = _selectedIndex == index;
+    final bool isSelected = _mode != 'launch' && _selectedIndex == index;
     final option = _gridOptions[index];
-    final bool hasIcon = option.icon.isNotEmpty;
+    // In launcher mode, prefer the dedicated icons config (index-aligned).
+    // Fall back to inline icon from the text◇iconKey format.
+    // Length-guard: _iconList may be shorter than _gridOptions.
+    final String resolvedIconKey = (_mode == 'launch' &&
+            _iconList.length > index &&
+            _iconList[index].trim().isNotEmpty)
+        ? _iconList[index].trim()
+        : option.icon;
+    final bool hasIcon = resolvedIconKey.isNotEmpty;
     final IconData? iconData =
-        hasIcon ? otqIcons[option.icon] as IconData? : null;
+        hasIcon ? otqIcons[resolvedIconKey] as IconData? : null;
 
     return GestureDetector(
-      onTap: () => _onSelect(index),
+      onTap: () => _mode == 'launch' ? _onLaunch(index) : _onSelect(index),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOut,

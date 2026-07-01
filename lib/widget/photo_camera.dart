@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:image/image.dart' as img;
-import 'package:image_watermark/image_watermark.dart';
 import 'package:intl/intl.dart';
 
 import '../global.dart';
@@ -27,9 +26,10 @@ class ImageProcessArgs {
 }
 
 /// Runs in a background isolate (via compute) so the shutter doesn't freeze the
-/// UI (~1s) on every capture: decode -> bake orientation -> resize -> jpg
-/// encode -> two text watermarks. Pure-Dart (image/image_watermark), so it is
-/// isolate-safe. Always returns bytes — falls back to the input on any failure.
+/// UI (~1s) on every capture: decode -> bake orientation -> resize -> draw two
+/// text watermarks straight onto the decoded image -> single jpg encode.
+/// Pure-Dart (image pkg), so it is isolate-safe. Always returns bytes — falls
+/// back to the input on any failure.
 Future<Uint8List> processCapturedImage(ImageProcessArgs a) async {
   final img.Image? decoded = img.decodeImage(a.bytes);
   if (decoded == null) return a.bytes;
@@ -45,29 +45,20 @@ Future<Uint8List> processCapturedImage(ImageProcessArgs a) async {
       resizedImage = img.copyResize(image, width: a.maxSize);
     }
   } catch (_) {}
-  Uint8List out =
-      Uint8List.fromList(img.encodeJpg(resizedImage, quality: a.quality));
+  // Bake both watermark texts (dark shadow + blue) directly onto the decoded
+  // image, then JPG-encode ONCE. The old image_watermark path decoded and
+  // re-encoded as PNG twice per shot — slow, and it silently returned an
+  // oversized PNG stored under a .jpg name, throwing away the JPG quality.
   try {
-    out = await ImageWatermark.addTextWatermark(
-      imgBytes: out,
-      watermarkText: a.dateTime,
-      color: const Color.fromARGB(150, 10, 10, 10),
-      font: img.arial14,
-      dstX: 11,
-      dstY: 9,
-    );
+    img.drawString(resizedImage, a.dateTime,
+        font: img.arial14, x: 11, y: 9, color: img.ColorRgba8(10, 10, 10, 150));
+    img.drawString(resizedImage, a.dateTime,
+        font: img.arial14,
+        x: 10,
+        y: 8,
+        color: img.ColorRgba8(24, 129, 240, 255));
   } catch (_) {}
-  try {
-    out = await ImageWatermark.addTextWatermark(
-      imgBytes: out,
-      watermarkText: a.dateTime,
-      color: const Color.fromARGB(255, 24, 129, 240),
-      font: img.arial14,
-      dstX: 10,
-      dstY: 8,
-    );
-  } catch (_) {}
-  return out;
+  return Uint8List.fromList(img.encodeJpg(resizedImage, quality: a.quality));
 }
 
 class PhotoCamera extends StatefulWidget {
@@ -142,6 +133,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
   int selectedCamera = 0;
   int flashIndex = 0;
   late bool gotPicture;
+  bool _processing = false; // shutter busy: blocks re-entry, shows spinner
   List<IconData> flashIcons = [
     Icons.flash_auto_rounded,
     Icons.flash_on_rounded,
@@ -370,7 +362,9 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                       ),
                       IconButton(
                         onPressed: () async {
-                          if (!gotPicture) {
+                          if (!gotPicture && !_processing) {
+                            setState(() => _processing = true);
+                            try {
                             await _initializeControllerFuture;
                             var xFile = await controller!.takePicture();
                             controller!.setFlashMode(FlashMode.off);
@@ -437,12 +431,19 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                               // capturedImages.add(File(
                               //     '/data/user/0/com.example.camera_app/cache/a1.jpg'));
                               gotPicture = true;
+                              _processing = false;
                             });
+                            } catch (e) {
+                              errorReport('capture error: $e');
+                              if (mounted) {
+                                setState(() => _processing = false);
+                              }
+                            }
                           }
                         },
                         icon: Icon(
                           Icons.camera, // camera
-                          color: gotPicture
+                          color: gotPicture || _processing
                               ? colorMap['disabled']
                               : colorMap['enabled'],
                           size: 70,
@@ -533,6 +534,10 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
             ],
           ),
         ),
+        if (_processing)
+          const Positioned.fill(
+            child: Center(child: CircularProgressIndicator()),
+          ),
       ],
     );
   }

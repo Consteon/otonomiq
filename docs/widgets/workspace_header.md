@@ -1,6 +1,6 @@
 # WorkspaceHeader
 
-Top-bar header for P11 DeliveryWorkspace showing task identity, stop number, customer name, status chip, and address band.
+Top-bar header for P11 DeliveryWorkspace and admin wizard step pages.
 
 - **File:** [lib/widget/workspace_header.dart](../../lib/widget/workspace_header.dart)
 - **Class:** `WorkspaceHeader` (StatefulWidget)
@@ -9,19 +9,40 @@ Top-bar header for P11 DeliveryWorkspace showing task identity, stop number, cus
 
 ## Purpose
 
-Provides the top-bar context for the delivery workspace screen. Displays the active task's ID, stop number (derived from doc-order position), customer name, a "BERJALAN" status chip, and an address band. Includes a back arrow that navigates to the TaskFeed via routeStack.push + gotoRoute.
+Provides the top-bar context for workspace screens. Two rendering modes:
+
+1. **Driver-stop (default):** Task identity (stop number, customer name, "BERJALAN" chip, address band) for P11 DeliveryWorkspace. Subscribes to task collection and derives stop number from doc-order position.
+2. **Step header (`variant:"step"`):** Clean title + step subtitle for admin create-task wizard (P2/P3/P4). No in-header back arrow (app bar handles back). No data subscription.
 
 ## Component JSON
+
+### Default (driver-stop)
 
 ```json
 {"type":"WORKSPACE_HEADER","vidtable":"20342033315492","table":"84214220504259//task","search":"tnm◼{activeTaskVid}","listSearch":"vv◼{vehicleId}⭘tdt◼{today}","idField":"tnm","titleField":"kn","addressField":"al","backRoute":"vertikaTeknoLokaciptaTaskFeed","text":"Stop◆Berjalan"}
 ```
 
+### Step variant (admin wizard)
+
+```json
+{"type":"WORKSPACE_HEADER","variant":"step","text":"Pilih Kendaraan◆Langkah 3 dari 4"}
+```
+
+Step mode renders **title + step subtitle only** (no in-header back arrow) — back navigation is handled by the app bar (pops `routeStack`).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `variant` | string | No | `"step"` for admin step header; absent/other = driver-stop |
+| `text` | diamond `◆` | Rec. | Step: slot 0 = title (bold), slot 1 = step subtitle (grey). Absent = renders empty (safe). |
+| `backRoute` | string | No | Driver-stop only. Ignored in step mode (app bar handles back). |
+
 ## Data Source
 
-Subscribes to `84214220504259//task` via `subscribeToMapCollection`. Finds the active task doc via `filterDriverHomeDocs` with `search:"tnm◼{activeTaskVid}"`. The `{activeTaskVid}` token is resolved from `#ACTIVE_TASK` in transactionStore via `resolveDriverCurlyTokens`.
+**Driver-stop:** Subscribes to `84214220504259//task` via `subscribeToMapCollection`. Finds the active task doc via `filterDriverHomeDocs` with `search:"tnm◼{activeTaskVid}"`. The `{activeTaskVid}` token is resolved from `#ACTIVE_TASK` in transactionStore via `resolveDriverCurlyTokens`.
 
-## Stop number (P10-scoped)
+**Step variant:** No data subscription. Reads only `text` and `backRoute` from the component JSON.
+
+## Stop number (P10-scoped, driver-stop only)
 
 The stop number is NOT counted over the raw subscription. It is derived by ordering ALL task docs with the SAME vehicle+today filter P10 uses (`listSearch`, default `vv◼{vehicleId}⭘tdt◼{today}` when the JSON omits it), then taking the 1-based doc-order position of the `{activeTaskVid}` match WITHIN that filtered list. This keeps the P11 stop number in lock-step with the card the driver tapped in P10 (mirrors `task_feed_list.dart` `_getFilteredTasks()` + `globalIndex`).
 

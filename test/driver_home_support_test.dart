@@ -1564,4 +1564,380 @@ void main() {
       expect(result[0]['id'], '1');
     });
   });
+
+  // ── H1 warehouse curly tokens ────────────────────────────────────────────
+
+  group('resolveDriverCurlyTokens H1 tokens', () {
+    test('{checkerVid} resolves to #VID', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#VID': 42,
+      })));
+      final result = resolveDriverCurlyTokens(
+        'VID\u{25FC}{checkerVid}', 'testScreen');
+      expect(result, 'VID\u{25FC}42');
+    });
+
+    test('{checkerVid} left literal when #VID empty', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#VID': '',
+      })));
+      final result = resolveDriverCurlyTokens(
+        'VID\u{25FC}{checkerVid}', 'testScreen');
+      expect(result, 'VID\u{25FC}{checkerVid}');
+    });
+
+    test('{activeVehicle} resolves to #ACTIVE_VEHICLE', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#ACTIVE_VEHICLE': 'V123',
+      })));
+      final result = resolveDriverCurlyTokens(
+        'vv\u{25FC}{activeVehicle}', 'testScreen');
+      expect(result, 'vv\u{25FC}V123');
+    });
+
+    test('{activeVehicle} left literal when empty', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#ACTIVE_VEHICLE': '',
+      })));
+      final result = resolveDriverCurlyTokens(
+        'vv\u{25FC}{activeVehicle}', 'testScreen');
+      expect(result, 'vv\u{25FC}{activeVehicle}');
+    });
+  });
+
+  group('resolveDriverCurlyTokens O1 tokens', () {
+    test('{chosenVid} resolves to #CHOSEN_DRIVER_VID', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#CHOSEN_DRIVER_VID': 'wf-5',
+      })));
+      final result = resolveDriverCurlyTokens(
+          'dv\u{25FC}{chosenVid}', 'o1Screen');
+      expect(result, 'dv\u{25FC}wf-5');
+    });
+
+    test('{chosenVid} left literal when empty', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#CHOSEN_DRIVER_VID': '',
+      })));
+      final result = resolveDriverCurlyTokens(
+          'dv\u{25FC}{chosenVid}', 'o1Screen');
+      expect(result, 'dv\u{25FC}{chosenVid}');
+    });
+
+    test('{chosenName} resolves to #CHOSEN_DRIVER_NAME', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#CHOSEN_DRIVER_NAME': 'Budi',
+      })));
+      final result = resolveDriverCurlyTokens(
+          'dn\u{25FC}{chosenName}', 'o1Screen');
+      expect(result, 'dn\u{25FC}Budi');
+    });
+
+    test('{warehouseId} resolves to #ACTIVE_WAREHOUSE', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#ACTIVE_WAREHOUSE': 'WH-001',
+      })));
+      final result = resolveDriverCurlyTokens(
+          'gl\u{25FC}{warehouseId}', 'o1Screen');
+      expect(result, 'gl\u{25FC}WH-001');
+    });
+
+    test('{warehouseId} left literal when empty', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#ACTIVE_WAREHOUSE': '',
+      })));
+      final result = resolveDriverCurlyTokens(
+          'gl\u{25FC}{warehouseId}', 'o1Screen');
+      expect(result, 'gl\u{25FC}{warehouseId}');
+    });
+
+    test('{now} resolves to a non-empty epoch-ms string (never literal)', () {
+      final result = resolveDriverCurlyTokens('t\u{25FC}{now}', 'o1Screen');
+      expect(result.startsWith('t\u{25FC}'), true);
+      final String nowPart = result.split('\u{25FC}')[1];
+      expect(nowPart.isNotEmpty, true);
+      expect(int.tryParse(nowPart), isNotNull); // numeric epoch-ms
+    });
+  });
+
+  group('aggregateManifestFromIe (ie[] manifest rows)', () {
+    final Map<String, String> nameMap = {
+      '31': 'Amidis Galon 19L',
+      '32': 'Aqua 600ml',
+      '33': 'Le Minerale 1500ml',
+    };
+
+    test('sums qt per ii across cd (full+empty -> one row)', () {
+      final ie = [
+        {'ii': '31', 'cd': 'full', 'qt': 25},
+        {'ii': '31', 'cd': 'empty', 'qt': 5},
+        {'ii': '32', 'cd': 'full', 'qt': 12},
+      ];
+      final rows = aggregateManifestFromIe(ie, nameMap);
+      expect(rows.length, 2);
+      expect(rows[0], {'in': 'Amidis Galon 19L', 'qt': 30}); // 25+5
+      expect(rows[1], {'in': 'Aqua 600ml', 'qt': 12});
+    });
+
+    test('name join resolves ii -> in via nameMap', () {
+      final ie = [
+        {'ii': '31', 'cd': 'full', 'qt': 10},
+      ];
+      final rows = aggregateManifestFromIe(ie, nameMap);
+      expect(rows.length, 1);
+      expect(rows[0]['in'], 'Amidis Galon 19L');
+    });
+
+    test('unknown ii falls back to raw id string', () {
+      final ie = [
+        {'ii': '999', 'cd': 'full', 'qt': 7},
+      ];
+      final rows = aggregateManifestFromIe(ie, {});
+      expect(rows.length, 1);
+      expect(rows[0], {'in': '999', 'qt': 7});
+    });
+
+    test('nameMap entry with empty name -> falls back to raw id', () {
+      final mapWithEmpty = {'31': '', '32': 'Aqua'};
+      final ie = [
+        {'ii': '31', 'cd': 'full', 'qt': 10},
+        {'ii': '32', 'cd': 'full', 'qt': 5},
+      ];
+      final rows = aggregateManifestFromIe(ie, mapWithEmpty);
+      expect(rows[0]['in'], '31'); // empty name -> raw id
+      expect(rows[1]['in'], 'Aqua');
+    });
+
+    test('hideZero drops items with summed total 0', () {
+      final ie = [
+        {'ii': '31', 'cd': 'full', 'qt': 0},
+        {'ii': '31', 'cd': 'empty', 'qt': 0},
+        {'ii': '32', 'cd': 'full', 'qt': 5},
+      ];
+      final rows = aggregateManifestFromIe(ie, nameMap, hideZero: true);
+      expect(rows.length, 1);
+      expect(rows[0], {'in': 'Aqua 600ml', 'qt': 5});
+    });
+
+    test('hideZero=false keeps items with summed total 0', () {
+      final ie = [
+        {'ii': '31', 'cd': 'full', 'qt': 0},
+        {'ii': '32', 'cd': 'full', 'qt': 5},
+      ];
+      final rows = aggregateManifestFromIe(ie, nameMap, hideZero: false);
+      expect(rows.length, 2);
+      expect(rows[0], {'in': 'Amidis Galon 19L', 'qt': 0});
+    });
+
+    test('malformed entries: non-Map skipped', () {
+      final ie = [
+        'rogue string',
+        {'ii': '31', 'cd': 'full', 'qt': 10},
+        42,
+        null,
+      ];
+      final rows = aggregateManifestFromIe(ie, nameMap);
+      expect(rows.length, 1);
+      expect(rows[0], {'in': 'Amidis Galon 19L', 'qt': 10});
+    });
+
+    test('entry with empty ii is skipped', () {
+      final ie = [
+        {'ii': '', 'cd': 'full', 'qt': 5},
+        {'cd': 'full', 'qt': 3}, // ii absent
+        {'ii': '31', 'cd': 'full', 'qt': 10},
+      ];
+      final rows = aggregateManifestFromIe(ie, nameMap);
+      expect(rows.length, 1);
+      expect(rows[0], {'in': 'Amidis Galon 19L', 'qt': 10});
+    });
+
+    test('non-numeric qt parses to 0', () {
+      final ie = [
+        {'ii': '31', 'cd': 'full', 'qt': 'abc'},
+        {'ii': '31', 'cd': 'empty', 'qt': 5},
+      ];
+      final rows = aggregateManifestFromIe(ie, nameMap);
+      expect(rows[0], {'in': 'Amidis Galon 19L', 'qt': 5}); // abc->0 + 5
+    });
+
+    test('absent qt treated as 0', () {
+      final ie = [
+        {'ii': '31', 'cd': 'full'}, // no qt key
+      ];
+      final rows = aggregateManifestFromIe(ie, nameMap);
+      expect(rows[0], {'in': 'Amidis Galon 19L', 'qt': 0});
+    });
+
+    test('String qt values aggregate correctly', () {
+      final ie = [
+        {'ii': '31', 'cd': 'full', 'qt': '20'},
+        {'ii': '31', 'cd': 'empty', 'qt': '14'},
+      ];
+      final rows = aggregateManifestFromIe(ie, nameMap);
+      expect(rows[0], {'in': 'Amidis Galon 19L', 'qt': 34});
+    });
+
+    test('non-List ieArray returns empty', () {
+      expect(aggregateManifestFromIe(null, nameMap), isEmpty);
+      expect(aggregateManifestFromIe('not a list', nameMap), isEmpty);
+      expect(aggregateManifestFromIe(42, nameMap), isEmpty);
+    });
+
+    test('empty List returns empty', () {
+      expect(aggregateManifestFromIe([], nameMap), isEmpty);
+    });
+
+    test('first-seen order of ii preserved', () {
+      final ie = [
+        {'ii': '33', 'cd': 'full', 'qt': 1},
+        {'ii': '31', 'cd': 'full', 'qt': 2},
+        {'ii': '32', 'cd': 'full', 'qt': 3},
+      ];
+      final rows = aggregateManifestFromIe(ie, nameMap);
+      expect(rows.length, 3);
+      expect(rows[0]['in'], 'Le Minerale 1500ml'); // 33 first
+      expect(rows[1]['in'], 'Amidis Galon 19L');   // 31 second
+      expect(rows[2]['in'], 'Aqua 600ml');          // 32 third
+    });
+
+    test('custom idField/qtyField/labelField', () {
+      final ie = [
+        {'code': '31', 'amount': 10},
+        {'code': '32', 'amount': 5},
+      ];
+      final rows = aggregateManifestFromIe(
+        ie,
+        nameMap,
+        idField: 'code',
+        qtyField: 'amount',
+        labelField: 'name',
+      );
+      expect(rows.length, 2);
+      expect(rows[0], {'name': 'Amidis Galon 19L', 'amount': 10});
+      expect(rows[1], {'name': 'Aqua 600ml', 'amount': 5});
+    });
+
+    test('returns typed List<Map<String, dynamic>>', () {
+      final ie = [
+        {'ii': '31', 'cd': 'full', 'qt': 5},
+      ];
+      final rows = aggregateManifestFromIe(ie, nameMap);
+      expect(rows, isA<List<Map<String, dynamic>>>());
+    });
+
+    test('output row keys match the qtyField/labelField params (render contract)', () {
+      // This test verifies the contract that _buildPending relies on:
+      // when component sets qtyField:"qt" and labelField:"in", the rows must
+      // be keyed {'in': ..., 'qt': ...} so items[i]['in'] and items[i]['qt']
+      // resolve correctly in the render loop.
+      final ie = [
+        {'ii': '31', 'cd': 'full', 'qt': 10},
+      ];
+      final rows = aggregateManifestFromIe(
+        ie,
+        nameMap,
+        qtyField: 'qt',
+        labelField: 'in',
+      );
+      expect(rows[0].containsKey('in'), isTrue);
+      expect(rows[0].containsKey('qt'), isTrue);
+      expect(rows[0]['in'], 'Amidis Galon 19L');
+      expect(rows[0]['qt'], 10);
+    });
+  });
+
+  // ── {userVid} and {userName} token resolution ─────────────────────────
+
+  group('resolveDriverCurlyTokens {userVid}', () {
+    test('resolves when #VID is set', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#VID': 12345,
+      })));
+      final result =
+          resolveDriverCurlyTokens('cv\u{25FC}{userVid}', 'testScr');
+      expect(result, 'cv\u{25FC}12345');
+    });
+
+    test('leaves literal when #VID is empty', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#VID': '',
+      })));
+      final result =
+          resolveDriverCurlyTokens('cv\u{25FC}{userVid}', 'testScr');
+      expect(result, 'cv\u{25FC}{userVid}');
+    });
+
+    test('leaves literal when #VID is absent', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#VID': null,
+      })));
+      final result =
+          resolveDriverCurlyTokens('cv\u{25FC}{userVid}', 'testScr');
+      expect(result, 'cv\u{25FC}{userVid}');
+    });
+
+    test('{userVid} and {checkerVid} both resolve from #VID', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#VID': 99999,
+      })));
+      final result = resolveDriverCurlyTokens(
+          'cv\u{25FC}{userVid}\u{2B58}chk\u{25FC}{checkerVid}', 'testScr');
+      expect(result, 'cv\u{25FC}99999\u{2B58}chk\u{25FC}99999');
+    });
+
+    // Restore for subsequent tests
+    tearDown(() {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#VID': '',
+      })));
+    });
+  });
+
+  group('resolveDriverCurlyTokens {userName}', () {
+    test('resolves when #NAME is set', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#NAME': 'Agenia Admin',
+      })));
+      final result =
+          resolveDriverCurlyTokens('cn\u{25FC}{userName}', 'testScr');
+      expect(result, 'cn\u{25FC}Agenia Admin');
+    });
+
+    test('leaves literal when #NAME is empty', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#NAME': '',
+      })));
+      final result =
+          resolveDriverCurlyTokens('cn\u{25FC}{userName}', 'testScr');
+      expect(result, 'cn\u{25FC}{userName}');
+    });
+
+    test('leaves literal when #NAME is absent', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#NAME': null,
+      })));
+      final result =
+          resolveDriverCurlyTokens('cn\u{25FC}{userName}', 'testScr');
+      expect(result, 'cn\u{25FC}{userName}');
+    });
+
+    test('{userVid} and {userName} in same string', () {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#VID': 54321,
+        '#NAME': 'Test Admin',
+      })));
+      final result = resolveDriverCurlyTokens(
+          'cv\u{25FC}{userVid}\u{2B58}cn\u{25FC}{userName}', 'testScr');
+      expect(result, 'cv\u{25FC}54321\u{2B58}cn\u{25FC}Test Admin');
+    });
+
+    // Restore for subsequent tests
+    tearDown(() {
+      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+        '#NAME': '',
+        '#VID': '',
+      })));
+    });
+  });
 }

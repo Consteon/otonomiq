@@ -92,7 +92,7 @@ class _TimelineState extends State<Timeline> {
       builder: (ctx) {
         return ValueListenableBuilder<String>(
           valueListenable: ApproverStickyBar.activeBarScreen,
-          builder: (_, activeScreen, __) {
+          builder: (_, activeScreen, _) {
             if (activeScreen != scrName) return const SizedBox.shrink();
             return ValueListenableBuilder<bool>(
               valueListenable: ApproverStickyBar.overlaysHidden,
@@ -158,7 +158,9 @@ class _TimelineState extends State<Timeline> {
         .toString()
         .trim()
         .toLowerCase();
-    _sortAsc = (widget.component['sort'] ?? 'asc').toString().trim().toLowerCase() != 'desc';
+    _sortAsc =
+        (widget.component['sort'] ?? 'asc').toString().trim().toLowerCase() !=
+        'desc';
     String textRaw = (widget.component['text'] ?? '').toString().trim();
     String text = autheniumDecode(textRaw) ?? textRaw;
     if (text.isNotEmpty) {
@@ -227,8 +229,10 @@ class _TimelineState extends State<Timeline> {
 
     String beforeDblSlash = resolved.substring(0, dblSlashIdx);
     String afterDblSlash = resolved.substring(dblSlashIdx + 2);
-    List<String> afterParts =
-        afterDblSlash.split('/').where((s) => s.isNotEmpty).toList();
+    List<String> afterParts = afterDblSlash
+        .split('/')
+        .where((s) => s.isNotEmpty)
+        .toList();
     if (afterParts.isEmpty) {
       debugPrint('[Timeline] no subcollection after //');
       return;
@@ -253,7 +257,8 @@ class _TimelineState extends State<Timeline> {
     }
 
     var screenTx = transactionStore.state.screenTx;
-    int vid = int.tryParse((screenTx['approval_vidtable'] ?? '').toString()) ??
+    int vid =
+        int.tryParse((screenTx['approval_vidtable'] ?? '').toString()) ??
         int.tryParse((widget.component['vidtable'] ?? '').toString()) ??
         appCodeController.applicationTableVid;
     String basePath = '$mobileTable/$vid/$mobileTableCollection';
@@ -279,8 +284,9 @@ class _TimelineState extends State<Timeline> {
     debugPrint('[Timeline] === END PATH DEBUG ===');
 
     try {
-      DocumentReference tableDocRef =
-          firestoreDb.collection(basePath).doc(tableCode);
+      DocumentReference tableDocRef = firestoreDb
+          .collection(basePath)
+          .doc(tableCode);
 
       if (subcollection.isEmpty) {
         // New format: comments are content docs in the table
@@ -301,13 +307,15 @@ class _TimelineState extends State<Timeline> {
             Map<String, dynamic> entry = {'t': t};
             try {
               List<dynamic> fields = jsonDecode(raw['c'] ?? '[]');
-              entry['n'] =
-                  fields.length > _nameIdx ? fields[_nameIdx].toString() : '';
+              entry['n'] = fields.length > _nameIdx
+                  ? fields[_nameIdx].toString()
+                  : '';
               entry['a'] = fields.length > _attachIdx
                   ? fields[_attachIdx].toString()
                   : '';
-              entry['ts'] =
-                  fields.length > _tsIdx ? fields[_tsIdx].toString() : '';
+              entry['ts'] = fields.length > _tsIdx
+                  ? fields[_tsIdx].toString()
+                  : '';
               entry['c'] = fields.length > 3 ? fields[3].toString() : '';
             } catch (_) {
               entry['c'] = raw['c'] ?? '';
@@ -330,34 +338,39 @@ class _TimelineState extends State<Timeline> {
           debugPrint('[Timeline] request_doc_t not found in transactionStore');
           return;
         }
-        CollectionReference contentRef =
-            tableDocRef.collection(mobileTableContent);
+        CollectionReference contentRef = tableDocRef.collection(
+          mobileTableContent,
+        );
         int? tValue = int.tryParse(docT);
         debugPrint('[Timeline] querying content where t=${tValue ?? docT}');
-        contentRef.where('t', isEqualTo: tValue ?? docT).get().then((snapshot) {
-          if (!mounted) return;
-          if (snapshot.docs.isEmpty) {
-            debugPrint('[Timeline] no content doc found with t=$docT');
-            return;
-          }
-          DocumentReference contentDocRef = snapshot.docs.first.reference;
-          _commentCollRef = contentDocRef.collection(subcollection);
-          debugPrint('[Timeline] content doc: ${contentDocRef.path}');
-          debugPrint('[Timeline] subscribing: ${_commentCollRef!.path}');
-          _subscription = _commentCollRef!
-              .orderBy('t', descending: !_sortAsc)
-              .snapshots()
-              .listen((snap) {
-            if (!mounted) return;
-            setState(() {
-              _comments = snap.docs
-                  .map((d) => d.data() as Map<String, dynamic>)
-                  .toList();
+        contentRef
+            .where('t', isEqualTo: tValue ?? docT)
+            .get()
+            .then((snapshot) {
+              if (!mounted) return;
+              if (snapshot.docs.isEmpty) {
+                debugPrint('[Timeline] no content doc found with t=$docT');
+                return;
+              }
+              DocumentReference contentDocRef = snapshot.docs.first.reference;
+              _commentCollRef = contentDocRef.collection(subcollection);
+              debugPrint('[Timeline] content doc: ${contentDocRef.path}');
+              debugPrint('[Timeline] subscribing: ${_commentCollRef!.path}');
+              _subscription = _commentCollRef!
+                  .orderBy('t', descending: !_sortAsc)
+                  .snapshots()
+                  .listen((snap) {
+                    if (!mounted) return;
+                    setState(() {
+                      _comments = snap.docs
+                          .map((d) => d.data() as Map<String, dynamic>)
+                          .toList();
+                    });
+                  });
+            })
+            .catchError((e) {
+              debugPrint('[Timeline] query error: $e');
             });
-          });
-        }).catchError((e) {
-          debugPrint('[Timeline] query error: $e');
-        });
       }
     } catch (e) {
       debugPrint('[Timeline] error: $e');
@@ -377,7 +390,11 @@ class _TimelineState extends State<Timeline> {
         }
         return Padding(
           padding: EdgeInsets.fromLTRB(
-              widget.lPad, widget.tPad, widget.rPad, widget.bPad + extraBottom),
+            widget.lPad,
+            widget.tPad,
+            widget.rPad,
+            widget.bPad + extraBottom,
+          ),
           child: child,
         );
       },
@@ -410,7 +427,9 @@ class _TimelineState extends State<Timeline> {
                     onTap: () => setState(() => _expanded = !_expanded),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -445,10 +464,7 @@ class _TimelineState extends State<Timeline> {
                 child: Center(
                   child: Text(
                     'No comments yet',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Color(0xFF9CA3AF),
-                    ),
+                    style: TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
                   ),
                 ),
               )
@@ -493,7 +509,11 @@ class _TimelineState extends State<Timeline> {
   Widget _buildTimeline() {
     return Padding(
       padding: EdgeInsets.fromLTRB(
-          widget.lPad, widget.tPad, widget.rPad, widget.bPad),
+        widget.lPad,
+        widget.tPad,
+        widget.rPad,
+        widget.bPad,
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -523,8 +543,10 @@ class _TimelineState extends State<Timeline> {
                     child: Center(
                       child: Text(
                         'Belum ada aktivitas',
-                        style:
-                            TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF9CA3AF),
+                        ),
                       ),
                     ),
                   )
@@ -638,7 +660,7 @@ class _TimelineState extends State<Timeline> {
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: _pendingAttachments.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
                 itemBuilder: (_, i) {
                   final file = _pendingAttachments[i];
                   final isImage = _isImageFile(file.path);
@@ -649,8 +671,12 @@ class _TimelineState extends State<Timeline> {
                       if (isImage)
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
-                          child: Image.file(file,
-                              width: 72, height: 72, fit: BoxFit.cover),
+                          child: Image.file(
+                            file,
+                            width: 72,
+                            height: 72,
+                            fit: BoxFit.cover,
+                          ),
                         )
                       else
                         Container(
@@ -660,13 +686,17 @@ class _TimelineState extends State<Timeline> {
                             color: _docColor(ext).withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                                color: _docColor(ext).withValues(alpha: 0.3)),
+                              color: _docColor(ext).withValues(alpha: 0.3),
+                            ),
                           ),
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(_docIcon(ext),
-                                  size: 28, color: _docColor(ext)),
+                              Icon(
+                                _docIcon(ext),
+                                size: 28,
+                                color: _docColor(ext),
+                              ),
                               const SizedBox(height: 4),
                               Text(
                                 ext.toUpperCase(),
@@ -690,8 +720,11 @@ class _TimelineState extends State<Timeline> {
                               color: Colors.red,
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.close,
-                                size: 14, color: Colors.white),
+                            child: const Icon(
+                              Icons.close,
+                              size: 14,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ),
@@ -712,11 +745,13 @@ class _TimelineState extends State<Timeline> {
                   onTap: _uploading ? null : _pickAttachment,
                   child: Padding(
                     padding: const EdgeInsets.all(10),
-                    child: Icon(Icons.attach_file_rounded,
-                        size: 20,
-                        color: _pendingAttachments.length >= _attachmentMax
-                            ? const Color(0xFFD1D5DB)
-                            : const Color(0xFF6B7280)),
+                    child: Icon(
+                      Icons.attach_file_rounded,
+                      size: 20,
+                      color: _pendingAttachments.length >= _attachmentMax
+                          ? const Color(0xFFD1D5DB)
+                          : const Color(0xFF6B7280),
+                    ),
                   ),
                 ),
               ),
@@ -732,7 +767,9 @@ class _TimelineState extends State<Timeline> {
                       color: Color(0xFF9CA3AF),
                     ),
                     contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 10),
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
                     filled: true,
                     fillColor: const Color(0xFFF9FAFB),
                     border: OutlineInputBorder(
@@ -764,10 +801,15 @@ class _TimelineState extends State<Timeline> {
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
                           )
-                        : const Icon(Icons.send_rounded,
-                            size: 20, color: Colors.white),
+                        : const Icon(
+                            Icons.send_rounded,
+                            size: 20,
+                            color: Colors.white,
+                          ),
                   ),
                 ),
               ),
@@ -819,7 +861,7 @@ class _TimelineState extends State<Timeline> {
     'gif',
     'bmp',
     'webp',
-    'heic'
+    'heic',
   };
 
   bool _isImageFile(String path) {
@@ -931,8 +973,9 @@ class _TimelineState extends State<Timeline> {
       if (choice == 'camera') {
         List<CameraDescription>? cams;
         try {
-          cams = transactionStore.state.screenTx['#CAMS']
-              as List<CameraDescription>?;
+          cams =
+              transactionStore.state.screenTx['#CAMS']
+                  as List<CameraDescription>?;
         } catch (_) {
           try {
             final raw = transactionStore.state.screenTx['#CAMS'] as List?;
@@ -1011,7 +1054,8 @@ class _TimelineState extends State<Timeline> {
         );
         if (result == null || result.files.single.path == null) return;
         setState(
-            () => _pendingAttachments.add(File(result.files.single.path!)));
+          () => _pendingAttachments.add(File(result.files.single.path!)),
+        );
         _inputEntry?.markNeedsBuild();
       }
     } catch (e) {
@@ -1036,8 +1080,9 @@ class _TimelineState extends State<Timeline> {
   }
 
   void _confirmDownload(String url, String filename) {
-    String ext =
-        filename.contains('.') ? filename.split('.').last.toLowerCase() : '';
+    String ext = filename.contains('.')
+        ? filename.split('.').last.toLowerCase()
+        : '';
 
     ApproverStickyBar.overlaysHidden.value = true;
     showModalBottomSheet(
@@ -1086,11 +1131,14 @@ class _TimelineState extends State<Timeline> {
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                         side: const BorderSide(color: Color(0xFFE5E7EB)),
                       ),
-                      child: const Text('Cancel',
-                          style: TextStyle(color: Color(0xFF6B7280))),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(color: Color(0xFF6B7280)),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1107,7 +1155,8 @@ class _TimelineState extends State<Timeline> {
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
                     ),
                   ),
@@ -1122,15 +1171,15 @@ class _TimelineState extends State<Timeline> {
 
   void _downloadFile(String url, String filename) async {
     try {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Downloading...')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Downloading...')));
       final response = await http.get(Uri.parse(url));
       if (response.statusCode != 200) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Download failed')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Download failed')));
         }
         return;
       }
@@ -1156,9 +1205,9 @@ class _TimelineState extends State<Timeline> {
     } catch (e) {
       debugPrint('[Timeline] download error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Download failed')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Download failed')));
       }
     }
   }
@@ -1172,17 +1221,20 @@ class _TimelineState extends State<Timeline> {
 
     Map<String, String> addFields = _parseAddToTable();
     String name = addFields['<2>'] ?? currentUser?.displayName ?? '';
-    String vid = addFields['<3>'] ??
+    String vid =
+        addFields['<3>'] ??
         (transactionStore.state.screenTx['#VID'] ?? '').toString();
     String rating = addFields['<7>'] ?? '';
     int now = DateTime.now().millisecondsSinceEpoch;
-    String formattedDate =
-        DateFormat('dd MMM yyyy HH:mm').format(DateTime.now());
+    String formattedDate = DateFormat(
+      'dd MMM yyyy HH:mm',
+    ).format(DateTime.now());
 
     List<String> uploadedUrls = [];
     if (_pendingAttachments.isNotEmpty) {
-      String folder =
-          _resolveNamedMarkers(_attachmentFolder).replaceAll('//', '/');
+      String folder = _resolveNamedMarkers(
+        _attachmentFolder,
+      ).replaceAll('//', '/');
       String baseFilename = _resolveNamedMarkers(_attachmentFilename);
 
       debugPrint('[Timeline] === UPLOAD DEBUG ===');
@@ -1212,7 +1264,9 @@ class _TimelineState extends State<Timeline> {
         debugPrint('[Timeline] local file: ${_pendingAttachments[i].path}');
         try {
           String url = await uploadToCloudStorage(
-              _pendingAttachments[i].path, cloudPath);
+            _pendingAttachments[i].path,
+            cloudPath,
+          );
           debugPrint('[Timeline] upload result [$i]: $url');
           debugPrint('[Timeline] isValidUrl [$i]: ${isValidImageUrl(url)}');
           if (isValidImageUrl(url)) uploadedUrls.add(url);
@@ -1283,8 +1337,11 @@ class _TimelineState extends State<Timeline> {
                 CircleAvatar(
                   radius: 18,
                   backgroundColor: const Color(0xFFEDE9FE),
-                  child: const Icon(Icons.auto_fix_high_rounded,
-                      size: 16, color: Color(0xFF7C3AED)),
+                  child: const Icon(
+                    Icons.auto_fix_high_rounded,
+                    size: 16,
+                    color: Color(0xFF7C3AED),
+                  ),
                 )
               else
                 CircleAvatar(
@@ -1357,69 +1414,81 @@ class _TimelineState extends State<Timeline> {
                           .split('◇')
                           .where((u) => u.trim().startsWith('http'))
                           .map((url) {
-                        String trimmed = url.trim();
-                        String decodedPath = Uri.decodeFull(
-                            trimmed.split('?').first.split('/o/').last);
-                        String ext = decodedPath.contains('.')
-                            ? decodedPath.split('.').last.toLowerCase()
-                            : '';
-                        bool isImg = _imageExtensions.contains(ext);
+                            String trimmed = url.trim();
+                            String decodedPath = Uri.decodeFull(
+                              trimmed.split('?').first.split('/o/').last,
+                            );
+                            String ext = decodedPath.contains('.')
+                                ? decodedPath.split('.').last.toLowerCase()
+                                : '';
+                            bool isImg = _imageExtensions.contains(ext);
 
-                        String fileName = decodedPath.split('/').last;
+                            String fileName = decodedPath.split('/').last;
 
-                        if (isImg) {
-                          return GestureDetector(
-                            onTap: () => _openFullScreenImage(trimmed),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.network(
-                                trimmed,
-                                height: 100,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) =>
-                                    const SizedBox.shrink(),
-                              ),
-                            ),
-                          );
-                        }
-                        return GestureDetector(
-                          onTap: () => _confirmDownload(trimmed, fileName),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: _docColor(ext).withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                  color:
-                                      _docColor(ext).withValues(alpha: 0.25)),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(_docIcon(ext),
-                                    size: 20, color: _docColor(ext)),
-                                const SizedBox(width: 6),
-                                Flexible(
-                                  child: Text(
-                                    fileName,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: _docColor(ext),
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                            if (isImg) {
+                              return GestureDetector(
+                                onTap: () => _openFullScreenImage(trimmed),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.network(
+                                    trimmed,
+                                    height: 100,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) =>
+                                        const SizedBox.shrink(),
                                   ),
                                 ),
-                                const SizedBox(width: 6),
-                                Icon(Icons.download_rounded,
-                                    size: 16, color: _docColor(ext)),
-                              ],
-                            ),
-                          ),
-                        );
-                      }).toList(),
+                              );
+                            }
+                            return GestureDetector(
+                              onTap: () => _confirmDownload(trimmed, fileName),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _docColor(ext).withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: _docColor(
+                                      ext,
+                                    ).withValues(alpha: 0.25),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      _docIcon(ext),
+                                      size: 20,
+                                      color: _docColor(ext),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Flexible(
+                                      child: Text(
+                                        fileName,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: _docColor(ext),
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Icon(
+                                      Icons.download_rounded,
+                                      size: 16,
+                                      color: _docColor(ext),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          })
+                          .toList(),
                     ),
                   ],
                 ],
@@ -1463,15 +1532,18 @@ class _FullScreenImageViewer extends StatelessWidget {
                   child: CircularProgressIndicator(
                     value: progress.expectedTotalBytes != null
                         ? progress.cumulativeBytesLoaded /
-                            progress.expectedTotalBytes!
+                              progress.expectedTotalBytes!
                         : null,
                     color: Colors.white,
                   ),
                 );
               },
-              errorBuilder: (_, __, ___) => const Center(
-                child: Icon(Icons.broken_image_rounded,
-                    size: 64, color: Colors.white54),
+              errorBuilder: (_, _, _) => const Center(
+                child: Icon(
+                  Icons.broken_image_rounded,
+                  size: 64,
+                  color: Colors.white54,
+                ),
               ),
             ),
           ),

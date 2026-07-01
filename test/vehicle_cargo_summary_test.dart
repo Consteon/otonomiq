@@ -28,6 +28,24 @@ void main() {
       expect(arr.length > 5 ? arr[5] : '', 'Tidak ada sisa muatan');
     });
 
+    test('5-slot spec text (introA/introB/cardTitle/isi/kosong)', () {
+      // Canonical P12 (1).md text: 5 segments, no emptyState slot.
+      final text = [
+        'Serahkan kendaraan', // 0 introA
+        ' + sisa muatan ke gudang. ...', // 1 introB
+        'Sisa di Kendaraan', // 2 cardTitle
+        'isi', // 3 fullLabel
+        'kosong', // 4 emptyLabel
+      ].join('\u{25C6}');
+      final arr = diamondTextToList(text);
+      expect(arr.length, 5);
+      expect(arr.length > 3 ? arr[3] : 'isi', 'isi');
+      expect(arr.length > 4 ? arr[4] : 'kosong', 'kosong');
+      // slot 5 (emptyState) absent -> widget falls back to its default
+      expect(arr.length > 5 ? arr[5] : 'Tidak ada sisa muatan',
+          'Tidak ada sisa muatan');
+    });
+
     test('short text array uses defaults for missing slots', () {
       final arr = diamondTextToList('Serahkan kendaraan');
       expect(arr.isNotEmpty ? arr[0] : '', 'Serahkan kendaraan');
@@ -306,6 +324,102 @@ void main() {
     test('empty item docs -> empty map', () {
       final map = buildItemNameMap([]);
       expect(map, isEmpty);
+    });
+  });
+
+  // ── unit resolution + per-condition prefix (spec §2 "{un} isi {qty}") ────
+  // buildItemUnitMap (ii -> un) and computePerItemCargoRows' itemUnitMap param
+  // drive the per-condition unit prefix, replacing the hardcoded "Tabung".
+
+  group('vehicleCargoSummary unit resolution', () {
+    final itemDocs = <Map<String, dynamic>>[
+      {'ii': '8886008101138', 'in': 'Aqua Galon 19 Liter', 'un': 'Galon'},
+      {'ii': '8886008101139', 'in': 'LPG 3kg', 'un': 'Tabung'},
+      {'ii': '8886008101141', 'in': 'Dus Amidis', 'ic': 'consumable'}, // no un
+    ];
+
+    test('buildItemUnitMap maps ii -> un', () {
+      final map = buildItemUnitMap(itemDocs);
+      expect(map['8886008101138'], 'Galon');
+      expect(map['8886008101139'], 'Tabung');
+    });
+
+    test('buildItemUnitMap yields "" when un absent', () {
+      final map = buildItemUnitMap(itemDocs);
+      expect(map['8886008101141'], '');
+    });
+
+    test('buildItemUnitMap skips empty/absent ii', () {
+      final map = buildItemUnitMap(<Map<String, dynamic>>[
+        {'ii': '', 'un': 'Ghost'},
+        {'un': 'NoId'}, // ii absent
+        {'ii': '123', 'un': 'Galon'},
+      ]);
+      expect(map.length, 1);
+      expect(map['123'], 'Galon');
+    });
+
+    test('buildItemUnitMap honors custom unitField', () {
+      final map = buildItemUnitMap(
+        <Map<String, dynamic>>[
+          {'ii': '1', 'satuan': 'Karton'}
+        ],
+        unitField: 'satuan',
+      );
+      expect(map['1'], 'Karton');
+    });
+
+    test('buildItemUnitMap empty docs -> empty map', () {
+      expect(buildItemUnitMap(<Map<String, dynamic>>[]), isEmpty);
+    });
+
+    test('computePerItemCargoRows resolves unit from itemUnitMap', () {
+      final docs = <Map<String, dynamic>>[
+        {'ii': '8886008101139', 'cd': 'full', 'qt': '5'},
+        {'ii': '8886008101139', 'cd': 'empty', 'qt': '2'},
+      ];
+      final rows = computePerItemCargoRows(
+        docs,
+        {'8886008101139': 'LPG 3kg'},
+        itemUnitMap: {'8886008101139': 'Tabung'},
+      );
+      expect(rows.single.unit, 'Tabung');
+    });
+
+    test('computePerItemCargoRows unit defaults to "" when no unit map', () {
+      final docs = <Map<String, dynamic>>[
+        {'ii': '8886008101139', 'cd': 'full', 'qt': '5'},
+      ];
+      final rows = computePerItemCargoRows(docs, {'8886008101139': 'LPG 3kg'});
+      expect(rows.single.unit, '');
+    });
+
+    test('computePerItemCargoRows unit "" when ii missing from unit map', () {
+      final docs = <Map<String, dynamic>>[
+        {'ii': '9999999999999', 'cd': 'full', 'qt': '3'},
+      ];
+      final rows = computePerItemCargoRows(
+        docs,
+        const <String, String>{},
+        itemUnitMap: {'8886008101139': 'Tabung'},
+      );
+      expect(rows.single.unit, '');
+    });
+
+    // Mirrors the widget's render composition (build() is not unit-testable
+    // without bootstrapping GetX): "{un} {label}" when unit present, bare
+    // "{label}" when unit empty.
+    String condLabel(String unit, String label) =>
+        unit.isEmpty ? label : '$unit $label';
+
+    test('condition label prefixes unit when present', () {
+      expect(condLabel('Tabung', 'isi'), 'Tabung isi');
+      expect(condLabel('Galon', 'kosong'), 'Galon kosong');
+    });
+
+    test('condition label degrades to bare label when unit empty', () {
+      expect(condLabel('', 'isi'), 'isi');
+      expect(condLabel('', 'kosong'), 'kosong');
     });
   });
 

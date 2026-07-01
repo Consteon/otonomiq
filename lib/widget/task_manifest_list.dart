@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
+import 'admin_create_task_support.dart';
 import 'driver_home_support.dart';
 import 'panel_card_support.dart';
 
@@ -44,6 +45,87 @@ class TaskManifestList extends StatefulWidget {
     _seeded.remove(scrName);
   }
 
+  /// Build item-line annotation strings from a single it[] entry.
+  ///
+  /// Tx-aware when [txField] is non-empty: reads the tx type from the entry
+  /// and selects the right qty field per type. Legacy mode (txField empty):
+  /// reads drop/pickup only (P5/P10 backward-compat).
+  ///
+  /// The sale/purchase/refill labels are config-driven via [saleLabel],
+  /// [buyLabel], [refillLabel] (mirrors the drop/pickup label pattern). They
+  /// default to '' so legacy callers are unaffected.
+  ///
+  /// Returns a list of annotation strings (e.g. ["↓ 10 drop", "↑ 5 pickup"]).
+  /// Empty list when all quantities are zero.
+  static List<String> buildItemAnnotations(
+    Map entry, {
+    required String dropField,
+    required String pickupField,
+    required String dropLabel,
+    required String pickupLabel,
+    String txField = '',
+    String saleField = '',
+    String buyField = '',
+    String refillField = '',
+    String saleLabel = '',
+    String buyLabel = '',
+    String refillLabel = '',
+  }) {
+    final List<String> annotations = [];
+    if (txField.isNotEmpty) {
+      final String tx = (entry[txField] ?? '').toString().trim();
+      switch (tx) {
+        case 'deliver':
+          final int pd =
+              int.tryParse((entry[dropField] ?? '0').toString().trim()) ?? 0;
+          final int pp =
+              int.tryParse((entry[pickupField] ?? '0').toString().trim()) ?? 0;
+          if (pd > 0) annotations.add('\u{2193} $pd $dropLabel');
+          if (pp > 0) annotations.add('\u{2191} $pp $pickupLabel');
+          break;
+        case 'sale':
+          if (saleField.isNotEmpty) {
+            final int ps =
+                int.tryParse((entry[saleField] ?? '0').toString().trim()) ?? 0;
+            if (ps > 0) annotations.add('$ps $saleLabel');
+          }
+          break;
+        case 'purchase':
+          if (buyField.isNotEmpty) {
+            final int pb =
+                int.tryParse((entry[buyField] ?? '0').toString().trim()) ?? 0;
+            if (pb > 0) annotations.add('$pb $buyLabel');
+          }
+          break;
+        case 'refill':
+          if (refillField.isNotEmpty) {
+            final int pr =
+                int.tryParse((entry[refillField] ?? '0').toString().trim()) ??
+                    0;
+            if (pr > 0) annotations.add('$pr $refillLabel');
+          }
+          break;
+        default:
+          // Unknown tx: fall through to drop/pickup display.
+          final int pd =
+              int.tryParse((entry[dropField] ?? '0').toString().trim()) ?? 0;
+          final int pp =
+              int.tryParse((entry[pickupField] ?? '0').toString().trim()) ?? 0;
+          if (pd > 0) annotations.add('\u{2193} $pd $dropLabel');
+          if (pp > 0) annotations.add('\u{2191} $pp $pickupLabel');
+      }
+    } else {
+      // Legacy mode: drop/pickup only.
+      final int pd =
+          int.tryParse((entry[dropField] ?? '0').toString().trim()) ?? 0;
+      final int pp =
+          int.tryParse((entry[pickupField] ?? '0').toString().trim()) ?? 0;
+      if (pd > 0) annotations.add('\u{2193} $pd $dropLabel');
+      if (pp > 0) annotations.add('\u{2191} $pp $pickupLabel');
+    }
+    return annotations;
+  }
+
   @override
   State<TaskManifestList> createState() => _TaskManifestListState();
 }
@@ -51,12 +133,22 @@ class TaskManifestList extends StatefulWidget {
 class _TaskManifestListState extends State<TaskManifestList> {
   List<String> _textArray = [];
   String _dataCode = '';
+  String _source = '';
+
+  String get _wizardKey =>
+      (widget.component['wizardKey'] ?? 'admin_create_task').toString().trim();
 
   @override
   void initState() {
     super.initState();
     _parseText();
-    _subscribe();
+    _source =
+        (widget.component['source'] ?? '').toString().trim().toLowerCase();
+    // Skip Firestore subscription in draft mode -- P4 review reads the
+    // in-memory wizard draft, not a collection.
+    if (_source != 'draft') {
+      _subscribe();
+    }
   }
 
   void _parseText() {
@@ -76,6 +168,13 @@ class _TaskManifestListState extends State<TaskManifestList> {
   ///  [5] "tap untuk lihat detail"     (hint)
   String _t(int i, [String def = '']) =>
       _textArray.length > i ? _textArray[i] : def;
+
+  /// Like [_t] but also falls back to [def] when the slot exists but is empty
+  /// (draft text slots may be trailing-empty under diamondTextToList).
+  String _tOr(int i, String def) {
+    final String v = _t(i, def);
+    return v.isEmpty ? def : v;
+  }
 
   void _subscribe() {
     final String appVid = resolveAppVid(widget.component);
@@ -122,11 +221,24 @@ class _TaskManifestListState extends State<TaskManifestList> {
 
   @override
   Widget build(BuildContext context) {
+    if (_source == 'draft') {
+      return _buildDraftMode();
+    }
     return Obx(() {
       final DriverHomeState dhState = getDriverHomeState(widget.scrName);
       dhState.vehicleId.value; // register dependency
 
       final List<Map<String, dynamic>> tasks = _getFilteredTasks();
+
+      // O1 variant flags (absent for P10 -> unchanged behavior).
+      // hideQty: suppress the drop/pickup qty pills on each task row.
+      // collapsible: do NOT auto-expand the first task (start all collapsed).
+      final bool hideQty =
+          (widget.component['hideQty'] ?? '').toString().toUpperCase() ==
+              'TRUE';
+      final bool collapsible =
+          (widget.component['collapsible'] ?? '').toString().toUpperCase() ==
+              'TRUE';
 
       // Compute aggregates for header
       int totalItemLines = 0;
@@ -149,7 +261,8 @@ class _TaskManifestListState extends State<TaskManifestList> {
       final String idField =
           (widget.component['idField'] ?? 'tnm').toString();
       final Set<String> expandSet = _getExpandSet();
-      if (TaskManifestList._seeded[widget.scrName] != true &&
+      if (!collapsible &&
+          TaskManifestList._seeded[widget.scrName] != true &&
           tasks.isNotEmpty) {
         final String firstTnm =
             (tasks.first[idField] ?? '').toString().trim();
@@ -248,6 +361,7 @@ class _TaskManifestListState extends State<TaskManifestList> {
                     pickupLabel: pickupLabel,
                     isFirst: i == 0,
                     expandSet: expandSet,
+                    hideQty: hideQty,
                   ),
               ],
             ],
@@ -255,6 +369,124 @@ class _TaskManifestListState extends State<TaskManifestList> {
         ),
       );
     });
+  }
+
+  /// Draft-mode rendering: reads the in-memory wizard draft and renders
+  /// item lines through the shared [_buildItemLines] path.
+  ///
+  /// No Firestore subscription, no Obx, no per-task card grouping. The draft
+  /// represents a SINGLE task's items; they are shown as a flat item list
+  /// inside the standard manifest card shell (header + item lines).
+  Widget _buildDraftMode() {
+    final List<DraftItem> draft =
+        AdminCreateTaskSupport.getDraft(_wizardKey);
+    final List<Map<String, dynamic>> itArray =
+        AdminCreateTaskSupport.draftToItArray(draft);
+
+    // Build a synthetic task doc from the draft items.
+    final String itemsField =
+        (widget.component['itemsField'] ?? 'it').toString();
+    final Map<String, dynamic> syntheticTask = <String, dynamic>{
+      itemsField: itArray,
+    };
+
+    // Draft-mode text slots (different mapping from collection mode):
+    //  [0] "Item Order"   (card title)
+    //  [1] "item line"    (count unit)
+    //  [2] "drop"         (drop annotation label)
+    //  [3] "pickup"       (pickup annotation label)
+    //  [4] "Jual"         (sale annotation label)
+    //  [5] "Beli"         (purchase annotation label)
+    //  [6] "Refill"       (refill annotation label)
+    final String title = _t(0, 'Item Order');
+    final String countUnit = _t(1, 'item line');
+    final String dropLabel = _t(2, 'drop');
+    final String pickupLabel = _t(3, 'pickup');
+    final String saleLabel = _tOr(4, 'Jual');
+    final String buyLabel = _tOr(5, 'Beli');
+    final String refillLabel = _tOr(6, 'Refill');
+
+    final String headerSummary = '${itArray.length} $countUnit';
+
+    // Read tx-aware field names for draft rendering.
+    final String dropField =
+        (widget.component['dropField'] ?? 'pd').toString();
+    final String pickupField =
+        (widget.component['pickupField'] ?? 'pp').toString();
+    final String txField =
+        (widget.component['txField'] ?? '').toString();
+    final String saleField =
+        (widget.component['saleField'] ?? '').toString();
+    final String buyField =
+        (widget.component['buyField'] ?? '').toString();
+    final String refillField =
+        (widget.component['refillField'] ?? '').toString();
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          widget.lPad, widget.tPad, widget.rPad, widget.bPad),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header (reuses the same visual structure as collection mode)
+            Row(
+              children: [
+                const Icon(Icons.list_alt,
+                    size: 20, color: Color(0xFF4338CA)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1F2937),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        headerSummary,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF6B7280),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            // Item lines (always expanded, no accordion, no per-task grouping)
+            if (itArray.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              _buildItemLines(
+                syntheticTask, itemsField, dropField, pickupField,
+                dropLabel, pickupLabel,
+                txField: txField,
+                saleField: saleField,
+                buyField: buyField,
+                refillField: refillField,
+                saleLabel: saleLabel,
+                buyLabel: buyLabel,
+                refillLabel: refillLabel,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildTaskRow(
@@ -271,6 +503,7 @@ class _TaskManifestListState extends State<TaskManifestList> {
     required String pickupLabel,
     required bool isFirst,
     required Set<String> expandSet,
+    bool hideQty = false,
   }) {
     final String tnm = (task[idField] ?? '').toString().trim();
     final String name = (task[titleField] ?? '').toString().trim();
@@ -358,14 +591,16 @@ class _TaskManifestListState extends State<TaskManifestList> {
                   ),
                 ),
                 const SizedBox(width: 6),
-                // Drop/pickup pills
-                if (agg.totalDrop > 0)
-                  _pill('\u{2193}${agg.totalDrop}',
-                      const Color(0xFFDCFCE7), const Color(0xFF16A34A)),
-                if (agg.totalPickup > 0) ...[
-                  const SizedBox(width: 4),
-                  _pill('\u{2191}${agg.totalPickup}',
-                      const Color(0xFFEEF2FF), const Color(0xFF4338CA)),
+                // Drop/pickup pills (O1 hideQty suppresses them)
+                if (!hideQty) ...[
+                  if (agg.totalDrop > 0)
+                    _pill('\u{2193}${agg.totalDrop}',
+                        const Color(0xFFDCFCE7), const Color(0xFF16A34A)),
+                  if (agg.totalPickup > 0) ...[
+                    const SizedBox(width: 4),
+                    _pill('\u{2191}${agg.totalPickup}',
+                        const Color(0xFFEEF2FF), const Color(0xFF4338CA)),
+                  ],
                 ],
                 const SizedBox(width: 4),
                 // Chevron (rotates on expand)
@@ -394,8 +629,15 @@ class _TaskManifestListState extends State<TaskManifestList> {
     String dropField,
     String pickupField,
     String dropLabel,
-    String pickupLabel,
-  ) {
+    String pickupLabel, {
+    String txField = '',
+    String saleField = '',
+    String buyField = '',
+    String refillField = '',
+    String saleLabel = '',
+    String buyLabel = '',
+    String refillLabel = '',
+  }) {
     final dynamic rawItems = task[itemsField];
     if (rawItems is! List) return const SizedBox.shrink();
 
@@ -404,15 +646,21 @@ class _TaskManifestListState extends State<TaskManifestList> {
       if (entry is! Map) continue;
       final String itemName = (entry['in'] ?? '').toString().trim();
       if (itemName.isEmpty) continue;
-      final int pd =
-          int.tryParse((entry[dropField] ?? '0').toString().trim()) ?? 0;
-      final int pp =
-          int.tryParse((entry[pickupField] ?? '0').toString().trim()) ?? 0;
 
-      // Build qty annotations
-      final List<String> annotations = [];
-      if (pd > 0) annotations.add('\u{2193} $pd $dropLabel');
-      if (pp > 0) annotations.add('\u{2191} $pp $pickupLabel');
+      final List<String> annotations = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: dropField,
+        pickupField: pickupField,
+        dropLabel: dropLabel,
+        pickupLabel: pickupLabel,
+        txField: txField,
+        saleField: saleField,
+        buyField: buyField,
+        refillField: refillField,
+        saleLabel: saleLabel,
+        buyLabel: buyLabel,
+        refillLabel: refillLabel,
+      );
 
       rows.add(Padding(
         padding: const EdgeInsets.only(left: 42, right: 10, top: 4, bottom: 4),

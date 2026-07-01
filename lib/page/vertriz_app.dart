@@ -104,7 +104,17 @@ class VertrizApp extends StatelessWidget {
             if (state['#NEED_PINHASH'] == true) {
               BlocProvider.of<MainBloc>(context).add(NeedPinHash());
             }
-            return MainPage(key: UniqueKey());
+            // Stable key: MainBloc emits (nav between home variants, NeedPinHash,
+            // etc.) must NOT tear down + re-inflate the whole shell. A fresh
+            // UniqueKey() here forced Flutter to destroy the old MainPage and
+            // build a new one every emit, which (a) mounted two Scaffolds sharing
+            // the module-global mainScaffoldKey for one frame -> "Duplicate
+            // GlobalKey detected", (b) ran ancestor lookups on the deactivating
+            // subtree -> "Looking up a deactivated widget's ancestor is unsafe",
+            // and (c) re-ran initState (asyncAppStartup2 + subscribeToProxy) ->
+            // "table ... has already subscribed" spam. A const ValueKey keeps the
+            // single MainPageState alive, matching the shell's render-once design.
+            return const MainPage(key: ValueKey('mainPage'));
             // return BlocBuilder<SubmitBloc, SubmitState> (
             //   builder: (context, state) {
             //     return MainPage();

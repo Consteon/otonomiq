@@ -21,6 +21,8 @@ import '../model/otq_state.dart';
 import '../redux/screen_transaction.dart';
 import 'do_chain.dart';
 import 'driver_home_support.dart';
+import 'item_execution_list.dart';
+import 'item_execution_submit.dart';
 
 // display a row of buttons
 
@@ -450,7 +452,41 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
         if (children[i]['type'] == null) {
           children[i]['type'] = 'rbt';
         }
-        saveData(timeStamp, scrName, children[i], locString, send: send);
+        // ── Actual-write hook ──────────────────────────────────────────
+        // Persist ITEM_EXECUTION_LIST stepper actuals to task.it[]
+        // atomically with tst=completed BEFORE the offline updateEventRow
+        // submit, so CF OnTaskCompleted reads actuals (ad/ap) not plan.
+        // No-op if no LIST registered for this screen (guard is airtight:
+        // only ITEM_EXECUTION_LIST initState populates submitComponentByScr).
+        dynamic componentForSave = children[i];
+        if (ItemExecutionList.submitComponentByScr.containsKey(scrName)) {
+          final bool ok = await ItemExecutionSubmit.runActualWrite(scrName);
+          if (!ok) {
+            devPrint('[doSaveProcedure] actual-write failed for $scrName');
+            setDataOK('2'); // release the action lock so the driver can retry
+                            // (mirrors the doSaveProcedure catch; spec §6 still
+                            // honored — tst is NOT flipped, saveSend not called)
+            return; // bail -- do NOT saveSend, do NOT flip tst
+          }
+          // Strip tst/tce from this submit's updateEventRow so saveSend
+          // doesn't double-write them (native write already owns them).
+          // Operate on a COPY -- do not mutate the shared children[i].
+          componentForSave = Map<String, dynamic>.from(children[i] as Map);
+          final String rawUER =
+              (componentForSave['updateEventRow'] ?? '').toString();
+          if (rawUER.isNotEmpty) {
+            final String stripped = stripTstFromUpdateEventRow(rawUER);
+            if (updateEventRowHasBody(stripped)) {
+              componentForSave['updateEventRow'] = stripped;
+            } else {
+              // Only header survived the strip (live P11 form: tst+tce are the
+              // only body clauses). Remove updateEventRow entirely so saveSend
+              // skips the segment and historySync does no redundant query.
+              componentForSave.remove('updateEventRow');
+            }
+          }
+        }
+        saveData(timeStamp, scrName, componentForSave, locString, send: send);
         if (routeExist(children[i]['route'])) {
           if (children[i]['route'] == scrName) {
             String pageToGo = children[i]['route'] ?? scrName;

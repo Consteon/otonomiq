@@ -1,0 +1,467 @@
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+
+import '../api.dart'; // getNowMillisecondFromEpoch
+import '../global.dart'; // transactionStore, routeStack, gotoRoute, routeExist, errorReport, diamondTextToList, autheniumDecode
+import '../global2.dart'; // txfController, txfControllerCheck, generateAutoNumber, addToTxfController, WidgetUpdateController
+import 'admin_create_task_support.dart';
+import 'driver_home_support.dart'; // todayEpochMidnightWib, createNativeDoc, createNativeDocAutoId, stripRouteWrapper
+import 'admin_home_support.dart'; // AdminTierColors
+import 'do_chain.dart';
+import 'panel_card_support.dart'; // parseTablePath, TablePath
+import 'task_item_builder.dart'; // TaskItemBuilder.draftRev
+
+/// TASK_CREATE_SUBMIT -- P4 submit button for the Admin create-task wizard.
+///
+/// Reads the draft from AdminCreateTaskSupport, assembles the full task doc
+/// (scalars from screenTx bare keys + it[] from draft), and writes via
+/// createNativeDoc (one native Firestore set, offline-safe).
+///
+/// On success: clears draft, navigates to P5 (chain-aware).
+/// On failure: snackbar, no nav, no draft clear.
+///
+/// ScreenTx key names are CONFIGURABLE via component fields (degrade-safe
+/// defaults). This allows the op1Screen config to map different bare key
+/// names if needed.
+///
+/// When component['action'] == 'savesend' (savesend mode):
+///   - Processes run field to trigger generate_number (counter-based tnm)
+///   - Reads generated tnm from numberPos position
+///   - Writes doc with Firestore auto-generated id (createNativeDocAutoId)
+/// When action is absent or not 'savesend' (legacy mode):
+///   - Generates tnm from kl + timestamp (generateTnm)
+///   - Writes doc with tnm as doc-id (createNativeDoc)
+class TaskCreateSubmit extends StatefulWidget {
+  const TaskCreateSubmit({
+    super.key,
+    required this.component,
+    required this.scrName,
+    required this.lPad,
+    required this.tPad,
+    required this.rPad,
+    required this.bPad,
+  });
+
+  final dynamic component;
+  final String scrName;
+  final double lPad, tPad, rPad, bPad;
+
+  /// Per-scrName writing-in-progress flag to prevent double taps.
+  static final Map<String, bool> _writing = {};
+
+  /// Reset the writing-in-progress flag for a screen. Called from
+  /// ui_component.dart clearData so a disposed-mid-await widget (whose
+  /// _onSubmit `finally` never ran) cannot leave the button permanently
+  /// disabled. Mirrors [TaskItemBuilder.resetClientPublished].
+  static void resetWriting(String scrName) => _writing.remove(scrName);
+
+  @override
+  State<TaskCreateSubmit> createState() => _TaskCreateSubmitState();
+}
+
+class _TaskCreateSubmitState extends State<TaskCreateSubmit> {
+  List<String> _textArray = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _parseText();
+  }
+
+  void _parseText() {
+    try {
+      _textArray = diamondTextToList(widget.component['text'] ?? '');
+    } catch (_) {
+      _textArray = [];
+    }
+  }
+
+  /// Text slot accessors:
+  ///  [0] "Buat Task & Assign"  (enabled label)
+  ///  [1] "Lengkapi data dulu"  (disabled label)
+  ///  [2] "Gagal membuat task"  (error snackbar)
+  ///  [3] "Data item kosong"    (empty items snackbar)
+  String _t(int i, [String def = '']) =>
+      _textArray.length > i ? _textArray[i] : def;
+
+  String get _wizardKey =>
+      (widget.component['wizardKey'] ?? 'admin_create_task').toString().trim();
+
+  Future<void> _onSubmit(BuildContext context) async {
+    if (TaskCreateSubmit._writing[widget.scrName] == true) return;
+
+    TaskCreateSubmit._writing[widget.scrName] = true;
+    TaskItemBuilder.draftRev.value++; // trigger rebuild to show spinner
+
+    try {
+      final Map<String, dynamic> screenTx = transactionStore.state.screenTx;
+
+      // ── Savesend mode gate (spec section 9 rollback) ──────────────────
+      final bool savesendMode =
+          AdminCreateTaskSupport.isSavesendMode(widget.component['action']);
+
+      // 1. Read CONFIGURABLE screenTx key names from component (degrade-safe)
+      final String klKey =
+          (widget.component['klKey'] ?? 'kl').toString().trim();
+      final String knKey =
+          (widget.component['knKey'] ?? 'kn').toString().trim();
+      final String alKey =
+          (widget.component['alKey'] ?? 'al').toString().trim();
+      final String vvKey =
+          (widget.component['vvKey'] ?? 'vv').toString().trim();
+
+      // Draft-carry: when the wizard draft holds a customer (kl set), it is the
+      // AUTHORITATIVE source -- read kl/kn/al from it as a UNIT. Mixing draft kl
+      // with a screenTx kn/al that belongs to a previously-picked customer would
+      // write a cross-customer doc (review C-1). P2 _republishClient backfills
+      // the draft's kn/al from stock_location, so the draft is complete.
+      // Only when no draft customer exists (legacy wizardKey-absent path) do we
+      // fall back to the screenTx bare keys -- all three from the same source.
+      final Map<String, String>? draftCust =
+          AdminCreateTaskSupport.getCustomer(_wizardKey);
+      final bool hasDraftCust =
+          draftCust != null && (draftCust['kl'] ?? '').isNotEmpty;
+      final String kl = hasDraftCust
+          ? (draftCust['kl'] ?? '')
+          : (screenTx[klKey] ?? '').toString().trim();
+      final String kn = hasDraftCust
+          ? (draftCust['kn'] ?? '')
+          : (screenTx[knKey] ?? '').toString().trim();
+      final String al = hasDraftCust
+          ? (draftCust['al'] ?? '')
+          : (screenTx[alKey] ?? '').toString().trim();
+
+      final Map<String, String>? draftVeh =
+          AdminCreateTaskSupport.getVehicle(_wizardKey);
+      final String vv = (draftVeh != null && (draftVeh['vv'] ?? '').isNotEmpty)
+          ? draftVeh['vv']!
+          : (screenTx[vvKey] ?? '').toString().trim();
+
+      // 2. gl (origin warehouse) from component config or screenTx
+      String gl = (widget.component['originWarehouse'] ?? '').toString().trim();
+      if (gl.isEmpty) {
+        final String glKey =
+            (widget.component['glKey'] ?? 'gl').toString().trim();
+        gl = (screenTx[glKey] ?? '').toString().trim();
+      }
+
+      // 3. Creator (admin, NOT driver)
+      final String cv = (screenTx['#VID'] ?? '').toString().trim();
+      final String cn = (screenTx['#NAME'] ?? '').toString().trim();
+
+      // 4. Read draft + validate (BEFORE generate -- counter must not
+      //    increment on empty draft, per spec section 7)
+      final List<DraftItem> draft =
+          AdminCreateTaskSupport.getDraft(_wizardKey);
+      final List<Map<String, dynamic>> itArray =
+          AdminCreateTaskSupport.draftToItArray(draft);
+
+      if (itArray.isEmpty) {
+        if (context.mounted) {
+          _showSnackBar(context, _t(3, 'Data item kosong'));
+        }
+        return;
+      }
+
+      // ── Branch: tnm generation + write method ─────────────────────────
+      final String tnm;
+      final bool useAutoId;
+
+      if (savesendMode) {
+        // 5a. Re-seed the read slot to the empty-marker BEFORE generate, so a
+        //     skipped/no-op generate (config drift: numberPos != the run
+        //     position, or the NUMBER widget not deployed / not yet built) can
+        //     never leave a STALE prior-submit tnm behind. Without this, a
+        //     second submit whose generate silently no-ops would read the
+        //     previous run's value and write a duplicate tnm (review R2 Info).
+        //     In correct config the generate below overwrites this immediately,
+        //     so the happy path is unaffected.
+        final int numPos = AdminCreateTaskSupport.parseNumberPos(
+            widget.component['numberPos']);
+        txfControllerCheck(widget.scrName, numPos);
+        addToTxfController(numPos, widget.scrName, emptyString);
+
+        // 5b. Process run field (trigger generate_number at the run position)
+        await _processRunCommands(widget.scrName);
+
+        // 5c. Read generated tnm from numberPos
+        final String generatedTnm =
+            txfController[widget.scrName]?[numPos]?.finalData ?? '';
+
+        // 5d. Validate generated tnm (spec section 7: fail -> no write)
+        if (!AdminCreateTaskSupport.isGeneratedTnmValid(generatedTnm)) {
+          if (context.mounted) {
+            _showSnackBar(context, _t(2, 'Gagal membuat task'));
+          }
+          return;
+        }
+
+        tnm = generatedTnm;
+        useAutoId = true;
+      } else {
+        // 5. Legacy: generate tnm from kl + timestamp
+        tnm = AdminCreateTaskSupport.generateTnm(kl);
+        useAutoId = false;
+      }
+
+      // 6. Time
+      final int nowMs = getNowMillisecondFromEpoch();
+      final String tdt = todayEpochMidnightWib();
+
+      // 7. tableVid
+      final String tableVid = (widget.component['vidtable'] ?? '')
+              .toString()
+              .trim()
+              .isNotEmpty
+          ? (widget.component['vidtable'] ?? '').toString().trim()
+          : parseTablePath(
+                  (widget.component['table'] ?? '').toString().trim())
+              .tableDocId;
+
+      // 8. Assemble doc
+      final Map<String, dynamic> taskDoc =
+          AdminCreateTaskSupport.assembleTaskDoc(
+        tnm: tnm,
+        kl: kl,
+        kn: kn,
+        al: al,
+        vv: vv,
+        gl: gl,
+        cv: cv,
+        cn: cn,
+        tdt: tdt,
+        t: nowMs,
+        itArray: itArray,
+        tableVid: tableVid,
+      );
+
+      // 9. Write
+      final String rawTable =
+          (widget.component['table'] ?? '').toString().trim();
+      if (rawTable.isEmpty) {
+        if (context.mounted) {
+          _showSnackBar(context, _t(2, 'Gagal membuat task'));
+        }
+        return;
+      }
+
+      final bool created;
+      if (useAutoId) {
+        // Auto-id write (savesendMode): doc-id is Firestore-generated
+        created = await createNativeDocAutoId(
+          component: widget.component,
+          rawTable: rawTable,
+          docMap: taskDoc,
+        );
+      } else {
+        // Legacy write: doc-id = tnm
+        created = await createNativeDoc(
+          component: widget.component,
+          rawTable: rawTable,
+          docId: tnm,
+          docMap: taskDoc,
+        );
+      }
+
+      if (!created) {
+        if (context.mounted) {
+          _showSnackBar(context, _t(2, 'Gagal membuat task'));
+        }
+        return;
+      }
+
+      // 9b. Stash snapshot for success screen (before draft is cleared).
+      // Only fires on the success path (after created==true). Failure paths
+      // return above and never reach here.
+      final TaskTotals totals = AdminCreateTaskSupport.computeTotals(draft);
+      final String vn =
+          (draftVeh != null && (draftVeh['vn'] ?? '').isNotEmpty)
+              ? draftVeh['vn']!
+              : '';
+      AdminCreateTaskSupport.setLastCreated(
+        _wizardKey,
+        tnm: tnm,
+        kn: kn,
+        vn: vn,
+        totalDrop: totals.totalDrop,
+        totalPickup: totals.totalPickup,
+      );
+
+      // 10. Clear draft
+      AdminCreateTaskSupport.clearDraft(_wizardKey);
+
+      // 11. Navigate (chain-aware, mirrors custody_count_submit.dart:356)
+      final dynamic chain = widget.component['chain'];
+      if (chain != null && chain.toString().trim().isNotEmpty) {
+        if (context.mounted) {
+          await doChain(context, widget.scrName, chain);
+        }
+      } else {
+        final String rawRoute =
+            (widget.component['route'] ?? '').toString().trim();
+        final String route = stripRouteWrapper(rawRoute);
+        if (route.isNotEmpty && routeExist(route)) {
+          routeStack.push(route);
+          gotoRoute(route);
+        }
+      }
+    } catch (e) {
+      errorReport(e);
+      if (context.mounted) {
+        _showSnackBar(context, '${_t(2, 'Gagal membuat task')}: $e');
+      }
+    } finally {
+      TaskCreateSubmit._writing[widget.scrName] = false;
+      TaskItemBuilder.draftRev.value++;
+    }
+  }
+
+  /// Process the `run` config field: parse and execute run commands.
+  ///
+  /// Replicates the pattern from ftz_row_of_button_2.dart:553-636.
+  /// Format: "pos:action" commands separated by diamond (◆).
+  /// Only `generate_number` action is processed (others are no-ops here).
+  Future<void> _processRunCommands(String scrName) async {
+    final String runField =
+        (autheniumDecode((widget.component['run'] ?? '').toString()) ?? '')
+            .trim()
+            .toLowerCase();
+    if (runField.isEmpty) return;
+
+    final List<String> commands = runField.split('\u{25C6}'); // ◆
+    final List<String> widgetsToUpdate = [];
+
+    for (final String cmd in commands) {
+      final List<String> parts = cmd.split(':');
+      if (parts.length != 2) continue;
+
+      final int? targetPosition = int.tryParse(parts[0].trim());
+      final String action = parts[1].trim().toLowerCase();
+
+      if (targetPosition == null) continue;
+      if (action != 'generate_number') continue;
+
+      txfControllerCheck(scrName, targetPosition);
+      final controller = txfController[scrName]?[targetPosition];
+      if (controller == null) continue;
+
+      // Find the 'generate_number' entries registered by FtzAutoNumber initState
+      final List<dynamic> execute1Actions = controller.execute1
+              ?.where((item) =>
+                  item != null &&
+                  item.length >= 2 &&
+                  item[1].toString().toLowerCase() == 'generate_number')
+              .toList() ??
+          [];
+
+      for (final actionItem in execute1Actions) {
+        if (actionItem != null && actionItem.length >= 3) {
+          final String template = actionItem[2] as String;
+          final String generatedString =
+              await generateAutoNumber(template, scrName);
+          addToTxfController(targetPosition, scrName, generatedString);
+          widgetsToUpdate.add('$scrName-$targetPosition');
+        }
+      }
+    }
+
+    // Update all affected NUMBER widgets so they show the generated value
+    if (widgetsToUpdate.isNotEmpty) {
+      Get.find<WidgetUpdateController>().update(widgetsToUpdate);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(() {
+      // Touch revision signal for cross-widget reactivity
+      TaskItemBuilder.draftRev.value;
+
+      final List<DraftItem> draft =
+          AdminCreateTaskSupport.getDraft(_wizardKey);
+      final bool hasItems = draft.isNotEmpty;
+
+      // Read vehicle from draft first, screenTx as fallback
+      final Map<String, String>? draftVeh =
+          AdminCreateTaskSupport.getVehicle(_wizardKey);
+      final bool hasVehicleFromDraft =
+          draftVeh != null && (draftVeh['vv'] ?? '').isNotEmpty;
+      final bool hasVehicleFromTx;
+      if (!hasVehicleFromDraft) {
+        final Map<String, dynamic> screenTx = transactionStore.state.screenTx;
+        final String vvKey =
+            (widget.component['vvKey'] ?? 'vv').toString().trim();
+        final String vv = (screenTx[vvKey] ?? '').toString().trim();
+        hasVehicleFromTx = vv.isNotEmpty;
+      } else {
+        hasVehicleFromTx = false;
+      }
+      final bool hasVehicle = hasVehicleFromDraft || hasVehicleFromTx;
+
+      final bool enabled = hasItems && hasVehicle;
+      final bool isWriting =
+          TaskCreateSubmit._writing[widget.scrName] ?? false;
+
+      final String label = enabled
+          ? _t(0, 'Buat Task & Assign')
+          : _t(1, 'Lengkapi data dulu');
+
+      final Color bgColor = enabled && !isWriting
+          ? AdminTierColors.okAction // #2563EB (admin blue)
+          : const Color(0xFFD1D5DB); // gray-300
+      final Color textColor =
+          enabled && !isWriting ? Colors.white : const Color(0xFF6B7280);
+
+      return Padding(
+        padding: EdgeInsets.fromLTRB(
+            widget.lPad, widget.tPad, widget.rPad, widget.bPad),
+        child: SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: ElevatedButton(
+            onPressed: (enabled && !isWriting)
+                ? () => _onSubmit(context)
+                : null,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: bgColor,
+              disabledBackgroundColor: const Color(0xFFD1D5DB),
+              foregroundColor: textColor,
+              disabledForegroundColor: const Color(0xFF6B7280),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: isWriting
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: textColor,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+          ),
+        ),
+      );
+    });
+  }
+
+  void _showSnackBar(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+}

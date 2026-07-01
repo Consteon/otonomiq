@@ -209,6 +209,12 @@ void main() {
     test('unresolved token → no match (empty)', () {
       expect(filterByCharCodeEquality(docs, 'av◼{ccVid}', const {}), isEmpty);
     });
+    test('unresolved token → MODIFIABLE empty list (regression: const [] crashed caller .sort)', () {
+      final r = filterByCharCodeEquality(docs, 'av◼{ccVid}', const {});
+      // list_statistic_card_keyed sorts this result in its Obx — must not be unmodifiable.
+      expect(() => r.sort((a, b) => 0), returnsNormally);
+      expect(() => r.add(<String, dynamic>{'av': '1'}), returnsNormally);
+    });
   });
 
   group('scopePatrolEvents', () {

@@ -2,6 +2,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otonomiq/global.dart';
 import 'package:otonomiq/widget/driver_home_support.dart';
+import 'package:otonomiq/widget/admin_create_task_support.dart';
+import 'package:otonomiq/widget/task_manifest_list.dart';
 
 void main() {
   // ── aggregateTaskDropPickup ──────────────────────────────────────────────
@@ -391,6 +393,336 @@ void main() {
       final agg = aggregateTaskDropPickup(filtered[0]);
       expect(agg.totalDrop, 6);
       expect(agg.totalPickup, 1);
+    });
+  });
+
+  // ── draft source: synthetic task from draftToItArray ─────────────────────
+
+  group('draft source: synthetic task from draftToItArray', () {
+    test('mixed-tx draft wrapped as synthetic task aggregates only deliver pd/pp', () {
+      final items = [
+        DraftItem(ii: 'a', itemName: 'Galon', tx: 'deliver', pd: 10, pp: 5),
+        DraftItem(ii: 'b', itemName: 'LPG', tx: 'sale', ps: 3),
+        DraftItem(ii: 'c', itemName: 'Tabung', tx: 'purchase', pb: 2),
+        DraftItem(ii: 'd', itemName: 'Air', tx: 'refill', pr: 4),
+      ];
+      final itArray = AdminCreateTaskSupport.draftToItArray(items);
+      final syntheticTask = <String, dynamic>{'it': itArray};
+      final agg = aggregateTaskDropPickup(syntheticTask);
+      // Only deliver items contribute to pd/pp aggregates
+      expect(agg.itemLineCount, 4);
+      expect(agg.totalDrop, 10);
+      expect(agg.totalPickup, 5);
+    });
+
+    test('all-deliver draft aggregates pd and pp correctly', () {
+      final items = [
+        DraftItem(ii: 'a', itemName: 'Galon', tx: 'deliver', pd: 8, pp: 3),
+        DraftItem(ii: 'b', itemName: 'LPG', tx: 'deliver', pd: 5, pp: 2),
+      ];
+      final itArray = AdminCreateTaskSupport.draftToItArray(items);
+      final syntheticTask = <String, dynamic>{'it': itArray};
+      final agg = aggregateTaskDropPickup(syntheticTask);
+      expect(agg.itemLineCount, 2);
+      expect(agg.totalDrop, 13);
+      expect(agg.totalPickup, 5);
+    });
+
+    test('all-sale draft produces zero drop/pickup aggregates', () {
+      final items = [
+        DraftItem(ii: 'a', itemName: 'Galon', tx: 'sale', ps: 10),
+        DraftItem(ii: 'b', itemName: 'LPG', tx: 'sale', ps: 5),
+      ];
+      final itArray = AdminCreateTaskSupport.draftToItArray(items);
+      final syntheticTask = <String, dynamic>{'it': itArray};
+      final agg = aggregateTaskDropPickup(syntheticTask);
+      expect(agg.itemLineCount, 2);
+      expect(agg.totalDrop, 0);
+      expect(agg.totalPickup, 0);
+    });
+
+    test('empty draft produces empty itArray and zero aggregates', () {
+      final itArray = AdminCreateTaskSupport.draftToItArray([]);
+      expect(itArray, isEmpty);
+      final syntheticTask = <String, dynamic>{'it': itArray};
+      final agg = aggregateTaskDropPickup(syntheticTask);
+      expect(agg.itemLineCount, 0);
+      expect(agg.totalDrop, 0);
+      expect(agg.totalPickup, 0);
+    });
+  });
+
+  // ── draft source: buildItemAnnotations ──────────────────────────────────
+
+  group('draft source: buildItemAnnotations', () {
+    test('deliver entry shows drop and pickup arrows', () {
+      final entry = {'tx': 'deliver', 'pd': '10', 'pp': '5'};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'drop',
+        pickupLabel: 'pickup',
+        txField: 'tx',
+      );
+      expect(result, ['\u{2193} 10 drop', '\u{2191} 5 pickup']);
+    });
+
+    test('deliver entry with zero pickup shows only drop', () {
+      final entry = {'tx': 'deliver', 'pd': '8', 'pp': '0'};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'drop',
+        pickupLabel: 'pickup',
+        txField: 'tx',
+      );
+      expect(result, ['\u{2193} 8 drop']);
+    });
+
+    test('sale entry shows qty with config sale label (Jual)', () {
+      // W1: sale label is config-driven; _buildDraftMode supplies _t(4,'Jual').
+      final entry = {'tx': 'sale', 'ps': '3'};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'drop',
+        pickupLabel: 'pickup',
+        txField: 'tx',
+        saleField: 'ps',
+        saleLabel: 'Jual',
+      );
+      expect(result, ['3 Jual']);
+    });
+
+    test('purchase entry shows qty with config buy label (Beli)', () {
+      // W1: purchase label is config-driven; _buildDraftMode supplies _t(5,'Beli').
+      final entry = {'tx': 'purchase', 'pb': '7'};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'drop',
+        pickupLabel: 'pickup',
+        txField: 'tx',
+        buyField: 'pb',
+        buyLabel: 'Beli',
+      );
+      expect(result, ['7 Beli']);
+    });
+
+    test('refill entry shows qty with config refill label (Refill)', () {
+      // W1: refill label is config-driven; _buildDraftMode supplies _t(6,'Refill').
+      final entry = {'tx': 'refill', 'pr': '4'};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'drop',
+        pickupLabel: 'pickup',
+        txField: 'tx',
+        refillField: 'pr',
+        refillLabel: 'Refill',
+      );
+      expect(result, ['4 Refill']);
+    });
+
+    test('unknown tx falls through to drop/pickup', () {
+      final entry = {'tx': 'unknown', 'pd': '3', 'pp': '1'};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'drop',
+        pickupLabel: 'pickup',
+        txField: 'tx',
+      );
+      expect(result, ['\u{2193} 3 drop', '\u{2191} 1 pickup']);
+    });
+
+    test('all-zero quantities produce empty annotations', () {
+      final entry = {'tx': 'deliver', 'pd': '0', 'pp': '0'};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'drop',
+        pickupLabel: 'pickup',
+        txField: 'tx',
+      );
+      expect(result, isEmpty);
+    });
+
+    test('sale entry with zero qty produces empty annotations', () {
+      final entry = {'tx': 'sale', 'ps': '0'};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'drop',
+        pickupLabel: 'pickup',
+        txField: 'tx',
+        saleField: 'ps',
+        saleLabel: 'Jual',
+      );
+      expect(result, isEmpty);
+    });
+
+    test('legacy mode (txField empty) reads drop/pickup only', () {
+      // Sale entry with non-zero ps, but txField empty -> legacy mode ignores ps
+      final entry = {'tx': 'sale', 'pd': '0', 'pp': '0', 'ps': '5'};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'drop',
+        pickupLabel: 'pickup',
+        // txField defaults to '' -> legacy mode
+      );
+      expect(result, isEmpty); // pd=0, pp=0 -> no annotations
+    });
+
+    test('legacy mode with drop/pickup values works like existing behavior', () {
+      final entry = {'pd': '6', 'pp': '2'};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'drop',
+        pickupLabel: 'pickup',
+      );
+      expect(result, ['\u{2193} 6 drop', '\u{2191} 2 pickup']);
+    });
+
+    test('missing fields default to 0 safely', () {
+      final entry = <String, dynamic>{'tx': 'deliver'}; // no pd, no pp
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'drop',
+        pickupLabel: 'pickup',
+        txField: 'tx',
+      );
+      expect(result, isEmpty);
+    });
+
+    test('integer qty values work (not just strings)', () {
+      final entry = {'tx': 'deliver', 'pd': 8, 'pp': 3};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'drop',
+        pickupLabel: 'pickup',
+        txField: 'tx',
+      );
+      expect(result, ['\u{2193} 8 drop', '\u{2191} 3 pickup']);
+    });
+
+    test('sale entry with saleField empty produces no annotation', () {
+      final entry = {'tx': 'sale', 'ps': '5'};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'drop',
+        pickupLabel: 'pickup',
+        txField: 'tx',
+        // saleField defaults to '' -> no sale annotation
+      );
+      expect(result, isEmpty);
+    });
+
+    test('custom field names honored', () {
+      final entry = {'kind': 'deliver', 'planned_drop': '4', 'planned_pick': '2'};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'planned_drop',
+        pickupField: 'planned_pick',
+        dropLabel: 'kirim',
+        pickupLabel: 'ambil',
+        txField: 'kind',
+      );
+      expect(result, ['\u{2193} 4 kirim', '\u{2191} 2 ambil']);
+    });
+  });
+
+  // ── draft source: text slot mapping ─────────────────────────────────────
+
+  group('draft source: text slot mapping', () {
+    test('draft config text parses to correct slot mapping', () {
+      final text = 'Item Order\u{25C6}item line\u{25C6}drop\u{25C6}pickup\u{25C6}';
+      final arr = diamondTextToList(text);
+      // Draft slots: [0] title, [1] count unit, [2] drop label, [3] pickup label, [4] ''
+      expect(arr.isNotEmpty ? arr[0] : '', 'Item Order');
+      expect(arr.length > 1 ? arr[1] : 'item line', 'item line');
+      expect(arr.length > 2 ? arr[2] : 'drop', 'drop');
+      expect(arr.length > 3 ? arr[3] : 'pickup', 'pickup');
+    });
+
+    test('empty draft text: slot 0 is the single empty element, slots 1+ default', () {
+      // diamondTextToList('') yields [''] (length 1, NOT []). The length guard
+      // therefore returns '' for index 0 (the single empty element); the
+      // defaults only kick in at index >= 1. Mirrors the existing
+      // diamondTextToList('') contract test in this file (and the documented
+      // gotcha). The plan's original assertion expected arr[0] isNotEmpty,
+      // which contradicts this contract -- corrected here.
+      final arr = diamondTextToList('');
+      expect(arr.length, 1);
+      expect(arr.isNotEmpty ? arr[0] : 'Item Order', ''); // index 0 = '' (no default)
+      expect(arr.length > 1 ? arr[1] : 'item line', 'item line');
+      expect(arr.length > 2 ? arr[2] : 'drop', 'drop');
+      expect(arr.length > 3 ? arr[3] : 'pickup', 'pickup');
+    });
+
+    test('live 4-diamond draft text: slot 4 is trailing-empty, slots 5/6 default', () {
+      // W1 nuance: live op1Screen P4 text "Item Order◆item line◆drop◆pickup◆"
+      // has a TRAILING diamond, so diamondTextToList yields 5 segments (the 5th
+      // being the trailing empty string). Slot 4 (sale label) therefore resolves
+      // to '' here, while slots 5/6 (buy/refill) are out-of-range and fall back
+      // to the Indonesian defaults. _t(4,'Jual') returns '' for this exact text;
+      // _t(5,'Beli')/_t(6,'Refill') return their defaults.
+      final text = 'Item Order\u{25C6}item line\u{25C6}drop\u{25C6}pickup\u{25C6}';
+      final arr = diamondTextToList(text);
+      expect(arr.length, 5);
+      expect(arr.length > 4 ? arr[4] : 'Jual', ''); // trailing empty, NOT 'Jual'
+      expect(arr.length > 5 ? arr[5] : 'Beli', 'Beli'); // out-of-range -> default
+      expect(arr.length > 6 ? arr[6] : 'Refill', 'Refill'); // out-of-range -> default
+    });
+
+    test('empty-aware label (_tOr) resolves trailing-empty slot 4 so sale renders "3 Jual"', () {
+      // W-1 fix: _buildDraftMode reads the sale/buy/refill labels via the
+      // empty-aware _tOr helper. Under the live text the trailing diamond makes
+      // slot 4 a trailing-empty string, so raw _t(4,'Jual') returns '' (in range
+      // -> no default) which previously rendered a bare "3". _tOr falls back to
+      // the default, so the sale line now renders "3 Jual". This mirrors _tOr's
+      // logic (private helper, not directly callable from the test).
+      final text = 'Item Order\u{25C6}item line\u{25C6}drop\u{25C6}pickup\u{25C6}';
+      final arr = diamondTextToList(text);
+
+      // Mirror _t (raw): in-range slot returned verbatim, even when empty.
+      final String rawSlot4 = arr.length > 4 ? arr[4] : 'Jual';
+      expect(rawSlot4, ''); // raw _t fact -- still the bug input
+
+      // Mirror _tOr (empty-aware): empty slot falls back to the default.
+      final String saleLabel = rawSlot4.isEmpty ? 'Jual' : rawSlot4;
+      expect(saleLabel, 'Jual');
+
+      // The resolved label now renders through buildItemAnnotations: no bare "3".
+      final result = TaskManifestList.buildItemAnnotations(
+        {'tx': 'sale', 'ps': '3'},
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'drop',
+        pickupLabel: 'pickup',
+        txField: 'tx',
+        saleField: 'ps',
+        saleLabel: saleLabel,
+      );
+      expect(result, ['3 Jual']);
     });
   });
 }

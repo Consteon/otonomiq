@@ -389,7 +389,7 @@ List<Map<String, dynamic>> filterByCharCodeEquality(
   final String field = cleaned.substring(0, sep).trim();
   final String value = cleaned.substring(sep + 1).trim();
   if (field.isEmpty) return docs;
-  if (value.isEmpty || value.contains('{')) return const [];
+  if (value.isEmpty || value.contains('{')) return <Map<String, dynamic>>[];
   return docs
       .where((d) => (d[field] ?? '').toString().trim() == value)
       .toList();

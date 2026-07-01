@@ -59,15 +59,14 @@ void main() async {
   // window. SplashScreen is self-contained (no Firebase/globals), so it is
   // safe to render this early.
   runApp(const _BootstrapLoadingApp());
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   // Crash reporting. Disabled in debug so dev runs don't pollute the console.
   // Captures uncaught Flutter framework errors and async/platform errors;
   // errorReport() (the app-wide sink) forwards non-fatal errors separately.
-  await FirebaseCrashlytics.instance
-      .setCrashlyticsCollectionEnabled(!kDebugMode);
+  await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(
+    !kDebugMode,
+  );
   FlutterError.onError = (errorDetails) {
     if (kDebugMode) {
       FlutterError.presentError(errorDetails);
@@ -105,12 +104,16 @@ void main() async {
     // }
     // setTransactionNotOK('main');
     // setTransactionOK('main');
-    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-      '#REFRESH': false,
-      '#DATA_OK': false,
-      '#GPSDELAYTIME': 0,
-      '#GPSDATA': empty,
-    })));
+    transactionStore.dispatch(
+      UpdateScreenTxAction(
+        ScreenTransaction({
+          '#REFRESH': false,
+          '#DATA_OK': false,
+          '#GPSDELAYTIME': 0,
+          '#GPSDATA': empty,
+        }),
+      ),
+    );
     Map<int, TextEditingController> ct = {};
     ct[1] = TextEditingController();
     ct[3] = TextEditingController();
@@ -118,10 +121,10 @@ void main() async {
     //         .size
     //         .shortestSide) <
     //     600;
-    mobileLayout = (MediaQueryData.fromView(
-                WidgetsBinding.instance.platformDispatcher.views.first)
-            .size
-            .shortestSide) <
+    mobileLayout =
+        (MediaQueryData.fromView(
+          WidgetsBinding.instance.platformDispatcher.views.first,
+        ).size.shortestSide) <
         600;
     if (mobileLayout) {
       // mobile
@@ -167,13 +170,21 @@ void main() async {
     trace(debugCount);
     if (fUser != null) {
       String? userDocId = await checkIfUserReset(
-          fUser, await deviceIdF); // check in firebase if user reset
+        fUser,
+        await deviceIdF,
+      ); // check in firebase if user reset
       if (userDocId == null) {
         myLif = null;
         await kickedOut();
       } else {
-        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-            {'#FIREBASE_USER': fUser, '#FS_USER_DOC_ID': userDocId})));
+        transactionStore.dispatch(
+          UpdateScreenTxAction(
+            ScreenTransaction({
+              '#FIREBASE_USER': fUser,
+              '#FS_USER_DOC_ID': userDocId,
+            }),
+          ),
+        );
         subscribeToUserReset(userDocId); // listen to dvc
       } // end if (userReset)
     } //if (fUser != null)
@@ -212,14 +223,15 @@ void main() async {
 
     debugCount = 4;
     trace(debugCount);
-//    var pa = Uri(path: Uri.encodeFull("sounds/scanner-beep.mp3")).path;
-//    scannerBeep = await rootBundle
-//        .load("sounds/scanner-beep.mp3")
-//        .then((ByteData soundData) {
-//      return pool.load(soundData);
-//    });
-    transactionStore.dispatch(UpdateScreenTxAction(
-        ScreenTransaction({'#SIGNUP_KEY': defaultLifKey})));
+    //    var pa = Uri(path: Uri.encodeFull("sounds/scanner-beep.mp3")).path;
+    //    scannerBeep = await rootBundle
+    //        .load("sounds/scanner-beep.mp3")
+    //        .then((ByteData soundData) {
+    //      return pool.load(soundData);
+    //    });
+    transactionStore.dispatch(
+      UpdateScreenTxAction(ScreenTransaction({'#SIGNUP_KEY': defaultLifKey})),
+    );
     if (demoApp && fUser != null && myLif == defaultLifKey) {
       myLif = invitationKey;
     }
@@ -230,24 +242,32 @@ void main() async {
     if (myLif != defaultLifKey && myLif != invitationKey) {
       // if user logged in
       var myClt = await storage.read(key: 'myCluster');
-      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-        '#CLUSTER': myClt,
-        '#INTERFACE_KEY': myLif,
-        '#CURRENT_ROUTE': home,
-      })));
+      transactionStore.dispatch(
+        UpdateScreenTxAction(
+          ScreenTransaction({
+            '#CLUSTER': myClt,
+            '#INTERFACE_KEY': myLif,
+            '#CURRENT_ROUTE': home,
+          }),
+        ),
+      );
       loadHistory(clearHistory, 'main[175] <= async');
-//      runLifInstructions('2'); //   run Instructions2 in background
+      //      runLifInstructions('2'); //   run Instructions2 in background
     }
     debugCount = 5;
     trace(debugCount);
-//    await readSettings(myLif);
+    //    await readSettings(myLif);
     final UserRepository userRepository = UserRepository();
     debugCount = 51;
     trace(debugCount);
-    transactionStore.dispatch(UpdateScreenTxAction(
-        ScreenTransaction({'#USER_REPOSITORY': userRepository})));
-    localeText =
-        jsonDecode(stringDecompress(prefs.getString('@localeText')) ?? '{}');
+    transactionStore.dispatch(
+      UpdateScreenTxAction(
+        ScreenTransaction({'#USER_REPOSITORY': userRepository}),
+      ),
+    );
+    localeText = jsonDecode(
+      stringDecompress(prefs.getString('@localeText')) ?? '{}',
+    );
     syncLocaleTable();
     // setTransactionOK('main');
     debugCount = 52;
@@ -268,7 +288,7 @@ void main() async {
     constructHomeElements();
     debugCount = 7;
     trace(debugCount);
-//    BlocSupervisor.delegate = SimpleBlocDelegate();
+    //    BlocSupervisor.delegate = SimpleBlocDelegate();
     // Debug-only: SimpleBlocDelegate logs every bloc event incl. password
     // change events. Keep it out of release builds.
     if (kDebugMode) {
@@ -285,15 +305,19 @@ void main() async {
     // so run it off the critical path after the first frame instead of
     // blocking startup on it.
     if (state['#VID'] != null && state['#VID'] != '') {
-      unawaited(launchCheck().then((launchOk) {
-        debugCount = 8;
-        trace(debugCount);
-        if (launchOk > 0) {
-          debugPrint('launchCheck returned $launchOk (background)');
-        }
-      }).catchError((e) {
-        debugPrint('launchCheck error (background): $e');
-      }));
+      unawaited(
+        launchCheck()
+            .then((launchOk) {
+              debugCount = 8;
+              trace(debugCount);
+              if (launchOk > 0) {
+                debugPrint('launchCheck returned $launchOk (background)');
+              }
+            })
+            .catchError((e) {
+              debugPrint('launchCheck error (background): $e');
+            }),
+      );
     }
     {
       debugCount = 9;
@@ -314,14 +338,18 @@ void main() async {
         MultiBlocProvider(
           providers: [
             BlocProvider<AuthenticationBloc>(
-                create: (context) =>
-                    AuthenticationBloc(userRepository: userRepository)
-                      ..add(AppStarted())),
+              create: (context) =>
+                  AuthenticationBloc(userRepository: userRepository)
+                    ..add(AppStarted()),
+            ),
             BlocProvider<TimerBloc>(
               create: (BuildContext context1) {
                 TimerBloc timerBloc = TimerBloc(ticker: Ticker());
-                transactionStore.dispatch(UpdateScreenTxAction(
-                    ScreenTransaction({'#TIMER_BLOC': timerBloc})));
+                transactionStore.dispatch(
+                  UpdateScreenTxAction(
+                    ScreenTransaction({'#TIMER_BLOC': timerBloc}),
+                  ),
+                );
                 return timerBloc;
               },
             ),
@@ -344,9 +372,8 @@ void main() async {
             ),
             BlocProvider<SubmitBloc>(
               create: (BuildContext contextN) {
-                return SubmitBloc(
-                  submitRepository: FirebaseSubmitRepository(),
-                )..add(LoadSubmit());
+                return SubmitBloc(submitRepository: FirebaseSubmitRepository())
+                  ..add(LoadSubmit());
               },
             ),
           ],
@@ -355,9 +382,7 @@ void main() async {
       ); // end of runApp
     }
   } catch (err) {
-    runApp(TestApp(
-      flag: 'Error: ${err.toString()}',
-    ));
+    runApp(TestApp(flag: 'Error: ${err.toString()}'));
   }
 } // end of main
 
@@ -403,16 +428,21 @@ void getSettingJson(var rawData) {
 class App extends StatelessWidget {
   final UserRepository _userRepository;
 
-  const App({required Key key, required UserRepository userRepository})
-      : _userRepository = userRepository,
-        super(key: key);
+  const App({required Key key, required this._userRepository})
+    : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     SubmitBloc submitBloc = BlocProvider.of<SubmitBloc>(context);
     TimerBloc timerBloc = BlocProvider.of<TimerBloc>(context);
-    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-        {'#TIMER_BLOC': timerBloc, '#SUBMIT_BLOC': submitBloc})));
+    transactionStore.dispatch(
+      UpdateScreenTxAction(
+        ScreenTransaction({
+          '#TIMER_BLOC': timerBloc,
+          '#SUBMIT_BLOC': submitBloc,
+        }),
+      ),
+    );
     return GetMaterialApp(
       // localeResolutionCallback: (
       //     Locale? locale,
@@ -432,7 +462,7 @@ class App extends StatelessWidget {
         // Add other locales your app supports
       ],
       home: BlocBuilder<AuthenticationBloc, AuthenticationState>(
-//        bloc: BlocProvider.of<AuthenticationBloc>(context),
+        //        bloc: BlocProvider.of<AuthenticationBloc>(context),
         builder: (BuildContext context, state) {
           // ignore: missing_return
           Widget ret = const SplashScreen();
@@ -440,16 +470,20 @@ class App extends StatelessWidget {
             ret = const SplashScreen();
           }
           if (state is Unauthenticated) {
-//            return LoginScreen(userRepository: _userRepository);
+            //            return LoginScreen(userRepository: _userRepository);
             ret = LinkReduxApp(
-                transactionStore, _userRepository); // <<=== display Home screen
+              transactionStore,
+              _userRepository,
+            ); // <<=== display Home screen
           }
           if (state is TosReview) {
             ret = const TosPage();
           }
           if (state is Authenticated) {
             ret = LinkReduxApp(
-                transactionStore, _userRepository); // <<=== display Home screen
+              transactionStore,
+              _userRepository,
+            ); // <<=== display Home screen
           }
           return ret;
         },
@@ -517,28 +551,16 @@ class _MyHomePageState extends State<MyHomePage> {
       appBar: AppBar(
         backgroundColor: const Color(0xff001a72),
         leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back,
-            color: Colors.white,
-          ), //= back icon
+          icon: const Icon(Icons.arrow_back, color: Colors.white), //= back icon
           tooltip: 'Back',
           onPressed: () {
             // handle the press
           },
         ),
-        title: Text(
-          widget.title,
-          style: const TextStyle(color: Colors.white),
-        ),
+        title: Text(widget.title, style: const TextStyle(color: Colors.white)),
         actions: const [
-          Icon(
-            Icons.fiber_manual_record,
-            color: Colors.green,
-          ),
-          Icon(
-            Icons.refresh,
-            color: Colors.white,
-          ), //= refresh icon
+          Icon(Icons.fiber_manual_record, color: Colors.green),
+          Icon(Icons.refresh, color: Colors.white), //= refresh icon
         ],
       ),
       body: Column(
@@ -560,9 +582,10 @@ class _MyHomePageState extends State<MyHomePage> {
               'autsorz for iOS ($version$subVersion): Final Testing Underway!',
               // textAlign: TextAlign.center,
               style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black45),
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Colors.black45,
+              ),
             ),
           ),
           const Padding(
@@ -570,10 +593,7 @@ class _MyHomePageState extends State<MyHomePage> {
             child: Text(
               'Get ready for a seamless experience.',
               // textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 18,
-                color: Colors.black45,
-              ),
+              style: TextStyle(fontSize: 18, color: Colors.black45),
             ),
           ),
         ],
