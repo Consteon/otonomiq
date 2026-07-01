@@ -2,6 +2,7 @@ import 'package:intl/intl.dart';
 
 import 'package:flutter/painting.dart';
 
+import 'dsl_eq.dart';
 import 'panel_card_support.dart';
 
 /// Relative timestamp for a timeline entry, computed from the event epoch.
@@ -72,7 +73,7 @@ List<Map<String, dynamic>> filterEventsByConditions(
   if (conds.any((c) => c.value.isEmpty || c.value.contains('<'))) return const [];
   return events.where((e) {
     for (final c in conds) {
-      if ((e[c.key] ?? '').toString().trim() != c.value) return false;
+      if (!eq((e[c.key] ?? '').toString().trim(), c.value)) return false;
     }
     return true;
   }).toList();

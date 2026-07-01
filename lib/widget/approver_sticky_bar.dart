@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../global.dart';
+import 'dsl_eq.dart';
 import 'ftz_row_of_button_2.dart';
 import 'item_card_detail.dart';
 
@@ -23,7 +24,7 @@ bool evaluateRbtSearch(String searchStr, List<dynamic> row) {
       int? idx = int.tryParse(kv[0].trim());
       String val = kv[1].trim();
       if (idx == null || idx >= row.length) return false;
-      if (row[idx].toString().trim().toUpperCase() != val.toUpperCase()) {
+      if (!eq(row[idx].toString().trim().toUpperCase(), val.toUpperCase())) {
         return false;
       }
     }

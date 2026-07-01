@@ -1,3 +1,4 @@
+import 'dsl_eq.dart';
 import 'panel_card_support.dart';
 
 /// One option in the LIST_STATISTIC_CARD period selector.
@@ -391,7 +392,7 @@ List<Map<String, dynamic>> filterByCharCodeEquality(
   if (field.isEmpty) return docs;
   if (value.isEmpty || value.contains('{')) return <Map<String, dynamic>>[];
   return docs
-      .where((d) => (d[field] ?? '').toString().trim() == value)
+      .where((d) => eq((d[field] ?? '').toString().trim(), value))
       .toList();
 }
 

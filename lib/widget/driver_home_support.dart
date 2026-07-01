@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import '../api.dart'; // getTableVid
 import '../global.dart';
 import '../redux/screen_transaction.dart';
+import 'dsl_eq.dart';
 import 'panel_card_support.dart';
 import 'statistic_card_support.dart';
 
@@ -348,7 +349,7 @@ List<Map<String, dynamic>> filterByMultiClause(
   // AND: doc must match ALL clauses
   return docs.where((doc) {
     for (final pair in pairs) {
-      if ((doc[pair.key] ?? '').toString().trim() != pair.value) return false;
+      if (!eq((doc[pair.key] ?? '').toString().trim(), pair.value)) return false;
     }
     return true;
   }).toList();
@@ -1676,7 +1677,7 @@ Future<bool> writeNativeFields({
       final Map<String, dynamic> data =
           Map<String, dynamic>.from(d.data() as Map);
       for (final p in pairs) {
-        if ((data[p.key] ?? '').toString().trim() != p.value) return false;
+        if (!eq((data[p.key] ?? '').toString().trim(), p.value)) return false;
       }
       return true;
     }).toList();

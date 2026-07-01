@@ -5,6 +5,7 @@ import '../api.dart'; // getNowMillisecondFromEpoch, autheniumDecode, devPrint, 
 import '../firestore_repository/update_event_row.dart'; // parseUpdateEventRow, UpdateEventTarget
 import '../global.dart'; // firestoreDb, mobileTable, mobileTableCollection
 import 'driver_home_support.dart'; // resolveAppVid
+import 'dsl_eq.dart';
 
 // ============================================================================
 // Admin Home support — pure helpers for H1 coordinationSignalList + header.
@@ -112,7 +113,7 @@ int countBerjalan(
   for (final doc in vehicleChecks) {
     final String cst = (doc[cstField] ?? '').toString().trim();
     final String cdt = (doc[cdtField] ?? '').toString().trim();
-    if (cst == 'custody_confirmed' && cdt == todayStr) {
+    if (cst == 'custody_confirmed' && eq(cdt, todayStr)) {
       count++;
     }
   }
@@ -333,7 +334,7 @@ List<Signal> deriveAdminSignals({
       // Check if this vehicle has tasks scheduled today
       final List<Map<String, dynamic>> vehTasks = tasksByVv[vv] ?? [];
       final bool hasTodayTask = vehTasks.any((t) =>
-          (t[scheduleField] ?? '').toString().trim() == todayStr);
+          eq((t[scheduleField] ?? '').toString().trim(), todayStr));
       if (!hasTodayTask) continue;
 
       // Plate from stock_location
@@ -427,8 +428,8 @@ bool evaluateGate(Map<String, dynamic> doc, String gateDsl) {
       // Empty expected = doc field must be empty
       if (docValue.isNotEmpty) return false;
     } else {
-      // Non-empty expected = exact string match
-      if (docValue != expectedValue) return false;
+      // Non-empty expected = type-tolerant match
+      if (!eq(docValue, expectedValue)) return false;
     }
   }
   return true;

@@ -25,6 +25,7 @@ export 'custody_step_header.dart';
 export 'display_card.dart';
 export 'display_list.dart';
 export 'do_chain.dart';
+export 'dsl_eq.dart';
 export 'driver_home_support.dart';
 export 'driver_stop_card.dart';
 export 'evidence_row.dart';

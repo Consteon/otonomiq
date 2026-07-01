@@ -1,6 +1,7 @@
 import 'package:intl/intl.dart';
 
 import 'driver_home_support.dart'; // stopStatusOf, todayEpochMidnightWib
+import 'dsl_eq.dart';
 
 // ─── Tier enum ────────────────────────────────────────────────────────────────
 
@@ -332,7 +333,7 @@ List<VehicleFeedEntry> buildVehicleFeed({
     final String vv = (doc['vv'] ?? '').toString().trim();
     final String tdt = (doc['tdt'] ?? '').toString().trim();
     if (vv.isEmpty) continue;
-    if (tdt == todayEpoch) {
+    if (eq(tdt, todayEpoch)) {
       tasksByVv.putIfAbsent(vv, () => []).add(doc);
     }
   }
@@ -375,7 +376,7 @@ List<VehicleFeedEntry> buildVehicleFeed({
       final String cdt = openingDoc != null
           ? (openingDoc['cdt'] ?? '').toString().trim()
           : '';
-      if (cdt != todayEpoch) continue; // older trip: drop from feed
+      if (!eq(cdt, todayEpoch)) continue; // older trip: drop from feed
     }
 
     // Category summary
