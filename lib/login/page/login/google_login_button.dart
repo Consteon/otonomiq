@@ -1,22 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import '../../../login/page/login/login.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+
+import '../../../login/page/login/login.dart';
 
 class GoogleLoginButton extends StatelessWidget {
   final _component;
   final _country;
   final _inv;
 
-  const GoogleLoginButton(
-      {required Key key,
-        var component,
-        required String country,
-        required String inv})
-      : _component = component,
-        _country = country,
-        _inv = inv,
-        super(key: key);
+  const GoogleLoginButton({
+    required Key key,
+    var this._component,
+    required String this._country,
+    required String this._inv,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -35,15 +33,18 @@ class GoogleLoginButton extends StatelessWidget {
         onPressed: () {
           // The spinner is driven by the bloc's loading state (login_form
           // dialog + main_page LoginWaitScreen), not by rootThis.wait.
-          BlocProvider.of<LoginBloc>(context).add(
-            LoginWithGooglePressed(country: _country, inv: _inv),
-          );
+          BlocProvider.of<LoginBloc>(
+            context,
+          ).add(LoginWithGooglePressed(country: _country, inv: _inv));
         },
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(FontAwesomeIcons.google,
-                size: 18, color: Color(0xFF4285F4)),
+            const FaIcon(
+              FontAwesomeIcons.google,
+              size: 18,
+              color: Color(0xFF4285F4),
+            ),
             const SizedBox(width: 12),
             Flexible(
               child: Text(

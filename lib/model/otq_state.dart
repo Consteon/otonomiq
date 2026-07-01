@@ -1,9 +1,11 @@
 import 'dart:io';
-import 'package:geolocator/geolocator.dart';
+
 import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:ntp/ntp.dart';
-import '../global.dart';
+
 import '../api.dart';
+import '../global.dart';
 
 const trueLoc = 'true-location';
 const fakeLoc = 'fake-location';
@@ -47,7 +49,10 @@ class OtqState {
   } // end of setInternetData
 
   OtqState getDataFrom(
-      DateTime currentTime, Position? pos, List<Placemark> myPlace) {
+    DateTime currentTime,
+    Position? pos,
+    List<Placemark> myPlace,
+  ) {
     gpsDone = false;
     if (pos != null) {
       if (pos.latitude != invalidLocation) {
@@ -68,10 +73,12 @@ class OtqState {
           if (myPlace.isNotEmpty) {
             isoCountryCode = (myPlace[0].isoCountryCode) ?? '88';
             postalCode = myPlace[0].postalCode ?? '';
-            administrativeArea =
-                cleanupString(myPlace[0].administrativeArea ?? '');
-            subAdministrativeArea =
-                cleanupString(myPlace[0].subAdministrativeArea ?? '');
+            administrativeArea = cleanupString(
+              myPlace[0].administrativeArea ?? '',
+            );
+            subAdministrativeArea = cleanupString(
+              myPlace[0].subAdministrativeArea ?? '',
+            );
             locality = cleanupString(myPlace[0].locality ?? '');
             subLocality = cleanupString(myPlace[0].subLocality ?? '');
             thoroughfare = cleanupString(myPlace[0].thoroughfare ?? '');
@@ -113,20 +120,24 @@ class OtqState {
           locationStatus = pos.isMocked ? fakeLoc : trueLoc;
           try {
             // List<Placemark?> myPlace;
-            placemarkFromCoordinates(pos.latitude, pos.longitude)
-                .then((myPlace) {
+            placemarkFromCoordinates(pos.latitude, pos.longitude).then((
+              myPlace,
+            ) {
               if (myPlace.isNotEmpty) {
                 isoCountryCode = (myPlace[0].isoCountryCode) ?? '88';
                 postalCode = myPlace[0].postalCode ?? '';
-                administrativeArea =
-                    cleanupString(myPlace[0].administrativeArea ?? '');
-                subAdministrativeArea =
-                    cleanupString(myPlace[0].subAdministrativeArea ?? '');
+                administrativeArea = cleanupString(
+                  myPlace[0].administrativeArea ?? '',
+                );
+                subAdministrativeArea = cleanupString(
+                  myPlace[0].subAdministrativeArea ?? '',
+                );
                 locality = cleanupString(myPlace[0].locality ?? '');
                 subLocality = cleanupString(myPlace[0].subLocality ?? '');
                 thoroughfare = cleanupString(myPlace[0].thoroughfare ?? '');
-                subThoroughfare =
-                    cleanupString(myPlace[0].subThoroughfare ?? '');
+                subThoroughfare = cleanupString(
+                  myPlace[0].subThoroughfare ?? '',
+                );
                 gpsDone = true;
               } // end if myPlace
             }); // end of placemarkFromCoordinates
@@ -158,7 +169,7 @@ class OtqState {
           nowTime = currentTime;
           trueTime = true;
         } catch (eNtp) {
-          errorReport(eNtp);
+          reportNonTimeout(eNtp);
         }
       } // end if internetOn
     } catch (e) {
@@ -191,10 +202,12 @@ class OtqState {
               dynamic myPlace = gpsPlaceMark;
               isoCountryCode = (myPlace.isoCountryCode) ?? '88';
               postalCode = myPlace.postalCode ?? '';
-              administrativeArea =
-                  cleanupString(myPlace.administrativeArea ?? '');
-              subAdministrativeArea =
-                  cleanupString(myPlace.subAdministrativeArea ?? '');
+              administrativeArea = cleanupString(
+                myPlace.administrativeArea ?? '',
+              );
+              subAdministrativeArea = cleanupString(
+                myPlace.subAdministrativeArea ?? '',
+              );
               locality = cleanupString(myPlace.locality ?? '');
               subLocality = cleanupString(myPlace.subLocality ?? '');
               thoroughfare = cleanupString(myPlace.thoroughfare ?? '');
@@ -235,17 +248,18 @@ class OtqState {
               try {
                 // List<Placemark?> myPlace;
                 dynamic myPlace = gpsPlaceMark;
-                isoCountryCode = (myPlace[0].isoCountryCode) ?? '88';
-                postalCode = myPlace[0].postalCode ?? '';
-                administrativeArea =
-                    cleanupString(myPlace[0].administrativeArea ?? '');
-                subAdministrativeArea =
-                    cleanupString(myPlace[0].subAdministrativeArea ?? '');
-                locality = cleanupString(myPlace[0].locality ?? '');
-                subLocality = cleanupString(myPlace[0].subLocality ?? '');
-                thoroughfare = cleanupString(myPlace[0].thoroughfare ?? '');
-                subThoroughfare =
-                    cleanupString(myPlace[0].subThoroughfare ?? '');
+                isoCountryCode = (myPlace.isoCountryCode) ?? '88';
+                postalCode = myPlace.postalCode ?? '';
+                administrativeArea = cleanupString(
+                  myPlace.administrativeArea ?? '',
+                );
+                subAdministrativeArea = cleanupString(
+                  myPlace.subAdministrativeArea ?? '',
+                );
+                locality = cleanupString(myPlace.locality ?? '');
+                subLocality = cleanupString(myPlace.subLocality ?? '');
+                thoroughfare = cleanupString(myPlace.thoroughfare ?? '');
+                subThoroughfare = cleanupString(myPlace.subThoroughfare ?? '');
                 gpsDone = true;
               } catch (e) {
                 gpsDone = true;

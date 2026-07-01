@@ -16,17 +16,16 @@ class LoginForm extends StatefulWidget {
   final dynamic component;
   final dynamic route;
 
-  const LoginForm(
-      {required Key key,
-        required UserRepository userRepository,
-        this.tosText,
-        this.tosRoute,
-        this.parentContext,
-        this.component,
-        this.route})
-      : assert(component != null),
-        _userRepository = userRepository,
-        super(key: key);
+  const LoginForm({
+    required Key key,
+    required this._userRepository,
+    this.tosText,
+    this.tosRoute,
+    this.parentContext,
+    this.component,
+    this.route,
+  }) : assert(component != null),
+       super(key: key);
 
   @override
   State<LoginForm> createState() => _LoginFormState();
@@ -43,20 +42,22 @@ class _LoginFormState extends State<LoginForm> {
 
   LoginBloc? _loginBloc;
   bool _tosOk = false;
-  bool _isLoadingDialogShown = false;
   // Stable keys: created once, not per-build, so rebuilds don't throw the
   // social buttons' elements away.
   final GlobalKey _appleBtnKey = GlobalKey();
   final GlobalKey _googleBtnKey = GlobalKey();
-  // The loading dialog's own route, captured when shown so we can remove
-  // exactly it — not whatever else happens to be on top of the navigator.
-  ModalRoute<dynamic>? _loadingDialogRoute;
+  // Drives the full-screen processing overlay. OverlayPortal renders the dim +
+  // spinner into the root Overlay, so it covers the WHOLE screen (not just this
+  // form's card bounds) while staying tied to this widget's lifecycle — it is
+  // torn down with LoginForm on the login→home swap, so it can never strand
+  // over the home page the way the old root-navigator showDialog did.
+  final OverlayPortalController _spinnerOverlay = OverlayPortalController();
   String tText = 'a';
   UserRepository get _userRepository => widget._userRepository;
 
   bool get isPopulated =>
-//      _emailController.text.isNotEmpty && _passwordController.text.isNotEmpty;
-  _phoneController.text.isNotEmpty;
+      //      _emailController.text.isNotEmpty && _passwordController.text.isNotEmpty;
+      _phoneController.text.isNotEmpty;
 
   bool isLoginButtonEnabled(LoginState state) {
     return state.isFormValid &&
@@ -74,10 +75,6 @@ class _LoginFormState extends State<LoginForm> {
 
   bool isOtherProviderEnabled(LoginState state) {
     return state.isTosOK;
-  }
-
-  bool isLoginProcessing(LoginState state) {
-    return loginSpinnerVisible(state);
   }
 
   bool isInvNeeded(LoginState state) {
@@ -103,73 +100,21 @@ class _LoginFormState extends State<LoginForm> {
     return BlocListener(
       bloc: _loginBloc,
       listener: (BuildContext context, LoginState state) {
-        if (isLoginProcessing(state) && !_isLoadingDialogShown) {
-          _isLoadingDialogShown = true;
-          final primary = Theme.of(context).primaryColor;
-          final accent = HSLColor.fromColor(primary)
-              .withLightness(0.45)
-              .withSaturation(0.7)
-              .toColor();
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            barrierColor: Colors.black.withValues(alpha: 0.3),
-            builder: (BuildContext ctx) {
-              _loadingDialogRoute = ModalRoute.of(ctx);
-              return PopScope(
-                canPop: false,
-                child: Center(
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 60),
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 32, horizontal: 40),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.12),
-                          blurRadius: 24,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(
-                          width: 40,
-                          height: 40,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 3,
-                            valueColor:
-                            AlwaysStoppedAnimation<Color>(accent),
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        Text(
-                          widget.component['loading'] ?? 'Memproses...',
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: Colors.grey.shade600,
-                            fontWeight: FontWeight.w500,
-                            decoration: TextDecoration.none,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
-          );
-        } else if (!isLoginProcessing(state) && _isLoadingDialogShown) {
-          _isLoadingDialogShown = false;
-          final route = _loadingDialogRoute;
-          _loadingDialogRoute = null;
-          if (route != null && route.isActive) {
-            Navigator.of(context, rootNavigator: true).removeRoute(route);
-          }
+        // The blocking spinner is rendered declaratively in the BlocBuilder
+        // below (keyed on loginSpinnerVisible(state)); nothing to show/dismiss
+        // imperatively here.
+        //
+        // Dismiss the soft keyboard the moment login starts processing. The old
+        // showDialog pushed a modal route that stole focus (hiding the keyboard
+        // as a side effect); the declarative overlay does not, so without this
+        // the numeric keypad stays up and the overlay floats above it, leaving a
+        // grey gap. Unfocusing lets the body — and the full-screen overlay —
+        // reclaim the keyboard's space.
+        if (loginSpinnerVisible(state)) {
+          FocusScope.of(context).unfocus();
+          if (!_spinnerOverlay.isShowing) _spinnerOverlay.show();
+        } else {
+          if (_spinnerOverlay.isShowing) _spinnerOverlay.hide();
         }
 
         if (state.isFailure) {
@@ -180,15 +125,16 @@ class _LoginFormState extends State<LoginForm> {
               builder: (BuildContext context) {
                 return AlertDialog(
                   title: Text(textList['AnotherUserLogin']),
-                  content:
-                  Text(textList['AnotherUserLoginMessage']), // show dialog
+                  content: Text(
+                    textList['AnotherUserLoginMessage'],
+                  ), // show dialog
                   actions: <Widget>[
                     TextButton(
                       child: Text(textList["OK"]),
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -206,7 +152,7 @@ class _LoginFormState extends State<LoginForm> {
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -224,7 +170,7 @@ class _LoginFormState extends State<LoginForm> {
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -242,7 +188,7 @@ class _LoginFormState extends State<LoginForm> {
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -260,7 +206,7 @@ class _LoginFormState extends State<LoginForm> {
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -278,7 +224,7 @@ class _LoginFormState extends State<LoginForm> {
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -296,9 +242,7 @@ class _LoginFormState extends State<LoginForm> {
                         .min, // Column length = sum of children length
                     children: [
                       Text(textList['Error802Message']),
-                      Container(
-                        height: 10,
-                      ),
+                      Container(height: 10),
                       Text(textList["802"]),
                     ],
                   ),
@@ -308,7 +252,7 @@ class _LoginFormState extends State<LoginForm> {
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -326,13 +270,9 @@ class _LoginFormState extends State<LoginForm> {
                         .min, // Column length = sum of children length
                     children: [
                       Text(textList['Error809Message']),
-                      Container(
-                        height: 10,
-                      ),
+                      Container(height: 10),
                       Text(textList['NoAccount']),
-                      Container(
-                        height: 10,
-                      ),
+                      Container(height: 10),
                       Text(textList['AdminRegisterAccount']),
                     ],
                   ),
@@ -342,7 +282,7 @@ class _LoginFormState extends State<LoginForm> {
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -360,7 +300,7 @@ class _LoginFormState extends State<LoginForm> {
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -369,290 +309,372 @@ class _LoginFormState extends State<LoginForm> {
         } else if (state.isSuccess) {
           BlocProvider.of<AuthenticationBloc>(context).add(LoggedIn());
         } else if (state.loginUid != '') {
-          gotoRoute(widget.route ??
-              '_Invitation'); // TODO delete this line, change it with new user getter.
+          gotoRoute(
+            widget.route ?? '_Invitation',
+          ); // TODO delete this line, change it with new user getter.
         }
       },
       child: BlocBuilder(
         bloc: _loginBloc,
         builder: (BuildContext context, LoginState state) {
-          isLoginProcessing(state);
           final primary = Theme.of(context).primaryColor;
-          final darkPrimary = HSLColor.fromColor(primary)
-              .withLightness(0.15)
-              .withSaturation(0.6)
-              .toColor();
-          final accentColor = HSLColor.fromColor(primary)
-              .withLightness(0.45)
-              .withSaturation(0.7)
-              .toColor();
+          final darkPrimary = HSLColor.fromColor(
+            primary,
+          ).withLightness(0.15).withSaturation(0.6).toColor();
+          final accentColor = HSLColor.fromColor(
+            primary,
+          ).withLightness(0.45).withSaturation(0.7).toColor();
 
-          return Stack(
-            children: [
-              Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      darkPrimary,
-                      HSLColor.fromColor(primary).withLightness(0.08).toColor(),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Decorative circles
-              Positioned(
-                top: -60,
-                right: -40,
-                child: Container(
-                  width: 200,
-                  height: 200,
+          return OverlayPortal(
+            controller: _spinnerOverlay,
+            overlayChildBuilder: _buildSpinnerOverlay,
+            child: Stack(
+              children: [
+                Container(
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white.withValues(alpha: 0.04),
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        darkPrimary,
+                        HSLColor.fromColor(
+                          primary,
+                        ).withLightness(0.08).toColor(),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              Positioned(
-                bottom: 80,
-                left: -60,
-                child: Container(
-                  width: 160,
-                  height: 160,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white.withValues(alpha: 0.03),
+
+                // Decorative circles
+                Positioned(
+                  top: -60,
+                  right: -40,
+                  child: Container(
+                    width: 200,
+                    height: 200,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withValues(alpha: 0.04),
+                    ),
                   ),
                 ),
-              ),
+                Positioned(
+                  bottom: 80,
+                  left: -60,
+                  child: Container(
+                    width: 160,
+                    height: 160,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withValues(alpha: 0.03),
+                    ),
+                  ),
+                ),
 
-              SafeArea(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Form(
-                    child: Column(
-                      children: [
-                        const SizedBox(height: 8),
+                SafeArea(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Form(
+                      child: Column(
+                        children: [
+                          const SizedBox(height: 8),
 
-                        Text(
-                          widget.component['subtitle'] ?? 'Masuk ke akun Anda',
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: darkPrimary.withValues(alpha: 0.5),
-                            fontWeight: FontWeight.w500,
-                            letterSpacing: 0.3,
+                          Text(
+                            widget.component['subtitle'] ??
+                                'Masuk ke akun Anda',
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: darkPrimary.withValues(alpha: 0.5),
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: 0.3,
+                            ),
                           ),
-                        ),
 
-                        const SizedBox(height: 16),
+                          const SizedBox(height: 16),
 
-                        // Login card
-                        Container(
-                          padding: const EdgeInsets.all(24),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(20),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.15),
-                                blurRadius: 30,
-                                offset: const Offset(0, 12),
-                                spreadRadius: -4,
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              // Invitation / phone input
-                              TextField(
-                                textAlign: TextAlign.center,
-                                controller: _invController,
-                                keyboardType: TextInputType.phone,
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.allow(
-                                      RegExp('[0-9]+'))
-                                ],
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  letterSpacing: 2.0,
-                                  fontWeight: FontWeight.w500,
+                          // Login card
+                          Container(
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(20),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.15),
+                                  blurRadius: 30,
+                                  offset: const Offset(0, 12),
+                                  spreadRadius: -4,
                                 ),
-                                decoration: InputDecoration(
-                                  labelText: widget.component['text3'],
-                                  hintText: widget.component['text4'],
-                                  filled: true,
-                                  fillColor: Colors.grey.shade50,
-                                  prefixIcon: Icon(
-                                    Icons.phone_android_rounded,
-                                    color: Colors.grey.shade400,
+                              ],
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                // Invitation / phone input
+                                TextField(
+                                  textAlign: TextAlign.center,
+                                  controller: _invController,
+                                  keyboardType: TextInputType.phone,
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.allow(
+                                      RegExp('[0-9]+'),
+                                    ),
+                                  ],
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    letterSpacing: 2.0,
+                                    fontWeight: FontWeight.w500,
                                   ),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                    borderSide:
-                                    BorderSide(color: Colors.grey.shade200),
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                    borderSide:
-                                    BorderSide(color: Colors.grey.shade200),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                    borderSide: BorderSide(
-                                        color: accentColor, width: 1.5),
-                                  ),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      vertical: 16, horizontal: 16),
-                                ),
-                              ),
-
-                              // TOS checkbox below input
-                              if (!state.isWaitingSmsCode) ...[
-                                const SizedBox(height: 16),
-                                GestureDetector(
-                                  onTap: _onTosOKTabbed,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 12, horizontal: 12),
-                                    decoration: BoxDecoration(
-                                      color: _tosOk
-                                          ? accentColor.withValues(alpha: 0.08)
-                                          : Colors.grey.shade50,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: _tosOk
-                                            ? accentColor.withValues(alpha: 0.3)
-                                            : Colors.grey.shade200,
+                                  decoration: InputDecoration(
+                                    labelText: widget.component['text3'],
+                                    hintText: widget.component['text4'],
+                                    filled: true,
+                                    fillColor: Colors.grey.shade50,
+                                    prefixIcon: Icon(
+                                      Icons.phone_android_rounded,
+                                      color: Colors.grey.shade400,
+                                    ),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                      borderSide: BorderSide(
+                                        color: Colors.grey.shade200,
                                       ),
                                     ),
-                                    child: Row(
-                                      children: [
-                                        Container(
-                                          width: 22,
-                                          height: 22,
-                                          decoration: BoxDecoration(
-                                            color: _tosOk
-                                                ? accentColor
-                                                : Colors.transparent,
-                                            borderRadius:
-                                            BorderRadius.circular(6),
-                                            border: Border.all(
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                      borderSide: BorderSide(
+                                        color: Colors.grey.shade200,
+                                      ),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                      borderSide: BorderSide(
+                                        color: accentColor,
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      vertical: 16,
+                                      horizontal: 16,
+                                    ),
+                                  ),
+                                ),
+
+                                // TOS checkbox below input
+                                if (!state.isWaitingSmsCode) ...[
+                                  const SizedBox(height: 16),
+                                  GestureDetector(
+                                    onTap: _onTosOKTabbed,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 12,
+                                        horizontal: 12,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: _tosOk
+                                            ? accentColor.withValues(
+                                                alpha: 0.08,
+                                              )
+                                            : Colors.grey.shade50,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color: _tosOk
+                                              ? accentColor.withValues(
+                                                  alpha: 0.3,
+                                                )
+                                              : Colors.grey.shade200,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Container(
+                                            width: 22,
+                                            height: 22,
+                                            decoration: BoxDecoration(
                                               color: _tosOk
                                                   ? accentColor
-                                                  : Colors.grey.shade300,
-                                              width: 2,
+                                                  : Colors.transparent,
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
+                                              border: Border.all(
+                                                color: _tosOk
+                                                    ? accentColor
+                                                    : Colors.grey.shade300,
+                                                width: 2,
+                                              ),
                                             ),
+                                            child: _tosOk
+                                                ? const Icon(
+                                                    Icons.check,
+                                                    size: 16,
+                                                    color: Colors.white,
+                                                  )
+                                                : null,
                                           ),
-                                          child: _tosOk
-                                              ? const Icon(Icons.check,
-                                              size: 16, color: Colors.white)
-                                              : null,
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Flexible(
-                                          child: GestureDetector(
-                                            onTap: () {
-                                              gotoRoute(widget.tosRoute!);
-                                            },
-                                            child: Text(
-                                              widget.tosText!,
-                                              style: TextStyle(
-                                                fontSize: 13,
-                                                color: Colors.grey.shade700,
-                                                height: 1.4,
+                                          const SizedBox(width: 12),
+                                          Flexible(
+                                            child: GestureDetector(
+                                              onTap: () {
+                                                gotoRoute(widget.tosRoute!);
+                                              },
+                                              child: Text(
+                                                widget.tosText!,
+                                                style: TextStyle(
+                                                  fontSize: 13,
+                                                  color: Colors.grey.shade700,
+                                                  height: 1.4,
+                                                ),
                                               ),
                                             ),
                                           ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-
-                              const SizedBox(height: 20),
-
-                              // Divider
-                              Row(
-                                children: [
-                                  Expanded(
-                                      child:
-                                      Divider(color: Colors.grey.shade200)),
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 16),
-                                    child: Text(
-                                      widget.component['divider'] ??
-                                          'Masuk dengan',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey.shade400,
-                                        fontWeight: FontWeight.w500,
+                                        ],
                                       ),
                                     ),
                                   ),
-                                  Expanded(
-                                      child:
-                                      Divider(color: Colors.grey.shade200)),
                                 ],
-                              ),
-                              const SizedBox(height: 20),
 
-                              // Social buttons — enabled only when TOS checked & phone filled
-                              if (sinner)
+                                const SizedBox(height: 20),
+
+                                // Divider
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Divider(
+                                        color: Colors.grey.shade200,
+                                      ),
+                                    ),
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                      ),
+                                      child: Text(
+                                        widget.component['divider'] ??
+                                            'Masuk dengan',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey.shade400,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Divider(
+                                        color: Colors.grey.shade200,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 20),
+
+                                // Social buttons — enabled only when TOS checked & phone filled
+                                if (sinner)
+                                  AbsorbPointer(
+                                    absorbing: !_isLoginReady(),
+                                    child: Opacity(
+                                      opacity: _isLoginReady() ? 1.0 : 0.4,
+                                      child: AppleLoginButton(
+                                        key: _appleBtnKey,
+                                        component: widget.component,
+                                        country: _countryController.text,
+                                        inv: _invController.text,
+                                      ),
+                                    ),
+                                  ),
+                                if (sinner) const SizedBox(height: 12),
                                 AbsorbPointer(
                                   absorbing: !_isLoginReady(),
                                   child: Opacity(
                                     opacity: _isLoginReady() ? 1.0 : 0.4,
-                                    child: AppleLoginButton(
-                                      key: _appleBtnKey,
+                                    child: GoogleLoginButton(
+                                      key: _googleBtnKey,
                                       component: widget.component,
                                       country: _countryController.text,
                                       inv: _invController.text,
                                     ),
                                   ),
                                 ),
-                              if (sinner) const SizedBox(height: 12),
-                              AbsorbPointer(
-                                absorbing: !_isLoginReady(),
-                                child: Opacity(
-                                  opacity: _isLoginReady() ? 1.0 : 0.4,
-                                  child: GoogleLoginButton(
-                                    key: _googleBtnKey,
-                                    component: widget.component,
-                                    country: _countryController.text,
-                                    inv: _invController.text,
-                                  ),
-                                ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
 
-                        const SizedBox(height: 32),
+                          const SizedBox(height: 32),
 
-                        // Footer
-                        Text(
-                          widget.component['footer'] ??
-                              '© ${DateTime.now().year} $thisAppName',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.white.withValues(alpha: 0.35),
+                          // Footer
+                          Text(
+                            widget.component['footer'] ??
+                                '© ${DateTime.now().year} $thisAppName',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white.withValues(alpha: 0.35),
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 24),
-                      ],
+                          const SizedBox(height: 24),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-
-            ],
+              ],
+            ),
           );
         },
+      ),
+    );
+  }
+
+  // Full-screen processing overlay, shown via OverlayPortal into the root
+  // Overlay. Because the overlay child is laid out inside the Overlay's own
+  // Stack, Positioned.fill covers the ENTIRE screen (incl. the app bar) — the
+  // dim the user asked for — instead of being clipped to this form's card.
+  Widget _buildSpinnerOverlay(BuildContext context) {
+    final primary = Theme.of(context).primaryColor;
+    final accent = HSLColor.fromColor(
+      primary,
+    ).withLightness(0.45).withSaturation(0.7).toColor();
+    return Positioned.fill(
+      child: AbsorbPointer(
+        child: Container(
+          color: Colors.black.withValues(alpha: 0.3),
+          alignment: Alignment.center,
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 60),
+            padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 40),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.12),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    valueColor: AlwaysStoppedAnimation<Color>(accent),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  widget.component['loading'] ?? 'Memproses...',
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: Colors.grey.shade600,
+                    fontWeight: FontWeight.w500,
+                    decoration: TextDecoration.none,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -665,15 +687,11 @@ class _LoginFormState extends State<LoginForm> {
   }
 
   void _onEmailChanged() {
-    _loginBloc!.add(
-      EmailChanged(email: _emailController.text),
-    );
+    _loginBloc!.add(EmailChanged(email: _emailController.text));
   }
 
   void _onPasswordChanged() {
-    _loginBloc!.add(
-      PasswordChanged(password: _passwordController.text),
-    );
+    _loginBloc!.add(PasswordChanged(password: _passwordController.text));
   }
 
   void _onSmsCodeChanged() {
@@ -714,20 +732,20 @@ class _LoginFormState extends State<LoginForm> {
     return result;
   }
 
-//  void _onSmsSendPressed() {
-//    String intlPhone = phoneInternationalize(_phoneController.text);
-//    _loginBloc.add(
-//      SendSmsPressed(
-//        phone: intlPhone,
-//      ),
-//    );
-//  }
+  //  void _onSmsSendPressed() {
+  //    String intlPhone = phoneInternationalize(_phoneController.text);
+  //    _loginBloc.add(
+  //      SendSmsPressed(
+  //        phone: intlPhone,
+  //      ),
+  //    );
+  //  }
 
-//  void _onPhoneLoginPressed() {
-//    _loginBloc.add(
-//      LoginWithPhonePressed(
-//        smsCode: _smsCodeController.text,
-//      ),
-//    );
-//  }
+  //  void _onPhoneLoginPressed() {
+  //    _loginBloc.add(
+  //      LoginWithPhonePressed(
+  //        smsCode: _smsCodeController.text,
+  //      ),
+  //    );
+  //  }
 }

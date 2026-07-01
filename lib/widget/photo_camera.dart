@@ -2,15 +2,73 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:image/image.dart' as img;
-import 'package:image_watermark/image_watermark.dart';
 import 'package:intl/intl.dart';
 
 import '../global.dart';
 
 String inputPath = emptyString; // temporary path variable
+
+class ImageProcessArgs {
+  final Uint8List bytes;
+  final int maxSize;
+  final int quality;
+  final String dateTime;
+  const ImageProcessArgs({
+    required this.bytes,
+    required this.maxSize,
+    required this.quality,
+    required this.dateTime,
+  });
+}
+
+/// Runs in a background isolate (via compute) so the shutter doesn't freeze the
+/// UI (~1s) on every capture: decode -> bake orientation -> resize -> draw two
+/// text watermarks straight onto the decoded image -> single jpg encode.
+/// Pure-Dart (image pkg), so it is isolate-safe. Always returns bytes — falls
+/// back to the input on any failure.
+Future<Uint8List> processCapturedImage(ImageProcessArgs a) async {
+  final img.Image? decoded = img.decodeImage(a.bytes);
+  if (decoded == null) return a.bytes;
+  img.Image image = decoded;
+  try {
+    image = img.bakeOrientation(image);
+  } catch (_) {}
+  img.Image resizedImage = image;
+  try {
+    if (image.height > image.width) {
+      resizedImage = img.copyResize(image, height: a.maxSize);
+    } else {
+      resizedImage = img.copyResize(image, width: a.maxSize);
+    }
+  } catch (_) {}
+  // Bake both watermark texts (dark shadow + blue) directly onto the decoded
+  // image, then JPG-encode ONCE. The old image_watermark path decoded and
+  // re-encoded as PNG twice per shot — slow, and it silently returned an
+  // oversized PNG stored under a .jpg name, throwing away the JPG quality.
+  try {
+    img.drawString(
+      resizedImage,
+      a.dateTime,
+      font: img.arial14,
+      x: 11,
+      y: 9,
+      color: img.ColorRgba8(10, 10, 10, 150),
+    );
+    img.drawString(
+      resizedImage,
+      a.dateTime,
+      font: img.arial14,
+      x: 10,
+      y: 8,
+      color: img.ColorRgba8(24, 129, 240, 255),
+    );
+  } catch (_) {}
+  return Uint8List.fromList(img.encodeJpg(resizedImage, quality: a.quality));
+}
 
 class PhotoCamera extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -84,6 +142,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
   int selectedCamera = 0;
   int flashIndex = 0;
   late bool gotPicture;
+  bool _processing = false; // shutter busy: blocks re-entry, shows spinner
   List<IconData> flashIcons = [
     Icons.flash_auto_rounded,
     Icons.flash_on_rounded,
@@ -218,35 +277,37 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
       children: [
         gotPicture
             ? Container(
-          height: pictureHeight,
-          alignment: Alignment.center,
-          // width: MediaQuery.of(context).size.width * picFactor,
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.blue),
-            borderRadius: BorderRadius.circular(4),
-            image: DecorationImage(
-              // image: FileImage(capturedImages.last),
-                image: FileImage(currentImage!),
-                fit: BoxFit.cover),
-          ),
-        )
+                height: pictureHeight,
+                alignment: Alignment.center,
+                // width: MediaQuery.of(context).size.width * picFactor,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.blue),
+                  borderRadius: BorderRadius.circular(4),
+                  image: DecorationImage(
+                    // image: FileImage(capturedImages.last),
+                    image: FileImage(currentImage!),
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              )
             : FutureBuilder<void>(
-          future: _initializeControllerFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.done) {
-              // If the Future is complete, display the preview.
-              return Container(
-                //width: pictureWidth,
-                  height: pictureHeight,
-                  //width: MediaQuery.of(context).size.width * picFactor,
-                  alignment: Alignment.center,
-                  child: CameraPreview(controller!));
-            } else {
-              // Otherwise, display a loading indicator.
-              return const Center(child: CircularProgressIndicator());
-            }
-          },
-        ),
+                future: _initializeControllerFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.done) {
+                    // If the Future is complete, display the preview.
+                    return Container(
+                      //width: pictureWidth,
+                      height: pictureHeight,
+                      //width: MediaQuery.of(context).size.width * picFactor,
+                      alignment: Alignment.center,
+                      child: CameraPreview(controller!),
+                    );
+                  } else {
+                    // Otherwise, display a loading indicator.
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                },
+              ),
         SizedBox(
           height: currentHeight,
           width: currentWidth,
@@ -312,113 +373,91 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                       ),
                       IconButton(
                         onPressed: () async {
-                          if (!gotPicture) {
-                            await _initializeControllerFuture;
-                            var xFile = await controller!.takePicture();
-                            controller!.setFlashMode(FlashMode.off);
-                            switch (flashIndex) {
-                              case 0:
-                                controller!.setFlashMode(FlashMode.auto);
-                                break;
-
-                              case 1:
-                                controller!.setFlashMode(FlashMode.always);
-                                break;
-
-                              case 2:
-                                controller!.setFlashMode(FlashMode.torch);
-                                break;
-
-                              case 3:
-                                controller!.setFlashMode(FlashMode.off);
-                                break;
-                            } // end switch
-                            String imagePath =
-                                "${xFile.path.split("/CAP")[0]}/$localImageArtifact${globalRandom.nextInt(999999999).toString()}.jpg";
-                            final now = DateTime.now();
-                            final String formattedDateTime =
-                            DateFormat(dateTimeFormat).format(now);
-                            dynamic image = img.decodeImage(
-                                File(xFile.path).readAsBytesSync());
+                          if (!gotPicture && !_processing) {
+                            setState(() => _processing = true);
                             try {
-                              image = img.bakeOrientation(image!);
-                            } catch (e) {
-                              devPrint('orientation error: $e');
-                            }
-                            File(xFile.path).delete();
-                            img.Image resizedImage = image;
-                            try {
-                              if (image.height > image.width) {
-                                resizedImage = img.copyResize(image,
-                                    height: widget.maxSize ?? 500);
-                              } else {
-                                resizedImage = img.copyResize(image,
-                                    width: widget.maxSize ?? 500);
+                              await _initializeControllerFuture;
+                              var xFile = await controller!.takePicture();
+                              controller!.setFlashMode(FlashMode.off);
+                              switch (flashIndex) {
+                                case 0:
+                                  controller!.setFlashMode(FlashMode.auto);
+                                  break;
+
+                                case 1:
+                                  controller!.setFlashMode(FlashMode.always);
+                                  break;
+
+                                case 2:
+                                  controller!.setFlashMode(FlashMode.torch);
+                                  break;
+
+                                case 3:
+                                  controller!.setFlashMode(FlashMode.off);
+                                  break;
+                              } // end switch
+                              String imagePath =
+                                  "${xFile.path.split("/CAP")[0]}/$localImageArtifact${globalRandom.nextInt(999999999).toString()}.jpg";
+                              final now = DateTime.now();
+                              final String formattedDateTime = DateFormat(
+                                dateTimeFormat,
+                              ).format(now);
+                              // Read bytes + run the CPU-heavy decode/resize/
+                              // watermark pipeline off the UI isolate (compute),
+                              // and use async file I/O, so the shutter no longer
+                              // freezes the UI on every capture.
+                              final Uint8List rawBytes = await File(
+                                xFile.path,
+                              ).readAsBytes();
+                              try {
+                                await File(xFile.path).delete();
+                              } catch (e) {
+                                devPrint('delete temp capture error: $e');
                               }
-                            } catch (e) {
-                              devPrint('resize error: $e');
-                            }
-                            final imageBytes = Uint8List.fromList(img.encodeJpg(
-                                resizedImage,
-                                quality: widget.quality ?? 80));
-                            dynamic watermarkedImage = imageBytes;
-                            try {
-                              watermarkedImage =
-                              await ImageWatermark.addTextWatermark(
-                                imgBytes: imageBytes,
-
-                                ///image bytes
-                                watermarkText: formattedDateTime,
-
-                                ///watermark text
-                                // color: const Color(0xffF08118),
-                                color: const Color.fromARGB(150, 10, 10, 10),
-                                // b, g, r
-                                // color: Colors.black,
-                                font: img.arial14,
-                                dstX: 11,
-                                dstY: 9,
-                              );
-                            } catch (e) {
-                              devPrint('watermark error: $e');
-                            }
-                            try {
-                              watermarkedImage =
-                              await ImageWatermark.addTextWatermark(
-                                imgBytes: watermarkedImage,
-
-                                ///image bytes
-                                watermarkText: formattedDateTime,
-
-                                ///watermark text
-                                // color: const Color(0xffF08118),
-                                // color: const Color.fromARGB(255, 10, 30, 180), // b, g, r
-                                color: const Color.fromARGB(255, 24, 129, 240),
-                                // b, g, r
-                                // color: Colors.black,
-                                font: img.arial14,
-                                dstX: 10,
-                                dstY: 8,
-                              );
-                            } catch (e) {
-                              devPrint('watermark error: $e');
-                            }
-                            File(imagePath).writeAsBytesSync(watermarkedImage!);
-                            setState(() {
-                              // capturedImages.add(File(xFile.path));
-                              if (currentImage != null) {
-                                currentImage!.delete();
+                              Uint8List watermarkedImage;
+                              try {
+                                watermarkedImage = await compute(
+                                  processCapturedImage,
+                                  ImageProcessArgs(
+                                    bytes: rawBytes,
+                                    maxSize: widget.maxSize ?? 500,
+                                    quality: widget.quality ?? 80,
+                                    dateTime: formattedDateTime,
+                                  ),
+                                );
+                              } catch (e) {
+                                errorReport('image processing error: $e');
+                                watermarkedImage = rawBytes;
                               }
-                              currentImage = File(imagePath);
-                              // capturedImages.add(File(
-                              //     '/data/user/0/com.example.camera_app/cache/a1.jpg'));
-                              gotPicture = true;
-                            });
+                              try {
+                                await File(
+                                  imagePath,
+                                ).writeAsBytes(watermarkedImage);
+                              } catch (e) {
+                                errorReport('write captured image error: $e');
+                              }
+                              setState(() {
+                                // capturedImages.add(File(xFile.path));
+                                if (currentImage != null) {
+                                  currentImage!.delete();
+                                }
+                                currentImage = File(imagePath);
+                                // capturedImages.add(File(
+                                //     '/data/user/0/com.example.camera_app/cache/a1.jpg'));
+                                gotPicture = true;
+                                _processing = false;
+                              });
+                            } catch (e) {
+                              errorReport('capture error: $e');
+                              if (mounted) {
+                                setState(() => _processing = false);
+                              }
+                            }
                           }
                         },
                         icon: Icon(
                           Icons.camera, // camera
-                          color: gotPicture
+                          color: gotPicture || _processing
                               ? colorMap['disabled']
                               : colorMap['enabled'],
                           size: 70,
@@ -439,11 +478,13 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                                 controller!.setFlashMode(FlashMode.torch);
                               }
                             }
-                            Future.delayed(const Duration(milliseconds: 1200),
-                                    () {
-                                  // wait until the camera is stable
-                                  tapDetector = false;
-                                });
+                            Future.delayed(
+                              const Duration(milliseconds: 1200),
+                              () {
+                                // wait until the camera is stable
+                                tapDetector = false;
+                              },
+                            );
                           }
                         },
                         icon: Icon(
@@ -509,41 +550,44 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
             ],
           ),
         ),
+        if (_processing)
+          const Positioned.fill(
+            child: Center(child: CircularProgressIndicator()),
+          ),
       ],
     );
   }
 }
 
 Future<String> acquireCamera(
-    List<CameraDescription> cameras,
-    String label,
-    String direction,
-    int maxSize,
-    int quality,
-    double? height,
-    double? width,
-    ) async {
+  List<CameraDescription> cameras,
+  String label,
+  String direction,
+  int maxSize,
+  int quality,
+  double? height,
+  double? width,
+) async {
   // inputPath = emptyString;
   FocusManager.instance.primaryFocus?.unfocus();
   await Future.delayed(const Duration(milliseconds: 300));
   List<String> result = [emptyString];
-  await Get.dialog(AlertDialog(
-    insetPadding: const EdgeInsets.fromLTRB(12, 40, 12, 20),
-    title: Text(
-      label,
-      textAlign: TextAlign.center,
+  await Get.dialog(
+    AlertDialog(
+      insetPadding: const EdgeInsets.fromLTRB(12, 40, 12, 20),
+      title: Text(label, textAlign: TextAlign.center),
+      content: PhotoCamera(
+        cameras: cameras,
+        label: label,
+        direction: getCameraIndex(cameras, direction),
+        maxSize: maxSize,
+        quality: quality,
+        height: height,
+        width: width,
+        imageUrl: result,
+      ),
     ),
-    content: PhotoCamera(
-      cameras: cameras,
-      label: label,
-      direction: getCameraIndex(cameras, direction),
-      maxSize: maxSize,
-      quality: quality,
-      height: height,
-      width: width,
-      imageUrl: result,
-    ),
-  ));
+  );
   return result[0];
 } // end of acquireCamera
 
@@ -551,7 +595,7 @@ int getCameraIndex(List<CameraDescription> cameras, String lensFacing) {
   int result = 0;
   bool found = false;
   CameraLensDirection direction =
-  lensFacing.toString().trim().toLowerCase() == 'front'
+      lensFacing.toString().trim().toLowerCase() == 'front'
       ? CameraLensDirection.front
       : CameraLensDirection.back;
   for (int i = 0; i < cameras.length && !found; i++) {

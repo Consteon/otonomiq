@@ -1,11 +1,12 @@
 // from https://medium.com/flutter-community/firebase-login-with-flutter-bloc-47455e6047b0
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import '../../../login/api/user_repository.dart';
-import '../../../login/page/login/login.dart';
-import '../../../login/bloc_authentication/bloc.dart';
-import '../../../global.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+
+import '../../../global.dart';
+import '../../../login/api/user_repository.dart';
+import '../../../login/bloc_authentication/bloc.dart';
+import '../../../login/page/login/login.dart';
 
 class InvitationForm extends StatefulWidget {
   final UserRepository _userRepository;
@@ -14,16 +15,14 @@ class InvitationForm extends StatefulWidget {
   final BuildContext parentContext;
   final _component;
 
-  const InvitationForm(
-      {required Key key,
-        required UserRepository userRepository,
-        required this.tosText,
-        required this.tosRoute,
-        required this.parentContext,
-        @required var component})
-      : _userRepository = userRepository,
-        _component = component,
-        super(key: key);
+  const InvitationForm({
+    required Key key,
+    required this._userRepository,
+    required this.tosText,
+    required this.tosRoute,
+    required this.parentContext,
+    @required var this._component,
+  }) : super(key: key);
 
   @override
   State<InvitationForm> createState() => _InvitationFormState();
@@ -32,7 +31,7 @@ class InvitationForm extends StatefulWidget {
 class _InvitationFormState extends State<InvitationForm> {
   final TextEditingController _invController = TextEditingController();
 
-  LoginBloc? _loginBloc ;
+  LoginBloc? _loginBloc;
   bool _wait = false;
   String tText = 'a';
   UserRepository get _userRepository => widget._userRepository;
@@ -61,14 +60,15 @@ class _InvitationFormState extends State<InvitationForm> {
                 return AlertDialog(
                   title: const Text("User not found"),
                   content: const Text(
-                      "VID tidak ditemukan, masukan sekali lagi, atau kosongkan jika tidak tahu."), // show dialog
+                    "VID tidak ditemukan, masukan sekali lagi, atau kosongkan jika tidak tahu.",
+                  ), // show dialog
                   actions: <Widget>[
                     TextButton(
                       child: const Text("OK"),
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -87,7 +87,7 @@ class _InvitationFormState extends State<InvitationForm> {
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -99,14 +99,15 @@ class _InvitationFormState extends State<InvitationForm> {
                 return AlertDialog(
                   title: const Text("Full !"),
                   content: const Text(
-                      "Wah!, banyak sekali yang mendaftar. Sementara ini tidak dapat menambah pemakai baru. Kami sedang terus menambah kapasitas, silahkan coba beberapa jam lagi."), // show dialog
+                    "Wah!, banyak sekali yang mendaftar. Sementara ini tidak dapat menambah pemakai baru. Kami sedang terus menambah kapasitas, silahkan coba beberapa jam lagi.",
+                  ), // show dialog
                   actions: <Widget>[
                     TextButton(
                       child: const Text("OK"),
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -118,14 +119,15 @@ class _InvitationFormState extends State<InvitationForm> {
                 return AlertDialog(
                   title: const Text("Sign in error"),
                   content: const Text(
-                      "Terjadi kesalahan pada saat sign in, silahkan coba beberapa saat lagi."), // show dialog
+                    "Terjadi kesalahan pada saat sign in, silahkan coba beberapa saat lagi.",
+                  ), // show dialog
                   actions: <Widget>[
                     TextButton(
                       child: const Text("OK"),
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -137,14 +139,15 @@ class _InvitationFormState extends State<InvitationForm> {
                 return AlertDialog(
                   title: const Text("Sign in error"),
                   content: const Text(
-                      "Terjadi kesalahan pada saat autorisasi akun Google, silahkan coba lagi."),
+                    "Terjadi kesalahan pada saat autorisasi akun Google, silahkan coba lagi.",
+                  ),
                   actions: <Widget>[
                     TextButton(
                       child: const Text("OK"),
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -156,14 +159,15 @@ class _InvitationFormState extends State<InvitationForm> {
                 return AlertDialog(
                   title: const Text("Code Expired"),
                   content: const Text(
-                      "Terlambat. Nomor undangan yang anda masukan sudah kadaluwarsa. Silahkan hubungi administrator komunitas yang memberikan nomor undangan ini untuk mendapatkan nomor undangan yang baru."),
+                    "Terlambat. Nomor undangan yang anda masukan sudah kadaluwarsa. Silahkan hubungi administrator komunitas yang memberikan nomor undangan ini untuk mendapatkan nomor undangan yang baru.",
+                  ),
                   actions: <Widget>[
                     TextButton(
                       child: const Text("OK"),
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -175,14 +179,15 @@ class _InvitationFormState extends State<InvitationForm> {
                 return AlertDialog(
                   title: const Text("Login fail"),
                   content: const Text(
-                      "Login anda gagal. Kemungkinan karena koneksi internet anda terganggu. Silahkan coba beberapa saat lagi"), // show dialog
+                    "Login anda gagal. Kemungkinan karena koneksi internet anda terganggu. Silahkan coba beberapa saat lagi",
+                  ), // show dialog
                   actions: <Widget>[
                     TextButton(
                       child: const Text("OK"),
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                    )
+                    ),
                   ],
                 );
               },
@@ -191,7 +196,7 @@ class _InvitationFormState extends State<InvitationForm> {
         }
         if (state.isSuccess) {
           BlocProvider.of<AuthenticationBloc>(context).add(LoggedIn());
-//          _wait = false;
+          //          _wait = false;
         }
       },
       child: BlocBuilder(
@@ -223,21 +228,29 @@ class _InvitationFormState extends State<InvitationForm> {
                             ElevatedButton.icon(
                               // shape: RoundedRectangleBorder(
                               //     borderRadius: BorderRadius.circular(30.0)),
-                              icon: const Icon(FontAwesomeIcons.signInAlt,
-                                  color: Colors.white),
+                              icon: const FaIcon(
+                                FontAwesomeIcons.rightToBracket,
+                                color: Colors.white,
+                              ),
                               onPressed: () {
                                 setState(() {
                                   _wait = true;
                                 });
                                 var uid = transactionStore
-                                    .state.screenTx['#FIREBASE_USER']?.uid;
+                                    .state
+                                    .screenTx['#FIREBASE_USER']
+                                    ?.uid;
                                 BlocProvider.of<LoginBloc>(context).add(
                                   InvitationLoginPressed(
-                                      inv: _invController.text, uid: uid),
+                                    inv: _invController.text,
+                                    uid: uid,
+                                  ),
                                 );
                               },
-                              label: Text(widget._component['text5'],
-                                  style: const TextStyle(color: Colors.white)),
+                              label: Text(
+                                widget._component['text5'],
+                                style: const TextStyle(color: Colors.white),
+                              ),
                               // color: Colors.teal,
                             ),
                           ],
@@ -247,22 +260,22 @@ class _InvitationFormState extends State<InvitationForm> {
                   ),
                   isLoginProcessing(state)
                       ? Stack(
-                    children: <Widget>[
-                      Center(
-                        child: Container(
-                          width: 1000,
-                          height: 2000,
-                          color: Colors.white.withOpacity(0.5),
-//                              child: Center(child: CircularProgressIndicator()),
-                        ),
-                      ),
-                      const Center(
-                        child: CircularProgressIndicator(
-//                                backgroundColor: Colors.red,
-                        ),
-                      ),
-                    ],
-                  )
+                          children: <Widget>[
+                            Center(
+                              child: Container(
+                                width: 1000,
+                                height: 2000,
+                                color: Colors.white.withValues(alpha: 0.5),
+                                //                              child: Center(child: CircularProgressIndicator()),
+                              ),
+                            ),
+                            const Center(
+                              child: CircularProgressIndicator(
+                                //                                backgroundColor: Colors.red,
+                              ),
+                            ),
+                          ],
+                        )
                       : Container(),
                 ],
               ),

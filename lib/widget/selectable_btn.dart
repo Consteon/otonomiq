@@ -35,6 +35,10 @@ class _SelectableBtnState extends State<SelectableBtn> {
   late String _iconKey;
   int _selectedIndex = -1;
 
+  late String _mode;
+  final List<String> _routeList = [];
+  final List<String> _iconList = [];
+
   // Grid variant: label + optional icon
   final List<_GridOption> _gridOptions = [];
 
@@ -50,12 +54,15 @@ class _SelectableBtnState extends State<SelectableBtn> {
     _btnHeight = (widget.component['height'] as num?)?.toDouble() ?? 48;
     _maxGrid = (widget.component['maxGrid'] as num?)?.toInt() ?? 2;
     _position = widget.component['position'] as int?;
-    _selectedColor =
-        _parseColor(widget.component['bgSelected'] as String? ?? 'gray');
+    _selectedColor = _parseColor(
+      widget.component['bgSelected'] as String? ?? 'gray',
+    );
     _margin = marginArray(widget.component['margin'] as String?);
     _iconKey = (widget.component['icon'] ?? '').toString().trim();
 
     _parseOptions();
+    _mode = (widget.component['mode'] ?? '').toString().trim().toLowerCase();
+    _parseLauncherConfig();
     _initController();
   }
 
@@ -65,26 +72,48 @@ class _SelectableBtnState extends State<SelectableBtn> {
     if (_variant == 'vertical') {
       for (final part in rawParts) {
         final segments = part.split('◇');
-        _verticalOptions.add(_VerticalOption(
-          label: segments.isNotEmpty ? segments[0].trim() : '',
-          description: segments.length > 1 ? segments[1].trim() : '',
-          color: segments.length > 2
-              ? _parseColor(segments[2].trim())
-              : _selectedColor,
-        ));
+        _verticalOptions.add(
+          _VerticalOption(
+            label: segments.isNotEmpty ? segments[0].trim() : '',
+            description: segments.length > 1 ? segments[1].trim() : '',
+            color: segments.length > 2
+                ? _parseColor(segments[2].trim())
+                : _selectedColor,
+          ),
+        );
       }
     } else {
       for (final part in rawParts) {
         final segments = part.split('◇');
-        _gridOptions.add(_GridOption(
-          label: segments.isNotEmpty ? segments[0].trim() : '',
-          icon: segments.length > 1 ? segments[1].trim() : '',
-        ));
+        _gridOptions.add(
+          _GridOption(
+            label: segments.isNotEmpty ? segments[0].trim() : '',
+            icon: segments.length > 1 ? segments[1].trim() : '',
+          ),
+        );
       }
     }
   }
 
+  void _parseLauncherConfig() {
+    if (_mode != 'launch') return;
+    // Parse routes (diamond-separated, index-aligned with text)
+    final String rawRoutes =
+        autheniumDecode(widget.component['routes'] ?? '') ?? '';
+    if (rawRoutes.isNotEmpty) {
+      _routeList.addAll(diamondTextToList(rawRoutes));
+    }
+    // Parse icons (diamond-separated, index-aligned with text)
+    // Per dev-spec section-4.1: icons:"emoji1◆emoji2◆emoji3"
+    final String rawIcons =
+        autheniumDecode(widget.component['icons'] ?? '') ?? '';
+    if (rawIcons.isNotEmpty) {
+      _iconList.addAll(diamondTextToList(rawIcons));
+    }
+  }
+
   void _initController() {
+    if (_mode == 'launch') return; // launcher mode does not use txfController
     if (_position == null) return;
     txfControllerCheck(widget.scrName, _position);
     if (canInitializePage(widget.scrName)) {
@@ -144,6 +173,17 @@ class _SelectableBtnState extends State<SelectableBtn> {
     }
   }
 
+  void _onLaunch(int index) {
+    // Length-guard: routes array may be shorter than text array
+    if (_routeList.length <= index) return;
+    final String route = _routeList[index].trim();
+    if (route.isEmpty) return;
+    // Dead-route guard
+    if (!routeExist(route)) return;
+    routeStack.push(route);
+    gotoRoute(route);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -173,8 +213,7 @@ class _SelectableBtnState extends State<SelectableBtn> {
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
               child: Row(
                 children: [
-                  if (_iconKey.isNotEmpty &&
-                      otqIcons[_iconKey] != null) ...[
+                  if (_iconKey.isNotEmpty && otqIcons[_iconKey] != null) ...[
                     Container(
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
@@ -200,33 +239,35 @@ class _SelectableBtnState extends State<SelectableBtn> {
                       ),
                     ),
                   ),
-                  Container(
-                    padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFEF2F2),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                        color: const Color(0xFFFECACA),
-                        width: 0.8,
+                  if (_mode != 'launch')
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: const Color(0xFFFECACA),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: const Text(
+                        'wajib',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFFDC2626),
+                        ),
                       ),
                     ),
-                    child: const Text(
-                      'wajib',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFFDC2626),
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ),
           Padding(
             padding: const EdgeInsets.all(12),
-            child:
-            _variant == 'vertical' ? _buildVerticalList() : _buildGrid(),
+            child: _variant == 'vertical' ? _buildVerticalList() : _buildGrid(),
           ),
         ],
       ),
@@ -253,14 +294,24 @@ class _SelectableBtnState extends State<SelectableBtn> {
   }
 
   Widget _buildGridButton(int index, double width) {
-    final bool isSelected = _selectedIndex == index;
+    final bool isSelected = _mode != 'launch' && _selectedIndex == index;
     final option = _gridOptions[index];
-    final bool hasIcon = option.icon.isNotEmpty;
-    final IconData? iconData =
-    hasIcon ? otqIcons[option.icon] as IconData? : null;
+    // In launcher mode, prefer the dedicated icons config (index-aligned).
+    // Fall back to inline icon from the text◇iconKey format.
+    // Length-guard: _iconList may be shorter than _gridOptions.
+    final String resolvedIconKey =
+        (_mode == 'launch' &&
+            _iconList.length > index &&
+            _iconList[index].trim().isNotEmpty)
+        ? _iconList[index].trim()
+        : option.icon;
+    final bool hasIcon = resolvedIconKey.isNotEmpty;
+    final IconData? iconData = hasIcon
+        ? otqIcons[resolvedIconKey] as IconData?
+        : null;
 
     return GestureDetector(
-      onTap: () => _onSelect(index),
+      onTap: () => _mode == 'launch' ? _onLaunch(index) : _onSelect(index),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOut,
@@ -277,93 +328,95 @@ class _SelectableBtnState extends State<SelectableBtn> {
           ),
           boxShadow: isSelected
               ? [
-            BoxShadow(
-              color: _selectedColor.withValues(alpha: 0.10),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ]
+                  BoxShadow(
+                    color: _selectedColor.withValues(alpha: 0.10),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
               : null,
         ),
         child: iconData != null
             ? Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? _selectedColor.withValues(alpha: 0.12)
-                    : const Color(0xFFE2E8F0).withValues(alpha: 0.6),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                iconData,
-                size: 22,
-                color: isSelected
-                    ? _selectedColor
-                    : const Color(0xFF94A3B8),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Text(
-                option.label,
-                textAlign: TextAlign.center,
-                overflow: TextOverflow.ellipsis,
-                maxLines: 2,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight:
-                  isSelected ? FontWeight.w600 : FontWeight.w500,
-                  color: isSelected
-                      ? _selectedColor
-                      : const Color(0xFF475569),
-                ),
-              ),
-            ),
-            if (isSelected) ...[
-              const SizedBox(height: 4),
-              Icon(
-                Icons.check_circle_rounded,
-                size: 16,
-                color: _selectedColor,
-              ),
-            ],
-          ],
-        )
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? _selectedColor.withValues(alpha: 0.12)
+                          : const Color(0xFFE2E8F0).withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      iconData,
+                      size: 22,
+                      color: isSelected
+                          ? _selectedColor
+                          : const Color(0xFF94A3B8),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      option.label,
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: isSelected
+                            ? FontWeight.w600
+                            : FontWeight.w500,
+                        color: isSelected
+                            ? _selectedColor
+                            : const Color(0xFF475569),
+                      ),
+                    ),
+                  ),
+                  if (isSelected) ...[
+                    const SizedBox(height: 4),
+                    Icon(
+                      Icons.check_circle_rounded,
+                      size: 16,
+                      color: _selectedColor,
+                    ),
+                  ],
+                ],
+              )
             : Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (isSelected) ...[
-              Icon(
-                Icons.check_circle_rounded,
-                size: 16,
-                color: _selectedColor,
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isSelected) ...[
+                    Icon(
+                      Icons.check_circle_rounded,
+                      size: 16,
+                      color: _selectedColor,
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  Flexible(
+                    child: Text(
+                      option.label,
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: isSelected
+                            ? FontWeight.w600
+                            : FontWeight.w500,
+                        color: isSelected
+                            ? _selectedColor
+                            : const Color(0xFF475569),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 6),
-            ],
-            Flexible(
-              child: Text(
-                option.label,
-                textAlign: TextAlign.center,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight:
-                  isSelected ? FontWeight.w600 : FontWeight.w500,
-                  color: isSelected
-                      ? _selectedColor
-                      : const Color(0xFF475569),
-                ),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -374,7 +427,9 @@ class _SelectableBtnState extends State<SelectableBtn> {
     return Column(
       children: List.generate(_verticalOptions.length, (i) {
         return Padding(
-          padding: EdgeInsets.only(bottom: i < _verticalOptions.length - 1 ? 8 : 0),
+          padding: EdgeInsets.only(
+            bottom: i < _verticalOptions.length - 1 ? 8 : 0,
+          ),
           child: _buildVerticalItem(i),
         );
       }),
@@ -405,12 +460,12 @@ class _SelectableBtnState extends State<SelectableBtn> {
           ),
           boxShadow: isSelected
               ? [
-            BoxShadow(
-              color: option.color.withValues(alpha: 0.08),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
-            ),
-          ]
+                  BoxShadow(
+                    color: option.color.withValues(alpha: 0.08),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
               : null,
         ),
         child: Row(
@@ -427,12 +482,12 @@ class _SelectableBtnState extends State<SelectableBtn> {
                     : option.color.withValues(alpha: 0.5),
                 boxShadow: isSelected
                     ? [
-                  BoxShadow(
-                    color: option.color.withValues(alpha: 0.3),
-                    blurRadius: 6,
-                    spreadRadius: 1,
-                  ),
-                ]
+                        BoxShadow(
+                          color: option.color.withValues(alpha: 0.3),
+                          blurRadius: 6,
+                          spreadRadius: 1,
+                        ),
+                      ]
                     : null,
               ),
             ),
@@ -447,8 +502,9 @@ class _SelectableBtnState extends State<SelectableBtn> {
                     option.label,
                     style: TextStyle(
                       fontSize: 14,
-                      fontWeight:
-                      isSelected ? FontWeight.w700 : FontWeight.w600,
+                      fontWeight: isSelected
+                          ? FontWeight.w700
+                          : FontWeight.w600,
                       color: isSelected
                           ? option.color
                           : const Color(0xFF334155),

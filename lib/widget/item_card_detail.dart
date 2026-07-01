@@ -57,15 +57,18 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
     }
 
     var screenTx = transactionStore.state.screenTx;
-    String txRole =
-    (screenTx['approval_role'] ?? '').toString().trim().toUpperCase();
+    String txRole = (screenTx['approval_role'] ?? '')
+        .toString()
+        .trim()
+        .toUpperCase();
     _role = txRole.isNotEmpty
         ? txRole
         : (widget.component['role'] ?? '').toString().trim().toUpperCase();
 
     if (screenTx['approval_tabs'] is List) {
-      _tabs =
-          (screenTx['approval_tabs'] as List).map((e) => e.toString()).toList();
+      _tabs = (screenTx['approval_tabs'] as List)
+          .map((e) => e.toString())
+          .toList();
     }
     _myApprovalLevel =
         int.tryParse((screenTx['approval_level'] ?? '').toString()) ?? -1;
@@ -77,7 +80,8 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
     _tableCode = normalizeTableName(decoded);
     var screenTx = transactionStore.state.screenTx;
     String txVid = (screenTx['approval_vidtable'] ?? '').toString();
-    int tableVid = int.tryParse(txVid) ??
+    int tableVid =
+        int.tryParse(txVid) ??
         int.tryParse((widget.component['vidtable'] ?? '').toString()) ??
         appCodeController.applicationTableVid;
     if (_tableCode.isNotEmpty) {
@@ -96,7 +100,11 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
 
   String _resolveText(String template, List<dynamic> row) {
     return replaceMarker(
-        template, row, int.tryParse((widget.component['indexStart'] ?? '1').toString()) ?? 1, false);
+      template,
+      row,
+      int.tryParse((widget.component['indexStart'] ?? '1').toString()) ?? 1,
+      false,
+    );
   }
 
   List<dynamic> _applyConditions(List<dynamic> data) {
@@ -160,8 +168,10 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
           String inner = s.substring(1, s.length - 1);
           for (var stepStr in inner.split(RegExp(r'\]\s*,\s*\['))) {
             stepStr = stepStr.replaceAll('[', '').replaceAll(']', '').trim();
-            List<String> parts =
-            stepStr.split(',').map((e) => e.trim()).toList();
+            List<String> parts = stepStr
+                .split(',')
+                .map((e) => e.trim())
+                .toList();
             if (parts.length >= 2) {
               int? stepNum = int.tryParse(parts[0]);
               String status = parts[1].trim();
@@ -261,7 +271,7 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
       'Sep',
       'Oct',
       'Nov',
-      'Dec'
+      'Dec',
     ];
     try {
       final trimmed = raw.trim();
@@ -293,15 +303,13 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
     ApproverStickyBar.overlaysHidden.value = true;
     Navigator.of(ctx)
         .push(
-      PageRouteBuilder(
-        opaque: false,
-        barrierColor: Colors.black87,
-        pageBuilder: (_, __, ___) => _FullImageViewer(
-          urls: urls,
-          initialIndex: initial,
-        ),
-      ),
-    )
+          PageRouteBuilder(
+            opaque: false,
+            barrierColor: Colors.black87,
+            pageBuilder: (_, _, _) =>
+                _FullImageViewer(urls: urls, initialIndex: initial),
+          ),
+        )
         .whenComplete(() => ApproverStickyBar.overlaysHidden.value = false);
   }
 
@@ -311,7 +319,8 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
       List<dynamic> allData = List.from(tableContent[_tableCode] ?? []);
       String condRaw = (widget.component['conditions'] ?? '').toString();
       debugPrint(
-          '[ItemCardDetail] tableCode=$_tableCode | rows=${allData.length} | conditions=$condRaw');
+        '[ItemCardDetail] tableCode=$_tableCode | rows=${allData.length} | conditions=$condRaw',
+      );
       allData = _applyConditions(allData);
       debugPrint('[ItemCardDetail] after conditions: ${allData.length} rows');
 
@@ -319,12 +328,15 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
 
       var row = allData[0];
 
-      String typeLabel =
-      _textArray.isNotEmpty ? _resolveText(_textArray[0], row) : '';
-      String titleText =
-      _textArray.length > 1 ? _resolveText(_textArray[1], row) : '';
-      String submittedText =
-      _textArray.length > 2 ? _resolveText(_textArray[2], row) : '';
+      String typeLabel = _textArray.isNotEmpty
+          ? _resolveText(_textArray[0], row)
+          : '';
+      String titleText = _textArray.length > 1
+          ? _resolveText(_textArray[1], row)
+          : '';
+      String submittedText = _textArray.length > 2
+          ? _resolveText(_textArray[2], row)
+          : '';
 
       String statusTemplate = (widget.component['status'] ?? '').toString();
       String status = statusTemplate.isNotEmpty
@@ -347,12 +359,14 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
       });
 
       String reasonTemplate = (widget.component['reason'] ?? '').toString();
-      String reason =
-      reasonTemplate.isNotEmpty ? _resolveText(reasonTemplate, row) : '';
+      String reason = reasonTemplate.isNotEmpty
+          ? _resolveText(reasonTemplate, row)
+          : '';
 
       String imageTemplate = (widget.component['image'] ?? '').toString();
-      String imageUrl =
-      imageTemplate.isNotEmpty ? _resolveText(imageTemplate, row) : '';
+      String imageUrl = imageTemplate.isNotEmpty
+          ? _resolveText(imageTemplate, row)
+          : '';
 
       Color accentColor = _statusAccentColor(status);
       Color statusBg = _statusBgColor(status);
@@ -375,14 +389,20 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
         }
       }
 
-      String reasonHeader =
-      _textArray.length >= 2 ? _textArray[_textArray.length - 2] : 'REASON';
-      String imageTitle =
-      _textArray.isNotEmpty ? _textArray.last : 'DATA PENDUKUNG';
+      String reasonHeader = _textArray.length >= 2
+          ? _textArray[_textArray.length - 2]
+          : 'REASON';
+      String imageTitle = _textArray.isNotEmpty
+          ? _textArray.last
+          : 'DATA PENDUKUNG';
 
       return Padding(
         padding: EdgeInsets.fromLTRB(
-            widget.lPad, widget.tPad, widget.rPad, widget.bPad),
+          widget.lPad,
+          widget.tPad,
+          widget.rPad,
+          widget.bPad,
+        ),
         child: Container(
           decoration: BoxDecoration(
             color: Colors.white,
@@ -411,8 +431,11 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
                             color: const Color(0xFFF3F4F6),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Icon(icon,
-                              size: 18, color: const Color(0xFF6B7280)),
+                          child: Icon(
+                            icon,
+                            size: 18,
+                            color: const Color(0xFF6B7280),
+                          ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -431,7 +454,9 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
                           Flexible(
                             child: Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 5),
+                                horizontal: 12,
+                                vertical: 5,
+                              ),
                               decoration: BoxDecoration(
                                 color: statusBg,
                                 borderRadius: BorderRadius.circular(20),
@@ -493,36 +518,38 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
                       const SizedBox(height: 14),
 
                       // Key-value rows
-                      ...details.map((entry) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              flex: 2,
-                              child: Text(
-                                entry.key,
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  color: Color(0xFF6B7280),
+                      ...details.map(
+                        (entry) => Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: Text(
+                                  entry.key,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    color: Color(0xFF6B7280),
+                                  ),
                                 ),
                               ),
-                            ),
-                            Expanded(
-                              flex: 3,
-                              child: Text(
-                                entry.value,
-                                textAlign: TextAlign.end,
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF1F2937),
+                              Expanded(
+                                flex: 3,
+                                child: Text(
+                                  entry.value,
+                                  textAlign: TextAlign.end,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF1F2937),
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      )),
+                      ),
                     ],
 
                     // Reason section
@@ -552,7 +579,7 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
 
                     // Image gallery
                     if (imageUrl.isNotEmpty) ...[
-                          () {
+                      () {
                         List<String> urls = imageUrl
                             .split('◇')
                             .map((u) => u.trim())
@@ -581,8 +608,8 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
                               child: ListView.separated(
                                 scrollDirection: Axis.horizontal,
                                 itemCount: urls.length,
-                                separatorBuilder: (_, __) =>
-                                const SizedBox(width: 8),
+                                separatorBuilder: (_, _) =>
+                                    const SizedBox(width: 8),
                                 itemBuilder: (_, idx) => GestureDetector(
                                   onTap: () =>
                                       _showFullImage(context, urls, idx),
@@ -593,18 +620,20 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
                                       width: 90,
                                       height: 90,
                                       fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) => Container(
+                                      errorBuilder: (_, _, _) => Container(
                                         width: 90,
                                         height: 90,
                                         decoration: BoxDecoration(
                                           color: const Color(0xFFF3F4F6),
-                                          borderRadius:
-                                          BorderRadius.circular(8),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
                                         ),
                                         child: const Icon(
-                                            Icons.broken_image_outlined,
-                                            size: 20,
-                                            color: Color(0xFF9CA3AF)),
+                                          Icons.broken_image_outlined,
+                                          size: 20,
+                                          color: Color(0xFF9CA3AF),
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -627,10 +656,7 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
 }
 
 class _FullImageViewer extends StatefulWidget {
-  const _FullImageViewer({
-    required this.urls,
-    required this.initialIndex,
-  });
+  const _FullImageViewer({required this.urls, required this.initialIndex});
 
   final List<String> urls;
   final int initialIndex;
@@ -674,7 +700,7 @@ class _FullImageViewerState extends State<_FullImageViewer> {
                   child: Image.network(
                     widget.urls[i],
                     fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const Icon(
+                    errorBuilder: (_, _, _) => const Icon(
                       Icons.broken_image_outlined,
                       size: 48,
                       color: Colors.white54,
@@ -700,7 +726,7 @@ class _FullImageViewerState extends State<_FullImageViewer> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: List.generate(
                     widget.urls.length,
-                        (i) => Container(
+                    (i) => Container(
                       width: 8,
                       height: 8,
                       margin: const EdgeInsets.symmetric(horizontal: 3),

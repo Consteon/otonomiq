@@ -1,5 +1,6 @@
-import '../global2.dart';
 import 'package:flutter/material.dart';
+
+import '../global2.dart';
 
 class OtqCheckbox extends StatefulWidget {
   const OtqCheckbox({
@@ -33,30 +34,31 @@ class _OtqCheckboxState extends State<OtqCheckbox> {
   @override
   Widget build(BuildContext context) {
     return Container();
-    //TODO: Finish checkbox widget code here
   }
 
   Widget childrenBuilder(var component, String scrName, bool enabled) {
     return Container(
       margin: EdgeInsets.only(
-          top: (widget.component['beforeSpacing'] ?? 0.0).toDouble(),
-          bottom: (widget.component['afterSpacing'] ?? 0.0).toDouble()),
+        top: (widget.component['beforeSpacing'] ?? 0.0).toDouble(),
+        bottom: (widget.component['afterSpacing'] ?? 0.0).toDouble(),
+      ),
       padding: EdgeInsets.fromLTRB(
-//          widget.lPad + (widget.component['leftPadding'] ?? 0.0).toDouble(),
-//          widget.tPad,
-//          widget.rPad + (widget.component['rightPadding'] ?? 0.0).toDouble(),
-//          widget.bPad),
-          (widget.component['leftPadding'] ?? 0.0).toDouble(),
-          0,
-          (widget.component['rightPadding'] ?? 0.0).toDouble(),
-          0),
+        //          widget.lPad + (widget.component['leftPadding'] ?? 0.0).toDouble(),
+        //          widget.tPad,
+        //          widget.rPad + (widget.component['rightPadding'] ?? 0.0).toDouble(),
+        //          widget.bPad),
+        (widget.component['leftPadding'] ?? 0.0).toDouble(),
+        0,
+        (widget.component['rightPadding'] ?? 0.0).toDouble(),
+        0,
+      ),
       child: widget.component['orientation'] == 'ltr'
           ? Row(
               children: <Widget>[
                 Checkbox(
                   value: enabled,
-//                  checkColor: Colors.black,
-//                  activeColor: Colors.red,
+                  //                  checkColor: Colors.black,
+                  //                  activeColor: Colors.red,
                   onChanged: (val) {
                     setState(() {
                       enabled = val!;
@@ -64,7 +66,9 @@ class _OtqCheckboxState extends State<OtqCheckbox> {
                     if (widget.component['position'] != null) {
                       txfController[widget.scrName]![widget.key]!
                           .controller
-                          .text = val! ? 'TRUE' : 'FALSE';
+                          .text = val!
+                          ? 'TRUE'
+                          : 'FALSE';
                     }
                   },
                 ),
@@ -72,8 +76,8 @@ class _OtqCheckboxState extends State<OtqCheckbox> {
                   child: GestureDetector(
                     child: Text(
                       widget.component['text'],
-//                style:
-//                TextStyle(color: Color(hexToInt('FFF57F17'))),
+                      //                style:
+                      //                TextStyle(color: Color(hexToInt('FFF57F17'))),
                     ),
                   ),
                 ),
@@ -82,9 +86,7 @@ class _OtqCheckboxState extends State<OtqCheckbox> {
           : Row(
               children: <Widget>[
                 Flexible(
-                  child: GestureDetector(
-                    child: Text(widget.component['text']),
-                  ),
+                  child: GestureDetector(child: Text(widget.component['text'])),
                 ),
                 Checkbox(
                   value: enabled,
@@ -95,7 +97,9 @@ class _OtqCheckboxState extends State<OtqCheckbox> {
                     if (widget.component['position'] != null) {
                       txfController[widget.scrName]![widget.key]!
                           .controller
-                          .text = val! ? 'TRUE' : 'FALSE';
+                          .text = val!
+                          ? 'TRUE'
+                          : 'FALSE';
                     }
                   },
                 ),

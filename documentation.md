@@ -23,6 +23,45 @@ An Otonomiq mobile apps
 - gpsData (as diamond separated string) and gpsTime are stored in transactionStore ('#GPSDATA' & '#LASTGPSTIME')
 
 ## Release Note
+
+### Fix: Image Upload to Firebase Storage (2026-05-20)
+Perbaikan kegagalan upload image ke Firebase Storage yang menghasilkan error `InvalidImagePath-13`.
+
+**Files Changed:**
+- `lib/api.dart` — renamePath(), getPhotoCameraImage()
+- `lib/firestore_repository/firestore_generic_repository.dart` — uploadToCloudStorage()
+- `lib/firestore_repository/table_repository.dart` — uploadUpdateImage()
+
+**Root Cause:**
+1. File image disimpan di cache directory (`/data/.../cache/`) yang bisa dihapus Android kapan saja saat storage penuh. Ketika retry upload, file sudah tidak ada.
+2. Retry counter di-increment 2x per attempt (di `uploadImageToCloud` dan `uploadUpdateImage`), sehingga max 5 retry habis dalam 3 attempt saja.
+3. `saveImagePutInImageMap` dipanggil tanpa `await`, menyebabkan race condition dengan `sendImagesInImageMap`.
+4. Kegagalan upload tidak di-log (file not found, no internet, lock failed semua silent), menyulitkan debugging.
+5. Bug `folder.isEmpty` di `renamePath` menyebabkan `RangeError` pada `substring(0, -1)`.
+
+**Perbaikan:**
+1. **Persistent storage** — Image file dipindah dari cache ke `getApplicationSupportDirectory()/otq_images/`. Directory ini tidak akan di-clean oleh Android. Jika `File.rename()` gagal (cross-mount), fallback ke `copy()` + `delete()`.
+2. **Fix double retry increment** — Hapus `imageMapUpdateUrl` duplikat di `uploadUpdateImage()`. Retry counter sekarang increment 1x per attempt (5 retry = 5 attempt).
+3. **Await first upload** — `saveImagePutInImageMap` sekarang di-`await`, mencegah race condition dengan retry scheduler.
+4. **Logging** — Tambah `devPrint` untuk semua failure path di `uploadToCloudStorage`: file not found, no internet, lock failed.
+5. **Fix folder.isEmpty crash** — Ganti conditional ternary dengan explicit `endsWith('/')` check.
+
+**Flow Diagram:**
+```
+Camera → renamePath() → app_support/otq_images/FTZIMG%2F{folder}___{file}.jpg
+  → await saveImagePutInImageMap()
+    → uploadToCloudStorage() [attempt 1]
+      → success: imageMap updated, file deleted after 5s
+      → fail: imageMap retry++ (1x only)
+  → sendImagesInImageMap() [retry 2-5]
+    → uploadImageToCloud() → uploadToCloudStorage()
+      → success: imageMap updated
+      → fail: retry++ until max 5
+  → replaceLocalImageToUrl() [saat submit transaksi]
+    → final attempt upload
+    → jika retry >= 5: replace dengan defaultImage
+```
+
 ### 0.9.75.04
 - Max of position in event is 14, event[14] will be used for table definition. History sync table_repository.dart [1527]
 
@@ -224,6 +263,13 @@ Error when executing method get() from document reference. Should be gone when a
     '#UNREAD' = int # of unread messages
     '#TX_LOCK' = bool lock semaphore for transaction. For writing + deleting
     '#LOGIN_OK' = bool is this user log in
+    '#has_user_login' = string, decrypted (qr:uqr) or raw scanned driver VID from the scanner widget; set on a valid scan, cleared when the VID is not in the workforce table. Mirrored to secure-storage key 'driverLogin' for persistence across app restarts (restored at globalInit; cleared on Keluar logout).
+    '#ACTIVE_TASK' = string, tnm VID of the task doc currently being executed on P11 DeliveryWorkspace. Set by P10 TaskFeedList on card tap (before routing to P11). Read by resolveDriverCurlyTokens to resolve {activeTaskVid} and {tnm} (alias) in search/event strings. NOT cleared on P11 exit (stale value harmless; pending-safe guard).
+    '#REJECT_TASK' = string, tnm VID of the task doc being rejected on the RejectTaskSheet. Set by DriverStopCard on Tolak tap (before routing). Read by resolveDriverCurlyTokens to resolve {rejectTaskVid} in search/event strings. NOT cleared on exit (stale value harmless; pending-safe guard).
+    '#ACTIVE_VEHICLE' = string, lv VID of the stock_location doc tapped for opening/closing check on H1 VehicleFeedList. Set by VehicleFeedList on card tap (before routing to O1/C1). Read by resolveDriverCurlyTokens to resolve {activeVehicle} in search/event strings. NOT cleared on exit (stale value harmless; pending-safe guard).
+    '#CHOSEN_DRIVER_VID' = string, workforce VID of the driver chosen by the checker on O1 ExecutorDesignateCard. Set by ExecutorDesignateCard on pick. Read by resolveDriverCurlyTokens for {chosenVid} and by CustodyCountSubmit O1 enable gate. Cleared on route change via ExecutorDesignateCard.clearO1State.
+    '#CHOSEN_DRIVER_NAME' = string, denorm driver name (workforce `n` field) chosen by the checker on O1. Set alongside #CHOSEN_DRIVER_VID. Read for {chosenName} token. Cleared on route change.
+    '#ACTIVE_WAREHOUSE' = string, `gl` field (gudang origin) from the aggregated task docs on O1. Set by CustodyCountList O1 variant once tasks load. Empty if no tasks (degrade-safe). Read for {warehouseId} token. Cleared on route change.
     '#GOOGLE_OK' = bool is this user already log in in google
     '#RECEIVE_LOG_OK' = bool is this user already specify at least 1 receive location
     '#PROFILE_OK' = bool is all needed profile entered
@@ -310,6 +356,7 @@ Error when executing method get() from document reference. Should be gone when a
     'gpsData' = last gps data. Format = <latitude>◆<longitude>◆<accuracy>◆<timestamp>◆<altitude>◆<speed>◆<speedAccuracy>.
     'gpsPlaceMark' = last gps place mark.
     'appSettings' = last result from GCF functionName['appSettings'] ~ /appSettings3.
+    'driverLogin' = persisted driver VID (mirrors #has_user_login in transactionStore). Written on a successful scanner VID scan, deleted on Keluar logout (and on a workforce not-found scan). Read at globalInit to restore the driver session.
 
 # Shared Persistence Keys:
     '@pages' = deprecated 1 Feb 2024,last all pages. Get from readSettings.Deleted when logout.
@@ -317,6 +364,9 @@ Error when executing method get() from document reference. Should be gone when a
     '@localeText' = compressed localeText string.
     '@localeCheckSum' = checksum of proxy's Locale text. Location cell defined in appSettings function.
     '@lastGpsTime' = last gps time. Persistent version of gpsTime state. 
+    '@guestScreenUI' = guest/login screenUIComponent snapshot. Written at guest bootstrap, restored on signOut for instant login page render.
+    '@guestSystemUI' = guest/login systemUIComponent snapshot. Written at guest bootstrap, restored on signOut for instant login page render.
+    '@authedSystemUI' = last authenticated systemUIComponent snapshot. Written by readSettings/readSettingsContext/proxy System refresh when settingKey (or proxy ssid) is not the guest/signup key. NOT cleared on signOut; survives across sessions. Used for cache-first navbar restore on login so the full bottomBar paints on the first authenticated frame.
 
 # GetX State management
 ## Directory

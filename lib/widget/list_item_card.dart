@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -42,6 +43,7 @@ class _ListItemCardState extends State<ListItemCard> {
   final Map<int, String> _searchFilters = {};
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  Timer? _searchDebounce;
   bool _showIcon = true;
   bool _showProgress = true;
 
@@ -54,6 +56,7 @@ class _ListItemCardState extends State<ListItemCard> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -93,10 +96,10 @@ class _ListItemCardState extends State<ListItemCard> {
     }
     _showIcon =
         (widget.component['showIcon'] ?? '').toString().toUpperCase() !=
-            'FALSE';
+        'FALSE';
     _showProgress =
         (widget.component['showProgress'] ?? '').toString().toUpperCase() !=
-            'FALSE';
+        'FALSE';
 
     if (_role == 'APPROVER') {
       String condRaw = (widget.component['conditions'] ?? '').toString().trim();
@@ -128,7 +131,7 @@ class _ListItemCardState extends State<ListItemCard> {
     _tableCode = normalizeTableName(decoded);
     int tableVid =
         int.tryParse((widget.component['vidtable'] ?? '').toString()) ??
-            appCodeController.applicationTableVid;
+        appCodeController.applicationTableVid;
     if (_tableCode.isNotEmpty) {
       tableSourceUpdated[_tableCode] = true;
       subscribeToTable(_tableCode, tableVid);
@@ -137,7 +140,11 @@ class _ListItemCardState extends State<ListItemCard> {
 
   String _resolveText(String template, List<dynamic> row) {
     return replaceMarker(
-        template, row, widget.component['indexStart'] ?? 1, false);
+      template,
+      row,
+      widget.component['indexStart'] ?? 1,
+      false,
+    );
   }
 
   String _getStatus(List<dynamic> row) {
@@ -186,8 +193,10 @@ class _ListItemCardState extends State<ListItemCard> {
           String inner = s.substring(1, s.length - 1);
           for (var stepStr in inner.split(RegExp(r'\]\s*,\s*\['))) {
             stepStr = stepStr.replaceAll('[', '').replaceAll(']', '').trim();
-            List<String> parts =
-            stepStr.split(',').map((e) => e.trim()).toList();
+            List<String> parts = stepStr
+                .split(',')
+                .map((e) => e.trim())
+                .toList();
             if (parts.length >= 2) {
               int? stepNum = int.tryParse(parts[0]);
               String status = parts[1].trim();
@@ -217,8 +226,9 @@ class _ListItemCardState extends State<ListItemCard> {
   List<dynamic> _applyApproverTabFilter(List<dynamic> data, String tabStatus) {
     if (_myApprovalLevel <= 0 || _tabs.isEmpty) return data;
     final String defaultStatus = _tabs[0].toUpperCase();
-    final String continueStatus =
-    _tabs.length > 1 ? _tabs[1].toUpperCase() : '';
+    final String continueStatus = _tabs.length > 1
+        ? _tabs[1].toUpperCase()
+        : '';
     return data.where((row) {
       Map<int, String> chain = _parseApprovalChain(row);
       if (tabStatus == defaultStatus) {
@@ -334,20 +344,24 @@ class _ListItemCardState extends State<ListItemCard> {
     String requestDocT = row.isNotEmpty ? row[0].toString() : '';
     String status = _getStatus(row);
     if (noRequest.isNotEmpty) {
-      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-        'no_request': noRequest,
-        'request_vid': requestVid,
-        'request_doc_t': requestDocT,
-        'approval_status': status,
-        'approval_role': _role,
-        'approval_tabs': _tabs,
-        'approval_level': _myApprovalLevel,
-        'approval_buttons': widget.component['buttons'],
-        'approval_table': widget.component['table'],
-        'approval_vidtable': widget.component['vidtable'],
-        'approval_flag': widget.component['flag'],
-        'approval_status_field': _statusFieldIndex,
-      })));
+      transactionStore.dispatch(
+        UpdateScreenTxAction(
+          ScreenTransaction({
+            'no_request': noRequest,
+            'request_vid': requestVid,
+            'request_doc_t': requestDocT,
+            'approval_status': status,
+            'approval_role': _role,
+            'approval_tabs': _tabs,
+            'approval_level': _myApprovalLevel,
+            'approval_buttons': widget.component['buttons'],
+            'approval_table': widget.component['table'],
+            'approval_vidtable': widget.component['vidtable'],
+            'approval_flag': widget.component['flag'],
+            'approval_status_field': _statusFieldIndex,
+          }),
+        ),
+      );
     }
 
     String route = (widget.component['route'] ?? '').toString();
@@ -358,7 +372,9 @@ class _ListItemCardState extends State<ListItemCard> {
   }
 
   void _onActionPressed(
-      List<dynamic> row, Map<String, dynamic> buttonConfig) async {
+    List<dynamic> row,
+    Map<String, dynamic> buttonConfig,
+  ) async {
     try {
       String rawActions = (buttonConfig['actions'] ?? '').toString();
       String actionsStr = autheniumDecode(rawActions) ?? rawActions;
@@ -385,10 +401,12 @@ class _ListItemCardState extends State<ListItemCard> {
           }
 
           // 3. Find step with default status
-          String defaultStatus =
-          _tabs.isNotEmpty ? _tabs[0].toUpperCase() : 'PENDING';
+          String defaultStatus = _tabs.isNotEmpty
+              ? _tabs[0].toUpperCase()
+              : 'PENDING';
           int targetIdx = steps.indexWhere(
-                  (s) => s.length > 1 && s[1].toUpperCase() == defaultStatus);
+            (s) => s.length > 1 && s[1].toUpperCase() == defaultStatus,
+          );
 
           if (targetIdx >= 0) {
             // 4. Apply actions template to step (markers stay intact for backend resolution)
@@ -415,17 +433,20 @@ class _ListItemCardState extends State<ListItemCard> {
                 '[${steps.map((s) => '[${s.join(', ')}]').join(', ')}]';
 
             // 5b. Determine action status and whether to update overall status (field 2)
-            String actionStatus =
-            newStep.length > 1 ? newStep[1].trim().toUpperCase() : '';
-            String continueStatus =
-            _tabs.length > 1 ? _tabs[1].toUpperCase() : '';
+            String actionStatus = newStep.length > 1
+                ? newStep[1].trim().toUpperCase()
+                : '';
+            String continueStatus = _tabs.length > 1
+                ? _tabs[1].toUpperCase()
+                : '';
             bool isLastLevel =
                 _myApprovalLevel > 0 && _myApprovalLevel == steps.length;
             bool updateOverallStatus =
                 isLastLevel || actionStatus != continueStatus;
 
             debugPrint(
-                '[Approval] actionStatus=$actionStatus | myLevel=$_myApprovalLevel | totalSteps=${steps.length} | isLastLevel=$isLastLevel | updateOverall=$updateOverallStatus');
+              '[Approval] actionStatus=$actionStatus | myLevel=$_myApprovalLevel | totalSteps=${steps.length} | isLastLevel=$isLastLevel | updateOverall=$updateOverallStatus',
+            );
 
             // 6. Build updateTableRow input: search by field "1" (no_request)
             String tableRaw = (widget.component['table'] ?? '').toString();
@@ -439,7 +460,8 @@ class _ListItemCardState extends State<ListItemCard> {
             if (updateOverallStatus) {
               input += '⭘<$_statusFieldIndex>◼$actionStatus';
               debugPrint(
-                  '[Approval] updating overall status field $_statusFieldIndex → $actionStatus');
+                '[Approval] updating overall status field $_statusFieldIndex → $actionStatus',
+              );
             }
 
             // 7. Build event row JSON
@@ -462,8 +484,11 @@ class _ListItemCardState extends State<ListItemCard> {
               contentParts.add(row[i].toString());
             }
             String eventContent = '0${contentParts.join(separator[1])}';
-            String eventRowString =
-            jsonEncode([nowMs, widget.scrName, eventContent]);
+            String eventRowString = jsonEncode([
+              nowMs,
+              widget.scrName,
+              eventContent,
+            ]);
 
             debugPrint('[Approval] action input: $input');
             debugPrint('[Approval] event row: $eventRowString');
@@ -471,16 +496,13 @@ class _ListItemCardState extends State<ListItemCard> {
             debugPrint('[Approval] updateTableRow result: $result');
 
             // Create Event C via DSL if button has 'event' property
-            String eventDSL =
-            (buttonConfig['event'] ?? '').toString();
+            String eventDSL = (buttonConfig['event'] ?? '').toString();
             if (eventDSL.isNotEmpty &&
                 result.isNotEmpty &&
                 result[0].startsWith('OK')) {
-              String eventFlag =
-              (widget.component['flag'] ?? '').toString();
+              String eventFlag = (widget.component['flag'] ?? '').toString();
               int appVid = defaultVid();
-              String vidTable =
-              (widget.component['vidtable'] ?? '').toString();
+              String vidTable = (widget.component['vidtable'] ?? '').toString();
               if (vidTable.isNotEmpty) {
                 appVid = int.tryParse(vidTable) ?? defaultVid();
               }
@@ -489,8 +511,9 @@ class _ListItemCardState extends State<ListItemCard> {
               // Resolve ◀...▶ markers in chain for event DSL
               final openM = forbiddenCharacter[7];
               final closeM = forbiddenCharacter[9];
-              String formattedNow = DateFormat('dd MMM yyyy HH:mm')
-                  .format(DateTime.fromMillisecondsSinceEpoch(nowMs));
+              String formattedNow = DateFormat(
+                'dd MMM yyyy HH:mm',
+              ).format(DateTime.fromMillisecondsSinceEpoch(nowMs));
               String resolvedChain = newChainStr;
               int mPos = 0;
               while (mPos < resolvedChain.length) {
@@ -498,13 +521,16 @@ class _ListItemCardState extends State<ListItemCard> {
                 if (start < 0) break;
                 int end = resolvedChain.indexOf(closeM, start);
                 if (end < 0) break;
-                resolvedChain = resolvedChain.substring(0, start) +
+                resolvedChain =
+                    resolvedChain.substring(0, start) +
                     formattedNow +
                     resolvedChain.substring(end + 1);
                 mPos = start + formattedNow.length;
               }
               resolvedChain = resolvedChain.replaceAll(
-                  '${openM}5$closeM', '$nowMs');
+                '${openM}5$closeM',
+                '$nowMs',
+              );
               updatedRow[chainColIdx] = resolvedChain;
               if (updateOverallStatus) {
                 updatedRow[_statusFieldIndex] = actionStatus;
@@ -551,7 +577,8 @@ class _ListItemCardState extends State<ListItemCard> {
       String selStatus = _tabs.isNotEmpty && _selectedTabIndex < _tabs.length
           ? _tabs[_selectedTabIndex]
           : '';
-      bool isAllTab = selStatus.toUpperCase() == 'SEMUA' ||
+      bool isAllTab =
+          selStatus.toUpperCase() == 'SEMUA' ||
           selStatus.toUpperCase() == 'ALL';
       Map<String, int> counts = {};
       for (var tab in _tabs) {
@@ -559,11 +586,11 @@ class _ListItemCardState extends State<ListItemCard> {
         if (tabUpper == 'SEMUA' || tabUpper == 'ALL') {
           counts[tab] = baseFiltered.length;
         } else if (_role == 'APPROVER') {
-          counts[tab] =
-              _applyApproverTabFilter(baseFiltered, tabUpper).length;
+          counts[tab] = _applyApproverTabFilter(baseFiltered, tabUpper).length;
         } else {
-          counts[tab] =
-              baseFiltered.where((r) => _getStatus(r) == tabUpper).length;
+          counts[tab] = baseFiltered
+              .where((r) => _getStatus(r) == tabUpper)
+              .length;
         }
       }
 
@@ -572,8 +599,10 @@ class _ListItemCardState extends State<ListItemCard> {
       if (selStatus.isEmpty || isAllTab) {
         filtered = baseFiltered;
       } else if (_role == 'APPROVER') {
-        filtered =
-            _applyApproverTabFilter(baseFiltered, selStatus.toUpperCase());
+        filtered = _applyApproverTabFilter(
+          baseFiltered,
+          selStatus.toUpperCase(),
+        );
       } else {
         filtered = baseFiltered
             .where((r) => _getStatus(r) == selStatus.toUpperCase())
@@ -585,11 +614,15 @@ class _ListItemCardState extends State<ListItemCard> {
 
       // [5] Sort descending by request timestamp (field [12])
       filtered.sort((a, b) {
-        final tA = int.tryParse(
-            (a as List).length > 12 ? a[12]?.toString() ?? '0' : '0') ??
+        final tA =
+            int.tryParse(
+              (a as List).length > 12 ? a[12]?.toString() ?? '0' : '0',
+            ) ??
             0;
-        final tB = int.tryParse(
-            (b as List).length > 12 ? b[12]?.toString() ?? '0' : '0') ??
+        final tB =
+            int.tryParse(
+              (b as List).length > 12 ? b[12]?.toString() ?? '0' : '0',
+            ) ??
             0;
         return tB.compareTo(tA);
       });
@@ -600,7 +633,11 @@ class _ListItemCardState extends State<ListItemCard> {
         height: availableH,
         child: Padding(
           padding: EdgeInsets.fromLTRB(
-              widget.lPad, widget.tPad, widget.rPad, widget.bPad),
+            widget.lPad,
+            widget.tPad,
+            widget.rPad,
+            widget.bPad,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -624,19 +661,19 @@ class _ListItemCardState extends State<ListItemCard> {
                 child: filtered.isEmpty
                     ? _buildEmptyState(selStatus)
                     : ListView.builder(
-                  padding: EdgeInsets.zero,
-                  itemCount: filtered.length,
-                  itemBuilder: (ctx, i) {
-                    Widget card = _buildCard(filtered[i], context);
-                    if (i == filtered.length - 1) {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 24),
-                        child: card,
-                      );
-                    }
-                    return card;
-                  },
-                ),
+                        padding: EdgeInsets.zero,
+                        itemCount: filtered.length,
+                        itemBuilder: (ctx, i) {
+                          Widget card = _buildCard(filtered[i], context);
+                          if (i == filtered.length - 1) {
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 24),
+                              child: card,
+                            );
+                          }
+                          return card;
+                        },
+                      ),
               ),
             ],
           ),
@@ -651,24 +688,34 @@ class _ListItemCardState extends State<ListItemCard> {
     return TextFormField(
       controller: _searchController,
       keyboardType: TextInputType.text,
-      onChanged: (value) => setState(() => _searchQuery = value),
+      onChanged: (value) {
+        // Debounce: run the heavy filter/sort pipeline once the user pauses
+        // typing instead of on every keystroke.
+        _searchDebounce?.cancel();
+        _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+          if (mounted) setState(() => _searchQuery = value);
+        });
+      },
       decoration: InputDecoration(
         prefixIcon: const Icon(Icons.search, color: Color(0xFF9CA3AF)),
         suffixIcon: _searchQuery.isEmpty
             ? null
             : IconButton(
-          icon: const Icon(Icons.close, color: Color(0xFF9CA3AF)),
-          onPressed: () {
-            _searchController.clear();
-            setState(() => _searchQuery = '');
-          },
-        ),
+                icon: const Icon(Icons.close, color: Color(0xFF9CA3AF)),
+                onPressed: () {
+                  _searchDebounce?.cancel();
+                  _searchController.clear();
+                  setState(() => _searchQuery = '');
+                },
+              ),
         hintText: hint,
         labelText: label,
         labelStyle: const TextStyle(color: Color(0xFF6B7280), fontSize: 14),
         hintStyle: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13),
-        contentPadding:
-        const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
         filled: true,
         fillColor: const Color(0xFFF9FAFB),
         border: OutlineInputBorder(
@@ -703,19 +750,18 @@ class _ListItemCardState extends State<ListItemCard> {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               curve: Curves.easeOut,
-              padding:
-              const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
               decoration: BoxDecoration(
                 color: selected ? Colors.white : Colors.transparent,
                 borderRadius: BorderRadius.circular(11),
                 boxShadow: selected
                     ? [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.06),
-                    blurRadius: 6,
-                    offset: const Offset(0, 2),
-                  )
-                ]
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.06),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ]
                     : null,
               ),
               child: Row(
@@ -726,8 +772,7 @@ class _ListItemCardState extends State<ListItemCard> {
                     _capitalize(tab),
                     style: TextStyle(
                       fontSize: 13,
-                      fontWeight:
-                      selected ? FontWeight.w600 : FontWeight.w500,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                       color: selected
                           ? const Color(0xFF1F2937)
                           : const Color(0xFF9CA3AF),
@@ -789,8 +834,11 @@ class _ListItemCardState extends State<ListItemCard> {
               color: const Color(0xFFF3F4F6),
               borderRadius: BorderRadius.circular(16),
             ),
-            child: const Icon(Icons.inbox_outlined,
-                size: 28, color: Color(0xFFD1D5DB)),
+            child: const Icon(
+              Icons.inbox_outlined,
+              size: 28,
+              color: Color(0xFFD1D5DB),
+            ),
           ),
           const SizedBox(height: 14),
           Text(
@@ -811,12 +859,15 @@ class _ListItemCardState extends State<ListItemCard> {
     String title = _textArray.length > 1
         ? _resolveText(_textArray[1], row)
         : id;
-    String subtitle =
-    _textArray.length > 2 ? _resolveText(_textArray[2], row) : '';
-    String dateText =
-    _textArray.length > 3 ? _resolveText(_textArray[3], row) : '';
-    String status =
-    _role == 'APPROVER' ? _getChainStatus(row) : _getStatus(row);
+    String subtitle = _textArray.length > 2
+        ? _resolveText(_textArray[2], row)
+        : '';
+    String dateText = _textArray.length > 3
+        ? _resolveText(_textArray[3], row)
+        : '';
+    String status = _role == 'APPROVER'
+        ? _getChainStatus(row)
+        : _getStatus(row);
     String progress = _showProgress ? _getChainProgress(row) : '';
     Color sColor = _statusColor(status);
     Color sBgColor = _statusBgColor(status);
@@ -885,7 +936,9 @@ class _ListItemCardState extends State<ListItemCard> {
                               if (priority.isNotEmpty)
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 3),
+                                    horizontal: 10,
+                                    vertical: 3,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: _priorityBgColor(priority),
                                     borderRadius: BorderRadius.circular(6),
@@ -913,15 +966,16 @@ class _ListItemCardState extends State<ListItemCard> {
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
-                          if (subtitle.isNotEmpty ||
-                              dateText.isNotEmpty) ...[
+                          if (subtitle.isNotEmpty || dateText.isNotEmpty) ...[
                             const SizedBox(height: 6),
                             Row(
                               children: [
                                 if (subtitle.isNotEmpty) ...[
-                                  Icon(Icons.location_on,
-                                      size: 14,
-                                      color: const Color(0xFF9CA3AF)),
+                                  Icon(
+                                    Icons.location_on,
+                                    size: 14,
+                                    color: const Color(0xFF9CA3AF),
+                                  ),
                                   const SizedBox(width: 4),
                                   Flexible(
                                     child: Text(
@@ -937,9 +991,11 @@ class _ListItemCardState extends State<ListItemCard> {
                                 if (dateText.isNotEmpty) ...[
                                   if (subtitle.isNotEmpty)
                                     const SizedBox(width: 12),
-                                  Icon(Icons.access_time,
-                                      size: 14,
-                                      color: const Color(0xFF9CA3AF)),
+                                  Icon(
+                                    Icons.access_time,
+                                    size: 14,
+                                    color: const Color(0xFF9CA3AF),
+                                  ),
                                   const SizedBox(width: 4),
                                   Text(
                                     dateText,
@@ -953,14 +1009,15 @@ class _ListItemCardState extends State<ListItemCard> {
                             ),
                           ],
                           const SizedBox(height: 12),
-                          const Divider(
-                              height: 1, color: Color(0xFFE5E7EB)),
+                          const Divider(height: 1, color: Color(0xFFE5E7EB)),
                           const SizedBox(height: 12),
                           Row(
                             children: [
                               Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 4),
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
                                 decoration: BoxDecoration(
                                   color: sBgColor,
                                   borderRadius: BorderRadius.circular(8),
@@ -1029,12 +1086,15 @@ class _ListItemCardState extends State<ListItemCard> {
     String name = _textArray.length > 1
         ? _resolveText(_textArray[1], row)
         : (row.length > 1 ? row[1].toString() : '');
-    String subtitle =
-    _textArray.length > 2 ? _resolveText(_textArray[2], row) : '';
-    String dateText =
-    _textArray.length > 3 ? _resolveText(_textArray[3], row) : '';
-    String status =
-    _role == 'APPROVER' ? _getChainStatus(row) : _getStatus(row);
+    String subtitle = _textArray.length > 2
+        ? _resolveText(_textArray[2], row)
+        : '';
+    String dateText = _textArray.length > 3
+        ? _resolveText(_textArray[3], row)
+        : '';
+    String status = _role == 'APPROVER'
+        ? _getChainStatus(row)
+        : _getStatus(row);
     String progress = _getChainProgress(row);
     Color sColor = _statusColor(status);
     Color sBgColor = _statusBgColor(status);
@@ -1090,8 +1150,11 @@ class _ListItemCardState extends State<ListItemCard> {
                                   color: const Color(0xFFF3F4F6),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
-                                child: Icon(icon,
-                                    size: 20, color: const Color(0xFF6B7280)),
+                                child: Icon(
+                                  icon,
+                                  size: 20,
+                                  color: const Color(0xFF6B7280),
+                                ),
                               ),
                               const SizedBox(width: 14),
                               Expanded(
@@ -1146,8 +1209,11 @@ class _ListItemCardState extends State<ListItemCard> {
                                   ],
                                 ),
                               ),
-                              Icon(Icons.chevron_right_rounded,
-                                  color: const Color(0xFFD1D5DB), size: 22),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                color: const Color(0xFFD1D5DB),
+                                size: 22,
+                              ),
                             ],
                           ),
                           const SizedBox(height: 10),
@@ -1155,7 +1221,9 @@ class _ListItemCardState extends State<ListItemCard> {
                             children: [
                               Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 4),
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
                                 decoration: BoxDecoration(
                                   color: sBgColor,
                                   borderRadius: BorderRadius.circular(8),
@@ -1210,8 +1278,9 @@ class _ListItemCardState extends State<ListItemCard> {
   List<Widget> _buildActionButtons(List<dynamic> row, List<dynamic> buttons) {
     List<Widget> result = [];
     for (int i = 0; i < buttons.length; i++) {
-      Map<String, dynamic> btn =
-      buttons[i] is Map<String, dynamic> ? buttons[i] : {};
+      Map<String, dynamic> btn = buttons[i] is Map<String, dynamic>
+          ? buttons[i]
+          : {};
       String text = btn['text'] ?? '';
       String colorStr = (btn['color'] ?? '').toString().toLowerCase();
 

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
-import 'package:get/get.dart';
 
 import '../api.dart';
 import '../crypto/auth_crypto.dart';
@@ -27,6 +26,7 @@ import 'ftz_row_of_button_2.dart';
 import 'goto.dart';
 import 'gps_send.dart';
 import 'image_upload.dart';
+import 'list_statistic_card_keyed.dart';
 import 'location_detector.dart';
 import 'otq_checkbox.dart';
 import 'otq_dropdown_2.dart';
@@ -36,11 +36,14 @@ import 'otq_txf_2.dart';
 import 'progress_bar.dart';
 import 'tasklist.dart';
 import 'time_presence.dart';
-
+import 'worker_card_detail_keyed.dart';
 
 Widget buildDisplayComponent(
-    dynamic component, String scrName, UserRepository userRepository,
-    {bool? dialog}) {
+  dynamic component,
+  String scrName,
+  UserRepository userRepository, {
+  bool? dialog,
+}) {
   Widget result;
   var lPad = (systemUIComponent['Mobile']['leftPad'] ?? 0.0).toDouble();
   var tPad = (systemUIComponent['Mobile']['topPad'] ?? 0.0).toDouble();
@@ -54,13 +57,16 @@ Widget buildDisplayComponent(
   if (component['position'] != null) {
     String initValue = getInitialValue(scrName, component);
     txfControllerCheck(
-        scrName, component['position']); // build txfController if necessary
+      scrName,
+      component['position'],
+    ); // build txfController if necessary
     final bool isEnabled =
         (component['isEnabled']?.toString().toLowerCase() ?? 'true') != 'false';
     txfController[scrName]![getPosition(component['position'])]!.isEnabled =
         isEnabled;
     txfController[scrName]![getPosition(component['position'])]!
-        .initialIsEnabled = isEnabled;
+            .initialIsEnabled =
+        isEnabled;
     if (scrName.toLowerCase() == 'vertikateknolokaciptareportpatrol' &&
         component['position'] == 5) {
       int d = 1;
@@ -76,16 +82,20 @@ Widget buildDisplayComponent(
       final children = component['children'] ?? [];
       for (var childComponent in children) {
         if (childComponent['position'] != null) {
-          txfControllerCheck(scrName,
-              childComponent['position']); // build txfController if necessary
+          txfControllerCheck(
+            scrName,
+            childComponent['position'],
+          ); // build txfController if necessary
           final bool isEnabled =
               (childComponent['isEnabled']?.toString().toLowerCase() ??
                   'true') !=
-                  'false';
+              'false';
           txfController[scrName]![getPosition(childComponent['position'])]!
-              .isEnabled = isEnabled;
+                  .isEnabled =
+              isEnabled;
           txfController[scrName]![getPosition(childComponent['position'])]!
-              .initialIsEnabled = isEnabled;
+                  .initialIsEnabled =
+              isEnabled;
         }
       }
     }
@@ -114,11 +124,7 @@ Widget buildDisplayComponent(
       // txfController[scrName]![getPosition(component['position'])]!.stateObject =
       //     OtqGetImagesStateObject();
       final key = GlobalKey<FtzAutoNumberState>();
-      result = FtzAutoNumber(
-        key: key,
-        component: component,
-        scrName: scrName,
-      );
+      result = FtzAutoNumber(key: key, component: component, scrName: scrName);
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     } // end of try
@@ -222,8 +228,9 @@ Widget buildDisplayComponent(
     try {
       result = Container(
         margin: EdgeInsets.only(
-            top: (component['beforeSpacing'] ?? 0.0).toDouble(),
-            bottom: (component['afterSpacing'] ?? 0.0).toDouble()),
+          top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+          bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+        ),
         height: (component['height'] ?? 0.0).toDouble(),
         padding: EdgeInsets.fromLTRB(lPad, tPad, rPad, bPad),
         child: Row(
@@ -231,7 +238,9 @@ Widget buildDisplayComponent(
           children: <Widget>[
             Expanded(
               child: displayImage(
-                  imageUrl: component['url'] ?? defaultImage, cached: true),
+                imageUrl: component['url'] ?? defaultImage,
+                cached: true,
+              ),
               // child: FadeInImage.memoryNetwork(
               //     fit: BoxFit.contain,
               //     placeholder: kTransparentImage,
@@ -249,17 +258,21 @@ Widget buildDisplayComponent(
       var bannerAspectRatio = 1.08 / bannerImageAspectRatio;
       result = Container(
         margin: EdgeInsets.only(
-            top: (component['beforeSpacing'] ?? 0.0).toDouble(),
-            bottom: (component['afterSpacing'] ?? 0.0).toDouble()),
+          top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+          bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+        ),
         height: (component['width'] ?? 0.0).toDouble(),
         child: GridView(
           scrollDirection: Axis.horizontal,
           controller: ScrollController(),
           gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: (component['width'] ?? 0.0).toDouble(),
-              childAspectRatio: bannerAspectRatio),
-          children:
-          buildBannerList(component['children'], bannerImageAspectRatio),
+            maxCrossAxisExtent: (component['width'] ?? 0.0).toDouble(),
+            childAspectRatio: bannerAspectRatio,
+          ),
+          children: buildBannerList(
+            component['children'],
+            bannerImageAspectRatio,
+          ),
         ),
       );
     } catch (e) {
@@ -270,14 +283,16 @@ Widget buildDisplayComponent(
       double fontSize = (component['fontSize'] ?? 14.0).toDouble();
       result = Container(
         margin: EdgeInsets.only(
-            top: (component['beforeSpacing'] ?? 0.0).toDouble(),
-            bottom: (component['afterSpacing'] ?? 0.0).toDouble()),
+          top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+          bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+        ),
         height: ((component['width'] ?? 90.0) * component['row']).toDouble(),
         child: GridView(
           scrollDirection: Axis.vertical,
           controller: ScrollController(),
           gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: (component['width'] ?? 90.0).toDouble()),
+            maxCrossAxisExtent: (component['width'] ?? 90.0).toDouble(),
+          ),
           children: buildGridList(component['children'], fontSize),
         ),
       );
@@ -289,14 +304,16 @@ Widget buildDisplayComponent(
       double fontSize = (component['fontSize'] ?? 14.0).toDouble();
       result = Container(
         margin: EdgeInsets.only(
-            top: (component['beforeSpacing'] ?? 0.0).toDouble(),
-            bottom: (component['afterSpacing'] ?? 0.0).toDouble()),
+          top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+          bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+        ),
         height: ((component['width'] ?? 90.0) * component['row']).toDouble(),
         child: GridView(
           scrollDirection: Axis.horizontal,
           controller: ScrollController(),
           gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: (component['width'] ?? 90.0).toDouble()),
+            maxCrossAxisExtent: (component['width'] ?? 90.0).toDouble(),
+          ),
           children: buildGridList(component['children'], fontSize),
         ),
       );
@@ -326,8 +343,9 @@ Widget buildDisplayComponent(
       } else {
         result = Container(
           margin: EdgeInsets.only(
-              top: (component['beforeSpacing'] ?? 0.0).toDouble(),
-              bottom: (component['afterSpacing'] ?? 0.0).toDouble()),
+            top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+            bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+          ),
           padding: EdgeInsets.fromLTRB(lPad, tPad, rPad, bPad),
           child: HtmlWidget(component['data']),
           // child: const Text(
@@ -358,47 +376,50 @@ Widget buildDisplayComponent(
       final ctxKey = GlobalKey();
       result = Container(
         margin: EdgeInsets.only(
-            top: (component['beforeSpacing'] ?? 0.0).toDouble(),
-            bottom: (component['afterSpacing'] ?? 0.0).toDouble()),
-        padding: EdgeInsets.fromLTRB(lPad + (component['leftPadding'] ?? 0.0),
-            tPad, rPad + (component['rightPadding'] ?? 0.0), bPad),
+          top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+          bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+        ),
+        padding: EdgeInsets.fromLTRB(
+          lPad + (component['leftPadding'] ?? 0.0),
+          tPad,
+          rPad + (component['rightPadding'] ?? 0.0),
+          bPad,
+        ),
         child: component['left'].toString().trim().toLowerCase() == 'true'
             ? Row(
-          children: <Widget>[
-            GestureDetector(
-              child: Swc(
-                key: ctxKey,
-                scrName: scrName,
-                component: component,
-              ),
-            ),
-            Container(width: 8),
-            Flexible(
-              child: GestureDetector(
-                child: Text(
-                  component['label'] ?? "",
-                ),
-              ),
-            ),
-          ],
-        )
+                children: <Widget>[
+                  GestureDetector(
+                    child: Swc(
+                      key: ctxKey,
+                      scrName: scrName,
+                      component: component,
+                    ),
+                  ),
+                  Container(width: 8),
+                  Flexible(
+                    child: GestureDetector(
+                      child: Text(component['label'] ?? ""),
+                    ),
+                  ),
+                ],
+              )
             : Row(
-          children: <Widget>[
-            Flexible(
-              child: GestureDetector(
-                child: Text(component['label'] ?? ""),
+                children: <Widget>[
+                  Flexible(
+                    child: GestureDetector(
+                      child: Text(component['label'] ?? ""),
+                    ),
+                  ),
+                  Container(width: 8),
+                  GestureDetector(
+                    child: Swc(
+                      key: ctxKey,
+                      scrName: scrName,
+                      component: component,
+                    ),
+                  ),
+                ],
               ),
-            ),
-            Container(width: 8),
-            GestureDetector(
-              child: Swc(
-                key: ctxKey,
-                scrName: scrName,
-                component: component,
-              ),
-            ),
-          ],
-        ),
       );
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
@@ -409,8 +430,10 @@ Widget buildDisplayComponent(
       // Logic to correctly set the initial finalData in the controller
       if (component['position'] != null) {
         final position = getPosition(component['position']);
-        final initValue =
-        getInitialValue(scrName, component); // This is the display value
+        final initValue = getInitialValue(
+          scrName,
+          component,
+        ); // This is the display value
         String finalDataValue = initValue; // Default to display value
 
         // Replicate logic from OtqDropdown to find the actual data value
@@ -448,11 +471,12 @@ Widget buildDisplayComponent(
   } else if (tip == 'rbt') {
     // Row of button
     try {
-      bool isApprovalRbt = (component['children'] as List<dynamic>? ?? [])
-          .any((btn) => btn is Map && btn.containsKey('actions'));
+      bool isApprovalRbt = (component['children'] as List<dynamic>? ?? []).any(
+        (btn) => btn is Map && btn.containsKey('actions'),
+      );
       bool hasSearch =
           (component['search'] ?? '').toString().trim().toLowerCase() ==
-              'sticky';
+          'sticky';
       if (isApprovalRbt || hasSearch) {
         List<String> tabs = [];
         String? defaultStatus;
@@ -463,8 +487,7 @@ Widget buildDisplayComponent(
                 .map((e) => e.toString())
                 .toList();
           }
-          defaultStatus =
-          tabs.isNotEmpty ? tabs[0].toUpperCase() : 'PENDING';
+          defaultStatus = tabs.isNotEmpty ? tabs[0].toUpperCase() : 'PENDING';
         }
         ApproverStickyBar.register(
           scrName: scrName,
@@ -477,6 +500,11 @@ Widget buildDisplayComponent(
           tPad: tPad,
           rPad: rPad,
           bPad: bPad,
+        );
+        debugPrint(
+          '[StickyRBT] register scrName="$scrName" '
+          'type=${isApprovalRbt ? "approval" : "incident"} '
+          'activeBarScreen="${ApproverStickyBar.activeBarScreen.value}"',
         );
         if (ApproverStickyBar.hasCommentInput(scrName)) {
           result = StickyBarSlot(scrName: scrName);
@@ -531,13 +559,15 @@ Widget buildDisplayComponent(
         builder: (BuildContext context) {
           return Container(
             margin: EdgeInsets.only(
-                top: (component['beforeSpacing'] ?? 0.0).toDouble(),
-                bottom: (component['afterSpacing'] ?? 0.0).toDouble()),
+              top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+              bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+            ),
             padding: EdgeInsets.fromLTRB(
-                lPad + (component['leftPadding'] ?? 0.0).toDouble(),
-                tPad,
-                rPad + (component['rightPadding'] ?? 0.0).toDouble(),
-                bPad),
+              lPad + (component['leftPadding'] ?? 0.0).toDouble(),
+              tPad,
+              rPad + (component['rightPadding'] ?? 0.0).toDouble(),
+              bPad,
+            ),
             child: LoginWidget(
               userRepository: userRepository,
               tosText: component['text1'],
@@ -559,13 +589,15 @@ Widget buildDisplayComponent(
         builder: (BuildContext context) {
           return Container(
             margin: EdgeInsets.only(
-                top: (component['beforeSpacing'] ?? 0.0).toDouble(),
-                bottom: (component['afterSpacing'] ?? 0.0).toDouble()),
+              top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+              bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+            ),
             padding: EdgeInsets.fromLTRB(
-                lPad + (component['leftPadding'] ?? 0.0).toDouble(),
-                tPad,
-                rPad + (component['rightPadding'] ?? 0.0).toDouble(),
-                bPad),
+              lPad + (component['leftPadding'] ?? 0.0).toDouble(),
+              tPad,
+              rPad + (component['rightPadding'] ?? 0.0).toDouble(),
+              bPad,
+            ),
             child: Column(
               children: <Widget>[
                 Card(
@@ -577,7 +609,10 @@ Widget buildDisplayComponent(
                             component['route'].substring(0, 4).toLowerCase() ==
                                 'http') {
                           openInWebView(
-                              context, component['route'], component['title']);
+                            context,
+                            component['route'],
+                            component['title'],
+                          );
                         } else {
                           var state = transactionStore.state.screenTx;
                           if (state['#REFRESH']) {
@@ -586,8 +621,11 @@ Widget buildDisplayComponent(
                               var lifKey = state.screenTx['#INTERFACE_KEY'];
                               readSettings(lifKey, 1).then((_) {
                                 // constructAllPageElements();
-                                transactionStore.dispatch(UpdateScreenTxAction(
-                                    ScreenTransaction({'#REFRESH': false})));
+                                transactionStore.dispatch(
+                                  UpdateScreenTxAction(
+                                    ScreenTransaction({'#REFRESH': false}),
+                                  ),
+                                );
                                 routeStack.push(component['route']);
                                 gotoRoute(component['route']);
                                 // String newRoute = component['route'];
@@ -640,13 +678,15 @@ Widget buildDisplayComponent(
         builder: (BuildContext context) {
           return Container(
             margin: EdgeInsets.only(
-                top: (component['beforeSpacing'] ?? 0.0).toDouble(),
-                bottom: (component['afterSpacing'] ?? 0.0).toDouble()),
+              top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+              bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+            ),
             padding: EdgeInsets.fromLTRB(
-                lPad + (component['leftPadding'] ?? 0.0).toDouble(),
-                tPad,
-                rPad + (component['rightPadding'] ?? 0.0).toDouble(),
-                bPad),
+              lPad + (component['leftPadding'] ?? 0.0).toDouble(),
+              tPad,
+              rPad + (component['rightPadding'] ?? 0.0).toDouble(),
+              bPad,
+            ),
             alignment: const Alignment(0.0, 0.0),
             child: DisplayQR(data: (qrData), size: (component['size'] ?? 200)),
           );
@@ -664,10 +704,11 @@ Widget buildDisplayComponent(
 
     if (txfController[scrName]![component['position']] == null) {
       txfController[scrName]![component['position']] = InputController(
-          component['position'],
-          TextEditingController(text: inputTxt[tKey]),
-          component['currentValue'] ?? '',
-          emptyString);
+        component['position'],
+        TextEditingController(text: inputTxt[tKey]),
+        component['currentValue'] ?? '',
+        emptyString,
+      );
     } else {
       txfController[scrName]![component['position']]!.controller.text =
           component['currentValue'] ?? "";
@@ -697,13 +738,11 @@ Widget buildDisplayComponent(
   } else if (tip == 'invitation') {
     try {
       Key rKey = GlobalKey();
-      result = Builder(builder: (BuildContext context) {
-        return Invitation(
-          key: rKey,
-          scrName: scrName,
-          component: component,
-        );
-      });
+      result = Builder(
+        builder: (BuildContext context) {
+          return Invitation(key: rKey, scrName: scrName, component: component);
+        },
+      );
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     } // end of try
@@ -715,17 +754,19 @@ Widget buildDisplayComponent(
         builder: (BuildContext context) {
           return Container(
             margin: EdgeInsets.only(
-                top: (component['beforeSpacing'] ?? 0.0).toDouble(),
-                bottom: (component['afterSpacing'] ?? 0.0).toDouble()),
+              top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+              bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+            ),
             padding: EdgeInsets.fromLTRB(
-                lPad + (component['leftPadding'] ?? 0.0).toDouble(),
-                tPad,
-                rPad + (component['rightPadding'] ?? 0.0).toDouble(),
-                bPad),
+              lPad + (component['leftPadding'] ?? 0.0).toDouble(),
+              tPad,
+              rPad + (component['rightPadding'] ?? 0.0).toDouble(),
+              bPad,
+            ),
             child: ImageUpload(
               key: iKey,
               component:
-              component, // imageType, folder, filename, route, position
+                  component, // imageType, folder, filename, route, position
               scrName: scrName,
             ),
           );
@@ -743,7 +784,7 @@ Widget buildDisplayComponent(
           return QrGps(
             key: iKey,
             component:
-            component, // imageType, folder, filename, route, position
+                component, // imageType, folder, filename, route, position
             scrName: scrName,
           );
         },
@@ -760,7 +801,7 @@ Widget buildDisplayComponent(
           return FtzChecker(
             key: iKey,
             component:
-            component, // imageType, folder, filename, route, position
+                component, // imageType, folder, filename, route, position
             scrName: scrName,
             single: true,
           );
@@ -777,7 +818,7 @@ Widget buildDisplayComponent(
           return TimePresence(
             key: iKey,
             component:
-            component, // imageType, folder, filename, route, position
+                component, // imageType, folder, filename, route, position
             scrName: scrName,
             single: true,
           );
@@ -794,7 +835,7 @@ Widget buildDisplayComponent(
           return LocationDetector(
             key: iKey,
             component:
-            component, // imageType, folder, filename, route, position
+                component, // imageType, folder, filename, route, position
             scrName: scrName,
             single: true,
           );
@@ -811,7 +852,7 @@ Widget buildDisplayComponent(
           return ProgressBar(
             key: iKey,
             component:
-            component, // imageType, folder, filename, route, position
+                component, // imageType, folder, filename, route, position
             scrName: scrName,
             single: true,
             lPad: lPad,
@@ -830,7 +871,7 @@ Widget buildDisplayComponent(
           return Tasklist(
             key: iKey,
             component:
-            component, // imageType, folder, filename, route, position
+                component, // imageType, folder, filename, route, position
             scrName: scrName,
             single: true,
             lPad: lPad,
@@ -849,7 +890,7 @@ Widget buildDisplayComponent(
           return ChoiceButtonGroup(
             key: iKey,
             component:
-            component, // imageType, folder, filename, route, position
+                component, // imageType, folder, filename, route, position
             scrName: scrName,
             lPad: lPad,
             tPad: tPad,
@@ -889,7 +930,7 @@ Widget buildDisplayComponent(
           return AttendQrGpsSelfie(
             key: iKey,
             component:
-            component, // imageType, folder, filename, route, position
+                component, // imageType, folder, filename, route, position
             scrName: scrName,
             single: true,
           );
@@ -904,11 +945,7 @@ Widget buildDisplayComponent(
       Key iKey = GlobalKey();
       result = Builder(
         builder: (BuildContext context) {
-          return PdfViewer(
-            key: iKey,
-            component: component,
-            scrName: scrName,
-          );
+          return PdfViewer(key: iKey, component: component, scrName: scrName);
         },
       );
     } catch (e) {
@@ -923,7 +960,7 @@ Widget buildDisplayComponent(
           return GpsSend(
             key: iKey,
             component:
-            component, // imageType, folder, filename, route, position
+                component, // imageType, folder, filename, route, position
             scrName: scrName,
             single: true,
           );
@@ -951,14 +988,14 @@ Widget buildDisplayComponent(
             break;
 
           case 'share':
-          // disabled because of share_plus incompatibility with ios18
-          // Share.share(component['children'][i]['message'] ?? '--',
-          //     subject: component['children'][i]['subject'] ?? '');
-          // if (routeExist(component['children'][i]['route'])) {
-          //   String pageToGo = component['children'][i]['route'] ?? scrName;
-          //   routeStack.push(pageToGo);
-          //   gotoRoute(pageToGo);
-          // }
+            // disabled because of share_plus incompatibility with ios18
+            // Share.share(component['children'][i]['message'] ?? '--',
+            //     subject: component['children'][i]['subject'] ?? '');
+            // if (routeExist(component['children'][i]['route'])) {
+            //   String pageToGo = component['children'][i]['route'] ?? scrName;
+            //   routeStack.push(pageToGo);
+            //   gotoRoute(pageToGo);
+            // }
             break;
 
           case 'location':
@@ -998,28 +1035,30 @@ Widget buildDisplayComponent(
 
           default:
             theIcon = disabledIcon(
-                component['children'][i]['url'],
-                component['children'][i]['text'],
-                (component['children'][i]['fontSize'] ?? 14.0).toDouble());
+              component['children'][i]['url'],
+              component['children'][i]['text'],
+              (component['children'][i]['fontSize'] ?? 14.0).toDouble(),
+            );
         } // end switch
         iconList.add(theIcon);
       } // end for
       result = Container(
-          margin: EdgeInsets.only(
-              top: (component['beforeSpacing'] ?? 0.0).toDouble(),
-              bottom: (component['afterSpacing'] ?? 0.0).toDouble()),
-          height: ((component['width']) ?? 90.0).toDouble(),
-          child: GridView(
-            scrollDirection: Axis.horizontal,
-            controller: ScrollController(),
-            gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent:
-              ((component['width'] + 30) ?? 130.0).toDouble(),
-              crossAxisSpacing: 1.0,
-              // mainAxisSpacing: 1.0,
-            ),
-            children: iconList,
-          ));
+        margin: EdgeInsets.only(
+          top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+          bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+        ),
+        height: ((component['width']) ?? 90.0).toDouble(),
+        child: GridView(
+          scrollDirection: Axis.horizontal,
+          controller: ScrollController(),
+          gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: ((component['width'] + 30) ?? 130.0).toDouble(),
+            crossAxisSpacing: 1.0,
+            // mainAxisSpacing: 1.0,
+          ),
+          children: iconList,
+        ),
+      );
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     } // end of try
@@ -1032,7 +1071,7 @@ Widget buildDisplayComponent(
           return Goto(
             key: iKey,
             component:
-            component, // imageType, folder, filename, route, position
+                component, // imageType, folder, filename, route, position
             scrName: scrName,
             single: true,
           );
@@ -1051,8 +1090,10 @@ Widget buildDisplayComponent(
         //= true => _component['variant'] = 'newPin'
 
         if (component['position'] != null) {
-          txfControllerCheck(scrName,
-              component['position']); // build txfController if necessary
+          txfControllerCheck(
+            scrName,
+            component['position'],
+          ); // build txfController if necessary
           if (canInitializePage(scrName)) {
             txfController[scrName]![component['position']]!.controller.text =
                 component['data'] ?? "FALSE";
@@ -1139,29 +1180,61 @@ Widget buildDisplayComponent(
     }
   } else if (tip == 'list_statistic_card') {
     try {
-      result = ListStatisticCard(
-        key: txfKey,
-        component: component,
-        scrName: scrName,
-        lPad: lPad,
-        tPad: tPad,
-        rPad: rPad,
-        bPad: bPad,
-      );
+      final String lscVariant = (component['variant'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (lscVariant == 'keyed') {
+        result = ListStatisticCardKeyed(
+          key: txfKey,
+          component: component,
+          scrName: scrName,
+          lPad: lPad,
+          tPad: tPad,
+          rPad: rPad,
+          bPad: bPad,
+        );
+      } else {
+        result = ListStatisticCard(
+          key: txfKey,
+          component: component,
+          scrName: scrName,
+          lPad: lPad,
+          tPad: tPad,
+          rPad: rPad,
+          bPad: bPad,
+        );
+      }
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }
   } else if (tip == 'worker_card_detail') {
     try {
-      result = WorkerCardDetail(
-        key: txfKey,
-        component: component,
-        scrName: scrName,
-        lPad: lPad,
-        tPad: tPad,
-        rPad: rPad,
-        bPad: bPad,
-      );
+      final String wcdVariant = (component['variant'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (wcdVariant == 'keyed') {
+        result = WorkerCardDetailKeyed(
+          key: txfKey,
+          component: component,
+          scrName: scrName,
+          lPad: lPad,
+          tPad: tPad,
+          rPad: rPad,
+          bPad: bPad,
+        );
+      } else {
+        result = WorkerCardDetail(
+          key: txfKey,
+          component: component,
+          scrName: scrName,
+          lPad: lPad,
+          tPad: tPad,
+          rPad: rPad,
+          bPad: bPad,
+        );
+      }
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }
@@ -1181,8 +1254,10 @@ Widget buildDisplayComponent(
     }
   } else if (tip == 'timeline') {
     try {
-      final String tlVariant =
-      (component['variant'] ?? '').toString().trim().toLowerCase();
+      final String tlVariant = (component['variant'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
       if (tlVariant == 'periodic') {
         result = TimelinePeriodic(
           key: txfKey,
@@ -1228,23 +1303,641 @@ Widget buildDisplayComponent(
         builder: (BuildContext context) {
           return Container(
             margin: EdgeInsets.only(
-                top: (component['beforeSpacing'] ?? 0.0).toDouble(),
-                bottom: (component['afterSpacing'] ?? 0.0).toDouble()),
+              top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+              bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+            ),
             padding: EdgeInsets.fromLTRB(
-                lPad + (component['leftPadding'] ?? 0.0).toDouble(),
-                tPad,
-                rPad + (component['rightPadding'] ?? 0.0).toDouble(),
-                bPad),
-            child: const SizedBox(
-              width: 0.0,
-              height: 0.0,
-            ), // put child here
+              lPad + (component['leftPadding'] ?? 0.0).toDouble(),
+              tPad,
+              rPad + (component['rightPadding'] ?? 0.0).toDouble(),
+              bPad,
+            ),
+            child: const SizedBox(width: 0.0, height: 0.0), // put child here
           );
         },
       );
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     } // end of try
+  } else if (tip == 'notice_bar') {
+    try {
+      result = NoticeBar(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'scanner') {
+    try {
+      result = Scanner(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'route_progress_header') {
+    try {
+      result = RouteProgressHeader(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'precondition_gate_card') {
+    try {
+      result = PreconditionGateCard(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'inventory_bucket_card') {
+    try {
+      result = InventoryBucketCard(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'driver_stop_card') {
+    try {
+      result = DriverStopCard(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'nav_action_card') {
+    try {
+      result = NavActionCard(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'vehicle_custody_header') {
+    try {
+      result = VehicleCustodyHeader(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'task_manifest_list') {
+    try {
+      result = TaskManifestList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'circulation_summary') {
+    try {
+      result = CirculationSummary(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'custody_step_header') {
+    try {
+      result = CustodyStepHeader(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'custody_count_list') {
+    try {
+      result = CustodyCountList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'custody_count_submit') {
+    try {
+      result = CustodyCountSubmit(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'custody_reveal') {
+    try {
+      result = CustodyReveal(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'custody_confirmed_list') {
+    try {
+      result = CustodyConfirmedList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'custody_discrepancy_list') {
+    try {
+      result = CustodyDiscrepancyList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'custody_event_submit') {
+    try {
+      result = CustodyEventSubmit(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'closing_context_rail') {
+    try {
+      result = ClosingContextRail(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'route_feed_header') {
+    try {
+      result = RouteFeedHeader(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'task_feed_list') {
+    try {
+      result = TaskFeedList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'workspace_header') {
+    try {
+      result = WorkspaceHeader(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'item_execution_list' || tip == 'itemexecutionlist') {
+    try {
+      result = ItemExecutionList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'item_execution_submit' || tip == 'itemexecutionsubmit') {
+    try {
+      result = ItemExecutionSubmit(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'signature_pad') {
+    try {
+      result = SignaturePad(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'evidence_row' || tip == 'evidencerow') {
+    try {
+      result = EvidenceRow(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'return_header') {
+    try {
+      result = ReturnHeader(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'vehicle_cargo_summary') {
+    try {
+      result = VehicleCargoSummary(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'vehicle_feed_header') {
+    try {
+      result = VehicleFeedHeader(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'vehicle_feed_list') {
+    try {
+      result = VehicleFeedList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'adminactivetriplist') {
+    try {
+      result = AdminActiveTripList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'adminupcomingtasklist') {
+    try {
+      result = AdminUpcomingTaskList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'adminoutstandinglist') {
+    try {
+      result = AdminOutstandingList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'admin_coordination_header') {
+    try {
+      result = AdminCoordinationHeader(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'coordination_signal_list') {
+    try {
+      result = CoordinationSignalList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'executor_designate_card') {
+    try {
+      result = ExecutorDesignateCard(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'taskitembuilder' || tip == 'task_item_builder') {
+    try {
+      result = TaskItemBuilder(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'task_draft_summary') {
+    try {
+      result = TaskDraftSummary(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'task_draft_info') {
+    try {
+      result = TaskDraftInfo(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'task_create_submit') {
+    try {
+      result = TaskCreateSubmit(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'task_create_success') {
+    try {
+      result = TaskCreateSuccess(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'picker_list' ||
+      tip == 'pickerlist' ||
+      tip == 'vehicle_picker' ||
+      tip == 'vehiclepicker') {
+    try {
+      result = PickerList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'running_task_list') {
+    try {
+      result = AdminActiveTripList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'upcoming_task_list') {
+    try {
+      result = AdminUpcomingTaskList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'outstanding_panel') {
+    try {
+      result = AdminOutstandingList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
   } else {
     result = Text("--${component['type']}-- Wrong widget name.");
   }

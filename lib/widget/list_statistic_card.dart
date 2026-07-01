@@ -42,6 +42,7 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
   String _eventCode = '';
   String _siteSv = '';
   String _searchQuery = '';
+  String _mergeTyped = '';
   final TextEditingController _searchController = TextEditingController();
 
   // Build-scoped indexes (rebuilt each Obx pass).
@@ -69,8 +70,9 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
       _textArray = [];
     }
     try {
-      _contentArray =
-          diamondTextToList((widget.component['content'] ?? '').toString());
+      _contentArray = diamondTextToList(
+        (widget.component['content'] ?? '').toString(),
+      );
     } catch (_) {
       _contentArray = [];
     }
@@ -79,18 +81,22 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
     final String statsRaw = (widget.component['stats'] ?? '').toString();
     _statSpecs = parseStatSpecs(autheniumDecode(statsRaw) ?? statsRaw);
     _staleMs =
-        int.tryParse((widget.component['staleMs'] ?? '').toString()) ?? 43200000;
+        int.tryParse((widget.component['staleMs'] ?? '').toString()) ??
+        43200000;
     final int def =
         int.tryParse((widget.component['periodDefault'] ?? '').toString()) ?? 0;
     _selectedMs = _periods.any((p) => p.ms == def)
         ? def
         : (_periods.isNotEmpty ? _periods.first.ms : 86400000);
+    _mergeTyped = (widget.component['mergeTyped'] ?? '').toString().trim();
   }
 
   void _subscribe() {
     final String rawTable = (widget.component['table'] ?? '').toString().trim();
     final TablePath tp = parseTablePath(rawTable);
-    final String appVid = (widget.component['vidtable'] ?? '').toString().trim();
+    final String appVid = (widget.component['vidtable'] ?? '')
+        .toString()
+        .trim();
     if (tp.tableDocId.isEmpty || appVid.isEmpty) return;
     _siteCode = '${tp.tableDocId}/${tp.subColl}';
     _eventCode = '${tp.tableDocId}/event';
@@ -99,6 +105,22 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
   }
 
   Map<String, dynamic> get _screenTx => transactionStore.state.screenTx;
+
+  /// Resolve the {ccVid} token from screenTx for event-side av filtering.
+  /// Uses the same conditions/search field (same precedence as [_points]) to
+  /// extract the token name, then looks it up in _screenTx.
+  String get _resolvedCcVid {
+    final String raw =
+        (widget.component['conditions'] ?? widget.component['search'] ?? '')
+            .toString();
+    final String decoded = autheniumDecode(raw) ?? raw;
+    // Extract the token name from the pattern (e.g. "av◼{ccVid}" -> "ccVid").
+    final RegExp tok = RegExp(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}');
+    final Match? m = tok.firstMatch(decoded);
+    if (m == null) return '';
+    final String key = m.group(1) ?? '';
+    return (_screenTx[key] ?? '').toString().trim();
+  }
 
   String get _selectedLabel {
     for (final p in _periods) {
@@ -110,16 +132,22 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
   /// The matched site doc's `ll[]` points (cc filtered by av == ccVid).
   List<Map<String, dynamic>> _points(List<Map<String, dynamic>> siteDocs) {
     final String condRaw =
-    (widget.component['conditions'] ?? widget.component['search'] ?? '')
-        .toString();
+        (widget.component['conditions'] ?? widget.component['search'] ?? '')
+            .toString();
     final String cond = autheniumDecode(condRaw) ?? condRaw;
-    final List<Map<String, dynamic>> matched =
-    filterByCharCodeEquality(siteDocs, cond, _screenTx);
+    final List<Map<String, dynamic>> matched = filterByCharCodeEquality(
+      siteDocs,
+      cond,
+      _screenTx,
+    );
     _siteSv = matched.isNotEmpty ? (matched.first['sv'] ?? '').toString() : '';
     if (matched.isEmpty) return const [];
     final dynamic ll = matched.first['ll'];
     if (ll is! List) return const [];
-    return ll.whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
+    return ll
+        .whereType<Map>()
+        .map((m) => Map<String, dynamic>.from(m))
+        .toList();
   }
 
   List<Map<String, dynamic>> _search(List<Map<String, dynamic>> points) {
@@ -132,13 +160,17 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
 
   void _onPointTap(Map<String, dynamic> point) {
     final String route = (widget.component['route'] ?? '').toString();
-    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-      'point': (point['ln'] ?? '').toString(),
-      'pointId': (point['li'] ?? '').toString(),
-      'pointName': (point['ln'] ?? '').toString(),
-      'point_route': route,
-      'site': _siteSv,
-    })));
+    transactionStore.dispatch(
+      UpdateScreenTxAction(
+        ScreenTransaction({
+          'point': (point['ln'] ?? '').toString(),
+          'pointId': (point['li'] ?? '').toString(),
+          'pointName': (point['ln'] ?? '').toString(),
+          'point_route': route,
+          'site': _siteSv,
+        }),
+      ),
+    );
     if (route.isNotEmpty && routeExist(route)) {
       routeStack.push(route);
       gotoRoute(route);
@@ -149,37 +181,132 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
   Widget build(BuildContext context) {
     return Obx(() {
       final List<Map<String, dynamic>> siteDocs =
-      List<Map<String, dynamic>>.from(mapTableContent[_siteCode] ?? const []);
-      final List<Map<String, dynamic>> events =
-      List<Map<String, dynamic>>.from(
-          mapTableContent[_eventCode] ?? const []);
+          List<Map<String, dynamic>>.from(
+            mapTableContent[_siteCode] ?? const [],
+          );
+      final List<Map<String, dynamic>> events = List<Map<String, dynamic>>.from(
+        mapTableContent[_eventCode] ?? const [],
+      );
       _nowMs = DateTime.now().millisecondsSinceEpoch;
       _windowStartMs = _nowMs - _selectedMs;
-      _byLn = eventsByLn(events);
 
       final List<Map<String, dynamic>> points = _points(siteDocs);
-      final StatsSummary summary =
-      computeStatsSummary(points, _byLn, _nowMs, _windowStartMs);
-      final List<Map<String, dynamic>> searched = _search(points);
 
-      // Pair each point with its stat, then sort severity-desc, oldest-first.
-      final List<MapEntry<Map<String, dynamic>, PointStat>> entries =
-      searched.map((p) {
-        final stat = computePointStat(
-            _byLn[(p['ln'] ?? '').toString()] ?? const [],
-            _nowMs,
-            _windowStartMs,
-            _staleMs);
-        return MapEntry(p, stat);
-      }).toList();
-      entries.sort((a, b) {
-        final int ra = statusOrder.indexOf(a.value.ps);
-        final int rb = statusOrder.indexOf(b.value.ps);
-        final int sa = ra < 0 ? statusOrder.length : ra;
-        final int sb = rb < 0 ? statusOrder.length : rb;
-        if (sa != sb) return sa - sb;
-        return a.value.lastEpoch.compareTo(b.value.lastEpoch);
-      });
+      // --- Merge-typed path vs legacy path ---
+      final List<MapEntry<Map<String, dynamic>, PointStat>> entries;
+      final StatsSummary summary;
+
+      if (_mergeTyped.isNotEmpty) {
+        // MERGE MODE: scope events, lowercase matching, orphan merge.
+        final String ccVid = _resolvedCcVid;
+        final List<Map<String, dynamic>> scoped = scopePatrolEvents(
+          events,
+          'report-patrol',
+          ccVid,
+          _windowStartMs,
+        );
+        final Map<String, List<Map<String, dynamic>>> byLnLower =
+            eventsByLnLower(scoped);
+
+        // Official points set (lowercase).
+        final Set<String> officialNamesLower = points
+            .map((p) => (p['ln'] ?? '').toString().toLowerCase())
+            .where((s) => s.isNotEmpty)
+            .toSet();
+
+        // Typed entries (orphans).
+        final List<TypedEntry> typedEntries = groupOrphans(
+          byLnLower,
+          officialNamesLower,
+        );
+
+        // Stats.
+        summary = computeStatsSummaryMerge(
+          points: points,
+          typedEntries: typedEntries,
+          scopedEvents: scoped,
+          byLnLower: byLnLower,
+        );
+
+        // Build entry pairs: official points.
+        final List<MapEntry<Map<String, dynamic>, PointStat>> officialEntries =
+            points.map((p) {
+              final String lnLower = (p['ln'] ?? '').toString().toLowerCase();
+              final stat = computePointStat(
+                byLnLower[lnLower] ?? const [],
+                _nowMs,
+                _windowStartMs,
+                _staleMs,
+              );
+              return MapEntry(p, stat);
+            }).toList();
+
+        // Build entry pairs: typed entries.
+        final List<MapEntry<Map<String, dynamic>, PointStat>> typedPairs =
+            typedEntries.map((te) {
+              final Map<String, dynamic> pseudoPoint = {'ln': te.ln, 'li': ''};
+              final stat = computeTypedPointStat(te.events, _nowMs);
+              return MapEntry(pseudoPoint, stat);
+            }).toList();
+
+        // Union then search.
+        final List<MapEntry<Map<String, dynamic>, PointStat>> union = [
+          ...officialEntries,
+          ...typedPairs,
+        ];
+
+        // Apply search filter.
+        final String q = _searchQuery.trim().toLowerCase();
+        final List<MapEntry<Map<String, dynamic>, PointStat>> searched =
+            q.isEmpty
+            ? union
+            : union
+                  .where(
+                    (e) => (e.key['ln'] ?? '')
+                        .toString()
+                        .toLowerCase()
+                        .contains(q),
+                  )
+                  .toList();
+
+        // Sort: severity desc, oldest first.
+        searched.sort((a, b) {
+          final int ra = statusOrder.indexOf(a.value.ps);
+          final int rb = statusOrder.indexOf(b.value.ps);
+          final int sa = ra < 0 ? statusOrder.length : ra;
+          final int sb = rb < 0 ? statusOrder.length : rb;
+          if (sa != sb) return sa - sb;
+          return a.value.lastEpoch.compareTo(b.value.lastEpoch);
+        });
+
+        entries = searched;
+      } else {
+        // LEGACY MODE: exact-case matching, old stats.
+        _byLn = eventsByLn(events);
+        summary = computeStatsSummary(points, _byLn, _nowMs, _windowStartMs);
+        final List<Map<String, dynamic>> searched = _search(points);
+
+        final List<MapEntry<Map<String, dynamic>, PointStat>> legacy = searched
+            .map((p) {
+              final stat = computePointStat(
+                _byLn[(p['ln'] ?? '').toString()] ?? const [],
+                _nowMs,
+                _windowStartMs,
+                _staleMs,
+              );
+              return MapEntry(p, stat);
+            })
+            .toList();
+        legacy.sort((a, b) {
+          final int ra = statusOrder.indexOf(a.value.ps);
+          final int rb = statusOrder.indexOf(b.value.ps);
+          final int sa = ra < 0 ? statusOrder.length : ra;
+          final int sb = rb < 0 ? statusOrder.length : rb;
+          if (sa != sb) return sa - sb;
+          return a.value.lastEpoch.compareTo(b.value.lastEpoch);
+        });
+        entries = legacy;
+      }
 
       final double availableH = MediaQuery.of(context).size.height * 0.82;
 
@@ -187,7 +314,11 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
         height: availableH,
         child: Padding(
           padding: EdgeInsets.fromLTRB(
-              widget.lPad, widget.tPad, widget.rPad, widget.bPad),
+            widget.lPad,
+            widget.tPad,
+            widget.rPad,
+            widget.bPad,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -201,13 +332,13 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
                 child: entries.isEmpty
                     ? _buildEmptyState()
                     : ListView(
-                  padding: EdgeInsets.zero,
-                  children: [
-                    for (final e in entries)
-                      _buildPointCard(e.key, e.value),
-                    const SizedBox(height: 24),
-                  ],
-                ),
+                        padding: EdgeInsets.zero,
+                        children: [
+                          for (final e in entries)
+                            _buildPointCard(e.key, e.value),
+                          const SizedBox(height: 24),
+                        ],
+                      ),
               ),
             ],
           ),
@@ -233,25 +364,30 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color:
-                    p.ms == _selectedMs ? Colors.white : Colors.transparent,
+                    color: p.ms == _selectedMs
+                        ? Colors.white
+                        : Colors.transparent,
                     borderRadius: BorderRadius.circular(11),
                     boxShadow: p.ms == _selectedMs
                         ? const [
-                      BoxShadow(
-                          color: Color(0x14000000),
-                          blurRadius: 6,
-                          offset: Offset(0, 2))
-                    ]
+                            BoxShadow(
+                              color: Color(0x14000000),
+                              blurRadius: 6,
+                              offset: Offset(0, 2),
+                            ),
+                          ]
                         : null,
                   ),
-                  child: Text(p.label,
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: p.ms == _selectedMs
-                              ? const Color(0xFF1A2233)
-                              : const Color(0xFF8A93A6))),
+                  child: Text(
+                    p.label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: p.ms == _selectedMs
+                          ? const Color(0xFF1A2233)
+                          : const Color(0xFF8A93A6),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -299,12 +435,19 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(value,
-              style: TextStyle(
-                  fontSize: 22, fontWeight: FontWeight.w800, color: fg)),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              color: fg,
+            ),
+          ),
           const SizedBox(height: 4),
-          Text(spec.label,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+          Text(
+            spec.label,
+            style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+          ),
         ],
       ),
     );
@@ -335,11 +478,14 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
   }
 
   Widget _buildEmptyState() {
-    final String empty =
-    _textArray.length > 2 ? _textArray[2] : 'Data tidak ditemukan';
+    final String empty = _textArray.length > 2
+        ? _textArray[2]
+        : 'Data tidak ditemukan';
     return Center(
-      child: Text(empty,
-          style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 14)),
+      child: Text(
+        empty,
+        style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 14),
+      ),
     );
   }
 
@@ -370,9 +516,10 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: const [
                 BoxShadow(
-                    color: Color(0x0F000000),
-                    blurRadius: 10,
-                    offset: Offset(0, 4)),
+                  color: Color(0x0F000000),
+                  blurRadius: 10,
+                  offset: Offset(0, 4),
+                ),
               ],
             ),
             child: IntrinsicHeight(
@@ -398,47 +545,63 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
                           Row(
                             children: [
                               Expanded(
-                                child: Text(name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w800,
-                                        color: Color(0xFF1A2233))),
+                                child: Text(
+                                  name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    color: Color(0xFF1A2233),
+                                  ),
+                                ),
                               ),
                               const SizedBox(width: 8),
                               if (stat.hasEvent) _evidenceBadge(stat.evidence),
                               const SizedBox(width: 4),
-                              const Icon(Icons.chevron_right_rounded,
-                                  color: Color(0xFFC7CCD4), size: 20),
+                              const Icon(
+                                Icons.chevron_right_rounded,
+                                color: Color(0xFFC7CCD4),
+                                size: 20,
+                              ),
                             ],
                           ),
                           if (type.isNotEmpty) ...[
                             const SizedBox(height: 3),
-                            Text(type,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.5,
-                                    color: Color(0xFF8A93A6))),
+                            Text(
+                              type,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.5,
+                                color: Color(0xFF8A93A6),
+                              ),
+                            ),
                           ],
                           if (line2.isNotEmpty) ...[
                             const SizedBox(height: 6),
-                            Text(line2,
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: normalizeStatus(ps) == 'ok'
-                                        ? const Color(0xFF6B7280)
-                                        : sColor)),
+                            Text(
+                              line2,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: normalizeStatus(ps) == 'ok'
+                                    ? const Color(0xFF6B7280)
+                                    : sColor,
+                              ),
+                            ),
                           ],
                           if (line3.isNotEmpty) ...[
                             const SizedBox(height: 4),
-                            Text(line3,
-                                style: const TextStyle(
-                                    fontSize: 12, color: Color(0xFF9AA1AD))),
+                            Text(
+                              line3,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF9AA1AD),
+                              ),
+                            ),
                           ],
                         ],
                       ),
@@ -465,14 +628,20 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(strong ? Icons.verified_user_rounded : Icons.gpp_maybe_rounded,
-              size: 14, color: statusColor(mapped)),
+          Icon(
+            strong ? Icons.verified_user_rounded : Icons.gpp_maybe_rounded,
+            size: 14,
+            color: statusColor(mapped),
+          ),
           const SizedBox(width: 4),
-          Text(evidence,
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: statusColor(mapped))),
+          Text(
+            evidence,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: statusColor(mapped),
+            ),
+          ),
         ],
       ),
     );

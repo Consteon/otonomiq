@@ -1,14 +1,15 @@
-import 'package:flutter/cupertino.dart';
-import '../global.dart';
 import 'dart:io';
+
+import 'package:flutter/cupertino.dart';
+import 'package:geocoding/geocoding.dart';
 // import 'package:connectivity/connectivity.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:geocoding/geocoding.dart';
-import '../api.dart';
 import 'package:ntp/ntp.dart';
-import '../redux/screen_transaction.dart';
 
+import '../api.dart';
 import '../firestore_repository/table_repository.dart';
+import '../global.dart';
+import '../redux/screen_transaction.dart';
 
 class ConnectionData {
   bool internetConnection = false;
@@ -37,7 +38,9 @@ class ConnectionData {
         if (settingKey != null &&
             transactionStore.state.screenTx['#CLUSTER'] != null) {
           runSheetStartup(
-              settingKey, transactionStore.state.screenTx['#CLUSTER']);
+            settingKey,
+            transactionStore.state.screenTx['#CLUSTER'],
+          );
         }
         debugPrint('>>>>> Internet is connected');
       } else {
@@ -66,7 +69,7 @@ class ConnectionData {
         try {
           n = await NTP.now().timeout(const Duration(seconds: 2));
         } catch (e) {
-          errorReport(e);
+          reportNonTimeout(e);
         }
         result.time = result.time == 0 ? n.millisecondsSinceEpoch : 0;
       } catch (eNtp) {
@@ -78,7 +81,7 @@ class ConnectionData {
     getAppGps();
     debugPrint('run historySync.');
     await sendImagesInImageMap(); // send unsent images in imageMap to firebase storage
-    historySync('Connection Data',false);
+    historySync('Connection Data', false);
     // }
     // } else {
     //   // else internet
@@ -90,10 +93,14 @@ class ConnectionData {
     // } // end if internet
     internetConnectionFlag.value = internetConnection;
     result.internet = internetConnection;
-    await transactionStore.dispatch(UpdateScreenTxAction(
-        ScreenTransaction({'#INTERNET': internetConnection})));
+    await transactionStore.dispatch(
+      UpdateScreenTxAction(
+        ScreenTransaction({'#INTERNET': internetConnection}),
+      ),
+    );
     debugPrint(
-        '>>> internetConnected=${internetConnectionFlag.value}, internetConnection = $internetConnection');
+      '>>> internetConnected=${internetConnectionFlag.value}, internetConnection = $internetConnection',
+    );
     return result;
   } // end of getConnection
 } // end of ConnectionData

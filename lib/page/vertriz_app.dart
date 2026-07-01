@@ -1,21 +1,21 @@
 import 'package:flutter/material.dart';
-import '../bloc_submit/bloc.dart';
-import '../main_bloc/bloc.dart';
-import 'package:redux_dev_tools/redux_dev_tools.dart';
-import 'package:flutter_redux/flutter_redux.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_redux/flutter_redux.dart';
+import 'package:redux_dev_tools/redux_dev_tools.dart';
+
+import '../bloc_submit/bloc.dart';
 import '../global.dart';
-import '../redux/screen_transaction.dart';
 import '../login/api/user_repository.dart';
+import '../main_bloc/bloc.dart';
 import '../page/main_page.dart';
+import '../redux/screen_transaction.dart';
 
 class VertrizApp extends StatelessWidget {
   // This widget is the root of your application.
   final UserRepository _userRepository;
 
-  const VertrizApp({required Key key, required UserRepository userRepository})
-      : _userRepository = userRepository,
-        super(key: key);
+  const VertrizApp({required Key key, required this._userRepository})
+    : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -39,20 +39,23 @@ class VertrizApp extends StatelessWidget {
             // side: MaterialStateProperty.resolveWith<BorderSide>(
             //         (states) => BorderSide(color: borderColor ?? Colors.black)),
             backgroundColor: WidgetStateProperty.resolveWith<Color>(
-                (states) => systemUIComponent[theme]['buttonColor'] == null
-                    ? Colors.grey[400]!
-                    : Color(systemUIComponent[theme]['buttonColor'])),
+              (states) => systemUIComponent[theme]['buttonColor'] == null
+                  ? Colors.grey[400]!
+                  : Color(systemUIComponent[theme]['buttonColor']),
+            ),
             foregroundColor: WidgetStateProperty.resolveWith<Color>(
-                (states) => systemUIComponent[theme]['buttonText'] == null
-                    ? Colors.black87
-                    : Color(systemUIComponent[theme]['buttonText'])),
+              (states) => systemUIComponent[theme]['buttonText'] == null
+                  ? Colors.black87
+                  : Color(systemUIComponent[theme]['buttonText']),
+            ),
             // backgroundColor: MaterialStateProperty.resolveWith<Color>(
             //         (states) => systemUIComponent[theme]['buttonColor'] == null
             //         ? Colors.grey[400]!
             //         : Colors.grey[400]!,
             shape: WidgetStateProperty.resolveWith<OutlinedBorder>((_) {
               return RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(4));
+                borderRadius: BorderRadius.circular(4),
+              );
             }),
             // textStyle: MaterialStateProperty.resolveWith<TextStyle>(
             //     (states) => TextStyle(color: Colors.red)),
@@ -74,8 +77,8 @@ class VertrizApp extends StatelessWidget {
           ),
         ),
         bottomAppBarTheme: BottomAppBarThemeData(
-            color:
-                Color(systemUIComponent[theme]['bottomAppBarColor'].toInt())),
+          color: Color(systemUIComponent[theme]['bottomAppBarColor'].toInt()),
+        ),
         // toggleableActiveColor: Color(systemUIComponent[theme]['toggleableActiveColor'].toInt()??4280391411), // blue
         // disabledColor: Color(systemUIComponent[theme]['disabledColor'].toInt()??4288585374), // grey
       ),
@@ -91,9 +94,9 @@ class VertrizApp extends StatelessWidget {
                 ..add(LoadSubmit());
             },
           ),
-//        BlocProvider<TimerBloc>(
-//          builder: (BuildContext context) => TimerBloc(),
-//        ),
+          //        BlocProvider<TimerBloc>(
+          //          builder: (BuildContext context) => TimerBloc(),
+          //        ),
         ],
         child: BlocBuilder<MainBloc, MainState>(
           builder: (context, state) {
@@ -101,7 +104,17 @@ class VertrizApp extends StatelessWidget {
             if (state['#NEED_PINHASH'] == true) {
               BlocProvider.of<MainBloc>(context).add(NeedPinHash());
             }
-            return MainPage(key: UniqueKey());
+            // Stable key: MainBloc emits (nav between home variants, NeedPinHash,
+            // etc.) must NOT tear down + re-inflate the whole shell. A fresh
+            // UniqueKey() here forced Flutter to destroy the old MainPage and
+            // build a new one every emit, which (a) mounted two Scaffolds sharing
+            // the module-global mainScaffoldKey for one frame -> "Duplicate
+            // GlobalKey detected", (b) ran ancestor lookups on the deactivating
+            // subtree -> "Looking up a deactivated widget's ancestor is unsafe",
+            // and (c) re-ran initState (asyncAppStartup2 + subscribeToProxy) ->
+            // "table ... has already subscribed" spam. A const ValueKey keeps the
+            // single MainPageState alive, matching the shell's render-once design.
+            return const MainPage(key: ValueKey('mainPage'));
             // return BlocBuilder<SubmitBloc, SubmitState> (
             //   builder: (context, state) {
             //     return MainPage();
@@ -110,12 +123,12 @@ class VertrizApp extends StatelessWidget {
           }, // MainBloc builder
         ),
       ),
-//      home: BlocProvider<MainBloc>(
-//        builder: (context) => MainBloc(),
-//        child: BlocBuilder<MainBloc,MainState>(
-//          builder: (context, state) => MainPage(),
-//        ),
-//      ),
+      //      home: BlocProvider<MainBloc>(
+      //        builder: (context) => MainBloc(),
+      //        child: BlocBuilder<MainBloc,MainState>(
+      //          builder: (context, state) => MainPage(),
+      //        ),
+      //      ),
     );
   }
 }

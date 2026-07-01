@@ -18,8 +18,10 @@ void constructPageElements(String scrName) {
     screenUIComponent[scrName] = {};
   }
   if (screenUIComponent[scrName]['children'] != null) {
-    linkElement[scrName] =
-        buildPage(screenUIComponent[scrName]['children'], scrName);
+    linkElement[scrName] = buildPage(
+      screenUIComponent[scrName]['children'],
+      scrName,
+    );
   } // end if children
 } // end of constructPageElements
 
@@ -84,7 +86,7 @@ dynamic getAllPages(BuildContext context, String scrName) {
 
 void buildAllPages(BuildContext context, String scrName) async {
   linkPage = getAllPages(context, scrName);
-//  poxPage = await compute(getAllPages,screenUIComponent);
+  //  poxPage = await compute(getAllPages,screenUIComponent);
 }
 
 Alignment getComponentAlignment(String? alg) {
@@ -105,8 +107,11 @@ Alignment getComponentAlignment(String? alg) {
   return result;
 } // end of getComponentAlignment
 
-List<Widget> buildColumnPage(var componentList, String scrName,
-    {bool? dialog}) {
+List<Widget> buildColumnPage(
+  var componentList,
+  String scrName, {
+  bool? dialog,
+}) {
   if (txfController[scrName] == null) {
     txfController[scrName] = {};
   } // end if
@@ -114,20 +119,32 @@ List<Widget> buildColumnPage(var componentList, String scrName,
   var userRepository = myState['#USER_REPOSITORY'];
   var pageComponent = [
     Align(
-        alignment: getComponentAlignment(componentList[0]['alignment']),
-        child: buildDisplayComponent(componentList[0], scrName, userRepository))
+      alignment: getComponentAlignment(componentList[0]['alignment']),
+      child: buildDisplayComponent(componentList[0], scrName, userRepository),
+    ),
   ];
   for (var i = 1; i < componentList.length; i++) {
-    pageComponent.add(Align(
+    pageComponent.add(
+      Align(
         alignment: getComponentAlignment(componentList[i]['alignment']),
-        child: buildDisplayComponent(componentList[i], scrName, userRepository,
-            dialog: dialog ?? false)));
+        child: buildDisplayComponent(
+          componentList[i],
+          scrName,
+          userRepository,
+          dialog: dialog ?? false,
+        ),
+      ),
+    );
   } // end for
   return pageComponent;
 } // end of buildColumnPage
 
-List<Widget> buildPage(var componentList, String scrName,
-    {bool? dialog, bool clear = true}) {
+List<Widget> buildPage(
+  var componentList,
+  String scrName, {
+  bool? dialog,
+  bool clear = true,
+}) {
   // main page should omit clear (=true),
   // sub page like dialog or widgetList should set clear = false
   dynamic myState = transactionStore.state.screenTx;
@@ -141,16 +158,32 @@ List<Widget> buildPage(var componentList, String scrName,
   } // end if (txfController[scrName] == null
   if (clear) {
     ApproverStickyBar.clearConfigs(scrName);
+    clearDriverHomeState(scrName);
+    TaskManifestList.clearExpandState(scrName);
+    CustodyCountList.clearCountStore(scrName);
+    CustodyReveal.clearEditState(scrName);
+    CustodyEventSubmit.clearState(scrName);
+    ItemExecutionList.clearExecutionStore(scrName);
+    ItemExecutionSubmit.clearState(scrName);
+    AdminCreateTaskSupport.clearAllDrafts();
+    TaskItemBuilder.resetClientPublished(scrName);
+    TaskCreateSubmit.resetWriting(scrName);
+    TaskFeedList.clearFlatSearch(scrName);
   }
 
   dynamic userRepository = myState['#USER_REPOSITORY'];
   List<Widget> pageComponent = [
-    buildDisplayComponent(componentList[0], scrName, userRepository)
+    buildDisplayComponent(componentList[0], scrName, userRepository),
   ];
   for (var i = 1; i < componentList.length; i++) {
-    pageComponent.add(buildDisplayComponent(
-        componentList[i], scrName, userRepository,
-        dialog: dialog ?? false));
+    pageComponent.add(
+      buildDisplayComponent(
+        componentList[i],
+        scrName,
+        userRepository,
+        dialog: dialog ?? false,
+      ),
+    );
   }
   return pageComponent;
 } // end of buildPage
@@ -164,9 +197,11 @@ void appRefresh() {
       readSettings(lifKey, 1).then((_) {
         // constructAllPageElements();
         transactionStore.dispatch(
-            UpdateScreenTxAction(ScreenTransaction({'#REFRESH': false})));
+          UpdateScreenTxAction(ScreenTransaction({'#REFRESH': false})),
+        );
         List<Widget> newElementList = List<Widget>.of(
-            linkElement[rootThis.pageName]!.map((widget) => widget));
+          linkElement[rootThis.pageName]!.map((widget) => widget),
+        );
         // List<Widget> newElementList = List<Widget>.empty(growable: true);
         // newElementList.addAll(linkElement[rootThis.pageName]!);
         rootThis.setState(() {
@@ -197,8 +232,11 @@ List<Widget> buildBannerList(var bannerList, double aspectRatio) {
                     if (bannerList[0]['route'].length >= 4 &&
                         bannerList[0]['route'].substring(0, 4).toLowerCase() ==
                             'http') {
-                      openInWebView(context, bannerList[0]['route'],
-                          bannerList[0]['title'] ?? 'Web');
+                      openInWebView(
+                        context,
+                        bannerList[0]['route'],
+                        bannerList[0]['title'] ?? 'Web',
+                      );
                     } else {
                       var state = transactionStore.state.screenTx;
                       if (state['#REFRESH']) {
@@ -207,12 +245,15 @@ List<Widget> buildBannerList(var bannerList, double aspectRatio) {
                           var lifKey = state.screenTx['#INTERFACE_KEY'];
                           readSettings(lifKey, 1).then((_) {
                             // constructAllPageElements();
-                            transactionStore.dispatch(UpdateScreenTxAction(
-                                ScreenTransaction({'#REFRESH': false})));
-//                            List<Widget> newElementList = List<Widget>();
+                            transactionStore.dispatch(
+                              UpdateScreenTxAction(
+                                ScreenTransaction({'#REFRESH': false}),
+                              ),
+                            );
+                            //                            List<Widget> newElementList = List<Widget>();
                             String newRoute = bannerList[0]['route'];
                             List<Widget> newElementList = reloadPage(newRoute);
-//                            newElementList.addAll(linkElement[newRoute]);
+                            //                            newElementList.addAll(linkElement[newRoute]);
                             rootThis.setState(() {
                               rootThis.pageName = newRoute;
                               rootThis.pageElements = newElementList;
@@ -241,8 +282,9 @@ List<Widget> buildBannerList(var bannerList, double aspectRatio) {
                     AspectRatio(
                       aspectRatio: aspectRatio,
                       child: displayImage(
-                          imageUrl: bannerList[0]['url'] ?? defaultImage,
-                          cached: true),
+                        imageUrl: bannerList[0]['url'] ?? defaultImage,
+                        cached: true,
+                      ),
                       //   child: FadeInImage.memoryNetwork(
                       //       placeholder: kTransparentImage,
                       //       image: _bannerList[0]['url']),
@@ -253,7 +295,7 @@ List<Widget> buildBannerList(var bannerList, double aspectRatio) {
             ),
           );
         },
-      )
+      ),
     ];
   } catch (_) {
     bannerComponent = Container(
@@ -279,96 +321,110 @@ List<Widget> buildBannerList(var bannerList, double aspectRatio) {
 
   for (var i = 1; i < bannerList.length; i++) {
     try {
-      bannerComponent.add(Builder(
-        builder: (BuildContext context) {
-          return Container(
-            alignment: const FractionalOffset(0.5, 0.5),
-            child: Card(
-              child: InkWell(
-                onTap: () {
-                  if (bannerList[i]['route'] != null &&
-                      bannerList[i]['route'] != rootThis.pageName &&
-                      routeExist(bannerList[i]['route'])) {
-                    routeStack.push(bannerList[i]['route']);
-                    if (bannerList[i]['route'].length >= 4 &&
-                        bannerList[i]['route'].substring(0, 4).toLowerCase() ==
-                            'http') {
-                      openInWebView(context, bannerList[i]['route'],
-                          bannerList[i]['title'] ?? 'Web');
-                    } else {
-                      var state = transactionStore.state.screenTx;
-                      if (state['#REFRESH']) {
-                        oldSettingUpShouldBeDeleted().then((aRes) {
-                          var state = transactionStore.state;
-                          var lifKey = state.screenTx['#INTERFACE_KEY'];
-                          readSettings(lifKey, 1).then((_) {
-                            transactionStore.dispatch(UpdateScreenTxAction(
-                                ScreenTransaction({'#REFRESH': false})));
-                            String newRoute = bannerList[i]['route'];
-                            List<Widget> newElementList = reloadPage(newRoute);
-                            rootThis.setState(() {
-                              rootThis.pageName = newRoute;
-                              rootThis.pageElements = newElementList;
-                              rootThis.wait = false;
+      bannerComponent.add(
+        Builder(
+          builder: (BuildContext context) {
+            return Container(
+              alignment: const FractionalOffset(0.5, 0.5),
+              child: Card(
+                child: InkWell(
+                  onTap: () {
+                    if (bannerList[i]['route'] != null &&
+                        bannerList[i]['route'] != rootThis.pageName &&
+                        routeExist(bannerList[i]['route'])) {
+                      routeStack.push(bannerList[i]['route']);
+                      if (bannerList[i]['route'].length >= 4 &&
+                          bannerList[i]['route']
+                                  .substring(0, 4)
+                                  .toLowerCase() ==
+                              'http') {
+                        openInWebView(
+                          context,
+                          bannerList[i]['route'],
+                          bannerList[i]['title'] ?? 'Web',
+                        );
+                      } else {
+                        var state = transactionStore.state.screenTx;
+                        if (state['#REFRESH']) {
+                          oldSettingUpShouldBeDeleted().then((aRes) {
+                            var state = transactionStore.state;
+                            var lifKey = state.screenTx['#INTERFACE_KEY'];
+                            readSettings(lifKey, 1).then((_) {
+                              transactionStore.dispatch(
+                                UpdateScreenTxAction(
+                                  ScreenTransaction({'#REFRESH': false}),
+                                ),
+                              );
+                              String newRoute = bannerList[i]['route'];
+                              List<Widget> newElementList = reloadPage(
+                                newRoute,
+                              );
+                              rootThis.setState(() {
+                                rootThis.pageName = newRoute;
+                                rootThis.pageElements = newElementList;
+                                rootThis.wait = false;
+                              });
                             });
                           });
-                        });
-                      } else {
-                        String newRoute = bannerList[i]['route'];
-                        List<Widget> newElementList = List<Widget>.of(
-                            linkElement[linkElement[newRoute]!]!
-                                .map((widget) => widget));
-                        // List<Widget> newElementList =
-                        //     List<Widget>.empty(growable: true);
-                        // newElementList.addAll(linkElement[newRoute]!);
-                        rootThis.setState(() {
-                          rootThis.pageName = newRoute;
-                          rootThis.pageElements = newElementList;
-                          rootThis.wait = false;
-                        });
+                        } else {
+                          String newRoute = bannerList[i]['route'];
+                          // Was linkElement[linkElement[newRoute]!]! — a double
+                          // index that null-deref crashed on the 2nd+ banner of a
+                          // multi-banner home. reloadPage matches the sibling
+                          // banner[0]/grid[0] branches above.
+                          List<Widget> newElementList = reloadPage(newRoute);
+                          rootThis.setState(() {
+                            rootThis.pageName = newRoute;
+                            rootThis.pageElements = newElementList;
+                            rootThis.wait = false;
+                          });
+                        }
                       }
                     }
-                  }
-                },
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: <Widget>[
-                    AspectRatio(
-                      aspectRatio: aspectRatio,
-                      child: displayImage(
+                  },
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: <Widget>[
+                      AspectRatio(
+                        aspectRatio: aspectRatio,
+                        child: displayImage(
                           imageUrl: bannerList[i]['url'] ?? defaultImage,
-                          cached: true),
-                      // child: FadeInImage.memoryNetwork(
-                      //     placeholder: kTransparentImage,
-                      //     image: _bannerList[i]['url']),
-                    ),
-                  ],
+                          cached: true,
+                        ),
+                        // child: FadeInImage.memoryNetwork(
+                        //     placeholder: kTransparentImage,
+                        //     image: _bannerList[i]['url']),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          );
-        },
-      ));
+            );
+          },
+        ),
+      );
     } catch (_) {
-      bannerComponent.add(Container(
-        alignment: const FractionalOffset(0.5, 0.5),
-        child: Card(
-          child: InkWell(
-            onTap: () {},
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: <Widget>[
-                AspectRatio(
-                  aspectRatio: aspectRatio,
-                  child: displayImage(imageUrl: errorUrl, cached: true),
-                  // child: FadeInImage.memoryNetwork(
-                  //     placeholder: kTransparentImage, image: errorUrl),
-                ),
-              ],
+      bannerComponent.add(
+        Container(
+          alignment: const FractionalOffset(0.5, 0.5),
+          child: Card(
+            child: InkWell(
+              onTap: () {},
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: <Widget>[
+                  AspectRatio(
+                    aspectRatio: aspectRatio,
+                    child: displayImage(imageUrl: errorUrl, cached: true),
+                    // child: FadeInImage.memoryNetwork(
+                    //     placeholder: kTransparentImage, image: errorUrl),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
-      ));
+      );
     }
   }
   return bannerComponent;
@@ -395,8 +451,11 @@ List<Widget> buildGridList(var gridList, double fontSize) {
                     if (gridList[0]['route'].length >= 4 &&
                         gridList[0]['route'].substring(0, 4).toLowerCase() ==
                             'http') {
-                      openInWebView(context, gridList[0]['route'],
-                          gridList[0]['title'] ?? 'Web');
+                      openInWebView(
+                        context,
+                        gridList[0]['route'],
+                        gridList[0]['title'] ?? 'Web',
+                      );
                     } else {
                       var state = transactionStore.state.screenTx;
                       if (state['#REFRESH']) {
@@ -405,8 +464,11 @@ List<Widget> buildGridList(var gridList, double fontSize) {
                           var lifKey = state.screenTx['#INTERFACE_KEY'];
                           readSettings(lifKey, 1).then((_) {
                             // constructAllPageElements();
-                            transactionStore.dispatch(UpdateScreenTxAction(
-                                ScreenTransaction({'#REFRESH': false})));
+                            transactionStore.dispatch(
+                              UpdateScreenTxAction(
+                                ScreenTransaction({'#REFRESH': false}),
+                              ),
+                            );
                             String newRoute = gridList[0]['route'];
                             List<Widget> newElementList = reloadPage(newRoute);
                             rootThis.setState(() {
@@ -432,14 +494,13 @@ List<Widget> buildGridList(var gridList, double fontSize) {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: <Widget>[
-                    Container(
-                      height: topPad,
-                    ),
+                    Container(height: topPad),
                     AspectRatio(
                       aspectRatio: defaultAspectRatio,
                       child: displayImage(
-                          imageUrl: gridList[0]['url'] ?? defaultImage,
-                          cached: true),
+                        imageUrl: gridList[0]['url'] ?? defaultImage,
+                        cached: true,
+                      ),
                       // child: FadeInImage.memoryNetwork(
                       //     placeholder: kTransparentImage,
                       //     image: _gridList[0]['url']),
@@ -465,7 +526,7 @@ List<Widget> buildGridList(var gridList, double fontSize) {
             ),
           );
         },
-      )
+      ),
     ];
   } catch (_) {
     gridComponent = Container(
@@ -476,9 +537,7 @@ List<Widget> buildGridList(var gridList, double fontSize) {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
-              Container(
-                height: topPad,
-              ),
+              Container(height: topPad),
               AspectRatio(
                 aspectRatio: defaultAspectRatio,
                 child: displayImage(imageUrl: errorUrl, cached: true),
@@ -499,115 +558,124 @@ List<Widget> buildGridList(var gridList, double fontSize) {
 
   for (var i = 1; i < gridList.length; i++) {
     try {
-      gridComponent.add(Builder(
-        builder: (BuildContext context) {
-          return Container(
-            alignment: const Alignment(0.0, 0.0),
-            child: Card(
-              child: InkWell(
-                onTap: () {
-                  if (gridList[i]['route'] != null &&
-                      gridList[i]['route'] != rootThis.pageName &&
-                      routeExist(gridList[i]['route'])) {
-                    routeStack.push(gridList[i]['route']);
-                    if (gridList[i]['route'].length >= 4 &&
-                        gridList[i]['route'].substring(0, 4).toLowerCase() ==
-                            'http') {
-                      openInWebView(context, gridList[i]['route'],
-                          gridList[i]['title'] ?? 'Web');
-                    } else {
-                      var state = transactionStore.state.screenTx;
-                      if (state['#REFRESH']) {
-                        oldSettingUpShouldBeDeleted().then((aRes) {
-                          var state = transactionStore.state;
-                          var lifKey = state.screenTx['#INTERFACE_KEY'];
-                          readSettings(lifKey, 1).then((_) {
-                            // constructAllPageElements();
-                            transactionStore.dispatch(UpdateScreenTxAction(
-                                ScreenTransaction({'#REFRESH': false})));
-//                            List<Widget> newElementList = List<Widget>();
-                            String newRoute = gridList[i]['route'];
-                            List<Widget> newElementList = reloadPage(newRoute);
-//                            newElementList.addAll(linkElement[newRoute]);
-                            rootThis.setState(() {
-                              rootThis.pageName = newRoute;
-                              rootThis.pageElements = newElementList;
-                              rootThis.wait = false;
+      gridComponent.add(
+        Builder(
+          builder: (BuildContext context) {
+            return Container(
+              alignment: const Alignment(0.0, 0.0),
+              child: Card(
+                child: InkWell(
+                  onTap: () {
+                    if (gridList[i]['route'] != null &&
+                        gridList[i]['route'] != rootThis.pageName &&
+                        routeExist(gridList[i]['route'])) {
+                      routeStack.push(gridList[i]['route']);
+                      if (gridList[i]['route'].length >= 4 &&
+                          gridList[i]['route'].substring(0, 4).toLowerCase() ==
+                              'http') {
+                        openInWebView(
+                          context,
+                          gridList[i]['route'],
+                          gridList[i]['title'] ?? 'Web',
+                        );
+                      } else {
+                        var state = transactionStore.state.screenTx;
+                        if (state['#REFRESH']) {
+                          oldSettingUpShouldBeDeleted().then((aRes) {
+                            var state = transactionStore.state;
+                            var lifKey = state.screenTx['#INTERFACE_KEY'];
+                            readSettings(lifKey, 1).then((_) {
+                              // constructAllPageElements();
+                              transactionStore.dispatch(
+                                UpdateScreenTxAction(
+                                  ScreenTransaction({'#REFRESH': false}),
+                                ),
+                              );
+                              //                            List<Widget> newElementList = List<Widget>();
+                              String newRoute = gridList[i]['route'];
+                              List<Widget> newElementList = reloadPage(
+                                newRoute,
+                              );
+                              //                            newElementList.addAll(linkElement[newRoute]);
+                              rootThis.setState(() {
+                                rootThis.pageName = newRoute;
+                                rootThis.pageElements = newElementList;
+                                rootThis.wait = false;
+                              });
                             });
                           });
-                        });
-                      } else {
-//                        List<Widget> newElementList = List<Widget>();
-                        String newRoute = gridList[i]['route'];
-                        List<Widget> newElementList = reloadPage(newRoute);
-//                        newElementList.addAll(linkElement[newRoute]);
-                        rootThis.setState(() {
-                          rootThis.pageName = newRoute;
-                          rootThis.pageElements = newElementList;
-                          rootThis.wait = false;
-                        });
+                        } else {
+                          //                        List<Widget> newElementList = List<Widget>();
+                          String newRoute = gridList[i]['route'];
+                          List<Widget> newElementList = reloadPage(newRoute);
+                          //                        newElementList.addAll(linkElement[newRoute]);
+                          rootThis.setState(() {
+                            rootThis.pageName = newRoute;
+                            rootThis.pageElements = newElementList;
+                            rootThis.wait = false;
+                          });
+                        }
                       }
                     }
-                  }
-                },
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: <Widget>[
-                    Container(
-                      height: topPad,
-                    ),
-                    AspectRatio(
-                      aspectRatio: defaultAspectRatio,
-                      child: displayImage(
+                  },
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: <Widget>[
+                      Container(height: topPad),
+                      AspectRatio(
+                        aspectRatio: defaultAspectRatio,
+                        child: displayImage(
                           imageUrl: gridList[i]['url'] ?? defaultImage,
-                          cached: true),
-                      // child: FadeInImage.memoryNetwork(
-                      //     placeholder: kTransparentImage,
-                      //     image: _gridList[i]['url']),
-                    ),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        gridList[i]['text'],
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: fontSize),
+                          cached: true,
+                        ),
+                        // child: FadeInImage.memoryNetwork(
+                        //     placeholder: kTransparentImage,
+                        //     image: _gridList[i]['url']),
                       ),
-                    ),
-                  ],
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          gridList[i]['text'],
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: fontSize),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          );
-        },
-      ));
+            );
+          },
+        ),
+      );
     } catch (_) {
-      gridComponent.add(Container(
-        alignment: const Alignment(0.0, 0.0),
-        child: Card(
-          child: InkWell(
-            onTap: () {},
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: <Widget>[
-                Container(
-                  height: topPad,
-                ),
-                AspectRatio(
-                  aspectRatio: defaultAspectRatio,
-                  child: displayImage(imageUrl: errorUrl, cached: true),
-                  // child: FadeInImage.memoryNetwork(
-                  //     placeholder: kTransparentImage, image: errorUrl),
-                ),
-                const Text(
-                  '--GRID--',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 10),
-                ),
-              ],
+      gridComponent.add(
+        Container(
+          alignment: const Alignment(0.0, 0.0),
+          child: Card(
+            child: InkWell(
+              onTap: () {},
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: <Widget>[
+                  Container(height: topPad),
+                  AspectRatio(
+                    aspectRatio: defaultAspectRatio,
+                    child: displayImage(imageUrl: errorUrl, cached: true),
+                    // child: FadeInImage.memoryNetwork(
+                    //     placeholder: kTransparentImage, image: errorUrl),
+                  ),
+                  const Text(
+                    '--GRID--',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 10),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
-      ));
+      );
     }
   }
   return gridComponent;
@@ -652,13 +720,13 @@ Widget disabledIcon(String url, String iText, double fontSize) {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
-            Container(
-              height: topPad,
-            ),
+            Container(height: topPad),
             AspectRatio(
               aspectRatio: defaultAspectRatio,
               child: displayImage(
-                  imageUrl: (url == '') ? dimmedImage : url, cached: true),
+                imageUrl: (url == '') ? dimmedImage : url,
+                cached: true,
+              ),
               // child: FadeInImage.memoryNetwork(
               //   placeholder: kTransparentImage,
               //   image: (url == '') ? dimmedImage : url,

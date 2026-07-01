@@ -1,6 +1,8 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+
 import '../api.dart';
 import '../global.dart';
 import '../otq_icons.dart';
@@ -45,7 +47,7 @@ class _FtzStaticArraySearchState extends State<FtzStaticArraySearch> {
       if (widget.component['content'] != null) {
         displayObject = {
           "searchDisplayType": "text1",
-          "content": widget.component['content']
+          "content": widget.component['content'],
         };
         title = textArray[0];
         searchLabel = textArray[1];
@@ -67,7 +69,9 @@ class _FtzStaticArraySearchState extends State<FtzStaticArraySearch> {
     try {
       searchValue = '';
       initialTable = searchTable(
-          widget.component['filter'] ?? '', List.from(widget.localTable));
+        widget.component['filter'] ?? '',
+        List.from(widget.localTable),
+      );
       // pickTable = List.from(initialTable);
       pickTable = searchTable(searchValue, initialTable);
     } catch (e) {
@@ -94,44 +98,48 @@ class _FtzStaticArraySearchState extends State<FtzStaticArraySearch> {
         ? [defaultImage]
         : getImageList(dataContent, widget.component['image']); // white diamond
     if ((widget.component['image'] ?? '') != '') {
-      detailContent.add(GestureDetector(
+      detailContent.add(
+        GestureDetector(
+          onTap: () {
+            Get.back();
+          },
+          child: HorizontalImageList(
+            imageUrls: imageList,
+            height: currentWidth - imageMargin,
+          ),
+        ),
+      );
+      detailContent.add(const SizedBox(height: 8));
+    } // end if ((widget.component['image'] ?? '') != '')
+    detailContent.add(
+      ListTile(
         onTap: () {
           Get.back();
         },
-        child: HorizontalImageList(
-          imageUrls: imageList,
-          height: currentWidth - imageMargin,
-        ),
-      ));
-      detailContent.add(const SizedBox(
-        height: 8,
-      ));
-    } // end if ((widget.component['image'] ?? '') != '')
-    detailContent.add(ListTile(
-      onTap: () {
-        Get.back();
-      },
-      subtitle: Text(
-        // stringContent.replaceAll('\n', '\n\n'),
-        // stringContent.replaceAll('\n', '--'),
-        stringContent,
-        style: TextStyle(color: Colors.black.withOpacity(0.6)),
-        // overflow: TextOverflow.,
-        softWrap: true,
-      ),
-    ));
-    return Get.dialog(AlertDialog(
-      content: SizedBox(
-        width: currentWidth,
-        child: ListView.builder(
-          shrinkWrap: true,
-          itemCount: detailContent.length,
-          itemBuilder: (context, position) {
-            return detailContent[position];
-          },
+        subtitle: Text(
+          // stringContent.replaceAll('\n', '\n\n'),
+          // stringContent.replaceAll('\n', '--'),
+          stringContent,
+          style: TextStyle(color: Colors.black.withValues(alpha: 0.6)),
+          // overflow: TextOverflow.,
+          softWrap: true,
         ),
       ),
-    ));
+    );
+    return Get.dialog(
+      AlertDialog(
+        content: SizedBox(
+          width: currentWidth,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: detailContent.length,
+            itemBuilder: (context, position) {
+              return detailContent[position];
+            },
+          ),
+        ),
+      ),
+    );
   } // end of detailDialog
 
   @override
@@ -154,15 +162,14 @@ class _FtzStaticArraySearchState extends State<FtzStaticArraySearch> {
           //end of onChanged
           decoration: InputDecoration(
             prefixIcon: widget.component['icon'].toString().isNotEmpty
-                ? Icon(
-                    otqIcons[widget.component['icon'].toString()],
-                  )
+                ? Icon(otqIcons[widget.component['icon'].toString()])
                 : null,
             labelText: searchLabel,
             hintText: hint,
             border: const OutlineInputBorder(
-                borderRadius: BorderRadius.all(Radius.circular(4)),
-                borderSide: BorderSide()),
+              borderRadius: BorderRadius.all(Radius.circular(4)),
+              borderSide: BorderSide(),
+            ),
           ),
           style: TextStyle(
             color: (widget.component['color'] ?? 'default') != 'default'
@@ -170,8 +177,8 @@ class _FtzStaticArraySearchState extends State<FtzStaticArraySearch> {
                 : Theme.of(context).textTheme.bodyLarge!.color,
             backgroundColor:
                 (widget.component['background'] ?? 'default') != 'default'
-                    ? Color(int.parse(widget.component['background']))
-                    : Theme.of(context).textTheme.bodyLarge!.backgroundColor,
+                ? Color(int.parse(widget.component['background']))
+                : Theme.of(context).textTheme.bodyLarge!.backgroundColor,
           ),
         ),
         const SizedBox(height: 8),
@@ -185,7 +192,6 @@ class _FtzStaticArraySearchState extends State<FtzStaticArraySearch> {
           //     return Text('Item $index');
           //   },
           // ),
-
           child: ListView.builder(
             itemCount: pickTable.isEmpty ? 1 : pickTable.length,
             shrinkWrap: true,
@@ -208,9 +214,11 @@ class _FtzStaticArraySearchState extends State<FtzStaticArraySearch> {
                                 : replaceMarkerPrototype(
                                     displayObject['content'],
                                     pickTable.first,
-                                    widget.component['indexStart'] ?? 0),
-                            style:
-                                TextStyle(color: Colors.black.withOpacity(0.6)),
+                                    widget.component['indexStart'] ?? 0,
+                                  ),
+                            style: TextStyle(
+                              color: Colors.black.withValues(alpha: 0.6),
+                            ),
                             overflow: TextOverflow.fade,
                             softWrap: false,
                           ),
@@ -226,19 +234,21 @@ class _FtzStaticArraySearchState extends State<FtzStaticArraySearch> {
                     ListTile(
                       onTap: () {
                         if (widget.resultController != null) {
-                          widget.resultController!.text =
-                              pickTable[index][1].toString();
+                          widget.resultController!.text = pickTable[index][1]
+                              .toString();
                           Get.back();
                         } else {
                           detailDialog(
-                              pickTable[index],
-                              displayObject['content'] == null
-                                  ? '${pickTable.first[0]}\n${pickTable.first[1]}'
-                                  : replaceMarker(
-                                      displayObject['content'],
-                                      pickTable[index],
-                                      widget.component['indexStart'] ?? 0,
-                                      false));
+                            pickTable[index],
+                            displayObject['content'] == null
+                                ? '${pickTable.first[0]}\n${pickTable.first[1]}'
+                                : replaceMarker(
+                                    displayObject['content'],
+                                    pickTable[index],
+                                    widget.component['indexStart'] ?? 0,
+                                    false,
+                                  ),
+                          );
                         }
                       },
                       leading: (widget.component['image'] ?? '') == ''
@@ -246,9 +256,12 @@ class _FtzStaticArraySearchState extends State<FtzStaticArraySearch> {
                           : AspectRatio(
                               aspectRatio: 1,
                               child: displayImage(
-                                  imageUrl: getImageList(pickTable[index],
-                                      widget.component['image'])[0],
-                                  cached: false),
+                                imageUrl: getImageList(
+                                  pickTable[index],
+                                  widget.component['image'],
+                                )[0],
+                                cached: false,
+                              ),
                               // child: FadeInImage.memoryNetwork(
                               //   placeholder: kTransparentImage,
                               //   image: getImageList(pickTable[index],
@@ -264,9 +277,11 @@ class _FtzStaticArraySearchState extends State<FtzStaticArraySearch> {
                                       displayObject['content'],
                                       pickTable[index],
                                       widget.component['indexStart'] ?? 0,
-                                      false),
+                                      false,
+                                    ),
                               style: TextStyle(
-                                  color: Colors.black.withOpacity(0.6)),
+                                color: Colors.black.withValues(alpha: 0.6),
+                              ),
                               overflow: TextOverflow.fade,
                               softWrap: false,
                             ),

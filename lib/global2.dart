@@ -3,13 +3,13 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
-import '../model/otq_state.dart';
-import 'model/input_controller.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import '../firestore_repository/table_repository.dart';
-import 'global.dart';
 import 'package:get/get.dart';
+import 'package:intl/intl.dart';
+
+import '../firestore_repository/table_repository.dart';
+import '../model/otq_state.dart';
+import 'global.dart';
+import 'model/input_controller.dart';
 
 Map<String, Map<int, InputController>> txfController = {};
 
@@ -21,19 +21,28 @@ Map<String, String> parsePosition(String input) {
   const int unicodeLeftwardTriangle = 9665; //LEFT-POINTING TRIANGLE
   const int unicodeRightwardTriangle = 9655; //RIGHT-POINTING TRIANGLE
   const int unicodeBlackLeftwardTriangle = 9664; // BLACK LEFT-POINTING TRIANGLE
-  const int unicodeBlackRightwardTriangle = 9654; //BLACK RIGHT-POINTING TRIANGLE
+  const int unicodeBlackRightwardTriangle =
+      9654; //BLACK RIGHT-POINTING TRIANGLE
 
   // 1. Convert Unicode enclosures to their ASCII equivalents internally
   String processedInput = input;
 
   processedInput = processedInput.replaceAll(
-      String.fromCharCode(unicodeLeftwardTriangle), '<<');
+    String.fromCharCode(unicodeLeftwardTriangle),
+    '<<',
+  );
   processedInput = processedInput.replaceAll(
-      String.fromCharCode(unicodeRightwardTriangle), '>>');
+    String.fromCharCode(unicodeRightwardTriangle),
+    '>>',
+  );
   processedInput = processedInput.replaceAll(
-      String.fromCharCode(unicodeBlackLeftwardTriangle), '[[');
+    String.fromCharCode(unicodeBlackLeftwardTriangle),
+    '[[',
+  );
   processedInput = processedInput.replaceAll(
-      String.fromCharCode(unicodeBlackRightwardTriangle), ']]');
+    String.fromCharCode(unicodeBlackRightwardTriangle),
+    ']]',
+  );
 
   // Define the patterns using standard ASCII characters for enclosures.
   // Using a single, non-greedy group (.+?) to capture the content.
@@ -51,30 +60,21 @@ Map<String, String> parsePosition(String input) {
   final positionMatch = positionPattern.firstMatch(processedInput);
   if (positionMatch != null) {
     // The content is always in group 1
-    return {
-      "type": "position",
-      "val": positionMatch.group(1)!,
-    };
+    return {"type": "position", "val": positionMatch.group(1)!};
   }
 
   // Check for 'left' pattern (against processedInput)
   final leftMatch = leftPattern.firstMatch(processedInput);
   if (leftMatch != null) {
     // The content is always in group 1
-    return {
-      "type": "left",
-      "val": leftMatch.group(1)!,
-    };
+    return {"type": "left", "val": leftMatch.group(1)!};
   }
 
   // Check for 'table' pattern (against processedInput)
   final tableMatch = tablePattern.firstMatch(processedInput);
   if (tableMatch != null) {
     // The content is always in group 1
-    return {
-      "type": "table",
-      "val": tableMatch.group(1)!,
-    };
+    return {"type": "table", "val": tableMatch.group(1)!};
   }
 
   // Default case: 'string'
@@ -85,7 +85,7 @@ Map<String, String> parsePosition(String input) {
 } // end of parsePosition
 
 // String getAddressFrom
-String getAddressFromOtqState (OtqState state) {
+String getAddressFromOtqState(OtqState state) {
   String address = '';
   if (state.thoroughfare.isNotEmpty) {
     address += '${state.thoroughfare} ';
@@ -113,12 +113,12 @@ String getAddressFromOtqState (OtqState state) {
   }
   return address;
 }
+
 String normalizeTableName(String input) {
   String tableName = input.toString().trim();
   final List<String> splitTableName = tableName.split('//');
   if (splitTableName.length >= 2) {
-    tableName =
-    "${splitTableName[0]}/${getDocumentName(splitTableName.last)}";
+    tableName = "${splitTableName[0]}/${getDocumentName(splitTableName.last)}";
   }
   return tableName;
 } // end of normalizeTableName
@@ -183,15 +183,19 @@ Future<void> executeWidgets(String scrName, String executable) async {
 
     if ((lowerCaseExecutable == 'execute1' || lowerCaseExecutable == 'all') &&
         controller.execute1 != null) {
-      executablesToRun.addAll(controller.execute1!
-          .where((item) => item != null)
-          .map((item) => item as List<dynamic>));
+      executablesToRun.addAll(
+        controller.execute1!
+            .where((item) => item != null)
+            .map((item) => item as List<dynamic>),
+      );
     }
     if ((lowerCaseExecutable == 'execute2' || lowerCaseExecutable == 'all') &&
         controller.execute2 != null) {
-      executablesToRun.addAll(controller.execute2!
-          .where((item) => item != null)
-          .map((item) => item as List<dynamic>));
+      executablesToRun.addAll(
+        controller.execute2!
+            .where((item) => item != null)
+            .map((item) => item as List<dynamic>),
+      );
     }
 
     for (final item in executablesToRun) {
@@ -206,7 +210,8 @@ Future<void> executeWidgets(String scrName, String executable) async {
           case 'generate_number':
             if (item.length < 3) {
               debugPrint(
-                  "Template missing for 'generate_number' action for widget: $widgetId");
+                "Template missing for 'generate_number' action for widget: $widgetId",
+              );
               continue;
             }
             final String template = item[2] as String;
@@ -225,8 +230,10 @@ Future<void> executeWidgets(String scrName, String executable) async {
 
             // Create an async task to perform the generation and update.
             final task = () async {
-              final generatedString =
-                  await generateAutoNumber(template, scrNameFromId);
+              final generatedString = await generateAutoNumber(
+                template,
+                scrNameFromId,
+              );
               addToTxfController(position, scrNameFromId, generatedString);
               // Rebuild the specific widget using its ID.
               Get.find<WidgetUpdateController>().update([widgetId]);
@@ -306,8 +313,10 @@ Future<String> _getTokenValue(String token, String scrName) async {
     return await _getCounterValue(token);
   } else if (token.toUpperCase().startsWith('POS')) {
     try {
-      final paramsString =
-          token.substring(token.indexOf('(') + 1, token.indexOf(')'));
+      final paramsString = token.substring(
+        token.indexOf('(') + 1,
+        token.indexOf(')'),
+      );
       final params = paramsString.split(',').map((p) => p.trim()).toList();
 
       if (params.isEmpty) {
@@ -333,11 +342,13 @@ Future<String> _getTokenValue(String token, String scrName) async {
 /// Generates a random string based on specified length and format.
 String _generateRandom(String token) {
   try {
-    final params =
-        token.substring(token.indexOf('(') + 1, token.indexOf(')')).split(',');
+    final params = token
+        .substring(token.indexOf('(') + 1, token.indexOf(')'))
+        .split(',');
     final length = int.parse(params[0].trim());
-    final format =
-        params.length > 1 ? params[1].trim().toLowerCase() : 'decimal';
+    final format = params.length > 1
+        ? params[1].trim().toLowerCase()
+        : 'decimal';
     final random = Random.secure();
 
     switch (format) {
@@ -355,7 +366,9 @@ String _generateRandom(String token) {
             'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
         return String.fromCharCodes(
           Iterable.generate(
-              length, (_) => chars.codeUnitAt(random.nextInt(chars.length))),
+            length,
+            (_) => chars.codeUnitAt(random.nextInt(chars.length)),
+          ),
         );
       case 'decimal':
       default:
@@ -371,8 +384,10 @@ String _generateRandom(String token) {
 /// Retrieves a sequential counter value.
 Future<String> _getCounterValue(String token) async {
   try {
-    final paramsString =
-        token.substring(token.indexOf('(') + 1, token.indexOf(')'));
+    final paramsString = token.substring(
+      token.indexOf('(') + 1,
+      token.indexOf(')'),
+    );
     final params = paramsString.split(',').map((p) => p.trim()).toList();
 
     if (params.isEmpty || params[0].isEmpty) {
@@ -417,7 +432,7 @@ String _intToRoman(int num) {
     9,
     5,
     4,
-    1
+    1,
   ];
   const List<String> numerals = [
     "M",
@@ -432,7 +447,7 @@ String _intToRoman(int num) {
     "IX",
     "V",
     "IV",
-    "I"
+    "I",
   ];
 
   StringBuffer result = StringBuffer();
@@ -474,7 +489,8 @@ void addExecutableToController(
       if (!controller.execute1!.any((item) => item![0] == keyString)) {
         controller.execute1!.add(executableItem);
         debugPrint(
-            '|||||||| add executable $scrName.$position Number = ${keyString.substring(keyString.length - 7)}');
+          '|||||||| add executable $scrName.$position Number = ${keyString.substring(keyString.length - 7)}',
+        );
       }
     } else if (executable == 'execute2') {
       // If execute2 is null, initialize it as an empty list.
@@ -613,6 +629,7 @@ IconData stringToIconData(String? iconName) {
     'cached': Icons.cached,
     'calendar_today': Icons.calendar_today,
     'calendar_view_day': Icons.calendar_view_day,
+    'camera_alt': Icons.camera_alt,
     'camera_enhance': Icons.camera_enhance,
     'card_giftcard': Icons.card_giftcard,
     'card_membership': Icons.card_membership,
@@ -690,6 +707,8 @@ IconData stringToIconData(String? iconName) {
     'lock': Icons.lock,
     'lock_open': Icons.lock_open,
     'lock_outline': Icons.lock_outline,
+    'login': Icons.login,
+    'logout': Icons.logout,
     'loyalty': Icons.loyalty,
     'markunread_mailbox': Icons.markunread_mailbox,
     'motorcycle': Icons.motorcycle,
@@ -1010,13 +1029,22 @@ void txfControllerCheck(String scrName, dynamic pos) {
   } // end if (txfController[scrName] == null)
   if (txfController[scrName]![position] == null) {
     txfController[scrName]![position] = InputController(
-        position, TextEditingController(text: ""), "", emptyString);
+      position,
+      TextEditingController(text: ""),
+      "",
+      emptyString,
+    );
   } // end if (txfController[scrName]![position] == null)
 } // end of txfControllerCheck
 
 /// A function to put output of a widget to the TxfController.
-void addToTxfController(int? position, String scrName, String content,
-    {Map<String, dynamic>? table, dynamic stateObject}) {
+void addToTxfController(
+  int? position,
+  String scrName,
+  String content, {
+  Map<String, dynamic>? table,
+  dynamic stateObject,
+}) {
   // If position is null, default it to 0.
   int finalPosition = position ?? 0;
 
@@ -1026,7 +1054,8 @@ void addToTxfController(int? position, String scrName, String content,
   } else {
     // Print the position, content, and table for debugging purposes.
     debugPrint(
-        '>>>>>>>>>>> Position: $finalPosition, Content: $content, Table: $table');
+      '>>>>>>>>>>> Position: $finalPosition, Content: $content, Table: $table',
+    );
     try {
       txfControllerCheck(scrName, position);
       txfController[scrName]![position]!.controller.text = content;

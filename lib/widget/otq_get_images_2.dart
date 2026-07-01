@@ -50,13 +50,13 @@ class OtqGetImages2State extends State<OtqGetImages2>
         imgParameter = [
           int.parse(imgParStr[0]),
           int.parse(imgParStr[1]),
-          int.parse(imgParStr[2])
+          int.parse(imgParStr[2]),
         ];
       } catch (e) {
         imgParameter = [400, 400, 80];
       }
       List<CameraDescription>? cams =
-      transactionStore.state.screenTx['#CAMS'] as List<CameraDescription>?;
+          transactionStore.state.screenTx['#CAMS'] as List<CameraDescription>?;
       if (cams == null || cams.isEmpty) return;
 
       String imgUrl = await getPhotoCameraImage(
@@ -79,22 +79,29 @@ class OtqGetImages2State extends State<OtqGetImages2>
       if (imgUrl != emptyImageUrl) {
         setState(() {
           GeneralGetXController.to.addWidget(
-              widget.scrName,
-              widget.component['position'],
-              buildImageWidget(imgUrl, isEnabled),
-              imgUrl);
+            widget.scrName,
+            widget.component['position'],
+            buildImageWidget(imgUrl, isEnabled),
+            imgUrl,
+          );
         });
 
-        String urlOutput = processData(GeneralGetXController.to
-            .getStringList(widget.scrName, widget.component['position']));
+        String urlOutput = processData(
+          GeneralGetXController.to.getStringList(
+            widget.scrName,
+            widget.component['position'],
+          ),
+        );
         try {
           if (widget.component['position'] != null) {
             txfControllerCheck(widget.scrName, widget.component['position']);
             txfController[widget.scrName]![widget.component['position']]!
-                .controller
-                .text = urlOutput;
+                    .controller
+                    .text =
+                urlOutput;
             txfController[widget.scrName]![widget.component['position']]!
-                .finalData = urlOutput;
+                    .finalData =
+                urlOutput;
           }
         } catch (e) {
           errorReport(e);
@@ -102,8 +109,10 @@ class OtqGetImages2State extends State<OtqGetImages2>
       } //
     } else {
       setState(() {
-        GeneralGetXController.to
-            .redraw(widget.scrName, widget.component['position']);
+        GeneralGetXController.to.redraw(
+          widget.scrName,
+          widget.component['position'],
+        );
       });
     } // end if isEnabled
   } // end buttonPressed
@@ -120,35 +129,39 @@ class OtqGetImages2State extends State<OtqGetImages2>
           txfController[widget.scrName]![widget.component['position']]!
               .initialIsEnabled;
 
-      List<String> currentUrlList = widget.component['currentValue']
-          .toString()
-          .trim()
-          .isNotEmpty
+      List<String> currentUrlList =
+          widget.component['currentValue'].toString().trim().isNotEmpty
           ? widget.component['currentValue'].toString().trim().split('_u2605_')
           : [];
       for (String url in currentUrlList) {
         if (url.trim().isNotEmpty) {
           GeneralGetXController.to.addWidget(
-              widget.scrName,
-              widget.component['position'],
-              buildImageWidget(url, initialIsEnabled),
-              url);
+            widget.scrName,
+            widget.component['position'],
+            buildImageWidget(url, initialIsEnabled),
+            url,
+          );
         }
       }
 
       String urlOutput = getImageInitValue(widget.scrName, widget.component);
       try {
         if (widget.component['position'] != null) {
-          txfControllerCheck(widget.scrName,
-              widget.component['position']); // build txfController if necessary
+          txfControllerCheck(
+            widget.scrName,
+            widget.component['position'],
+          ); // build txfController if necessary
           if (canInitializePage(widget.scrName)) {
             txfController[widget.scrName]![widget.component['position']]!
-                .controller
-                .text = urlOutput;
+                    .controller
+                    .text =
+                urlOutput;
             txfController[widget.scrName]![widget.component['position']]!
-                .initialValue = urlOutput;
+                    .initialValue =
+                urlOutput;
             txfController[widget.scrName]![widget.component['position']]!
-                .finalData = urlOutput;
+                    .finalData =
+                urlOutput;
           }
         }
       } catch (e) {
@@ -185,23 +198,27 @@ class OtqGetImages2State extends State<OtqGetImages2>
   }
 
   Widget _buildContent(BuildContext context, bool isEnabled) {
-    final imageItem = GeneralGetXController.to
-        .getWidgetItem(widget.scrName, widget.component['position']);
+    final imageItem = GeneralGetXController.to.getWidgetItem(
+      widget.scrName,
+      widget.component['position'],
+    );
     final imageWidgets = imageItem?.widgetList ?? [];
     final imageUrls = imageItem?.stringList ?? [];
 
-    final List<String> texts =
-    diamondTextToList(widget.component['text']?.toString() ?? '');
+    final List<String> texts = diamondTextToList(
+      widget.component['text']?.toString() ?? '',
+    );
     final String emptyTitle = 'Belum ada foto';
     final String emptySubtitle = 'Ambil foto untuk melengkapi data';
     final String fotoLabel = texts.length > 2 ? texts[2] : 'foto';
     final String addLabel = texts.length > 3 ? texts[3] : 'Tambah Foto';
 
-    final String headerLabel =
-    (widget.component['label'] ?? '').toString().toUpperCase();
+    final String headerLabel = (widget.component['label'] ?? '')
+        .toString()
+        .toUpperCase();
     final bool canAddMore = imageUrls.length < maxImages;
-    final double thumbSize =
-    (widget.component['previewSize'] ?? 90.0).toDouble();
+    final double thumbSize = (widget.component['previewSize'] ?? 90.0)
+        .toDouble();
 
     return Container(
       margin: EdgeInsets.only(
@@ -272,9 +289,7 @@ class OtqGetImages2State extends State<OtqGetImages2>
                   ? () => buttonPressed(widget.component, isEnabled)
                   : null,
               child: CustomPaint(
-                painter: _DashedBorderPainter(
-                  color: const Color(0xFFBFDBFE),
-                ),
+                painter: _DashedBorderPainter(color: const Color(0xFFBFDBFE)),
                 child: SizedBox(
                   width: double.infinity,
                   child: Padding(
@@ -330,7 +345,7 @@ class OtqGetImages2State extends State<OtqGetImages2>
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     itemCount: imageWidgets.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    separatorBuilder: (_, _) => const SizedBox(width: 8),
                     itemBuilder: (_, i) => SizedBox(
                       width: thumbSize,
                       height: thumbSize,
@@ -344,7 +359,9 @@ class OtqGetImages2State extends State<OtqGetImages2>
                     onTap: () => buttonPressed(widget.component, isEnabled),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 9),
+                        horizontal: 14,
+                        vertical: 9,
+                      ),
                       decoration: BoxDecoration(
                         color: const Color(0xFFEEF2F8),
                         borderRadius: BorderRadius.circular(8),
@@ -353,8 +370,11 @@ class OtqGetImages2State extends State<OtqGetImages2>
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.add_a_photo_outlined,
-                              size: 15, color: Color(0xFF3B82F6)),
+                          const Icon(
+                            Icons.add_a_photo_outlined,
+                            size: 15,
+                            color: Color(0xFF3B82F6),
+                          ),
                           const SizedBox(width: 6),
                           Text(
                             addLabel,
@@ -377,73 +397,88 @@ class OtqGetImages2State extends State<OtqGetImages2>
   }
 
   Widget buildImageWidget(String imageUrl, bool isEnabled) {
-    return Stack(children: <Widget>[
-      Card(
-        child: InkWell(
-          onTap: () {
-            // TODO add functionality to edit
-          },
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: <Widget>[
-              AspectRatio(
-                aspectRatio: 1,
-                child: displayImage(imageUrl: imageUrl, cached: true),
-              ),
-            ],
+    return Stack(
+      children: <Widget>[
+        Card(
+          child: InkWell(
+            onTap: () {},
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: <Widget>[
+                AspectRatio(
+                  aspectRatio: 1,
+                  child: displayImage(imageUrl: imageUrl, cached: true),
+                ),
+              ],
+            ),
           ),
         ),
-      ),
-      Align(
-        alignment: Alignment.topRight,
-        child: InkWell(
+        Align(
+          alignment: Alignment.topRight,
+          child: InkWell(
             onTap: isEnabled
                 ? () {
-              // delete image
-              int imageIndex = GeneralGetXController.to
-                  .getStringList(
-                  widget.scrName, widget.component['position'])
-                  .indexOf(imageUrl);
-              if (imageIndex >= 0) {
-                setState(() {
-                  GeneralGetXController.to.deleteWidgetAt(widget.scrName,
-                      widget.component['position'], imageIndex);
-                });
-                String urlOutput = processData(GeneralGetXController.to
-                    .getStringList(
-                    widget.scrName, widget.component['position']));
-                try {
-                  if (widget.component['position'] != null) {
-                    txfControllerCheck(
-                        widget.scrName, widget.component['position']);
-                    txfController[widget.scrName]![
-                    widget.component['position']]!
-                        .controller
-                        .text = urlOutput;
-                    txfController[widget.scrName]![
-                    widget.component['position']]!
-                        .finalData = urlOutput;
+                    // delete image
+                    int imageIndex = GeneralGetXController.to
+                        .getStringList(
+                          widget.scrName,
+                          widget.component['position'],
+                        )
+                        .indexOf(imageUrl);
+                    if (imageIndex >= 0) {
+                      setState(() {
+                        GeneralGetXController.to.deleteWidgetAt(
+                          widget.scrName,
+                          widget.component['position'],
+                          imageIndex,
+                        );
+                      });
+                      String urlOutput = processData(
+                        GeneralGetXController.to.getStringList(
+                          widget.scrName,
+                          widget.component['position'],
+                        ),
+                      );
+                      try {
+                        if (widget.component['position'] != null) {
+                          txfControllerCheck(
+                            widget.scrName,
+                            widget.component['position'],
+                          );
+                          txfController[widget.scrName]![widget
+                                      .component['position']]!
+                                  .controller
+                                  .text =
+                              urlOutput;
+                          txfController[widget.scrName]![widget
+                                      .component['position']]!
+                                  .finalData =
+                              urlOutput;
+                        }
+                      } catch (e) {
+                        errorReport(e);
+                      }
+                    }
                   }
-                } catch (e) {
-                  errorReport(e);
-                }
-              }
-            }
                 : null,
             child: Icon(
               Icons.cancel_outlined,
               color: isEnabled ? Colors.red : Colors.grey.shade400,
-            )),
-      )
-    ]);
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
   void dispose() {
     super.dispose();
     try {
-      GeneralGetXController.to
-          .deleteAllWidget(widget.scrName, widget.component['position']);
+      GeneralGetXController.to.deleteAllWidget(
+        widget.scrName,
+        widget.component['position'],
+      );
     } catch (e) {
       errorReport(e);
     }
@@ -471,11 +506,17 @@ class _DashedBorderPainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
 
     final path = Path()
-      ..addRRect(RRect.fromRectAndRadius(
-        Rect.fromLTWH(_stroke / 2, _stroke / 2, size.width - _stroke,
-            size.height - _stroke),
-        const Radius.circular(_radius),
-      ));
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(
+            _stroke / 2,
+            _stroke / 2,
+            size.width - _stroke,
+            size.height - _stroke,
+          ),
+          const Radius.circular(_radius),
+        ),
+      );
 
     final dashPath = Path();
     for (final metric in path.computeMetrics()) {

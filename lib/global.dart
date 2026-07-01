@@ -1,38 +1,39 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+
+import 'package:camera/camera.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:get/get.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:googleapis/sheets/v4.dart';
 import 'package:internet_connection_checker/internet_connection_checker.dart';
 // import 'package:internet_connection_checker_plus/internet_connection_checker_plus.dart';
 import 'package:intl/intl.dart';
+import 'package:pointycastle/digests/sha3.dart';
+import 'package:redux_dev_tools/redux_dev_tools.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'api.dart';
+import 'different_code/different_code.dart';
+import 'firebase_notification_handler.dart';
+import 'global2.dart';
+import 'login/api/user_repository.dart';
+import 'model/connection_data.dart';
+import 'model/general_get_controller.dart';
 import 'model/lock.dart';
 import 'part/build_part/channel.dart';
-import 'login/api/user_repository.dart';
-import 'states/app_code_controller.dart';
-import 'package:redux_dev_tools/redux_dev_tools.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:camera/camera.dart';
 import 'redux/screen_transaction.dart';
 import 'redux/screen_transaction_reducers.dart';
-import 'model/input_controller.dart';
-import 'api.dart';
 import 'route_stack.dart';
-import 'firebase_notification_handler.dart';
-import 'different_code/different_code.dart';
-import 'package:pointycastle/digests/sha3.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:geocoding/geocoding.dart';
-import 'package:get/get.dart';
-import 'model/general_get_controller.dart';
-import 'model/connection_data.dart';
-import 'firebase_options.dart';
-import 'global2.dart';
+import 'states/app_code_controller.dart';
+import 'widget/driver_home_support.dart';
 
 // import 'crypto/auth_crypto.dart';
 //import 'package:pointycastle/pointycastle.dart';  // full registry
@@ -186,11 +187,11 @@ import 'global2.dart';
   0.9.78.32 (260522) OO : udpate approval, etc
   0.9.78.33 (260526) OO : update request incident, fix bug log history
   0.9.78.34 (260602) OO : fix bug front camera stuck, blank white screen when open apps, implement addToEvent to Firestore
-  0.9.78.35 (260602) OO : fix bug in attendance_qr_selfie_gps_verify
-  0.9.79.01 (260604) OO : Release (cancelled)
-  0.9.79.02 (260605) OO : fix loading bug
-  0.9.80.01 (260609) OO : Release
-*/
+  0.9.78.35 (260605) OO : fix bug loading indicator in home, function logout cannot redirect to login page, addToEvent to firestore, widget supervisor view 
+                          (list_multiple_panel_card, panel_card_support list_statistic_card, statistic_card_support, timeline_periodic, timeline_periodic_support)
+  0.9.78.36 (260701) OO : update flutter 3.44.4, add module driver runtime, admin runtime, warehouse runtime, loading splash screen, 
+                          implement firebase crashlytics, fixing bug ftz_array_search, cleanup unused file
+ */
 // ========= Constants ==========================
 const iOSDevPage = false;
 final launchTime = DateTime.now().millisecondsSinceEpoch;
@@ -199,8 +200,8 @@ const clearHistory =
 int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
-const String version = '0.9.80';
-const String subVersion = '.01';
+const String version = '0.9.78';
+const String subVersion = '.28';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing
@@ -213,9 +214,7 @@ bool sinner = false;
 const int consteonVid = 20342033315492; // consteon
 const emptyString = '--';
 const body = 'body'; // for body of https request
-const defaultConfiguration = {
-  '1': '',
-};
+const defaultConfiguration = {'1': ''};
 const int qrLoop = 1; // # of attempt to get right qr, before selfie
 const defaultFinalSaveCounter = 2; // seconds
 const String functionFront = 'asia-northeast1-otq-01.cloudfunctions.net';
@@ -245,17 +244,21 @@ Map<String, dynamic> imageMap =
 const int maxImageUploadRetry = 5; // max retry to load image
 int imageMapMaxDayAge = 31; // max age (day) of image in imageMap
 const int imageMapLockExpiration = 30000; // lock expiration in milliseconds
-const Duration imageUploadInterval =
-    Duration(minutes: 1); // interval for imageMap upload check
+const Duration imageUploadInterval = Duration(
+  minutes: 1,
+); // interval for imageMap upload check
 final imageLock = Lock(expirationIntervalSeconds: 15); // lock for imageMap
 final imageSendLock = Lock(queueMax: 1); // lock for sendImagesInImageMap
-final imageFirebaseLock =
-    Lock(expirationIntervalSeconds: 15); // lock for firebase image upload
+final imageFirebaseLock = Lock(
+  expirationIntervalSeconds: 15,
+); // lock for firebase image upload
 // ==============GetX state management
-RxMap<String, bool> tableSourceUpdated =
-    {'default': false}.obs; // State management for table
-RxMap<String, dynamic> tableContent =
-    {'default': []}.obs; // content of table in ready to use array
+RxMap<String, bool> tableSourceUpdated = {
+  'default': false,
+}.obs; // State management for table
+RxMap<String, dynamic> tableContent = {
+  'default': [],
+}.obs; // content of table in ready to use array
 // Char-code map subcollections (e.g. `site`, `workforce`): each entry is a list
 // of raw Firestore doc maps (NOT positional `c`-arrays like `tableContent`).
 RxMap<String, List<Map<String, dynamic>>> mapTableContent =
@@ -383,77 +386,42 @@ final whiteDiamond = separator[5];
 const atiCode =
     '.\u{0F13}ati'; // internal code to mark a string. Put in the beginning
 const List<String> forbiddenCharacter = [
-  '\u{25C6}' // 0 black diamond
-  ,
-  '\u{25C7}' // 1 white diamond
-  ,
-  '\u{25C8}' // 2 inside diamond
-  ,
-  '\u{2B24}' // 3 black big circle
-  ,
-  '\u{2B58}' // 4 white big circle
-  ,
-  '\u{25FC}' // 5 black square
-  ,
-  '\u{25FB}' // 6 white square
-  ,
-  '\u{25C0}' // 7 black left triangle
-  ,
-  '\u{25C1}' // 8 white left triangle
-  ,
-  '\u{25B6}' // 9 black right triangle
-  ,
-  '\u{25B7}' // 10 white right triangle
-  ,
-  '\u{25CB}' // 11 white small circle
-  ,
-  '\u{25CF}' // 12 black small circle
-  ,
-  '\u{2605}' // 13 black star
-  ,
-  '\u{2606}' // 14 white star
-  ,
-  '\u{2A1D}' // 15 white N-ary vector
-  ,
-  '\u{2460}' // 16 circle 1
-  ,
-  '\u{2461}' // 17 circle 2
-  ,
-  '\u{2462}' // 18 circle 3
-  ,
-  '\u{2463}' // 19 circle 4
-  ,
-  '\u{2464}' // 20 circle 5
-  ,
-  '\u{2465}' // 21 circle 6
-  ,
-  '\u{2466}' // 22 circle 7
-  ,
-  '\u{2467}' // 23 circle 8
-  ,
-  '\u{2468}' // 24 circle 9
-  ,
-  '\u{2469}' // 25 circle 10
-  ,
-  '\u{246A}' // 26 circle 11
-  ,
-  '\u{246B}' // 27 circle 12
-  ,
-  '\u{246C}' // 28 circle 13
-  ,
-  '\u{246D}' // 29 circle 14
-  ,
-  '\u{246E}' // 30 circle 15
-  ,
-  '\u{246F}' // 31 circle 16
-  ,
-  '\u{2470}' // 32 circle 17
-  ,
-  '\u{2471}' // 33 circle 18
-  ,
-  '\u{2472}' // 34 circle 19
-  ,
-  '\u{2473}' // 35 circle 20
+  '\u{25C6}', // 0 black diamond
+  '\u{25C7}', // 1 white diamond
+  '\u{25C8}', // 2 inside diamond
+  '\u{2B24}', // 3 black big circle
+  '\u{2B58}', // 4 white big circle
+  '\u{25FC}', // 5 black square
+  '\u{25FB}', // 6 white square
+  '\u{25C0}', // 7 black left triangle
+  '\u{25C1}', // 8 white left triangle
+  '\u{25B6}', // 9 black right triangle
+  '\u{25B7}', // 10 white right triangle
+  '\u{25CB}', // 11 white small circle
+  '\u{25CF}', // 12 black small circle
+  '\u{2605}', // 13 black star
+  '\u{2606}', // 14 white star
+  '\u{2A1D}', // 15 white N-ary vector
+  '\u{2460}', // 16 circle 1
+  '\u{2461}', // 17 circle 2
+  '\u{2462}', // 18 circle 3
+  '\u{2463}', // 19 circle 4
+  '\u{2464}', // 20 circle 5
+  '\u{2465}', // 21 circle 6
+  '\u{2466}', // 22 circle 7
+  '\u{2467}', // 23 circle 8
+  '\u{2468}', // 24 circle 9
+  '\u{2469}', // 25 circle 10
+  '\u{246A}', // 26 circle 11
+  '\u{246B}', // 27 circle 12
+  '\u{246C}', // 28 circle 13
+  '\u{246D}', // 29 circle 14
+  '\u{246E}', // 30 circle 15
+  '\u{246F}', // 31 circle 16
+  '\u{2470}', // 32 circle 17
+  '\u{2471}', // 33 circle 18
+  '\u{2472}', // 34 circle 19
+  '\u{2473}', // 35 circle 20
 ];
 // final String fromLinkSeparator = separator[1];
 int star = separator[3].codeUnitAt(0);
@@ -508,9 +476,9 @@ dynamic secureStorageOptions;
 dynamic firestoreDb;
 dynamic firestoreCollection;
 dynamic
-    firestoreIO; // firestore collection for IO for this vid user/92343234234/io
+firestoreIO; // firestore collection for IO for this vid user/92343234234/io
 dynamic
-    firestoreMsg; // firestore collection for msg for any particular users/<my vid>/io/<other's vid>/msg
+firestoreMsg; // firestore collection for msg for any particular users/<my vid>/io/<other's vid>/msg
 dynamic firestoreNotif;
 dynamic transactionStore;
 String fsDeviceSubCollection = 'dvc'; //= device collection in user's uid doc
@@ -631,8 +599,8 @@ Future<int> globalInit() async {
       accessibility: KeychainAccessibility.first_unlock,
     );
     storage = FlutterSecureStorage(
-        iOptions:
-            secureStorageOptions); // secure storage : myLIf, pinHash, myAcc, myHub
+      iOptions: secureStorageOptions,
+    ); // secure storage : myLIf, pinHash, myAcc, myHub
 
     // vGoogleSignIn = GoogleSignIn();
     // scopes: [
@@ -645,7 +613,11 @@ Future<int> globalInit() async {
     //     '721538991284-iet4kp21754cj1ve7a78dpml9p6lps60.apps.googleusercontent.com',
     // );
   } else {
-    storage = const FlutterSecureStorage();
+    // migrateWithBackup: guard one-time 9.x->10.x cipher migration — kill mid-
+    // migration without it permanently wipes session/tenant keys (resetOnError).
+    storage = const FlutterSecureStorage(
+      aOptions: AndroidOptions(migrateWithBackup: true),
+    );
     // vGoogleSignIn = GoogleSignIn();
     // scopes: [
     //   'https://www.googleapis.com/auth/drive',
@@ -741,6 +713,8 @@ Future<int> globalInit() async {
   await internetConnectedCheck(forceTest: true);
   debugCount = -23;
   trace(debugCount);
+  // Firebase.initializeApp() already ran in main() before globalInit().
+  // Calling it again here was redundant work on the critical startup path.
   dynamic initValue = await Future.wait([
     getAllPermission(),
     SharedPreferences.getInstance(),
@@ -748,7 +722,8 @@ Future<int> globalInit() async {
   internetConnection.onStatusChange.listen((status) {
     internetConnectionFlag.value = status == InternetConnectionStatus.connected;
     debugPrint(
-        '>>>>> Connectivity change, result: ${internetConnectionFlag.value.toString()}');
+      '>>>>> Connectivity change, result: ${internetConnectionFlag.value.toString()}',
+    );
     ConnectionData().getConnection(false, true);
   });
   debugCount = -24;
@@ -791,7 +766,7 @@ Future<int> globalInit() async {
 
   functionName['readSS'] = '/readSS'; //= unsecured read
   functionName['writeSS'] = '/writeSS'; //= unsecured write
-//  functionName['addFL'] = '/addFL'; //= unsecured append to  FromLink
+  //  functionName['addFL'] = '/addFL'; //= unsecured append to  FromLink
   functionName['addFL'] =
       '/addFLSync3'; //= unsecured append to  FromLink, run Submitsync and sendMsg
   // addFLSync3 => write to Event
@@ -814,7 +789,7 @@ Future<int> globalInit() async {
   errorUrl =
       'https://firebasestorage.googleapis.com/v0/b/collanium1-4babc.appspot.com/o/link_app%2Flink_error.png?alt=media&token=ebf8e9d5-e6c1-457d-8f00-b83c76d94fa8';
   linkUrls = [
-    'https://script.google.com/macros/s/AKfycbxmoMsoUk7rfhud5VXXZr1LKasBeaM3Y92uXaGuyNcFat9XToE/exec'
+    'https://script.google.com/macros/s/AKfycbxmoMsoUk7rfhud5VXXZr1LKasBeaM3Y92uXaGuyNcFat9XToE/exec',
   ];
   legalPage =
       '{"title":"Legal","children":[{"type":"VMENU","left":"TRUE","leftPadding":0,"rightPadding":0,"beforeSpacing":30,"afterSpacing":0,"font":"default","size":18,"color":"4278196850","title":"Peraturan Layanan (Bahasa Indonesia)","route":"https://storage.googleapis.com/alz-public-ase2/legal/vertika_tos_id002.html"}]}';
@@ -839,8 +814,8 @@ Future<int> globalInit() async {
   // shortDateFormat = 'dd/MM/yyy';
   // dateTimeFormat = 'd MMM yyyy HH:mm';
   // pool = Soundpool(streamType: StreamType.notification);
-//  int scannerBeep; // beep id defined in main
-//   myScrollController = new ScrollController(keepScrollOffset: true);
+  //  int scannerBeep; // beep id defined in main
+  //   myScrollController = new ScrollController(keepScrollOffset: true);
   systemUIComponent = {}; // list of system JSON
   screenUIComponent = {}; // list of screen JSON
   linkTransaction = {}; // list of transaction
@@ -861,13 +836,32 @@ Future<int> globalInit() async {
       firestoreIO; // firestore collection for msg for any particular users/<my vid>/io/<other's vid>/msg
   firestoreNotif =
       firestoreIO; // firestore doc for notification from others. Document before /msg
-  transactionStore = DevToolsStore<ScreenTransaction>(transactionReducer,
-      initialState: ScreenTransaction(initTransactionStore()));
+  transactionStore = DevToolsStore<ScreenTransaction>(
+    transactionReducer,
+    initialState: ScreenTransaction(initTransactionStore()),
+  );
   availableCameras().then((value) {
-    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-      '#CAMS': value,
-    })));
+    transactionStore.dispatch(
+      UpdateScreenTxAction(ScreenTransaction({'#CAMS': value})),
+    );
   });
+  // ---- Restore persisted driver login (secure storage -> Redux) ----
+  // I2: placed strictly AFTER transactionStore is non-null (created just
+  // above). Read the driverLogin key; if non-empty, seed #has_user_login so the
+  // scanner self-skip gate sees the session before the first route is built.
+  // Local secure-storage read (no network) — safe in the serial bootstrap path.
+  // The later main.dart bootstrap dispatch is a per-key merge and preserves
+  // #has_user_login.
+  try {
+    final String? driverVid = await readDriverLogin();
+    if (driverVid != null && driverVid.isNotEmpty) {
+      transactionStore.dispatch(
+        UpdateScreenTxAction(ScreenTransaction({'#has_user_login': driverVid})),
+      );
+    }
+  } catch (e) {
+    devPrint('globalInit driverLogin restore error: $e');
+  }
   getCountryCodeList(); // put country code list in #SIM_COUNTRY_CODES
   getTimeDifference();
   Get.put(GeneralGetXController());
@@ -957,18 +951,18 @@ Placemark convertToPlaceMark(String? strObj) {
   late Placemark result;
   try {
     result = Placemark(
-      name: placeMark?[0].name ?? '%-pmName-%',
-      street: placeMark?[0].street ?? '%-pmstr-%',
-      isoCountryCode: placeMark?[0].isoCountryCode ?? '%-pmIsoCC-%',
-      country: placeMark?[0].country ?? invalidCountry,
-      postalCode: placeMark?[0].postalCode ?? '%-pmPostal-%',
-      administrativeArea: placeMark?[0].administrativeArea ?? '%-pmAdmin-%',
+      name: placeMark?['name'] ?? '%-pmName-%',
+      street: placeMark?['street'] ?? '%-pmstr-%',
+      isoCountryCode: placeMark?['isoCountryCode'] ?? '%-pmIsoCC-%',
+      country: placeMark?['country'] ?? invalidCountry,
+      postalCode: placeMark?['postalCode'] ?? '%-pmPostal-%',
+      administrativeArea: placeMark?['administrativeArea'] ?? '%-pmAdmin-%',
       subAdministrativeArea:
-          placeMark?[0].subAdministrativeArea ?? '%-pmSubAdmin-%',
-      locality: placeMark?[0].locality ?? '%-pmLocality-%',
-      subLocality: placeMark?[0].subLocality ?? '%-pmSubLocality-%',
-      thoroughfare: placeMark?[0].thoroughfare ?? '%-pmThrFare-%',
-      subThoroughfare: placeMark?[0].subThoroughfare ?? '%-pmSubThrFare-%',
+          placeMark?['subAdministrativeArea'] ?? '%-pmSubAdmin-%',
+      locality: placeMark?['locality'] ?? '%-pmLocality-%',
+      subLocality: placeMark?['subLocality'] ?? '%-pmSubLocality-%',
+      thoroughfare: placeMark?['thoroughfare'] ?? '%-pmThrFare-%',
+      subThoroughfare: placeMark?['subThoroughfare'] ?? '%-pmSubThrFare-%',
     );
   } catch (e) {
     result = const Placemark(
@@ -1067,8 +1061,10 @@ List<String> getImageList(dynamic data, String? indexString) {
   }
   // If the data at the specified index is empty or whitespace, return the default image URL.
   // index = max(0,index-1);
-  String imageData =
-      data[index].toString().trim().replaceAll(separator[6], separator[5]);
+  String imageData = data[index].toString().trim().replaceAll(
+    separator[6],
+    separator[5],
+  );
   imageData = imageData.replaceAll(' ', separator[5]);
   if (imageData.isEmpty) {
     return [defaultImage];
@@ -1121,7 +1117,7 @@ String? autheniumDecode(String? inp) {
     result = result.replaceAll('_u2B58_', '\u{2B58}');
     result = result.replaceAll('_u2B2A_', '\u{2B2A}');
     result = result.replaceAll('_u25C6_', '\u{25C6}');
-    result = result.replaceAll('_u25C7_', '\u{25C7}'); // hollow diamond
+    result = result.replaceAll('_u25C7_', '\u{25C7}');
     result = result.replaceAll('_25FC_', '\u{25FC}'); // this is buggy character
     // result = result.replaceAll('_25C0_', '\u{25C0}');
     // result = result.replaceAll('_25B6_', '\u{25B6}');
@@ -1145,6 +1141,21 @@ bool beginWithAtiCode(String? input) {
   return input.substring(0, atiCode.length) == atiCode;
 } // end of atiCheck
 
+String? cleanAtiCode(String? input) {
+  if (input == null) return null;
+  if (beginWithAtiCode(input)) {
+    return input.substring(atiCode.length);
+  }
+  return input;
+} // end of cleanAtiCode
+
+String? quoteCleanUp(String? inp) {
+  // replace " and ' to `
+  if (inp == null) return null;
+  String output = inp.replaceAll('"', '``').replaceAll("'", '`');
+  return output;
+} // end of quoteCleanUp
+
 String? stringCleanUp(String? inp) {
   if (inp == null) return null;
   String output = quoteCleanUp(cleanAtiCode(inp)) ?? '';
@@ -1165,23 +1176,11 @@ String? stringCleanUp(String? inp) {
   return output;
 } // end of stringCleanUp
 
-String? cleanAtiCode(String? input) {
-  if (input == null) return null;
-  if (beginWithAtiCode(input)) {
-    return input.substring(atiCode.length);
-  }
-  return input;
-} // end of cleanAtiCode
-
-String? quoteCleanUp(String? inp) {
-  // replace " and ' to `
-  if (inp == null) return null;
-  String output = inp.replaceAll('"', '``').replaceAll("'", '`');
-  return output;
-} // end of quoteCleanUp
-
 List<dynamic> tableToArray(
-    Map<String, dynamic>? sourceTable, String tableCode, String? sort) {
+  Map<String, dynamic>? sourceTable,
+  String tableCode,
+  String? sort,
+) {
   List<dynamic> res = [];
   int sortFactor = 0; // no sort as default
   if (sort != null) {
@@ -1202,9 +1201,12 @@ List<dynamic> tableToArray(
       try {
         // String? checksum = myTable[tableCode];
         myTable.remove(tableCode);
-        myTable = dict(sourceTable.entries.toList()
-          ..sort((e1, e2) =>
-              sortFactor * int.parse(e2.key).compareTo(int.parse(e1.key))));
+        myTable = dict(
+          sourceTable.entries.toList()..sort(
+            (e1, e2) =>
+                sortFactor * int.parse(e2.key).compareTo(int.parse(e1.key)),
+          ),
+        );
         // myTable[tableCode] = checksum;
       } catch (e) {
         myTable = sourceTable;
@@ -1251,9 +1253,9 @@ String replaceMarker(String source, List ref, int startIndex, bool newLine) {
     for (int i = 0; i < len; i++) {
       int convertedIndex = min(max(1, i + indexFactor), maxIndex);
       res = res.replaceAll(
-          '<$i>',
-          ref[convertedIndex]
-              .toString()); // notation begin with 1. 0 = sort key, 1 = timestamp
+        '<$i>',
+        ref[convertedIndex].toString(),
+      ); // notation begin with 1. 0 = sort key, 1 = timestamp
     } // end for (int i = 0; i < len; i++)
     if (!newLine) {
       res = res.replaceAll('\\n', ' -- ');
@@ -1271,8 +1273,14 @@ String cleanupString(String inp) {
 void getTimeDifference() async {
   getRealTime().then((res) {
     int deviceTime = DateTime.now().millisecondsSinceEpoch;
-    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-        {'#REF_TIME_START': res, '#DEVICE_TIME_START': deviceTime})));
+    transactionStore.dispatch(
+      UpdateScreenTxAction(
+        ScreenTransaction({
+          '#REF_TIME_START': res,
+          '#DEVICE_TIME_START': deviceTime,
+        }),
+      ),
+    );
   });
 } // end of getTimeDifference
 
@@ -1339,11 +1347,16 @@ List<dynamic> styleArray(String? inp) {
   String inpStyle = (inp ?? "").toString().toLowerCase();
   try {
     result.add(inpStyle.contains('bold') ? FontWeight.bold : FontWeight.normal);
-    result
-        .add(inpStyle.contains('italic') ? FontStyle.italic : FontStyle.normal);
+    result.add(
+      inpStyle.contains('italic') ? FontStyle.italic : FontStyle.normal,
+    );
     if (inpStyle.contains('underline') && inpStyle.contains('strikethrough')) {
-      result.add(TextDecoration.combine(
-          [TextDecoration.underline, TextDecoration.lineThrough]));
+      result.add(
+        TextDecoration.combine([
+          TextDecoration.underline,
+          TextDecoration.lineThrough,
+        ]),
+      );
     } else {
       if (inpStyle.contains('underline')) {
         result.add(TextDecoration.underline);
@@ -1401,14 +1414,14 @@ Future firstLogin(String vid, String sheetKey) async {
   var cUser = state['#FIREBASE_USER'];
   //* Set vid, email, sheetKey in transactionStore
   //* save to firestore :  email,uid
-//  await setUidImeiEmail(vid); // To Firestore
+  //  await setUidImeiEmail(vid); // To Firestore
   //* save to persistence.storage :
   //*   sheetKey => 'myLif',
   // X   #FIREBASE_USER => 'myFirebaseData'
   storage.write(
-      key: 'myLif',
-      value:
-          sheetKey); // put interface key as default LIF in persistent secure storage
+    key: 'myLif',
+    value: sheetKey,
+  ); // put interface key as default LIF in persistent secure storage
   //* put to LIF :
   //*  name, email, imei, gps, timestamp, photoUrl, authentication method
   if (state['#SHEET_API']) {
@@ -1416,11 +1429,15 @@ Future firstLogin(String vid, String sheetKey) async {
     ValueRange vu = ValueRange.fromJson({
       "values": [
         [cUser.displayName],
-        [cUser.email]
-      ]
+        [cUser.email],
+      ],
     });
-    sheetApi.spreadsheets.values.update(vu, sheetKey, 'Settings!B2:B3',
-        valueInputOption: 'USER_ENTERED');
+    sheetApi.spreadsheets.values.update(
+      vu,
+      sheetKey,
+      'Settings!B2:B3',
+      valueInputOption: 'USER_ENTERED',
+    );
     ValueRange profile = ValueRange.fromJson({
       "values": [
         [state['#IMEI'] ?? '-'],
@@ -1429,21 +1446,32 @@ Future firstLogin(String vid, String sheetKey) async {
         [state['#LOCATION'].lng ?? 0],
         [now],
         [state['#AUTH_METHOD']],
-      ]
+      ],
     });
-    sheetApi.spreadsheets.values.update(profile, sheetKey, 'Settings!G1:G6',
-        valueInputOption: 'USER_ENTERED');
+    sheetApi.spreadsheets.values.update(
+      profile,
+      sheetKey,
+      'Settings!G1:G6',
+      valueInputOption: 'USER_ENTERED',
+    );
   }
-  transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-      {'#INTERFACE_KEY': sheetKey, '#VID': vid, '#EMAIL': cUser.email})));
+  transactionStore.dispatch(
+    UpdateScreenTxAction(
+      ScreenTransaction({
+        '#INTERFACE_KEY': sheetKey,
+        '#VID': vid,
+        '#EMAIL': cUser.email,
+      }),
+    ),
+  );
   launchCheck();
 } // end of firstLogin
 
 dynamic displayPage(String pageName) {
   // clear global variables, ready for new page
-//   txfController.clear();
-//   inputTxt.clear();
-//  return AnyPage(pageName:pageName);
+  //   txfController.clear();
+  //   inputTxt.clear();
+  //  return AnyPage(pageName:pageName);
   return linkPage[pageName];
 }
 
@@ -1456,22 +1484,28 @@ bool routeExist(String? page) {
 }
 
 List<Widget> reloadPage(String page) {
-  clearData(page);
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    clearData(page);
+  });
   List<Widget> newPageElement =
       []; //List<Widget>.empty(); // create output List
   if (linkElement[page] != null) {
     //newPageElement.addAll(linkElement[page]!); // format for output
-    newPageElement =
-        List<Widget>.of(linkElement[page]!.map((widget) => widget));
+    newPageElement = List<Widget>.of(
+      linkElement[page]!.map((widget) => widget),
+    );
     transactionStore.dispatch(
-        UpdateScreenTxAction(ScreenTransaction({'#CURRENT_ROUTE': page})));
+      UpdateScreenTxAction(ScreenTransaction({'#CURRENT_ROUTE': page})),
+    );
   } else {
     // TODO if page not found, put error page here for application debug
     // newPageElement.addAll(linkElement[home]!); // format for output
-    newPageElement =
-        List<Widget>.of(linkElement[home]!.map((widget) => widget));
+    newPageElement = List<Widget>.of(
+      linkElement[home]!.map((widget) => widget),
+    );
     transactionStore.dispatch(
-        UpdateScreenTxAction(ScreenTransaction({'#CURRENT_ROUTE': home})));
+      UpdateScreenTxAction(ScreenTransaction({'#CURRENT_ROUTE': home})),
+    );
   }
   return newPageElement;
 }
@@ -1484,15 +1518,20 @@ void gotoRoute(String routeName) {
         var state = transactionStore.state;
         var lifKey = state.screenTx['#INTERFACE_KEY'];
         readSettings(lifKey, 1).then((_) {
-          transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-              {'#REFRESH': false, '#CURRENT_ROUTE': routeName})));
+          transactionStore.dispatch(
+            UpdateScreenTxAction(
+              ScreenTransaction({
+                '#REFRESH': false,
+                '#CURRENT_ROUTE': routeName,
+              }),
+            ),
+          );
           String newRoute = routeName;
           List<Widget> newElementList = reloadPage(newRoute);
           rootThis.setState(() {
             rootThis.pageName = newRoute;
             rootThis.pageElements = newElementList;
             rootThis.wait = false;
-            rootThis.touch = !rootThis.touch;
           });
         });
       });
@@ -1504,7 +1543,6 @@ void gotoRoute(String routeName) {
           rootThis.pageName = newRoute;
           rootThis.pageElements = newElementList;
           rootThis.wait = false;
-          rootThis.touch = !rootThis.touch;
         });
       }
     }
@@ -1529,9 +1567,13 @@ Future saveSendSingle(String screenName, int position, String sendData) async {
     row[pos] = "'$sendData";
   }
 
-  transactionStore.dispatch(SaveSendTxAction(ScreenTransaction({
-    'screenName': [row]
-  })));
+  transactionStore.dispatch(
+    SaveSendTxAction(
+      ScreenTransaction({
+        'screenName': [row],
+      }),
+    ),
+  );
 }
 
 // Future saveSendRecord(String screenName, String tail) async {
@@ -1581,8 +1623,9 @@ Future saveSendSingle(String screenName, int position, String sendData) async {
 // } // end of saveSendRecord
 
 String displayDateTime(int msUnix) {
-  String result = DateFormat("d MMM y H:m")
-      .format(DateTime.fromMillisecondsSinceEpoch(msUnix));
+  String result = DateFormat(
+    "d MMM y H:m",
+  ).format(DateTime.fromMillisecondsSinceEpoch(msUnix));
   return result;
 }
 
@@ -1656,12 +1699,12 @@ Future reLoginDemo() async {
   await getMyImei(); // put imei in #IMEI
   var state = transactionStore.state.screenTx;
   var sheetData = await getLifProfileData(state['#INTERFACE_KEY']);
-  transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-    '#VID': sheetData['vid'],
-  })));
+  transactionStore.dispatch(
+    UpdateScreenTxAction(ScreenTransaction({'#VID': sheetData['vid']})),
+  );
   storage.write(key: 'myLif', value: state['#INTERFACE_KEY']);
-//  storage.write(key: 'myFirebaseData', value: jsonEncode(state['#FIREBASE_USER']));
-//  await setUidImeiEmail(sheetData['vid'].toString()); // To Firestore
+  //  storage.write(key: 'myFirebaseData', value: jsonEncode(state['#FIREBASE_USER']));
+  //  await setUidImeiEmail(sheetData['vid'].toString()); // To Firestore
   launchCheckDemo();
 } // end of reLoginDemo
 
@@ -1670,7 +1713,7 @@ Future firstLoginDemo(String vid, String sheetKey) async {
   // no need to add document in firestore. Done by function getNewVid
   // run when first user login
   int now = DateTime.now().millisecondsSinceEpoch;
-//  var setResult =
+  //  var setResult =
   await Future.wait([
     getGPSLoc(), // put gps loc in #LOCATION
     getMyImei(), // put imei in #IMEI
@@ -1680,37 +1723,38 @@ Future firstLoginDemo(String vid, String sheetKey) async {
   if (cUser == null) {
     cUser = await getFirebaseUser();
     transactionStore.dispatch(
-        UpdateScreenTxAction(ScreenTransaction({'#FIREBASE_USER': cUser})));
+      UpdateScreenTxAction(ScreenTransaction({'#FIREBASE_USER': cUser})),
+    );
   }
   //* Set vid, email, sheetKey in transactionStore
   //* save to firestore :  email,uid
-//  await setUidImeiEmail(vid); // To Firestore
+  //  await setUidImeiEmail(vid); // To Firestore
   //* save to persistence.storage :
   //*   sheetKey => 'myLif',
   // X   #FIREBASE_USER => 'myFirebaseData'
   storage.write(
-      key: 'myLif',
-      value:
-          sheetKey); // put interface key as default LIF in persistent secure storage
-//  var jsonForm = cUser.toJson();
-//  var encoded = jsonEncode(jsonForm);
-//  storage.write(
-//      key: 'myFirebaseData',
-//      value: jsonEncode(encoded));      // put firebase user data in persistent secure storage
+    key: 'myLif',
+    value: sheetKey,
+  ); // put interface key as default LIF in persistent secure storage
+  //  var jsonForm = cUser.toJson();
+  //  var encoded = jsonEncode(jsonForm);
+  //  storage.write(
+  //      key: 'myFirebaseData',
+  //      value: jsonEncode(encoded));      // put firebase user data in persistent secure storage
 
   //* put to LIF :
   //*  name, email, imei, gps, timestamp, photoUrl, authentication method
   if (state['#SHEET_API']) {
     // Write to Lif for first time.
-//    ValueRange vu = new ValueRange.fromJson({
-//      "values": [
-//        [cUser.displayName],
-//        [cUser.email]
-//      ]
-//    });
-//    sheetApi.spreadsheets.values.update(vu, sheetKey, 'Settings!B2:B3',
-//        valueInputOption: 'USER_ENTERED');
-//    String pk = createPrivateKey('');
+    //    ValueRange vu = new ValueRange.fromJson({
+    //      "values": [
+    //        [cUser.displayName],
+    //        [cUser.email]
+    //      ]
+    //    });
+    //    sheetApi.spreadsheets.values.update(vu, sheetKey, 'Settings!B2:B3',
+    //        valueInputOption: 'USER_ENTERED');
+    //    String pk = createPrivateKey('');
     ValueRange profile = ValueRange.fromJson({
       "values": [
         [state['#IMEI'] ?? '-'],
@@ -1727,15 +1771,26 @@ Future firstLoginDemo(String vid, String sheetKey) async {
         ['public'],
         ['private'],
         ['address'],
-      ]
+      ],
     });
     // write setting to LIF.
     // TODO put pinhash, publicKey, [privateKey (temporary)], address in LIF
-    sheetApi.spreadsheets.values.update(profile, sheetKey, lifSetting2,
-        valueInputOption: 'USER_ENTERED');
+    sheetApi.spreadsheets.values.update(
+      profile,
+      sheetKey,
+      lifSetting2,
+      valueInputOption: 'USER_ENTERED',
+    );
   }
-  transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-      {'#INTERFACE_KEY': sheetKey, '#VID': vid, '#EMAIL': cUser.email})));
+  transactionStore.dispatch(
+    UpdateScreenTxAction(
+      ScreenTransaction({
+        '#INTERFACE_KEY': sheetKey,
+        '#VID': vid,
+        '#EMAIL': cUser.email,
+      }),
+    ),
+  );
   launchCheckDemo();
 } // end of firstLoginDemo
 
@@ -1748,7 +1803,7 @@ List<String> diamondTextToList(String input) {
       String strTest = '["${noDiamondStr.replaceAll('_u25C6_', '","')}"]';
       retVal = jsonDecode(strTest).cast<String>();
     } catch (_) {
-      retVal = input.split(separator[1]);
+      retVal = input.split('◆');
     }
   } // end if input
   return retVal;
@@ -1770,33 +1825,35 @@ Future<bool> dataOk(context) async {
       rootThis.dataColor = notReadyColor;
     });
     await showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            // display dialog that data is not ready
-            title: Text(textList[title]),
-            content: Container(
-              alignment: const Alignment(0.0, 0.0),
-              height: 100,
-              child: Text(textList[body]),
-            ),
-            actions: <Widget>[
-              ElevatedButton(
-                child: Text(
-                  textList["OK"],
-                  style: TextStyle(
-                    color: Theme.of(context).textTheme.bodyLarge!.color,
-                    backgroundColor:
-                        Theme.of(context).textTheme.bodyLarge!.backgroundColor,
-                  ),
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          // display dialog that data is not ready
+          title: Text(textList[title]),
+          content: Container(
+            alignment: const Alignment(0.0, 0.0),
+            height: 100,
+            child: Text(textList[body]),
+          ),
+          actions: <Widget>[
+            ElevatedButton(
+              child: Text(
+                textList["OK"],
+                style: TextStyle(
+                  color: Theme.of(context).textTheme.bodyLarge!.color,
+                  backgroundColor: Theme.of(
+                    context,
+                  ).textTheme.bodyLarge!.backgroundColor,
                 ),
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
               ),
-            ],
-          );
-        });
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
   return dataOk;
 } // end of dataOK
@@ -1811,26 +1868,27 @@ Future<bool> internetOk(context) async {
       rootThis.dataColor = notReadyColor;
     });
     await showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            // display dialog that data is not ready
-            title: Text(textList[title]),
-            content: Container(
-              alignment: const Alignment(0.0, 0.0),
-              height: 100,
-              child: Text(textList[body]),
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          // display dialog that data is not ready
+          title: Text(textList[title]),
+          content: Container(
+            alignment: const Alignment(0.0, 0.0),
+            height: 100,
+            child: Text(textList[body]),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: Text(textList["OK"]),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
             ),
-            actions: <Widget>[
-              TextButton(
-                child: Text(textList["OK"]),
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
-              ),
-            ],
-          );
-        });
+          ],
+        );
+      },
+    );
   }
   return dataOk;
 } // end of internetOK
@@ -1840,8 +1898,9 @@ void actionLock(String from) {
   // called by every action button
   // debugPrint('#### actionLock from $from');
   setTransactionNotOK('actionLock $from');
-  transactionStore
-      .dispatch(UpdateScreenTxAction(ScreenTransaction({'#DATA_OK': false})));
+  transactionStore.dispatch(
+    UpdateScreenTxAction(ScreenTransaction({'#DATA_OK': false})),
+  );
   // if (rootThis != null) {
   //   rootThis.setState(() {
   //     rootThis.dataColor = notReadyColor;
@@ -1853,8 +1912,9 @@ void actionUnLock(String from) {
   // unlock action
   // debugPrint('#### actionUnLock from $from');
   setTransactionOK('actionUnlock $from');
-  transactionStore
-      .dispatch(UpdateScreenTxAction(ScreenTransaction({'#DATA_OK': true})));
+  transactionStore.dispatch(
+    UpdateScreenTxAction(ScreenTransaction({'#DATA_OK': true})),
+  );
   // if (rootThis != null) {
   //   rootThis.setState(() {
   //     rootThis.touch = !rootThis.touch;
@@ -1866,14 +1926,28 @@ void actionUnLock(String from) {
 String phoneCleanup(String ph) {
   String retVal = ph.replaceAll(RegExp("[^0-9]"), "");
   return retVal.replaceFirst(
-      RegExp("^0|^62|^65|^60|^63|^66|^66|^1|^673|^61|^52"), "");
+    RegExp("^0|^62|^65|^60|^63|^66|^66|^1|^673|^61|^52"),
+    "",
+  );
 } // end of phoneCleanup
 
-void errorReport(dynamic e) {
-  // errorReport(e);
-  // TODO create error reporting to Otonomiq server via firebase
-  // devPrint(e);
-  devPrint(e.toString());
+void errorReport(dynamic e, [StackTrace? stack]) {
+  // Log unconditionally (debugPrint prints in release too) AND forward to
+  // Crashlytics as a non-fatal for remote capture — the hundreds of
+  // catch-then-errorReport sites (incl. historySync data-loss) are now visible
+  // in the field. Crashlytics no-ops when collection is disabled (debug).
+  // Guarded so a not-yet-initialised Firebase never turns an error report into
+  // a second crash.
+  debugPrint('errorReport: ${e.toString()}');
+  try {
+    FirebaseCrashlytics.instance.recordError(
+      e,
+      stack ?? StackTrace.current,
+      fatal: false,
+    );
+  } catch (_) {
+    // Crashlytics unavailable (e.g. before Firebase.initializeApp) — ignore.
+  }
 } //errorReport
 
 void devPrint(dynamic e) {
@@ -1882,10 +1956,23 @@ void devPrint(dynamic e) {
   }
 } // end of devPrint
 
+/// Forward [e] to [errorReport] (Crashlytics non-fatal) UNLESS it is a handled
+/// [TimeoutException] from a best-effort read / time fetch. Those recover
+/// gracefully (UI re-renders from cache, clock falls back to the device), so
+/// reporting them is pure noise — log debug-only and skip Crashlytics.
+void reportNonTimeout(dynamic e, [StackTrace? stack]) {
+  if (e is TimeoutException) {
+    devPrint('handled timeout (crash report skipped): $e');
+    return;
+  }
+  errorReport(e, stack);
+}
+
 void trace(int debugNum) {
   int nowTime = DateTime.now().millisecondsSinceEpoch;
   devPrint(
-      "$debugNum = Millisecond clock:${nowTime - launchTime}  = ${nowTime - debugTime}");
+    "$debugNum = Millisecond clock:${nowTime - launchTime}  = ${nowTime - debugTime}",
+  );
   debugTime = nowTime;
 }
 
@@ -1913,16 +2000,24 @@ List<dynamic> searchTable(String rx, var myList) {
         .toLowerCase()
         .replaceAll(RegExp(r"\s+\b|\b\s"), ' ')
         .split(' ');
+    // Compile each search term's RegExp ONCE up front. Previously a fresh
+    // RegExp was compiled per (row x term) inside the loop, i.e. on every
+    // keystroke for every row — the main cost of search lag on large tables.
+    final List<RegExp> regexps = rList
+        .map((rg) => RegExp(rg.toLowerCase()))
+        .toList();
     res = myList.where((c) {
       bool? finalResult;
-      for (var rg in rList) {
-        RegExp regexp = RegExp(rg.toLowerCase());
+      for (final regexp in regexps) {
         bool result = false;
         for (var e in c) {
-          result = result || regexp.hasMatch(e.toString().toLowerCase());
+          if (regexp.hasMatch(e.toString().toLowerCase())) {
+            result = true;
+            break;
+          }
         }
         finalResult = finalResult == null ? result : (finalResult && result);
-      } // end of rList
+      } // end of regexps
       return finalResult ?? false;
     }).toList();
   } else {
@@ -1988,7 +2083,10 @@ void setTransactionNotOK(String from) {
 } // end of setTransactionNotOK
 
 Future<dynamic> waitUntilNotNullScreenTx(
-    String from, String screenTxName, int maxLoop) async {
+  String from,
+  String screenTxName,
+  int maxLoop,
+) async {
   dynamic state = transactionStore.state.screenTx;
   int loopCounter = 0;
   Duration backoffDuration = const Duration(milliseconds: 250);

@@ -1,4 +1,8 @@
+import 'package:flutter/painting.dart';
 import 'package:intl/intl.dart';
+
+import 'dsl_eq.dart';
+import 'panel_card_support.dart';
 
 /// Relative timestamp for a timeline entry, computed from the event epoch.
 /// Same calendar day → "HH:mm hari ini"; yesterday → "Kemarin HH:mm"; else
@@ -6,9 +10,11 @@ import 'package:intl/intl.dart';
 String relativeTimestamp(int tMs, int nowMs) {
   final DateTime t = DateTime.fromMillisecondsSinceEpoch(tMs);
   final DateTime now = DateTime.fromMillisecondsSinceEpoch(nowMs);
-  final int dayDiff = DateTime(now.year, now.month, now.day)
-      .difference(DateTime(t.year, t.month, t.day))
-      .inDays;
+  final int dayDiff = DateTime(
+    now.year,
+    now.month,
+    now.day,
+  ).difference(DateTime(t.year, t.month, t.day)).inDays;
   final String hhmm = DateFormat('HH:mm').format(t);
   if (dayDiff <= 0) return '$hhmm hari ini';
   if (dayDiff == 1) return 'Kemarin $hhmm';
@@ -54,10 +60,10 @@ final RegExp _condPair = RegExp(r'[◀◁]([a-zA-Z][a-zA-Z0-9]*)[▶▷]◼([^�
 /// first. Empty conditions → unchanged; any value still containing `<` (an
 /// unresolvable token) → no match. Equality only.
 List<Map<String, dynamic>> filterEventsByConditions(
-    List<Map<String, dynamic>> events,
-    String rawConditions,
-    Map<String, dynamic> screenTx,
-    ) {
+  List<Map<String, dynamic>> events,
+  String rawConditions,
+  Map<String, dynamic> screenTx,
+) {
   if (rawConditions.trim().isEmpty) return events;
   final String resolved = resolveAngleTokens(rawConditions, screenTx);
   final List<MapEntry<String, String>> conds = [];
@@ -65,11 +71,67 @@ List<Map<String, dynamic>> filterEventsByConditions(
     conds.add(MapEntry(m.group(1)!.trim(), m.group(2)!.trim()));
   }
   if (conds.isEmpty) return events;
-  if (conds.any((c) => c.value.isEmpty || c.value.contains('<'))) return const [];
+  if (conds.any((c) => c.value.isEmpty || c.value.contains('<')))
+    return const [];
   return events.where((e) {
     for (final c in conds) {
-      if ((e[c.key] ?? '').toString().trim() != c.value) return false;
+      if (!eq((e[c.key] ?? '').toString().trim(), c.value)) return false;
     }
     return true;
   }).toList();
 }
+
+/// Neutral-gray foreground for status values outside ok/warn/danger.
+const Color kNeutralColor = Color(0xFF6B7280);
+
+/// Neutral-gray background for status values outside ok/warn/danger.
+const Color kNeutralBgColor = Color(0xFFF3F4F6);
+
+const Set<String> _knownStatuses = {'ok', 'warn', 'danger'};
+
+/// Dot / badge foreground color.
+///
+/// When [statusField] is non-null, reads `doc[statusField]`, normalizes it,
+/// and maps through [statusColor] for known statuses (ok/warn/danger).
+/// Unknown or empty values -> [kNeutralColor].
+///
+/// When [statusField] is null (patrol mode), derives color from [evidence]:
+/// `'Bukti kuat'` -> ok (green), else -> warn (amber).
+Color resolveStatusColor(
+  String? statusField,
+  Map<String, dynamic> doc,
+  String evidence,
+) {
+  if (statusField != null) {
+    final String raw = (doc[statusField] ?? '').toString();
+    final String norm = normalizeStatus(raw);
+    if (norm.isEmpty || !_knownStatuses.contains(norm)) return kNeutralColor;
+    return statusColor(norm);
+  }
+  return statusColor(evidence == 'Bukti kuat' ? 'ok' : 'warn');
+}
+
+/// Dot / badge background color. Same routing logic as [resolveStatusColor].
+Color resolveStatusBgColor(
+  String? statusField,
+  Map<String, dynamic> doc,
+  String evidence,
+) {
+  if (statusField != null) {
+    final String raw = (doc[statusField] ?? '').toString();
+    final String norm = normalizeStatus(raw);
+    if (norm.isEmpty || !_knownStatuses.contains(norm)) return kNeutralBgColor;
+    return statusBgColor(norm);
+  }
+  return statusBgColor(evidence == 'Bukti kuat' ? 'ok' : 'warn');
+}
+
+/// True when [badgeTemplate] contains the `{evidence}` computed token.
+/// Used to gate rendering of shield icons (verified_user / gpp_maybe).
+bool badgeContainsEvidence(String badgeTemplate) =>
+    badgeTemplate.contains('{evidence}');
+
+/// True when [textTemplate] contains the `{method}` computed token.
+/// Used to gate rendering of the method icon (qr_code_2 / text_fields).
+bool textContainsMethod(String textTemplate) =>
+    textTemplate.contains('{method}');
