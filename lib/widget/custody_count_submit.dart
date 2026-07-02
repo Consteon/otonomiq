@@ -5,6 +5,7 @@ import '../api.dart'; // saveSend, getRealTime, getLocationString, getNowMillise
 import '../firestore_repository/table_repository.dart'; // subscribeToMapCollection
 import '../global.dart'; // transactionStore (dynamic), mapTableContent, devPrint
 import '../model/otq_state.dart'; // OtqState
+import '../redux/screen_transaction.dart'; // UpdateScreenTxAction, ScreenTransaction
 import 'custody_count_list.dart';
 import 'do_chain.dart';
 import 'driver_home_support.dart';
@@ -61,6 +62,7 @@ class CustodyCountSubmit extends StatefulWidget {
 
 class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
   String _workforceCode = ''; // O1: workforce subscription code
+  String _stockLocationCode = ''; // O1: stock_location subscription code
   List<String> _textArray = [];
 
   bool get _isOpening =>
@@ -74,6 +76,7 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
     super.initState();
     _parseText();
     _subscribeWorkforce();
+    _subscribeStockLocation();
   }
 
   void _parseText() {
@@ -103,6 +106,36 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       _workforceCode = '${tp.tableDocId}/${tp.subColl}';
       subscribeToMapCollection(
           appVid, tp.tableDocId, tp.subColl, _workforceCode);
+    }
+  }
+
+  /// Subscribe to the `stock_location` collection so O1 submit can resolve
+  /// `{warehouseId}` from the single `lt=='warehouse'` doc when
+  /// `#ACTIVE_WAREHOUSE` (task.gl) is empty. O1 only: early-returns for P6/C1.
+  ///
+  /// Table path: optional `warehouseTable` config override, else derived from
+  /// `checkTable`'s tableDocId + the `stock_location` subcollection (same
+  /// container as vehicle_check; mirrors vehicle_feed_list `_itemCode`).
+  /// Idempotent per code (subscribeToMapCollection dedups via _mapSubscribed),
+  /// so this reuses H1 VehicleFeedList's live subscription when present.
+  void _subscribeStockLocation() {
+    if (!_isOpening) return;
+    final String appVid = resolveAppVid(widget.component);
+    final String rawWhTable =
+        (widget.component['warehouseTable'] ?? '').toString().trim();
+    TablePath? tp;
+    if (rawWhTable.isNotEmpty) {
+      tp = parseTablePath(rawWhTable);
+    } else {
+      final String rawCheckTable =
+          (widget.component['checkTable'] ?? '').toString().trim();
+      final String docId = parseTablePath(rawCheckTable).tableDocId;
+      if (docId.isNotEmpty) tp = TablePath(docId, 'stock_location');
+    }
+    if (tp != null && tp.tableDocId.isNotEmpty && tp.subColl.isNotEmpty) {
+      _stockLocationCode = '${tp.tableDocId}/${tp.subColl}';
+      subscribeToMapCollection(
+          appVid, tp.tableDocId, tp.subColl, _stockLocationCode);
     }
   }
 
@@ -264,8 +297,32 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       final String checkerVid = (screenTx['#VID'] ?? '').toString().trim();
       final String checkerName = _resolveCheckerName();
       final String genCnm = _generateCnm(vehicleId);
-      final String warehouseId =
+      // Resolve warehouseId with precedence (config override > #ACTIVE_WAREHOUSE
+      // [task.gl-derived] > stock_location lt=='warehouse' fallback, spec §2.1).
+      final String rawWhCfg =
+          (widget.component['warehouseId'] ?? '').toString().trim();
+      final String cfgResolved = rawWhCfg.isEmpty
+          ? ''
+          : resolveDriverCurlyTokens(rawWhCfg, widget.scrName);
+      final String whFromStore =
           (screenTx['#ACTIVE_WAREHOUSE'] ?? '').toString().trim();
+      final List<Map<String, dynamic>> stockDocs =
+          List<Map<String, dynamic>>.from(
+              mapTableContent[_stockLocationCode] ?? const []);
+      final String warehouseId = resolveWarehouseId(
+        configResolved: cfgResolved,
+        fromStore: whFromStore,
+        stockDocs: stockDocs,
+      );
+      // Forward-compat: when the value came from the fallback (store was empty),
+      // publish it so the {warehouseId} token + any DSL field resolved later in
+      // THIS submit (step 5) stay consistent with the native gl write. Cleared
+      // on route change by ExecutorDesignateCard.clearO1State (no stale leak).
+      if (whFromStore.isEmpty && warehouseId.isNotEmpty) {
+        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+          '#ACTIVE_WAREHOUSE': warehouseId,
+        })));
+      }
       // NOTE: #CHOSEN_DRIVER_VID / #CHOSEN_DRIVER_NAME are NOT read into locals
       // here -- the designate `updateEventRow` DSL resolves {chosenVid} /
       // {chosenName} from screenTx directly via _resolveO1Tokens (step 5).

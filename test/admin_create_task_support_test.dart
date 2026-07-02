@@ -119,6 +119,31 @@ void main() {
       expect(arr[0]['ii'], 'a');
       expect(arr[1]['ii'], 'b');
     });
+
+    test('every element carries ad+ap present with null value (mixed tx types)', () {
+      // Regression: ad/ap must survive the array-build path (draftToItArray),
+      // not just single toItMap(). CF custody/confirm falls back to plan when
+      // the field is ABSENT -- containsKey is the load-bearing assertion.
+      final items = [
+        DraftItem(ii: 'a', itemName: 'A', tx: 'deliver', pd: 5, pp: 3),
+        DraftItem(ii: 'b', itemName: 'B', tx: 'sale', ps: 2, hg: 45000),
+        DraftItem(ii: 'c', itemName: 'C', tx: 'purchase', pb: 4),
+        DraftItem(ii: 'd', itemName: 'D', tx: 'refill', pr: 3),
+      ];
+      final arr = AdminCreateTaskSupport.draftToItArray(items);
+      expect(arr.length, 4);
+      for (int i = 0; i < arr.length; i++) {
+        final m = arr[i];
+        expect(m.containsKey('ad'), isTrue,
+            reason: 'ad must be present at index $i (${m['tx']})');
+        expect(m.containsKey('ap'), isTrue,
+            reason: 'ap must be present at index $i (${m['tx']})');
+        expect(m['ad'], isNull,
+            reason: 'ad must be null at index $i (${m['tx']})');
+        expect(m['ap'], isNull,
+            reason: 'ap must be null at index $i (${m['tx']})');
+      }
+    });
   });
 
   // ── computeTotals ──────────────────────────────────────────────────
@@ -368,6 +393,46 @@ void main() {
       expect(doc['kl'], '');
       expect(doc['vv'], '');
       expect(doc['it'], isEmpty);
+    });
+
+    test('it[] in assembled doc carries ad+ap present+null on every line', () {
+      // Regression end-to-end: the field must reach the real Firestore payload.
+      // Build itArray via draftToItArray (the production path), then assemble
+      // the doc and verify each it[] element still has ad/ap present+null.
+      final items = [
+        DraftItem(ii: 'galon', itemName: 'Galon 19L', tx: 'deliver',
+            pd: 5, pp: 3),
+        DraftItem(ii: 'aqua', itemName: 'Aqua 600mL', tx: 'sale',
+            ps: 2, hg: 45000),
+      ];
+      final itArray = AdminCreateTaskSupport.draftToItArray(items);
+      final doc = AdminCreateTaskSupport.assembleTaskDoc(
+        tnm: 'TASK-C1-20260701-100000',
+        kl: 'C1',
+        kn: 'Toko Maju',
+        al: 'Jl. Sudirman',
+        vv: 'VEH-001',
+        gl: 'WH-001',
+        cv: '12345',
+        cn: 'Admin A',
+        tdt: '1782244800000',
+        t: 1782286245000,
+        itArray: itArray,
+        tableVid: '20342033315492',
+      );
+      final it = doc['it'] as List;
+      expect(it.length, 2);
+      for (int i = 0; i < it.length; i++) {
+        final m = it[i] as Map<String, dynamic>;
+        expect(m.containsKey('ad'), isTrue,
+            reason: 'ad must be present in doc.it[$i] (${m['tx']})');
+        expect(m.containsKey('ap'), isTrue,
+            reason: 'ap must be present in doc.it[$i] (${m['tx']})');
+        expect(m['ad'], isNull,
+            reason: 'ad must be null in doc.it[$i] (${m['tx']})');
+        expect(m['ap'], isNull,
+            reason: 'ap must be null in doc.it[$i] (${m['tx']})');
+      }
     });
   });
 
@@ -688,6 +753,25 @@ void main() {
       item.hg = 25000;
       expect(item.hg, 25000);
       expect(item.toItMap()['hg'], 25000);
+    });
+
+    test('sale row: ad+ap present+null alongside hg (coexistence)', () {
+      // Guards against a future refactor that drops ad/ap inside the sale
+      // branch when adding hg. The hg conditional block is AFTER the base map
+      // that sets ad/ap -- both must appear together.
+      final item = DraftItem(
+        ii: 'aqua', itemName: 'Aqua 600mL', tx: 'sale',
+        ps: 3, cdo: 'full', hg: 45000,
+      );
+      final m = item.toItMap();
+      // hg must be present with the specified price
+      expect(m.containsKey('hg'), isTrue);
+      expect(m['hg'], 45000);
+      // ad/ap must be present with null despite the hg conditional
+      expect(m.containsKey('ad'), isTrue);
+      expect(m.containsKey('ap'), isTrue);
+      expect(m['ad'], isNull);
+      expect(m['ap'], isNull);
     });
   });
 
@@ -1195,5 +1279,17 @@ void main() {
       // "ERR" alone is not a sentinel -- only the full sentinel substrings
       expect(AdminCreateTaskSupport.isGeneratedTnmValid('TASK-ERR-2026'), true);
     });
+  });
+
+  // ── DraftItem.toItMap ad/ap presence ──────────────────────────────
+  test('toItMap always includes ad+ap present with null value (all tx types)', () {
+    for (final tx in ['deliver', 'sale', 'purchase', 'refill']) {
+      final item = DraftItem(ii: 'galon', itemName: 'Galon 19L', tx: tx);
+      final m = item.toItMap();
+      expect(m.containsKey('ad'), isTrue, reason: 'ad must be present for $tx');
+      expect(m.containsKey('ap'), isTrue, reason: 'ap must be present for $tx');
+      expect(m['ad'], isNull, reason: 'ad must be null for $tx');
+      expect(m['ap'], isNull, reason: 'ap must be null for $tx');
+    }
   });
 }

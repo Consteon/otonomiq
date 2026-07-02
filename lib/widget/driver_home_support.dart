@@ -1856,3 +1856,75 @@ List<Map<String, dynamic>> excludeByStatus(
 /// Pure function, no Flutter deps, directly testable.
 bool hasLoadDiscrepancy(dynamic dpArray) =>
     dpArray is List && dpArray.isNotEmpty;
+
+// ─── Warehouse id resolution (O1 vehicle_check.gl) ─────────────────────────
+
+/// Look up the warehouse `lv` from the `stock_location` collection.
+///
+/// Filters [stockDocs] for the single doc whose [typeField] (default `lt`)
+/// equals [typeValue] (default `warehouse`) and returns its [idField]
+/// (default `lv`). Single-warehouse demo assumption (spec §2.1): exactly one
+/// such doc exists per tenant.
+///
+/// Returns '' when no doc matches (the O1 opening doc then keeps `gl:''`, the
+/// current CF-null-tolerant behavior). Docs whose resolved id is empty are
+/// skipped so a malformed row cannot mask a real one. When MULTIPLE non-empty
+/// matches exist, returns the FIRST and logs a warning (a multi-warehouse
+/// tenant needs the deferred session-anchor design, out of scope here).
+///
+/// Convention #7/#10: [stockDocs] originate from a `dynamic` Firestore store;
+/// every field read is `.toString().trim()` (no unguarded cast). Pure — no
+/// Flutter/Obx/Firestore deps, directly testable. Reads only in-memory data:
+/// never writes Firestore, never enqueues history, never fires a movement.
+String lookupWarehouseLv(
+  List<Map<String, dynamic>> stockDocs, {
+  String typeField = 'lt',
+  String typeValue = 'warehouse',
+  String idField = 'lv',
+}) {
+  String firstLv = '';
+  int matchCount = 0;
+  for (final Map<String, dynamic> doc in stockDocs) {
+    final String lt = (doc[typeField] ?? '').toString().trim();
+    if (lt != typeValue) continue;
+    final String lv = (doc[idField] ?? '').toString().trim();
+    if (lv.isEmpty) continue;
+    matchCount++;
+    if (firstLv.isEmpty) firstLv = lv;
+  }
+  if (matchCount > 1) {
+    devPrint('[lookupWarehouseLv] WARNING: $matchCount stock_location docs with '
+        '$typeField==$typeValue; using first $idField="$firstLv" '
+        '(single-warehouse demo assumption).');
+  }
+  return firstLv;
+}
+
+/// Resolve the warehouse id (`gl`) for the O1 opening doc, applying precedence:
+///
+///   1. [configResolved] — the token-resolved `component['warehouseId']` value
+///      (resolve tokens BEFORE calling). Wins when non-empty AND contains no
+///      unresolved `{` token. Tenant override knob (spec §3).
+///   2. [fromStore] — the current `#ACTIVE_WAREHOUSE` value (published from
+///      `tasks.first['gl']`). Wins next, so a filled `task.gl` (admin Option C,
+///      forward-compat) is honored over the fallback lookup.
+///   3. [lookupWarehouseLv] over [stockDocs] — the single-warehouse fallback
+///      (spec §2.1). Used only when 1 and 2 are empty.
+///
+/// Returns '' when all three are empty (`gl` stays empty; CF `fl` is null-
+/// tolerant). Pure — no Flutter/Obx/Firestore deps; directly testable.
+String resolveWarehouseId({
+  required String configResolved,
+  required String fromStore,
+  required List<Map<String, dynamic>> stockDocs,
+  String typeField = 'lt',
+  String typeValue = 'warehouse',
+  String idField = 'lv',
+}) {
+  final String cfg = configResolved.trim();
+  if (cfg.isNotEmpty && !cfg.contains('{')) return cfg;
+  final String store = fromStore.trim();
+  if (store.isNotEmpty) return store;
+  return lookupWarehouseLv(stockDocs,
+      typeField: typeField, typeValue: typeValue, idField: idField);
+}
