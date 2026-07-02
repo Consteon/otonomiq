@@ -89,6 +89,8 @@ class DraftItem {
       'cdo': (tx == 'deliver' || tx == 'sale') ? cdo : '',
       'cdi': (tx == 'deliver' || tx == 'purchase') ? cdi : '',
       'wt': tx == 'refill' ? wt : '',
+      'ad': null,
+      'ap': null,
     };
     // Price for sale rows only (per spec target doc; deliver rows have no hg)
     if (tx == 'sale') {

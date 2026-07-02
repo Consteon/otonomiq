@@ -187,11 +187,14 @@ import 'widget/driver_home_support.dart';
   0.9.78.32 (260522) OO : udpate approval, etc
   0.9.78.33 (260526) OO : update request incident, fix bug log history
   0.9.78.34 (260602) OO : fix bug front camera stuck, blank white screen when open apps, implement addToEvent to Firestore
-  0.9.78.35 (260605) OO : fix bug loading indicator in home, function logout cannot redirect to login page, addToEvent to firestore, widget supervisor view 
-                          (list_multiple_panel_card, panel_card_support list_statistic_card, statistic_card_support, timeline_periodic, timeline_periodic_support)
-  0.9.78.36 (260701) OO : update flutter 3.44.4, add module driver runtime, admin runtime, warehouse runtime, loading splash screen, 
-                          implement firebase crashlytics, fixing bug ftz_array_search, cleanup unused file
- */
+  0.9.78.35 (260602) OO : fix bug in attendance_qr_selfie_gps_verify
+  0.9.79.01 (260604) OO : Release (cancelled)
+  0.9.79.02 (260605) OO : fix loading bug
+  0.9.80.01 (260609) OO : Release
+  0.9.80.02 (260702) OO : update flutter 3.44.4, add module driver runtime, admin runtime, warehouse runtime, loading splash screen, 
+                          implement firebase crashlytics, fixing bug ftz_array_search, fixing bug data history patrol, cleanup unused file
+*/
+
 // ========= Constants ==========================
 const iOSDevPage = false;
 final launchTime = DateTime.now().millisecondsSinceEpoch;
@@ -200,8 +203,8 @@ const clearHistory =
 int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
-const String version = '0.9.78';
-const String subVersion = '.28';
+const String version = '0.9.80';
+const String subVersion = '.02';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing

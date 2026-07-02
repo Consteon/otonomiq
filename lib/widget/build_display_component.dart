@@ -18,6 +18,7 @@ import '../widget/approver_sticky_bar.dart';
 import '../widget/qr_gps.dart';
 import '../widget/radio_text.dart';
 import '../widget/ui_component.dart';
+import 'build_display_component_support.dart';
 import 'choice_button_group.dart';
 import 'ctx.dart';
 import 'display_qr.dart';
@@ -55,28 +56,41 @@ Widget buildDisplayComponent(
   // final txfKey = UniqueKey();
   final txfKey = ObjectKey("$scrName-${component['position']}");
   if (component['position'] != null) {
-    String initValue = getInitialValue(scrName, component);
+    final int posKey = getPosition(component['position']);
+    final String initValue = getInitialValue(scrName, component);
+    // Capture the controller BEFORE txfControllerCheck so a first-ever build
+    // (existing == null) is distinguishable from a rebuild of a field the user
+    // may already have edited.
+    final InputController? existing = txfController[scrName]?[posKey];
     txfControllerCheck(
       scrName,
       component['position'],
     ); // build txfController if necessary
+    final InputController ctrl = txfController[scrName]![posKey]!;
     final bool isEnabled =
         (component['isEnabled']?.toString().toLowerCase() ?? 'true') != 'false';
-    txfController[scrName]![getPosition(component['position'])]!.isEnabled =
-        isEnabled;
-    txfController[scrName]![getPosition(component['position'])]!
-            .initialIsEnabled =
-        isEnabled;
-    if (scrName.toLowerCase() == 'vertikateknolokaciptareportpatrol' &&
-        component['position'] == 5) {
-      int d = 1;
+    ctrl.isEnabled = isEnabled;
+    ctrl.initialIsEnabled = isEnabled;
+    // Field-loss fix (patrol report, 2026-07): this seed block used to run
+    // unconditionally on EVERY buildDisplayComponent call. The Firestore proxy
+    // listener (main_page.dart ~1277 -> constructAllPageElements -> buildPage)
+    // rebuilds every screen on any server UI push, so an unconditional reset
+    // wiped in-progress operator input mid-session. Only re-seed finalData when
+    // the field is untouched (new, still equal to its seeded initialValue, or
+    // holding only the uninitialised '--' sentinel); preserve a value the user
+    // or a widget action has already written. initialValue is always refreshed
+    // so route-change reset (clearData -> finalData = initialValue) and legit
+    // server display-refresh keep working. Do NOT restore the raw
+    // canInitializePage guard: it is false for every non-home page and would
+    // block first-time seeding of every form field.
+    if (isFieldUntouched(
+      existing != null,
+      existing?.finalData ?? emptyString,
+      existing?.initialValue ?? '',
+    )) {
+      ctrl.finalData = initValue; // put initial value
     }
-    // if (canInitializePage(scrName)) {
-    txfController[scrName]![getPosition(component['position'])]!.finalData =
-        initValue; // put initial value
-    txfController[scrName]![getPosition(component['position'])]!.initialValue =
-        initValue; // put initial value
-    // }
+    ctrl.initialValue = initValue; // put initial value
   } else {
     if (component['type'].toLowerCase() == 'rbt') {
       final children = component['children'] ?? [];

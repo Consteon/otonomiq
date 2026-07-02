@@ -75,7 +75,7 @@ android {
         }
         debug {
             ext.enableCrashlytics = false
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
         }
     }
 
