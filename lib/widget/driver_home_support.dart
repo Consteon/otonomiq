@@ -1814,6 +1814,8 @@ String stripRouteWrapper(String raw) {
 
 // -- Status exclusion filter (shared by DRIVER_STOP_CARD + future widgets) ---
 
+const String kDefaultExcludeStatus = 'load_rejected';
+
 /// Filter out docs whose raw status field matches [excludeStatus].
 ///
 /// Opt-in: when [excludeStatus] is empty, returns [docs] unchanged (no

@@ -1940,4 +1940,394 @@ void main() {
       })));
     });
   });
+
+  // ── return-gate-allclosed: computeStopProgress + excludeByStatus ────────
+  group('computeStopProgress', () {
+    test('empty list -> allClosed false, total 0', () {
+      final p = computeStopProgress([]);
+      expect(p.total, 0);
+      expect(p.closed, 0);
+      expect(p.allClosed, false);
+      expect(p.nextStop, isNull);
+    });
+
+    test('all completed -> allClosed true', () {
+      final docs = [
+        {'tst': 'completed', 'kn': 'A'},
+        {'tst': 'completed', 'kn': 'B'},
+      ];
+      final p = computeStopProgress(docs);
+      expect(p.total, 2);
+      expect(p.closed, 2);
+      expect(p.allClosed, true);
+      expect(p.nextStop, isNull);
+    });
+
+    test('mixed completed + assigned -> allClosed false', () {
+      final docs = [
+        {'tst': 'completed', 'kn': 'A'},
+        {'tst': 'assigned', 'kn': 'B'},
+      ];
+      final p = computeStopProgress(docs);
+      expect(p.total, 2);
+      expect(p.closed, 1);
+      expect(p.allClosed, false);
+      expect(p.nextStop, docs[1]);
+    });
+
+    test('failed + completed -> allClosed true (failed is terminal)', () {
+      final docs = [
+        {'tst': 'failed', 'kn': 'A'},
+        {'tst': 'completed', 'kn': 'B'},
+      ];
+      final p = computeStopProgress(docs);
+      expect(p.total, 2);
+      expect(p.closed, 2);
+      expect(p.allClosed, true);
+      expect(p.nextStop, isNull);
+    });
+
+    test('"closed" raw value normalizes to done -> counted as closed', () {
+      final docs = [
+        {'tst': 'closed', 'kn': 'A'},
+      ];
+      final p = computeStopProgress(docs);
+      expect(p.total, 1);
+      expect(p.closed, 1);
+      expect(p.allClosed, true);
+    });
+
+    test('nextStop is first non-closed doc', () {
+      final docs = [
+        {'tst': 'completed', 'kn': 'A'},
+        {'tst': 'assigned', 'kn': 'B'},
+        {'tst': 'ongoing', 'kn': 'C'},
+      ];
+      final p = computeStopProgress(docs);
+      expect(p.nextStop, docs[1]);
+    });
+  });
+
+  group('return-gate-allclosed acceptance matrix (exclude + progress)', () {
+    test('ACC-1: 2 completed (no rejected) -> allClosed true', () {
+      final docs = [
+        {'tst': 'completed', 'kn': 'Mandiri Tower'},
+        {'tst': 'completed', 'kn': 'Indomaret BSD'},
+      ];
+      // No exclusion needed -- no load_rejected present
+      final excluded = excludeByStatus(docs, kDefaultExcludeStatus);
+      final p = computeStopProgress(excluded);
+      expect(excluded.length, 2);
+      expect(p.allClosed, true);
+    });
+
+    test('ACC-2: 1 completed + 1 assigned -> allClosed false', () {
+      final docs = [
+        {'tst': 'completed', 'kn': 'A'},
+        {'tst': 'assigned', 'kn': 'B'},
+      ];
+      final excluded = excludeByStatus(docs, kDefaultExcludeStatus);
+      final p = computeStopProgress(excluded);
+      expect(excluded.length, 2);
+      expect(p.allClosed, false);
+    });
+
+    test('ACC-3: failed + completed -> allClosed true', () {
+      final docs = [
+        {'tst': 'failed', 'kn': 'A'},
+        {'tst': 'completed', 'kn': 'B'},
+      ];
+      final excluded = excludeByStatus(docs, kDefaultExcludeStatus);
+      final p = computeStopProgress(excluded);
+      expect(excluded.length, 2);
+      expect(p.allClosed, true);
+    });
+
+    test('ACC-4: load_rejected present -> excluded, does not block allClosed', () {
+      final docs = [
+        {'tst': 'completed', 'kn': 'A'},
+        {'tst': 'completed', 'kn': 'B'},
+        {'tst': 'load_rejected', 'kn': 'C'},
+      ];
+      final excluded = excludeByStatus(docs, kDefaultExcludeStatus);
+      expect(excluded.length, 2);
+      final p = computeStopProgress(excluded);
+      expect(p.allClosed, true);
+    });
+
+    test('ACC-4b: load_rejected + assigned -> excluded but assigned blocks', () {
+      final docs = [
+        {'tst': 'completed', 'kn': 'A'},
+        {'tst': 'assigned', 'kn': 'B'},
+        {'tst': 'load_rejected', 'kn': 'C'},
+      ];
+      final excluded = excludeByStatus(docs, kDefaultExcludeStatus);
+      expect(excluded.length, 2);
+      final p = computeStopProgress(excluded);
+      expect(p.allClosed, false);
+    });
+
+    test('ACC-5: all load_rejected -> excluded, empty set -> allClosed false', () {
+      final docs = [
+        {'tst': 'load_rejected', 'kn': 'A'},
+        {'tst': 'load_rejected', 'kn': 'B'},
+      ];
+      final excluded = excludeByStatus(docs, kDefaultExcludeStatus);
+      expect(excluded.length, 0);
+      final p = computeStopProgress(excluded);
+      // Empty set -> allClosed false (no stops to return for)
+      expect(p.allClosed, false);
+    });
+
+    test('kDefaultExcludeStatus is load_rejected', () {
+      expect(kDefaultExcludeStatus, 'load_rejected');
+    });
+  });
+
+  // ── GAP-1: stopStatusOf vocab completeness (edges) ──────────────────────
+  // Fills coverage for values NOT exercised by the existing 9-test group:
+  // `completed`, empty/absent tst, whitespace+case on COMPLETED,
+  // and `load_rejected` (proves raw-value exclusion is necessary).
+  group('stopStatusOf vocab completeness (edges)', () {
+    test('completed -> done (P10 alias for closed)', () {
+      // The spec doc-comment lists `completed` as a terminal alias for `closed`.
+      expect(stopStatusOf({'tst': 'completed'}), 'done');
+    });
+
+    test('empty tst string -> pending', () {
+      // Empty string is treated as unknown -> pending (same as absent).
+      expect(stopStatusOf({'tst': ''}), 'pending');
+    });
+
+    test('absent tst key -> pending', () {
+      // No tst field at all: doc[tstField] returns null -> '' -> pending.
+      expect(stopStatusOf(<String, dynamic>{}), 'pending');
+    });
+
+    test('whitespace + COMPLETED -> done (lowercase + trim in stopStatusOf)', () {
+      // stopStatusOf lowercases then trims before matching, so " COMPLETED "
+      // must resolve to done (same as 'completed').
+      expect(stopStatusOf({'tst': ' COMPLETED '}), 'done');
+    });
+
+    test('load_rejected -> pending (proves why raw-compare exclusion is needed)', () {
+      // `load_rejected` normalizes to `pending` via stopStatusOf.
+      // If computeStopProgress received load_rejected docs they would count
+      // as open stops, blocking allClosed.  excludeByStatus must remove them
+      // BEFORE progress is computed -- and it compares the RAW field, not the
+      // normalized result.
+      expect(stopStatusOf({'tst': 'load_rejected'}), 'pending');
+    });
+
+    test('FAILED uppercase -> failed (case-insensitive)', () {
+      // Verifies the failed branch also respects lowercasing.
+      expect(stopStatusOf({'tst': 'FAILED'}), 'failed');
+    });
+  });
+
+  // ── GAP-2: excludeByStatus edge — non-string tst field ──────────────────
+  // The null case is already covered. Add int and bool to confirm no throw and
+  // that the doc is kept (a non-string tst can never stringify to 'load_rejected').
+  group('excludeByStatus non-string tst field', () {
+    test('int tst does not throw and doc is kept', () {
+      // tst stored as int (e.g. a counter) -> .toString() = "0", not
+      // "load_rejected" -> doc survives the filter.
+      final docs = <Map<String, dynamic>>[
+        {'id': '1', 'tst': 0}, // int 0
+        {'id': '2', 'tst': 'assigned'},
+      ];
+      final result = excludeByStatus(docs, 'load_rejected');
+      expect(result.length, 2);
+      expect(result.map((d) => d['id']), containsAll(['1', '2']));
+    });
+
+    test('bool tst does not throw and doc is kept', () {
+      // tst stored as bool -> .toString() = "true" or "false", not
+      // "load_rejected" -> doc is kept.
+      final docs = <Map<String, dynamic>>[
+        {'id': '1', 'tst': true},
+        {'id': '2', 'tst': false},
+      ];
+      final result = excludeByStatus(docs, 'load_rejected');
+      expect(result.length, 2);
+    });
+  });
+
+  // ── GAP-3: tdt type-tolerance through filterByMultiClause + eq() ─────────
+  // Proves §3 of the return-gate-allclosed spec: the search
+  // `vv◼<vid>⭘tdt◼<today>` matches regardless of whether `tdt` is stored as
+  // String, int, or double in the doc.  Also pins the two safety guards in
+  // eq(): leading-zero barcode NOT numerically coerced (round-trip guard), and
+  // long-id (>15 chars) staying in string-only compare (safe-integer guard).
+  group('tdt type-tolerance (filterByMultiClause + eq)', () {
+    // Use a fixed epoch-midnight value for deterministic assertions.
+    // 1782925200000 = 2026-07-02 00:00 WIB (fits in 13 chars, well under the
+    // 15-char safe-integer guard in eq()).
+    const String kToday = '1782925200000';
+    const String kVehicle = 'V-TEST-01';
+
+    // Build a pre-resolved search string (no {tokens}, no server escaping).
+    // filterByMultiClause receives this directly.
+    final String resolvedSearch =
+        'vv\u{25FC}$kVehicle\u{2B58}tdt\u{25FC}$kToday';
+
+    test('tdt as String matches search (baseline)', () {
+      final docs = <Map<String, dynamic>>[
+        {'vv': kVehicle, 'tdt': kToday}, // String
+        {'vv': 'OTHER', 'tdt': kToday},
+      ];
+      final result = filterByMultiClause(docs, resolvedSearch);
+      expect(result.length, 1);
+      expect(result.first['vv'], kVehicle);
+    });
+
+    test('tdt as int matches search (int.toString() == String search)', () {
+      // On-device Firestore native writes may store tdt as an int.
+      // (int).toString() produces the same digit string so eq() trivially
+      // matches via the string fallback.
+      final int tdtInt = int.parse(kToday);
+      final docs = <Map<String, dynamic>>[
+        {'vv': kVehicle, 'tdt': tdtInt}, // int
+        {'vv': 'OTHER', 'tdt': tdtInt},
+      ];
+      final result = filterByMultiClause(docs, resolvedSearch);
+      expect(result.length, 1);
+      expect(result.first['vv'], kVehicle);
+    });
+
+    test('tdt as double matches search via numeric branch in eq()', () {
+      // Firestore can deliver a large integer as a double (e.g. 1782925200000.0).
+      // (double).toString() = "1782925200000.0" (15 chars, within guard).
+      // eq("1782925200000.0", "1782925200000"):
+      //   na=1782925200000.0, nb=1782925200000, both round-trip OK,
+      //   na==nb -> true (numeric branch fires).
+      const double tdtDouble = 1782925200000.0;
+      final docs = <Map<String, dynamic>>[
+        {'vv': kVehicle, 'tdt': tdtDouble}, // double
+        {'vv': 'OTHER', 'tdt': tdtDouble},
+      ];
+      final result = filterByMultiClause(docs, resolvedSearch);
+      expect(result.length, 1,
+          reason:
+              'double tdt must match via numeric branch; if this fails, §3 '
+              'type-tolerance is not covered for the double-storage case');
+      expect(result.first['vv'], kVehicle);
+    });
+
+    test('tdt String non-matching value is excluded', () {
+      // Sanity: a doc whose tdt is a DIFFERENT date is not returned.
+      const String yesterday = '1782838800000'; // a different epoch
+      final docs = <Map<String, dynamic>>[
+        {'vv': kVehicle, 'tdt': yesterday},
+        {'vv': kVehicle, 'tdt': kToday},
+      ];
+      final result = filterByMultiClause(docs, resolvedSearch);
+      expect(result.length, 1);
+      expect(result.first['tdt'], kToday);
+    });
+
+    test('leading-zero barcode NOT numerically coerced (round-trip guard)', () {
+      // eq() round-trip guard: na.toString() must equal the original trimmed
+      // string.  "01234" -> na=1234 -> na.toString()="1234" != "01234" ->
+      // round-trip fails -> string fallback is used.
+      // Therefore "01234" == "01234" -> true, but "01234" != "1234" -> false.
+      final docs = <Map<String, dynamic>>[
+        {'code': '01234'},
+        {'code': '1234'},
+      ];
+      // Search for code "01234" (leading zero preserved)
+      final r1 = filterByMultiClause(docs, 'code\u{25FC}01234');
+      expect(r1.length, 1, reason: 'only the leading-zero doc should match');
+      expect(r1.first['code'], '01234');
+
+      // Search for code "1234" (no leading zero) must NOT match "01234"
+      final r2 = filterByMultiClause(docs, 'code\u{25FC}1234');
+      expect(r2.length, 1, reason: 'only the non-leading-zero doc should match');
+      expect(r2.first['code'], '1234');
+    });
+
+    test('long id >15 chars falls back to string compare (safe-integer guard)',
+        () {
+      // Strings longer than 15 chars skip the numeric branch (guard in eq()).
+      // Both sides must be compared as strings to avoid precision loss.
+      const String longId = '1234567890123456'; // 16 chars
+      final docs = <Map<String, dynamic>>[
+        {'id': longId},
+        {'id': '1234567890123457'}, // one digit different
+      ];
+      // Exact match must find only the first doc
+      final r = filterByMultiClause(docs, 'id\u{25FC}$longId');
+      expect(r.length, 1);
+      expect(r.first['id'], longId);
+    });
+  });
+
+  // ── GAP-4: computeStopProgress + excludeByStatus composition (nextStop) ──
+  // Proves that nextStop correctly identifies the first REAL open stop AFTER
+  // load_rejected docs have been removed by excludeByStatus.  The existing
+  // acceptance matrix (ACC-4b) checks allClosed but not nextStop.
+  group('computeStopProgress nextStop after excludeByStatus (composition)', () {
+    test('load_rejected in middle: excluded and nextStop skips it', () {
+      // Arrange: completed, load_rejected, assigned (in that order).
+      // After exclusion: [completed, assigned].
+      // nextStop must be the assigned doc (not the excluded one).
+      final rejected = {'tst': 'load_rejected', 'kn': 'Excluded Stop'};
+      final assignedDoc = {'tst': 'assigned', 'kn': 'Real Next Stop'};
+      final docs = <Map<String, dynamic>>[
+        {'tst': 'completed', 'kn': 'Done Stop'},
+        rejected,
+        assignedDoc,
+      ];
+      final excluded = excludeByStatus(docs, kDefaultExcludeStatus);
+      expect(excluded.length, 2,
+          reason: 'load_rejected must be removed by excludeByStatus');
+      expect(excluded.contains(rejected), isFalse,
+          reason: 'excluded list must not contain the rejected doc');
+
+      final p = computeStopProgress(excluded);
+      expect(p.total, 2);
+      expect(p.closed, 1); // completed counts
+      expect(p.allClosed, isFalse);
+      expect(p.nextStop, assignedDoc,
+          reason:
+              'nextStop must be the first real open stop, not the rejected doc');
+    });
+
+    test('completed + load_rejected only: excluded -> allClosed true, nextStop null',
+        () {
+      // After excluding load_rejected, only completed remains -> allClosed.
+      final docs = <Map<String, dynamic>>[
+        {'tst': 'completed', 'kn': 'A'},
+        {'tst': 'load_rejected', 'kn': 'B'},
+      ];
+      final excluded = excludeByStatus(docs, kDefaultExcludeStatus);
+      expect(excluded.length, 1);
+      final p = computeStopProgress(excluded);
+      expect(p.allClosed, isTrue);
+      expect(p.nextStop, isNull);
+    });
+
+    test('multiple load_rejected around open stops: nextStop is correct open stop',
+        () {
+      // Arrange: load_rejected, ongoing, load_rejected, assigned.
+      // After exclusion: [ongoing, assigned].
+      // nextStop must be the ongoing doc (first non-closed after exclusion).
+      final ongoingDoc = {'tst': 'ongoing', 'kn': 'In Transit'};
+      final assignedDoc2 = {'tst': 'assigned', 'kn': 'Queued'};
+      final docs = <Map<String, dynamic>>[
+        {'tst': 'load_rejected', 'kn': 'R1'},
+        ongoingDoc,
+        {'tst': 'load_rejected', 'kn': 'R2'},
+        assignedDoc2,
+      ];
+      final excluded = excludeByStatus(docs, kDefaultExcludeStatus);
+      expect(excluded.length, 2);
+      final p = computeStopProgress(excluded);
+      expect(p.total, 2);
+      expect(p.closed, 0);
+      expect(p.allClosed, isFalse);
+      expect(p.nextStop, ongoingDoc,
+          reason: 'nextStop must be the ongoing doc, first after exclusion');
+    });
+  });
 }

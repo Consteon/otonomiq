@@ -85,8 +85,15 @@ class _NavActionCardState extends State<NavActionCard> {
         List<Map<String, dynamic>>.from(mapTableContent[_dataCode] ?? const []);
     final String rawSearch =
         (widget.component['search'] ?? '').toString().trim();
-    if (rawSearch.isEmpty) return docs;
-    return filterDriverHomeDocs(docs, rawSearch, widget.scrName);
+    final String rawExclude =
+        (widget.component['excludeStatus'] ?? '').toString().trim();
+    final String excludeStatus =
+        rawExclude.isEmpty ? kDefaultExcludeStatus : rawExclude;
+
+    List<Map<String, dynamic>> filtered =
+        rawSearch.isEmpty ? docs : filterDriverHomeDocs(docs, rawSearch, widget.scrName);
+
+    return excludeByStatus(filtered, excludeStatus);
   }
 
   void _onCtaTap() {
@@ -127,27 +134,20 @@ class _NavActionCardState extends State<NavActionCard> {
       final StopProgress progress = computeStopProgress(stops);
       final bool allClosed = progress.allClosed;
 
-      final String title = _t(0, 'Return Kendaraan');
-      final String bodyDefault =
-          _t(1, 'Balik & serahkan kendaraan + sisa muatan ke gudang');
-      final String bodyReady = _t(2, 'Semua kelar — balik & serahkan ke gudang');
+      // HIDDEN when not all stops are closed
+      if (!allClosed) return const SizedBox.shrink();
 
-      final String body = allClosed ? bodyReady : bodyDefault;
-      final Color accentColor =
-          allClosed ? const Color(0xFF16A34A) : const Color(0xFF9CA3AF);
-      final Color bgColor =
-          allClosed ? const Color(0xFFF0FDF4) : Colors.white;
-      final Color borderColor =
-          allClosed ? const Color(0xFF16A34A) : const Color(0xFFE5E7EB);
+      final String title = _t(0, 'Return Kendaraan');
+      final String body = _t(2, 'Semua kelar — balik & serahkan ke gudang');
 
       return Padding(
         padding: EdgeInsets.fromLTRB(
             widget.lPad, widget.tPad, widget.rPad, widget.bPad),
         child: Container(
           decoration: BoxDecoration(
-            color: bgColor,
+            color: const Color(0xFFF0FDF4),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: borderColor),
+            border: Border.all(color: const Color(0xFF16A34A)),
           ),
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -157,23 +157,19 @@ class _NavActionCardState extends State<NavActionCard> {
               // Header row
               Row(
                 children: [
-                  Icon(
-                    allClosed
-                        ? Icons.check_circle
-                        : Icons.directions_car_outlined,
+                  const Icon(
+                    Icons.check_circle,
                     size: 20,
-                    color: accentColor,
+                    color: Color(0xFF16A34A),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       title,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
-                        color: allClosed
-                            ? const Color(0xFF16A34A)
-                            : const Color(0xFF1F2937),
+                        color: Color(0xFF16A34A),
                       ),
                     ),
                   ),
@@ -183,29 +179,21 @@ class _NavActionCardState extends State<NavActionCard> {
               // Body text
               Text(
                 body,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 13,
-                  color: allClosed
-                      ? const Color(0xFF166534) // green-800
-                      : const Color(0xFF9CA3AF), // gray-400
+                  color: Color(0xFF166534), // green-800
                   height: 1.4,
                 ),
               ),
-              // CTA button (enabled only when allClosed)
+              // CTA button (always enabled -- card only renders when allClosed)
               const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: allClosed ? _onCtaTap : null,
+                  onPressed: _onCtaTap,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: allClosed
-                        ? const Color(0xFF16A34A)
-                        : const Color(0xFFE5E7EB),
-                    foregroundColor: allClosed
-                        ? Colors.white
-                        : const Color(0xFF9CA3AF),
-                    disabledBackgroundColor: const Color(0xFFF3F4F6),
-                    disabledForegroundColor: const Color(0xFFD1D5DB),
+                    backgroundColor: const Color(0xFF16A34A),
+                    foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
@@ -215,7 +203,7 @@ class _NavActionCardState extends State<NavActionCard> {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  child: Text('$title →'), // →
+                  child: Text('$title →'), // right arrow
                 ),
               ),
             ],

@@ -9,10 +9,12 @@ Return-vehicle CTA card for DriverHome (P4). HIDDEN when pending; confirmed show
 
 ## Purpose
 
-The final CTA on the DriverHome screen. HIDDEN when pending (`!confirmed`).
-When confirmed, the card shows with a "Return Kendaraan" button that is
-enabled only when all stops are closed (done or failed). Uses
-`computeStopProgress` from `driver_home_support.dart` to derive `allClosed`.
+The final CTA on the DriverHome screen. HIDDEN when the gate is not confirmed
+OR when not all stops are closed (`!allClosed`). Only renders in the
+fully-active green state. Uses `excludeByStatus` (default: `load_rejected`)
+then `computeStopProgress` from `driver_home_support.dart` to derive
+`allClosed`. Both this card and DRIVER_STOP_CARD share `kDefaultExcludeStatus`
+to ensure their progress always agrees.
 
 ## Signature / Constructor
 
@@ -35,8 +37,11 @@ NavActionCard({
 | `type` | String | yes | `"NAV_ACTION_CARD"` |
 | `table` | String | yes | `"<docId>//task"` |
 | `search` | String | yes | `"vv◼(VEHICLEID)⭘tdt◼(TODAY)"` |
+| `excludeStatus` | String | no | Raw `tst` value to exclude from stop set (default: `load_rejected`). Mirrors DRIVER_STOP_CARD. |
 | `vidtable` | String | yes | App VID for Firestore path |
 | `route` | String | yes | Route for CTA (e.g. `returnVehicle`) |
+| `gateTable` | String | no | Vehicle-check table for self-gating visibility |
+| `gateSearch` | String | no | Gate search clause |
 | `ready` | String | no | `"{allClosed}"` -- forward-compat metadata |
 | `text` | String | yes | diamond-delimited 3 slots |
 

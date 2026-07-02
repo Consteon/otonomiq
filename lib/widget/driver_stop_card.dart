@@ -103,8 +103,10 @@ class _DriverStopCardState extends State<DriverStopCard> {
         List<Map<String, dynamic>>.from(mapTableContent[_dataCode] ?? const []);
     final String rawSearch =
         (widget.component['search'] ?? '').toString().trim();
-    final String excludeStatus =
+    final String rawExclude =
         (widget.component['excludeStatus'] ?? '').toString().trim();
+    final String excludeStatus =
+        rawExclude.isEmpty ? kDefaultExcludeStatus : rawExclude;
 
     List<Map<String, dynamic>> filtered =
         rawSearch.isEmpty ? docs : filterDriverHomeDocs(docs, rawSearch, widget.scrName);

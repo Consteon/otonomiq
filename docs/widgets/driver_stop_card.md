@@ -23,8 +23,11 @@ and a footnote at card bottom. Tapping Tolak dispatches `#REJECT_TASK` and
 navigates to the reject sheet.
 
 When `excludeStatus` is set, tasks whose raw `tst` field matches are dropped
-from both the rendered list and the "N tujuan" count. This is opt-in: absent
-or empty `excludeStatus` shows all tasks including `load_rejected`.
+from both the rendered list and the "N tujuan" count. It defaults to
+`load_rejected` (via `kDefaultExcludeStatus`): an absent or empty
+`excludeStatus` triggers that default, so `load_rejected` tasks are excluded
+unless a tenant explicitly overrides the field. This keeps the stop-card
+progress in sync with NAV_ACTION_CARD's `allClosed`.
 
 ## Signature / Constructor
 
@@ -53,7 +56,7 @@ DriverStopCard({
 | `route` | String | no | Route for CTA button (e.g. `taskFeed`) |
 | `rejectRoute` | String | no | Route for reject-task sheet (e.g. `rejectTask`). When absent, Tolak buttons are hidden (backward compat). |
 | `taskIdField` | String | no | Field on task row for reject VID (default `tnm`) |
-| `excludeStatus` | String | no | Raw `tst` value to exclude from list + count (e.g. `"load_rejected"`). Opt-in: empty/absent = no exclusion. Compares raw tst, NOT stopStatusOf. Mirrors PRECONDITION_GATE_CARD excludeStatus. |
+| `excludeStatus` | String | no | Raw `tst` value to exclude from list + count (e.g. `"load_rejected"`). Default: `load_rejected` (via `kDefaultExcludeStatus`). Empty string from server JSON triggers the default, not "no exclusion". Compares raw tst, NOT stopStatusOf. Mirrors PRECONDITION_GATE_CARD excludeStatus. |
 | `text` | String | yes | diamond-delimited 20 slots (18 original + 2 reject) |
 
 ## Stop status mapping (SINGLE source: `driver_home_support.dart`)
