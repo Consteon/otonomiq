@@ -194,6 +194,7 @@ import 'widget/driver_home_support.dart';
   0.9.80.02 (260702) OO : update flutter 3.44.4, add module driver runtime, admin runtime, warehouse runtime, loading splash screen, 
                           implement firebase crashlytics, fixing bug ftz_array_search, fixing bug data history patrol, cleanup unused file
   0.9.82.01 (260702) HH : update plugins
+  0.9.82.02 (260703) HH : update plugins
 */
 
 // ========= Constants ==========================
@@ -205,7 +206,7 @@ int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
 const String version = '0.9.82';
-const String subVersion = '.01';
+const String subVersion = '.02';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing

@@ -3,8 +3,13 @@
 part of '../../widget/ftz_checker.dart';
 
 extension CTakeQr on FtzCheckerState {
-  Future<String?> checkerTakeQR(String label, String scrName, var component,
-      String caller, String lens) async {
+  Future<String?> checkerTakeQR(
+    String label,
+    String scrName,
+    var component,
+    String caller,
+    String lens,
+  ) async {
     // final camera = lens.toLowerCase() == 'front' ? CameraFacing.front : CameraFacing.back;
     // String qrResult = empty;
     // int cam = -1;
@@ -19,9 +24,14 @@ extension CTakeQr on FtzCheckerState {
       //     useCamera: cam,
       //   ),
       // );
+      // Settle so a just-closed selfie camera (camera plugin) releases the
+      // hardware before the scanner (mobile_scanner) opens — otherwise the
+      // scanner preview can come up blank on the multiple-scan handoff.
+      await Future.delayed(const Duration(milliseconds: 350));
       final qrResult = await Navigator.of(context).push<String>(
         MaterialPageRoute(
-          builder: (context) => FtzScannerScreen(title: label, camera: lens.toLowerCase()),
+          builder: (context) =>
+              FtzScannerScreen(title: label, camera: lens.toLowerCase()),
         ),
       );
       return qrResult ?? empty;

@@ -1,24 +1,25 @@
 import 'dart:async';
 import 'dart:math';
-import 'package:get/get.dart';
-import '../widget/photo_camera.dart';
 
-import '../bloc_timer/timer_bloc.dart';
-import '../bloc_timer/timer_event.dart';
-import 'package:intl/intl.dart';
-import '../crypto/auth_crypto.dart';
 import 'package:camera/camera.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
-import '../global.dart';
-import '../api.dart';
-import '../redux/screen_transaction.dart';
+import 'package:flutter/services.dart';
 // import '../part/android_part/ftz_mobile_scanner.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:get/get.dart';
+import 'package:intl/intl.dart';
+
+import '../api.dart';
+import '../bloc_timer/timer_bloc.dart';
+import '../bloc_timer/timer_event.dart';
+import '../crypto/auth_crypto.dart';
 import '../firestore_repository/table_repository.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
+import '../global.dart';
+import '../redux/screen_transaction.dart';
+import '../widget/photo_camera.dart';
 import 'ftz_scanner_screen.dart';
+
 // import 'package:barcode_scan2/barcode_scan2.dart';
 
 part '../part/build_part/ftz_checker_part.dart';
@@ -60,7 +61,7 @@ part '../part/build_part/ftz_checker_part.dart';
 class Controller extends GetxController {
   var count = 10.obs;
   var message = ''.obs;
-  decrease() => count--;
+  RxInt decrease() => count--;
 }
 
 class FtzChecker extends StatefulWidget {
@@ -98,16 +99,21 @@ class FtzCheckerState extends State<FtzChecker> {
     super.initState();
     // getCurrentPosition(desiredAccuracy: LocationAccuracy.high),
     if (widget.component['table'] != null) {
-      subscribeToTable(widget.component['table'], appCodeController.applicationTableVid);
+      subscribeToTable(
+        widget.component['table'],
+        appCodeController.applicationTableVid,
+      );
       // todo unsubscribe at dispose if desirable (will be need to load again)
     } // end if (widget.component['table'] != null)
-    timeDiff = transactionStore.state.screenTx['#REF_TIME_START'] -
+    timeDiff =
+        transactionStore.state.screenTx['#REF_TIME_START'] -
         transactionStore.state.screenTx['#DEVICE_TIME_START'];
     getLocation().then((pos) {
       lastPositionTime = DateTime.now().millisecondsSinceEpoch;
       position = pos;
-      placemarkFromCoordinates(position!.latitude, position!.longitude)
-          .then((pm) {
+      placemarkFromCoordinates(position!.latitude, position!.longitude).then((
+        pm,
+      ) {
         placeMark = pm;
       }); // end of placemarkFromCoordinates
     });
@@ -118,82 +124,86 @@ class FtzCheckerState extends State<FtzChecker> {
   Widget build(BuildContext context) {
     String selfieUrl = '';
 
-    Future<dynamic> checkerSuccessDialog(
-        {String title = 'Success',
-          String message = '',
-          String okString = 'Ok'}) async {
+    Future<dynamic> checkerSuccessDialog({
+      String title = 'Success',
+      String message = '',
+      String okString = 'Ok',
+    }) async {
       vibrate(duration: 50);
-      await Get.dialog(AlertDialog(
-        // title: Text(title),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message),
-            Container(
-              height: 12,
-            ),
-            Text(placeMark.isNotEmpty
-                ? "${placeMark[0].subThoroughfare} ${placeMark[0].thoroughfare}, ${placeMark[0].administrativeArea} ${placeMark[0].postalCode}"
-                : ""),
-            Container(
-              height: 12,
-            ),
-            Text(
-                "$plusMinus ${position == null ? "-" : position!.accuracy.round()}m"),
-          ],
-        ),
-        actions: <Widget>[
-          TextButton(
-            child: Text(okString),
-            onPressed: () {
-              Get.back();
-              //Navigator.of(context).pop();
-            },
-          ),
-        ],
-      ));
-      return 1;
-    } // end of checkerSuccessDialog
-
-    Future<String?> checkerDialog(
-        {String title = '',
-          String message = '',
-          String okString = 'Ok'}) async {
-      return Get.dialog(AlertDialog(
-        // dialog 3
-        // title: Text(title),
-        content: Container(
-          alignment: const Alignment(0.0, 0.0),
-          height: dialogHeight,
-          child: Column(
+      await Get.dialog(
+        AlertDialog(
+          // title: Text(title),
+          content: Column(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.start,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(message),
+              Container(height: 12),
+              Text(
+                placeMark.isNotEmpty
+                    ? "${placeMark[0].subThoroughfare} ${placeMark[0].thoroughfare}, ${placeMark[0].administrativeArea} ${placeMark[0].postalCode}"
+                    : "",
+              ),
+              Container(height: 12),
+              Text(
+                "$plusMinus ${position == null ? "-" : position!.accuracy.round()}m",
+              ),
             ],
           ),
+          actions: <Widget>[
+            TextButton(
+              child: Text(okString),
+              onPressed: () {
+                Get.back();
+                //Navigator.of(context).pop();
+              },
+            ),
+          ],
         ),
-        actions: <Widget>[
-          TextButton(
-            child: Text(okString),
-            onPressed: () {
-              routeStack.pop();
-              Get.back();
-            },
+      );
+      return 1;
+    } // end of checkerSuccessDialog
+
+    Future<String?> checkerDialog({
+      String title = '',
+      String message = '',
+      String okString = 'Ok',
+    }) async {
+      return Get.dialog(
+        AlertDialog(
+          // dialog 3
+          // title: Text(title),
+          content: Container(
+            alignment: const Alignment(0.0, 0.0),
+            height: dialogHeight,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [Text(message)],
+            ),
           ),
-        ],
-      ));
+          actions: <Widget>[
+            TextButton(
+              child: Text(okString),
+              onPressed: () {
+                routeStack.pop();
+                Get.back();
+              },
+            ),
+          ],
+        ),
+      );
     } // end of checkerDialog
 
-    Future<String?> checkerSendDialog(
-        {String title = '',
-          String message1 = '',
-          String message2 = '',
-          int counter = 10,
-          String okString = 'Ok'}) async {
+    Future<String?> checkerSendDialog({
+      String title = '',
+      String message1 = '',
+      String message2 = '',
+      int counter = 10,
+      String okString = 'Ok',
+    }) async {
       var getController = Get.put(Controller());
       //getController.decrease();
       getController.count.value = counter;
@@ -209,47 +219,52 @@ class FtzCheckerState extends State<FtzChecker> {
           getController.decrease();
         } // end if (c-- <=0)
       }); // end timer subscription
-      return Get.dialog(AlertDialog(
-        // dialog 3
-        // title: Text(title),
-        content: Container(
-          alignment: const Alignment(0.0, 0.0),
-          height: dialogHeight,
-          child: Obx(
-                () => Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.start,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(child: Text("${getController.message}")),
-                Container(),
-                Center(
+      return Get.dialog(
+        AlertDialog(
+          // dialog 3
+          // title: Text(title),
+          content: Container(
+            alignment: const Alignment(0.0, 0.0),
+            height: dialogHeight,
+            child: Obx(
+              () => Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(child: Text("${getController.message}")),
+                  Container(),
+                  Center(
                     child: Text(
                       "${(getController.count.value > 0) ? getController.count : ''}",
                       style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16),
-                    )),
-              ],
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-        actions: <Widget>[
-          Obx(
-                () => getController.count.value > 0
-                ? Container()
-                : TextButton(
-              child: Text(okString),
-              onPressed: () {
-                //getController.decrease();
-                setDataOK('2'); // display green
-                timerSubscription.cancel();
-                routeStack.pop();
-                Get.back();
-              },
+          actions: <Widget>[
+            Obx(
+              () => getController.count.value > 0
+                  ? Container()
+                  : TextButton(
+                      child: Text(okString),
+                      onPressed: () {
+                        //getController.decrease();
+                        setDataOK('2'); // display green
+                        timerSubscription.cancel();
+                        routeStack.pop();
+                        Get.back();
+                      },
+                    ),
             ),
-          )
-        ],
-      ));
+          ],
+        ),
+      );
     } // end of checkerSendDialog
 
     List? checkerVerifyVid(int vid, String tableCode) {
@@ -264,9 +279,10 @@ class FtzCheckerState extends State<FtzChecker> {
     Future<String> checkerTakePicture(String lens, String? title) async {
       // get selfie, save to firebase, then return url to selfie image
       List<CameraDescription> cameras =
-      transactionStore.state.screenTx['#CAMS'];
-      int imgSize = (widget.component['imgWidth'] ?? 540) >
-          (widget.component['imgHeight'] ?? 540)
+          transactionStore.state.screenTx['#CAMS'];
+      int imgSize =
+          (widget.component['imgWidth'] ?? 540) >
+              (widget.component['imgHeight'] ?? 540)
           ? widget.component['imgWidth'] ?? 540
           : widget.component['imgHeight'] ?? 540;
       String folder = widget.component['folder'] ?? 'default';
@@ -275,14 +291,17 @@ class FtzCheckerState extends State<FtzChecker> {
       int quality = widget.component['quality'] ?? 80;
       List<String> pickedFileUrl = [emptyString];
 
+      // Let the just-closed QR scanner (mobile_scanner) release the physical
+      // camera before the selfie camera (camera plugin) opens. Without this
+      // settle the two plugins contend for the same hardware and the selfie
+      // preview comes up blank white (mirrors acquireCamera's pre-dialog delay).
+      await Future.delayed(const Duration(milliseconds: 500));
+
       try {
         await Get.dialog(
           AlertDialog(
             insetPadding: const EdgeInsets.fromLTRB(12, 20, 12, 20),
-            title: Text(
-              label,
-              textAlign: TextAlign.center,
-            ),
+            title: Text(label, textAlign: TextAlign.center),
             content: PhotoCamera(
               //context: context,
               cameras: cameras,
@@ -309,12 +328,18 @@ class FtzCheckerState extends State<FtzChecker> {
       // String selfieUrl = await saveImageToCloud(
       //     imagePath: pickedFileUrl[0], folder: folder, fileName: fileName);
       String selfieUrl = await prepareImageAsLocal(
-          imagePath: pickedFileUrl[0], folder: folder, fileName: fileName);
+        imagePath: pickedFileUrl[0],
+        folder: folder,
+        fileName: fileName,
+      );
       return selfieUrl;
     } // end of checkerTakePicture
 
     void checkerSaveData(
-        String scrName, int timeStamp, String eventContent) async {
+      String scrName,
+      int timeStamp,
+      String eventContent,
+    ) async {
       TimerBloc timerBloc = transactionStore.state.screenTx['#TIMER_BLOC'];
       //int saveDelay = 10000; // delay between save in milliseconds
       int nowTimeSave = DateTime.now().millisecondsSinceEpoch;
@@ -322,7 +347,8 @@ class FtzCheckerState extends State<FtzChecker> {
         devPrint('delay from last save ${nowTimeSave - lastSave}');
         if ((nowTimeSave - lastSave) < saveDelay) {
           await Future.delayed(
-              Duration(milliseconds: saveDelay - (nowTimeSave - lastSave)));
+            Duration(milliseconds: saveDelay - (nowTimeSave - lastSave)),
+          );
         } // end if ((nowTimeSave - lastSave) < 10000)
       } // end if (lastSave>0)
       //lastSave = DateTime.now().millisecondsSinceEpoch;
@@ -331,12 +357,17 @@ class FtzCheckerState extends State<FtzChecker> {
         rootThis.wait = true;
       });
       timerBloc.add(
-          const Start(duration: 5)); //  get timerBloc from transactionStore
-      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-        '#NEXTROUTE': route,
-        '#TIMER_CONTEXT': context,
-        '#TIMER_DURATION': widget.component['delay'] ?? 5,
-      }))); // set state #NEXTROUTE route that will be displayed after waitScreen
+        const Start(duration: 5),
+      ); //  get timerBloc from transactionStore
+      transactionStore.dispatch(
+        UpdateScreenTxAction(
+          ScreenTransaction({
+            '#NEXTROUTE': route,
+            '#TIMER_CONTEXT': context,
+            '#TIMER_DURATION': widget.component['delay'] ?? 5,
+          }),
+        ),
+      ); // set state #NEXTROUTE route that will be displayed after waitScreen
       //saveSend(scrName, widget.component);
       List<dynamic> row = [timeStamp, scrName, eventContent];
       String checkerTableString = widget.component['addToTable'] ?? '';
@@ -345,22 +376,28 @@ class FtzCheckerState extends State<FtzChecker> {
       String eventRaw = widget.component['addToEvent'] ?? '';
       if (eventRaw.isNotEmpty) {
         checkerTableString =
-        '$checkerTableString${separator[0]}$updateRaw${separator[0]}$deleteRaw${separator[0]}$eventRaw';
+            '$checkerTableString${separator[0]}$updateRaw${separator[0]}$deleteRaw${separator[0]}$eventRaw';
       } else if (updateRaw.isNotEmpty || deleteRaw.isNotEmpty) {
         checkerTableString =
-        '$checkerTableString${separator[0]}$updateRaw${separator[0]}$deleteRaw';
+            '$checkerTableString${separator[0]}$updateRaw${separator[0]}$deleteRaw';
       }
       appendToSheet(
-          row,
-          defaultVid(),
-          widget.component['flag'] ?? '',
-          widget.component['desc'] ?? '',
-          widget.component['type'] ?? '',
-          checkerTableString);
+        row,
+        defaultVid(),
+        widget.component['flag'] ?? '',
+        widget.component['desc'] ?? '',
+        widget.component['type'] ?? '',
+        checkerTableString,
+      );
     } // end of checkerSaveData
 
-    Future<String> checkerDataProcess(List checkies, String originalScrName,
-        List<dynamic> tArray, int timeStamp, String lqr) async {
+    Future<String> checkerDataProcess(
+      List checkies,
+      String originalScrName,
+      List<dynamic> tArray,
+      int timeStamp,
+      String lqr,
+    ) async {
       setDataOK('2'); // checker is stateless event for current user
       String resultOk = empty;
       String mock = 'Unknown';
@@ -377,28 +414,28 @@ class FtzCheckerState extends State<FtzChecker> {
             eventContent += '${separator[7]}$timeStamp${separator[1]}';
             eventContent += '$originalScrName${separator[1]}';
             eventContent +=
-            '${widget.component['flag'] ?? 'location'}${separator[1]}';
+                '${widget.component['flag'] ?? 'location'}${separator[1]}';
             eventContent +=
-            '${widget.component['category'] ?? 'checkpoint'}${separator[1]}';
+                '${widget.component['category'] ?? 'checkpoint'}${separator[1]}';
             eventContent += '$lqr${separator[1]}';
             eventContent += '${position!.latitude.toString()}${separator[1]}';
             eventContent += '${position!.longitude.toString()}${separator[1]}';
             eventContent +=
-            '${placeMark.isNotEmpty ? placeMark[0].isoCountryCode! : invalidCountry}${separator[1]}';
+                '${placeMark.isNotEmpty ? placeMark[0].isoCountryCode! : invalidCountry}${separator[1]}';
             eventContent +=
-            '${placeMark.isNotEmpty ? placeMark[0].postalCode! : ""}${separator[1]}';
+                '${placeMark.isNotEmpty ? placeMark[0].postalCode! : ""}${separator[1]}';
             eventContent +=
-            '${cleanupString(placeMark.isNotEmpty ? placeMark[0].administrativeArea! : "")}${separator[1]}';
+                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].administrativeArea! : "")}${separator[1]}';
             eventContent +=
-            '${cleanupString(placeMark.isNotEmpty ? placeMark[0].subAdministrativeArea! : "")}${separator[1]}';
+                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].subAdministrativeArea! : "")}${separator[1]}';
             eventContent +=
-            '${cleanupString(placeMark.isNotEmpty ? placeMark[0].locality! : "")}${separator[1]}';
+                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].locality! : "")}${separator[1]}';
             eventContent +=
-            '${cleanupString(placeMark.isNotEmpty ? placeMark[0].subLocality! : "")}${separator[1]}';
+                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].subLocality! : "")}${separator[1]}';
             eventContent +=
-            '${cleanupString(placeMark.isNotEmpty ? placeMark[0].thoroughfare! : "")}${separator[1]}';
+                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].thoroughfare! : "")}${separator[1]}';
             eventContent +=
-            '${cleanupString(placeMark.isNotEmpty ? placeMark[0].subThoroughfare! : "")}${separator[1]}';
+                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].subThoroughfare! : "")}${separator[1]}';
             eventContent += mock;
             for (int i = 0; i < checkies.length; i++) {
               eventContent += '${separator[7]}${checkies[i][2]}${separator[5]}';
@@ -407,76 +444,80 @@ class FtzCheckerState extends State<FtzChecker> {
               int d = 1;
             } // end for checkies
             eventContent +=
-            '${separator[0]}${widget.component['flag'] ?? 'blank-flag'}';
-            checkerSaveData(originalScrName, timeStamp,
-                eventContent); //= send record to FromLink
+                '${separator[0]}${widget.component['flag'] ?? 'blank-flag'}';
+            checkerSaveData(
+              originalScrName,
+              timeStamp,
+              eventContent,
+            ); //= send record to FromLink
           } else {
             //checkerDialog(message: tArray[5], okString: tArray[7]);
             await showDialog(
-                context: context,
-                builder: (BuildContext context) {
-                  return AlertDialog(
-                    // dialog 3
-                    title: Text(tArray[11] ?? 'Fail'),
-                    content: Container(
-                      alignment: const Alignment(0.0, 0.0),
-                      height: dialogHeight,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        mainAxisAlignment: MainAxisAlignment.start,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(textList['GpsReadError']),
-                        ],
-                      ),
+              context: context,
+              builder: (BuildContext context) {
+                return AlertDialog(
+                  // dialog 3
+                  title: Text(tArray[11] ?? 'Fail'),
+                  content: Container(
+                    alignment: const Alignment(0.0, 0.0),
+                    height: dialogHeight,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [Text(textList['GpsReadError'])],
                     ),
-                    actions: <Widget>[
-                      TextButton(
-                        child: Text(tArray[7] ?? "Ok"),
-                        onPressed: () {
-                          routeStack.pop();
-                          Navigator.of(context).pop();
-                        },
-                      ),
-                    ],
-                  );
-                });
+                  ),
+                  actions: <Widget>[
+                    TextButton(
+                      child: Text(tArray[7] ?? "Ok"),
+                      onPressed: () {
+                        routeStack.pop();
+                        Navigator.of(context).pop();
+                      },
+                    ),
+                  ],
+                );
+              },
+            );
             resultOk = errorString;
           } // end if position
         } catch (e) {
           // TODO display dialog fail, and play wrong beep
           errorReport(e);
           setDataOK(
-              '1'); // reload pages and display green anyway. So the app will not lock up
+            '1',
+          ); // reload pages and display green anyway. So the app will not lock up
 
           await showDialog(
-              context: context,
-              builder: (BuildContext context) {
-                return AlertDialog(
-                  // dialog 3
-                  title: Text(textList["Fail"]), // Scan lagi
-                  // title: const Text("Error test1"), // Scan lagi
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.start,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(textList["Retry"]),
-                      Text("System: (${e.toString()})"),
-                      const Text("Position: otq_qr1(1)"),
-                      Text(textList["ScreenShot"]),
-                    ],
-                  ),
-                  actions: <Widget>[
-                    TextButton(
-                      child: Text(textList["OK"]),
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                      },
-                    ),
+            context: context,
+            builder: (BuildContext context) {
+              return AlertDialog(
+                // dialog 3
+                title: Text(textList["Fail"]), // Scan lagi
+                // title: const Text("Error test1"), // Scan lagi
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(textList["Retry"]),
+                    Text("System: (${e.toString()})"),
+                    const Text("Position: otq_qr1(1)"),
+                    Text(textList["ScreenShot"]),
                   ],
-                );
-              });
+                ),
+                actions: <Widget>[
+                  TextButton(
+                    child: Text(textList["OK"]),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                    },
+                  ),
+                ],
+              );
+            },
+          );
           resultOk = errorString;
         }
       } //end if (checkies.length > 0)
@@ -486,8 +527,10 @@ class FtzCheckerState extends State<FtzChecker> {
         getLocation().then((res) {
           position = res;
           lastPositionTime = nowTime;
-          placemarkFromCoordinates(position!.latitude, position!.longitude)
-              .then((pm) {
+          placemarkFromCoordinates(
+            position!.latitude,
+            position!.longitude,
+          ).then((pm) {
             placeMark = pm;
           }); // end of placemarkFromCoordinates
         }); // end of getLocation
@@ -516,28 +559,30 @@ class FtzCheckerState extends State<FtzChecker> {
             checkies = [];
             lastSend = data;
             checkerDataProcess(
-                processList,
-                widget.scrName,
-                newArray,
-                DateTime.fromMillisecondsSinceEpoch(
-                    DateTime.now().millisecondsSinceEpoch + timeDiff)
-                    .millisecondsSinceEpoch,
-                lqr);
+              processList,
+              widget.scrName,
+              newArray,
+              DateTime.fromMillisecondsSinceEpoch(
+                DateTime.now().millisecondsSinceEpoch + timeDiff,
+              ).millisecondsSinceEpoch,
+              lqr,
+            );
             int delayCounter = defaultFinalSaveCounter;
             if (lastSave > 0) {
               delayCounter = max(
-                  0,
-                  (widget.component['delay'] ?? 10) -
-                      (((DateTime.now().millisecondsSinceEpoch - lastSave) /
-                          1000)
-                          .round()) +
-                      2);
+                0,
+                (widget.component['delay'] ?? 10) -
+                    (((DateTime.now().millisecondsSinceEpoch - lastSave) / 1000)
+                        .round()) +
+                    2,
+              );
             } // end if (lastSave > 0)
             checkerSendDialog(
-                message1: newArray[15],
-                message2: newArray[16],
-                counter: delayCounter,
-                okString: newArray[1]);
+              message1: newArray[15],
+              message2: newArray[16],
+              counter: delayCounter,
+              okString: newArray[1],
+            );
             lastSave = DateTime.now().millisecondsSinceEpoch;
           } // end if (widget.component['interval']!= null &&
         } // end if (checkies.isNotEmpty)
@@ -551,9 +596,11 @@ class FtzCheckerState extends State<FtzChecker> {
         late DateTime qrTime;
         late String qrDateStr, qrTimeStr;
         List<dynamic> formatArray = diamondTextToList(
-            ftzDateTimeFormatConverter(
-                (widget.component['dateTimeFormat'] ?? 'd-MMM-yyyy◆H:mm')
-                    .toString()));
+          ftzDateTimeFormatConverter(
+            (widget.component['dateTimeFormat'] ?? 'd-MMM-yyyy◆H:mm')
+                .toString(),
+          ),
+        );
         dynamic dateFormatter = DateFormat((formatArray[0]) ?? 'd-MMM-yyyy');
         dynamic timeFormatter = DateFormat((formatArray[1]) ?? 'H:mm');
         bool continueLoop = true,
@@ -576,23 +623,26 @@ class FtzCheckerState extends State<FtzChecker> {
           lens = 'front';
         } // end if (actionType.contains('multiple'))
         int locationStatus =
-        0; // 1=good; 2=wrong lqr 3=lqr not registered; ; 4=wrong coordinate
+            0; // 1=good; 2=wrong lqr 3=lqr not registered; ; 4=wrong coordinate
         if (actionType.contains('lqr')) {
           dynamic p;
           dynamic q;
           takeLqr = true;
           newArray = List<String>.from(tArray);
-          await Future.wait([
-            omLqrReaderP(),
-            osLqrMakerQ(),
-          ]).then((res) {
+          await Future.wait([omLqrReaderP(), osLqrMakerQ()]).then((res) {
             p = res[0];
             q = res[1];
           });
           int d = 0;
           num finalTolerance = 0;
-          String lqrText = await checkerTakeQR(newArray[4] ?? 'LQR',
-              widget.scrName, widget.component, 'loc', lens) ??
+          String lqrText =
+              await checkerTakeQR(
+                newArray[4] ?? 'LQR',
+                widget.scrName,
+                widget.component,
+                'loc',
+                lens,
+              ) ??
               'Error';
           if (lqrText == empty) {
             locationStatus = 99; // exit
@@ -604,7 +654,7 @@ class FtzCheckerState extends State<FtzChecker> {
               continueLoop = false;
             } else {
               String resultOk =
-              (transactionStore.state.screenTx['#LQR_LIST'][lqr]) != null
+                  (transactionStore.state.screenTx['#LQR_LIST'][lqr]) != null
                   ? transactionStore.state.screenTx['#LQR_LIST'][lqr][0]
                   : empty;
               if (resultOk == empty || resultOk == errorString) {
@@ -616,11 +666,11 @@ class FtzCheckerState extends State<FtzChecker> {
                 finalTolerance = (position!.accuracy).round() + tol;
                 //throw 'Error Test';
                 d = (distanceM(
-                    position!.latitude,
-                    position!.longitude,
-                    transactionStore.state.screenTx['#LQR_LIST'][lqr][1],
-                    transactionStore.state.screenTx['#LQR_LIST'][lqr][2]))
-                    .round();
+                  position!.latitude,
+                  position!.longitude,
+                  transactionStore.state.screenTx['#LQR_LIST'][lqr][1],
+                  transactionStore.state.screenTx['#LQR_LIST'][lqr][2],
+                )).round();
                 if (d > finalTolerance) {
                   locationStatus = 4;
                   continueLoop = false;
@@ -649,7 +699,9 @@ class FtzCheckerState extends State<FtzChecker> {
             } // end if (locationStatus == 4)
             if (locationStatus < 10) {
               await checkerDialog(
-                  message: newArray[msgIndex], okString: newArray[1]);
+                message: newArray[msgIndex],
+                okString: newArray[1],
+              );
             }
           } // end if (continueLoop)
         } // end if (actionType.contains('lqr'))
@@ -664,16 +716,23 @@ class FtzCheckerState extends State<FtzChecker> {
                 position = res;
                 lastPositionTime = nowTime;
                 placemarkFromCoordinates(
-                    position!.latitude, position!.longitude)
-                    .then((pm) {
+                  position!.latitude,
+                  position!.longitude,
+                ).then((pm) {
                   placeMark = pm;
                 }); // end of placemarkFromCoordinates
               }); // end of getLocation
             } // end if  > 600000
 
             newArray = List<String>.from(tArray);
-            String qrText = await checkerTakeQR(newArray[9] ?? 'QR',
-                widget.scrName, widget.component, 'loc', lens) ??
+            String qrText =
+                await checkerTakeQR(
+                  newArray[9] ?? 'QR',
+                  widget.scrName,
+                  widget.component,
+                  'loc',
+                  lens,
+                ) ??
                 'Error';
             qrTime = DateTime.fromMillisecondsSinceEpoch(nowTime + timeDiff);
             qrDateStr = dateFormatter.format(qrTime);
@@ -685,15 +744,21 @@ class FtzCheckerState extends State<FtzChecker> {
               int vid = await getVidUQR(qrText);
               if (vid == -1) {
                 await checkerDialog(
-                    message: newArray[14], okString: newArray[1]);
+                  message: newArray[14],
+                  okString: newArray[1],
+                );
               } else {
-                List? vidProfile =
-                checkerVerifyVid(vid, widget.component['table']);
+                List? vidProfile = checkerVerifyVid(
+                  vid,
+                  widget.component['table'],
+                );
                 String photoUrl = '';
                 if (vidProfile == null) {
                   // alert vid not found
                   await checkerDialog(
-                      message: newArray[13], okString: newArray[1]);
+                    message: newArray[13],
+                    okString: newArray[1],
+                  );
                 } else {
                   // vid match take photo
                   vid = vidProfile[0]; // make sure vid match (for dev)
@@ -712,15 +777,23 @@ class FtzCheckerState extends State<FtzChecker> {
                     checkies.add([
                       vid.toString(),
                       photoUrl,
-                      qrTime.millisecondsSinceEpoch
+                      qrTime.millisecondsSinceEpoch,
                     ]);
                     getData = true;
                     for (int t = 0; t < newArray.length; t++) {
                       newArray[t] = newArray[t].replaceAll('<D>', qrDateStr);
                       newArray[t] = newArray[t].replaceAll('<T>', qrTimeStr);
                       for (int i = vidProfile.length - 1; i >= 0; i--) {
-                        newArray[t] = newArray[t].replaceAll(
-                            '<${(i + 1)}>', vidProfile[i + 1].toString());
+                        // '<n>' maps to vidProfile[n], valid only for
+                        // n < length. The old loop accessed vidProfile[length]
+                        // on the first pass (i+1 == length) → RangeError that
+                        // was swallowed and spun the scanner reopen loop.
+                        if (i + 1 < vidProfile.length) {
+                          newArray[t] = newArray[t].replaceAll(
+                            '<${(i + 1)}>',
+                            vidProfile[i + 1].toString(),
+                          );
+                        }
                       } // end for vidProfile
                     } // end for tArray
                     await checkerSuccessDialog(
@@ -734,30 +807,32 @@ class FtzCheckerState extends State<FtzChecker> {
                       checkies = [];
 
                       checkerDataProcess(
-                          processList,
-                          widget.scrName,
-                          newArray,
-                          DateTime.fromMillisecondsSinceEpoch(
-                              DateTime.now().millisecondsSinceEpoch +
-                                  timeDiff)
-                              .millisecondsSinceEpoch,
-                          lqr);
+                        processList,
+                        widget.scrName,
+                        newArray,
+                        DateTime.fromMillisecondsSinceEpoch(
+                          DateTime.now().millisecondsSinceEpoch + timeDiff,
+                        ).millisecondsSinceEpoch,
+                        lqr,
+                      );
                       int delayCounter = defaultFinalSaveCounter;
                       if (lastSave > 0) {
                         delayCounter = max(
-                            0,
-                            (widget.component['delay'] ?? 10) -
-                                (((DateTime.now().millisecondsSinceEpoch -
-                                    lastSave) /
-                                    1000)
-                                    .round()) +
-                                2);
+                          0,
+                          (widget.component['delay'] ?? 10) -
+                              (((DateTime.now().millisecondsSinceEpoch -
+                                          lastSave) /
+                                      1000)
+                                  .round()) +
+                              2,
+                        );
                       } // end if (lastSave > 0)
                       await checkerSendDialog(
-                          message1: newArray[15],
-                          message2: newArray[16],
-                          counter: delayCounter,
-                          okString: newArray[1]);
+                        message1: newArray[15],
+                        message2: newArray[16],
+                        counter: delayCounter,
+                        okString: newArray[1],
+                      );
                       lastSave = DateTime.now().millisecondsSinceEpoch;
                     } // end if (checkies.length >= (widget.component['buffer']??20))
                   } // end if (!takePicture || (takePicture && photoUrl != ''))
@@ -782,28 +857,31 @@ class FtzCheckerState extends State<FtzChecker> {
           int delayCounter = defaultFinalSaveCounter;
           if (lastSave > 0) {
             delayCounter = max(
-                0,
-                (widget.component['delay'] ?? 10) -
-                    (((DateTime.now().millisecondsSinceEpoch - lastSave) / 1000)
-                        .round()) +
-                    2);
+              0,
+              (widget.component['delay'] ?? 10) -
+                  (((DateTime.now().millisecondsSinceEpoch - lastSave) / 1000)
+                      .round()) +
+                  2,
+            );
           } // end if (lastSave > 0)
           checkerSendDialog(
-              message1: newArray[15],
-              message2: newArray[16],
-              counter: delayCounter,
-              okString: newArray[1]);
+            message1: newArray[15],
+            message2: newArray[16],
+            counter: delayCounter,
+            okString: newArray[1],
+          );
           if (checkies.isNotEmpty) {
             List processList = checkies;
             checkies = [];
             checkerDataProcess(
-                processList,
-                widget.scrName,
-                newArray,
-                DateTime.fromMillisecondsSinceEpoch(
-                    DateTime.now().millisecondsSinceEpoch + timeDiff)
-                    .millisecondsSinceEpoch,
-                lqr);
+              processList,
+              widget.scrName,
+              newArray,
+              DateTime.fromMillisecondsSinceEpoch(
+                DateTime.now().millisecondsSinceEpoch + timeDiff,
+              ).millisecondsSinceEpoch,
+              lqr,
+            );
             lastSave = DateTime.now().millisecondsSinceEpoch;
           } // end if (checkies.isNotEmpty)
           //checkerDialog(message: newArray[13], okString: newArray[1]);
@@ -815,30 +893,29 @@ class FtzCheckerState extends State<FtzChecker> {
         setDataOK('2'); // display green without do anything
         errorReport(err);
         await showDialog(
-            context: context,
-            builder: (BuildContext context) {
-              return AlertDialog(
-                // dialog 3
-                title: Text(textList["Fail"]),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.start,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(textList["GpsProblem"]),
-                  ],
-                ),
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              // dialog 3
+              title: Text(textList["Fail"]),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [Text(textList["GpsProblem"])],
+              ),
 
-                actions: <Widget>[
-                  TextButton(
-                    child: Text(newArray[3] ?? "--Bad GPS_SEND --"),
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                    },
-                  ),
-                ],
-              );
-            }); // end of dialog
+              actions: <Widget>[
+                TextButton(
+                  child: Text(newArray[3] ?? "--Bad GPS_SEND --"),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ],
+            );
+          },
+        ); // end of dialog
       } // end of platformException
       timerSubscription.cancel();
     } // end of checkerAcquireData
@@ -862,14 +939,13 @@ class FtzCheckerState extends State<FtzChecker> {
                   // mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: <Widget>[
-                    Container(
-                      height: topPad,
-                    ),
+                    Container(height: topPad),
                     AspectRatio(
                       aspectRatio: defaultAspectRatio,
                       child: displayImage(
-                          imageUrl: widget.component['url'] ?? defaultImage,
-                          cached: true),
+                        imageUrl: widget.component['url'] ?? defaultImage,
+                        cached: true,
+                      ),
                       // child: FadeInImage.memoryNetwork(
                       //   placeholder: kTransparentImage,
                       //   image: widget.component['url'] ?? defaultImage,
@@ -899,9 +975,10 @@ class FtzCheckerState extends State<FtzChecker> {
                       title = "AlertTitle";
                       body = "NeedGreen";
                       await checkerDialog(
-                          title: textList[title],
-                          message: textList[body],
-                          okString: textArray[1]);
+                        title: textList[title],
+                        message: textList[body],
+                        okString: textArray[1],
+                      );
                       //setDataOK('2');
                       tapped = false;
                     } else {
@@ -910,13 +987,17 @@ class FtzCheckerState extends State<FtzChecker> {
                         //setDataOK('2');
                         tapped = false;
                         await checkerDialog(
-                            title: textList['NoInternetTitle'],
-                            message: textList['NoInternet'],
-                            okString: textArray[1]);
+                          title: textList['NoInternetTitle'],
+                          message: textList['NoInternet'],
+                          okString: textArray[1],
+                        );
                       } else {
                         setTransactionNotOK('ftzChecker');
-                        transactionStore.dispatch(UpdateScreenTxAction(
-                            ScreenTransaction({'#DATA_OK': false})));
+                        transactionStore.dispatch(
+                          UpdateScreenTxAction(
+                            ScreenTransaction({'#DATA_OK': false}),
+                          ),
+                        );
                         try {
                           // OtqState currentData =
                           //     await OtqState().setAllDataAsync();
