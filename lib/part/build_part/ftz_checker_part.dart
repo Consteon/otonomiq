@@ -19,6 +19,10 @@ extension CTakeQr on FtzCheckerState {
       //     useCamera: cam,
       //   ),
       // );
+      // Settle so a just-closed selfie camera (camera plugin) releases the
+      // hardware before the scanner (mobile_scanner) opens — otherwise the
+      // scanner preview can come up blank on the multiple-scan handoff.
+      await Future.delayed(const Duration(milliseconds: 350));
       final qrResult = await Navigator.of(context).push<String>(
         MaterialPageRoute(
           builder: (context) => FtzScannerScreen(title: label, camera: lens.toLowerCase()),

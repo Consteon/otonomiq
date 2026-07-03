@@ -275,6 +275,12 @@ class FtzCheckerState extends State<FtzChecker> {
       int quality = widget.component['quality'] ?? 80;
       List<String> pickedFileUrl = [emptyString];
 
+      // Let the just-closed QR scanner (mobile_scanner) release the physical
+      // camera before the selfie camera (camera plugin) opens. Without this
+      // settle the two plugins contend for the same hardware and the selfie
+      // preview comes up blank white (mirrors acquireCamera's pre-dialog delay).
+      await Future.delayed(const Duration(milliseconds: 500));
+
       try {
         await Get.dialog(
           AlertDialog(
@@ -719,8 +725,14 @@ class FtzCheckerState extends State<FtzChecker> {
                       newArray[t] = newArray[t].replaceAll('<D>', qrDateStr);
                       newArray[t] = newArray[t].replaceAll('<T>', qrTimeStr);
                       for (int i = vidProfile.length - 1; i >= 0; i--) {
-                        newArray[t] = newArray[t].replaceAll(
-                            '<${(i + 1)}>', vidProfile[i + 1].toString());
+                        // '<n>' maps to vidProfile[n], valid only for
+                        // n < length. The old loop accessed vidProfile[length]
+                        // on the first pass (i+1 == length) → RangeError that
+                        // was swallowed and spun the scanner reopen loop.
+                        if (i + 1 < vidProfile.length) {
+                          newArray[t] = newArray[t].replaceAll(
+                              '<${(i + 1)}>', vidProfile[i + 1].toString());
+                        }
                       } // end for vidProfile
                     } // end for tArray
                     await checkerSuccessDialog(

@@ -98,6 +98,11 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
     gotPicture = false;
     flashIndex = 0;
     selectedCamera = widget.direction ?? 0;
+    // Register the lifecycle observer so didChangeAppLifecycleState actually
+    // fires — without this the resumed-handler that rebuilds the controller
+    // never runs, leaving a blank white preview after a permission dialog or
+    // an app background/foreground.
+    WidgetsBinding.instance.addObserver(this);
     initializeCamera(selectedCamera, flashIndex); //Initially selectedCamera = 0
     super.initState();
   }
@@ -150,7 +155,24 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
       ResolutionPreset.medium,
     );
 
-    await controller!.initialize();
+    // The previous camera owner (QR scanner via mobile_scanner) may still be
+    // releasing the hardware, so initialize() fails and the preview shows blank
+    // white. Retry a few times on a fresh controller with a short backoff
+    // before giving up.
+    for (int attempt = 0;; attempt++) {
+      try {
+        await controller!.initialize();
+        break;
+      } catch (e) {
+        if (attempt >= 3) rethrow;
+        await Future.delayed(const Duration(milliseconds: 300));
+        await controller?.dispose();
+        controller = CameraController(
+          widget.cameras[cameraIndex],
+          ResolutionPreset.medium,
+        );
+      }
+    }
     await Future.delayed(const Duration(milliseconds: 500));
     switch (flashIndex) {
       case 0:
@@ -283,8 +305,13 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
             : FutureBuilder<void>(
                 future: _initializeControllerFuture,
                 builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.done) {
-                    // If the Future is complete, display the preview.
+                  if (snapshot.connectionState == ConnectionState.done &&
+                      !snapshot.hasError &&
+                      controller != null &&
+                      controller!.value.isInitialized) {
+                    // Only show the preview when the camera is really live —
+                    // rendering CameraPreview on a failed/half-initialized
+                    // controller is exactly what produced the blank white frame.
                     return Container(
                         //width: pictureWidth,
                         height: pictureHeight,
