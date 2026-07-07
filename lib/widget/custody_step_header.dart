@@ -185,7 +185,7 @@ class _CustodyStepHeaderState extends State<CustodyStepHeader> {
       final DriverHomeState s = getDriverHomeState(widget.scrName);
       if (s.vehicleId.value != derivedVehicleId) {
         s.vehicleId.value = derivedVehicleId;
-        s.vehicleIdResolved = true;
+        s.vehicleIdResolved.value = true;
       }
     });
   }

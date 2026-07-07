@@ -17,6 +17,8 @@ active-row highlight, and a CTA to the taskFeed screen.
 Uses `computeStopProgress` from `driver_home_support.dart` for the
 tst-to-status mapping and closed/total/allClosed computation.
 
+> **Trip sequence:** the `{activeTrip}` token (newest non-closed `vehicle_check` opening doc-id) is available for the `search` config — e.g. `tr◼{activeTrip}` scopes stops to the current trip. Unresolved (no active opening) it stays literal and fails closed.
+
 When `rejectRoute` is set, the locked preview gains per-row "Tolak" buttons
 (amber outline) for non-completed stops, a "Selesai" chip for completed ones,
 and a footnote at card bottom. Tapping Tolak dispatches `#REJECT_TASK` and

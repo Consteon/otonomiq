@@ -105,8 +105,7 @@ class FirebaseSubmitRepository implements SubmitRepository {
 
   @override
   Future<void> updateSubmit(Submit update) {
-    return submitCollection
-        .doc(update.ss)
-        .update(update.toEntity().toDocument());
+    return safeFsUpdate(submitCollection.doc(update.ss),
+        update.toEntity().toDocument(), 'updateSubmit');
   }
 }

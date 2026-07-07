@@ -1096,6 +1096,60 @@ void main() {
       expect(arr.length > 2 ? arr[2] : '\u{2713} Sesuai', '\u{2713} Sesuai');
     });
   });
+
+  // ── PIVOT VARIANT: hideZero all-slot-zero skip (spec §2b) ───────────
+
+  group('pivot hideZero skip (mirrors _buildPivotVariant loop)', () {
+    // Pure mirror of the skip decision in _buildPivotVariant: group by ii,
+    // compute pivotExpected per slot, skip the whole item when hideZero and
+    // every slot is 0. Does not pump the widget (Obx/Firestore deps) --
+    // matches the mirror-test style used in inventory_bucket_card_test.dart.
+    List<String> survivingIds(
+      List<Map<String, dynamic>> docs,
+      List<PivotSlot> slots, {
+      bool hideZero = false,
+    }) {
+      final Map<String, List<Map<String, dynamic>>> groups =
+          groupDocsByKey(docs, 'ii');
+      final List<String> kept = [];
+      for (final entry in groups.entries) {
+        final List<int> expecteds = [
+          for (final slot in slots)
+            pivotExpected(entry.value, 'cd', slot.value, 'qt'),
+        ];
+        if (hideZero && expecteds.every((v) => v == 0)) continue;
+        kept.add(entry.key);
+      }
+      return kept;
+    }
+
+    final List<PivotSlot> slots = parsePivotSlots('full^Penuh~empty^Kosong');
+
+    test('all-slot-zero item skipped when hideZero true', () {
+      final docs = [
+        {'ii': 'A', 'cd': 'full', 'qt': 0},
+        {'ii': 'A', 'cd': 'empty', 'qt': 0},
+        {'ii': 'B', 'cd': 'full', 'qt': 3},
+      ];
+      expect(survivingIds(docs, slots, hideZero: true), ['B']);
+    });
+
+    test('0/1 split is kept (every()==0 check, not sum)', () {
+      final docs = [
+        {'ii': 'A', 'cd': 'full', 'qt': 0},
+        {'ii': 'A', 'cd': 'empty', 'qt': 1},
+      ];
+      expect(survivingIds(docs, slots, hideZero: true), ['A']);
+    });
+
+    test('hideZero=false keeps all-zero item (no regression)', () {
+      final docs = [
+        {'ii': 'A', 'cd': 'full', 'qt': 0},
+        {'ii': 'A', 'cd': 'empty', 'qt': 0},
+      ];
+      expect(survivingIds(docs, slots, hideZero: false), ['A']);
+    });
+  });
 }
 
 /// Test-only stand-in for ExecutionEntry (avoids importing widget file

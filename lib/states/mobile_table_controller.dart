@@ -129,10 +129,10 @@ class MobileTableController extends GetxController {
             header = newHeader;
           } //end if (header == null)
 
-          tableSnapshot.reference.update({
+          safeFsUpdate(tableSnapshot.reference, {
             // update checksum of the table
             'hd': header,
-          });
+          }, 'addContent-hd');
           // todo create flag 'sent' to local data
           returnValue = 'OK';
           update();

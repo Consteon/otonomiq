@@ -358,7 +358,7 @@ void main() {
         gl: 'WH-001',
         cv: '12345',
         cn: 'Admin A',
-        tdt: '1782244800000',
+        tdt: 1782244800000,
         t: 1782286245000,
         itArray: [{'ii': 'galon', 'in': 'Galon', 'tx': 'deliver', 'pd': 5, 'pp': 3, 'ps': 0, 'pb': 0, 'pr': 0, 'cdo': 'full', 'cdi': 'empty', 'wt': ''}],
         tableVid: '20342033315492',
@@ -374,7 +374,7 @@ void main() {
       expect(doc['cv'], '12345');
       expect(doc['cn'], 'Admin A');
       expect(doc['t'], 1782286245000);
-      expect(doc['tdt'], '1782244800000');
+      expect(doc['tdt'], 1782244800000);
       expect(doc['it'], isA<List>());
       expect((doc['it'] as List).length, 1);
       expect(doc['tablevid'], '20342033315492');
@@ -386,7 +386,7 @@ void main() {
         tnm: 'TASK--20260624-000000',
         kl: '', kn: '', al: '', vv: '', gl: '',
         cv: '', cn: '',
-        tdt: '', t: 0,
+        tdt: 0, t: 0,
         itArray: [],
         tableVid: '',
       );
@@ -415,7 +415,7 @@ void main() {
         gl: 'WH-001',
         cv: '12345',
         cn: 'Admin A',
-        tdt: '1782244800000',
+        tdt: 1782244800000,
         t: 1782286245000,
         itArray: itArray,
         tableVid: '20342033315492',

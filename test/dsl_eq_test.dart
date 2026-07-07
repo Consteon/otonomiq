@@ -384,9 +384,10 @@ void main() {
         categoryMap: const {},
         todayEpoch: '1782838800000',
       );
-      // completed tier with Number cdt matching String todayEpoch
+      // Task 11: completed tier removed. closed opening + dv set -> loading.
+      // (Number cdt vs String todayEpoch retained but no longer gates tier.)
       expect(feed.length, 1);
-      expect(feed.first.tier, VehicleTier.completed);
+      expect(feed.first.tier, VehicleTier.loading);
     });
 
     test('completed tier cdt mismatch (different day) drops from feed', () {
@@ -404,7 +405,10 @@ void main() {
         categoryMap: const {},
         todayEpoch: '1782838800000',
       );
-      expect(feed, isEmpty); // different day -> dropped
+      // Task 11: completed-drop removed. A closed opening whose vehicle still
+      // has dv set now surfaces as loading backlog instead of being dropped.
+      expect(feed.length, 1);
+      expect(feed.first.tier, VehicleTier.loading);
     });
 
     test('CR-I1 §1 B 1234X (real shape): DOUBLE tdt matches todayEpoch -> inRoute with task', () {
@@ -440,9 +444,9 @@ void main() {
     });
 
     test('CR-I1 completed tier (E2): DOUBLE cdt (real shape) matches todayEpoch via eq()', () {
-      // E2 path: opening cdt returned as a double -> "1782838800000.0". Under
-      // the OLD strict `!=` the completed vehicle was dropped (today-scope
-      // mismatch); eq() keeps it in the Selesai section.
+      // E2 path: opening cdt returned as a double -> "1782838800000.0".
+      // Task 11: completed tier removed; closed opening + dv set -> loading.
+      // (Double cdt retained but no longer gates tier.)
       final stock = <Map<String, dynamic>>[
         {'lv': 'V1', 'ln': 'AB 1', 'dv': 'D1', 'dn': 'D'},
       ];
@@ -458,7 +462,7 @@ void main() {
         todayEpoch: '1782838800000',
       );
       expect(feed.length, 1);
-      expect(feed.first.tier, VehicleTier.completed);
+      expect(feed.first.tier, VehicleTier.loading);
     });
   });
 

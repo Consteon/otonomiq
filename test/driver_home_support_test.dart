@@ -13,6 +13,7 @@ void main() {
   // store ONCE before all tests with a known #has_user_login value (mirrors
   // global.dart's DevToolsStore<ScreenTransaction> init).
   setUpAll(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
     transactionStore = DevToolsStore<ScreenTransaction>(
       transactionReducer,
       initialState: ScreenTransaction(initTransactionStore()),
@@ -2328,6 +2329,231 @@ void main() {
       expect(p.allClosed, isFalse);
       expect(p.nextStop, ongoingDoc,
           reason: 'nextStop must be the ongoing doc, first after exclusion');
+    });
+  });
+
+  // ── computeActiveTripDocId (pure) ────────────────────────────────────────
+
+  group('computeActiveTripDocId', () {
+    test('empty docs -> null (no openings)', () {
+      expect(computeActiveTripDocId([], 'V1'), isNull);
+    });
+
+    test('no opening-shaped docs -> null', () {
+      expect(
+        computeActiveTripDocId([
+          {'cty': 'closing', 'vv': 'V1', 'cst': '', '__docId': 'X'},
+          {'cty': 'task', 'vv': 'V1', 'cst': '', '__docId': 'Y'},
+        ], 'V1'),
+        isNull,
+      );
+    });
+
+    test('empty vehicleId -> null', () {
+      expect(
+        computeActiveTripDocId([
+          {'cty': 'opening', 'vv': 'V1', 'cst': 'awaiting_custody', '__docId': 'A'},
+        ], ''),
+        isNull,
+      );
+    });
+
+    test('active opening for vehicle -> returns docId', () {
+      expect(
+        computeActiveTripDocId([
+          {'cty': 'opening', 'vv': 'V1', 'cst': 'awaiting_custody', 't': 100, '__docId': 'ABC'},
+        ], 'V1'),
+        'ABC',
+      );
+    });
+
+    test('all openings closed -> empty string (fail-closed)', () {
+      expect(
+        computeActiveTripDocId([
+          {'cty': 'opening', 'vv': 'V1', 'cst': 'closed', 't': 100, '__docId': 'A'},
+          {'cty': 'opening', 'vv': 'V1', 'cst': 'closed', 't': 200, '__docId': 'B'},
+        ], 'V1'),
+        '',
+      );
+    });
+
+    test('newest non-closed wins', () {
+      expect(
+        computeActiveTripDocId([
+          {'cty': 'opening', 'vv': 'V1', 'cst': 'awaiting_custody', 't': 100, '__docId': 'OLD'},
+          {'cty': 'opening', 'vv': 'V1', 'cst': 'custody_confirmed', 't': 200, '__docId': 'NEW'},
+        ], 'V1'),
+        'NEW',
+      );
+    });
+
+    test('vv type-tolerant via eq (Number vs String)', () {
+      expect(
+        computeActiveTripDocId([
+          {'cty': 'opening', 'vv': 123, 'cst': 'awaiting_custody', 't': 100, '__docId': 'A'},
+        ], '123'),
+        'A',
+      );
+    });
+
+    test('openings exist for different vehicle only -> empty string', () {
+      expect(
+        computeActiveTripDocId([
+          {'cty': 'opening', 'vv': 'V2', 'cst': 'awaiting_custody', 't': 100, '__docId': 'A'},
+        ], 'V1'),
+        '',
+      );
+    });
+
+    test('missing __docId -> empty string (broken doc fail-closed)', () {
+      expect(
+        computeActiveTripDocId([
+          {'cty': 'opening', 'vv': 'V1', 'cst': 'awaiting_custody', 't': 100},
+        ], 'V1'),
+        '',
+      );
+    });
+
+    test('mixed non-opening and opening docs -> only openings considered', () {
+      expect(
+        computeActiveTripDocId([
+          {'cty': 'closing', 'vv': 'V1', 'cst': '', 't': 999, '__docId': 'CLOSING'},
+          {'cty': 'opening', 'vv': 'V1', 'cst': 'awaiting_custody', 't': 100, '__docId': 'OPENING'},
+        ], 'V1'),
+        'OPENING',
+      );
+    });
+  });
+
+  // ── resolveDriverCurlyTokens activeTrip fallback ─────────────────────────
+
+  group('resolveDriverCurlyTokens activeTrip fallback', () {
+    setUp(() {
+      clearDriverHomeState('trip_scr');
+      getDriverHomeState('trip_scr').vehicleId.value = 'V1';
+      mapTableContent['99/vehicle_check'] = [
+        {
+          'cty': 'opening',
+          'vv': 'V1',
+          'cst': 'awaiting_custody',
+          't': 100,
+          '__docId': 'DOC_ABC',
+        },
+      ];
+    });
+
+    tearDown(() {
+      clearDriverHomeState('trip_scr');
+      mapTableContent.remove('99/vehicle_check');
+    });
+
+    test('{activeTrip} resolves via fallback when state empty', () {
+      expect(getDriverHomeState('trip_scr').activeTrip.value, '');
+      final result = resolveDriverCurlyTokens(
+          'tr\u{25FC}{activeTrip}', 'trip_scr');
+      expect(result, 'tr\u{25FC}DOC_ABC');
+    });
+
+    test('{activeTrip} uses state value when already published', () {
+      getDriverHomeState('trip_scr').activeTrip.value = 'EXISTING';
+      final result = resolveDriverCurlyTokens(
+          'tr\u{25FC}{activeTrip}', 'trip_scr');
+      expect(result, 'tr\u{25FC}EXISTING');
+    });
+
+    test('{activeTrip} fallback with no vehicle_check key -> literal', () {
+      mapTableContent.remove('99/vehicle_check');
+      final result = resolveDriverCurlyTokens(
+          'tr\u{25FC}{activeTrip}', 'trip_scr');
+      expect(result, 'tr\u{25FC}{activeTrip}');
+    });
+
+    test('{activeTrip} fallback with empty vehicleId -> literal', () {
+      getDriverHomeState('trip_scr').vehicleId.value = '';
+      final result = resolveDriverCurlyTokens(
+          'tr\u{25FC}{activeTrip}', 'trip_scr');
+      expect(result, 'tr\u{25FC}{activeTrip}');
+    });
+
+    test('{activeTrip} fallback with all openings closed -> literal', () {
+      mapTableContent['99/vehicle_check'] = [
+        {
+          'cty': 'opening',
+          'vv': 'V1',
+          'cst': 'closed',
+          't': 100,
+          '__docId': 'A',
+        },
+      ];
+      final result = resolveDriverCurlyTokens(
+          'tr\u{25FC}{activeTrip}', 'trip_scr');
+      expect(result, 'tr\u{25FC}{activeTrip}');
+    });
+
+    test('{activeTrip} fallback skips non-vehicle_check keys', () {
+      // Seed a non-vehicle_check key with opening docs -- must be skipped.
+      mapTableContent['88/task'] = [
+        {
+          'cty': 'opening',
+          'vv': 'V1',
+          'cst': 'awaiting_custody',
+          't': 200,
+          '__docId': 'WRONG',
+        },
+      ];
+      final result = resolveDriverCurlyTokens(
+          'tr\u{25FC}{activeTrip}', 'trip_scr');
+      // Should resolve from 99/vehicle_check (DOC_ABC), not 88/task.
+      expect(result, 'tr\u{25FC}DOC_ABC');
+      mapTableContent.remove('88/task');
+    });
+
+    test('{activeTrip} in multi-clause search resolves correctly', () {
+      final result = resolveDriverCurlyTokens(
+          'tr\u{25FC}{activeTrip}\u{2B58}vv\u{25FC}{vehicleId}', 'trip_scr');
+      expect(result, 'tr\u{25FC}DOC_ABC\u{2B58}vv\u{25FC}V1');
+    });
+  });
+
+  // ── hideZeroEnabled (shared flag read, spec §4 Q2) ──────────────────────
+
+  group('hideZeroEnabled', () {
+    test('String "TRUE" -> true', () {
+      expect(hideZeroEnabled({'hideZero': 'TRUE'}), isTrue);
+    });
+
+    test('lowercase "true" -> true (case-insensitive)', () {
+      expect(hideZeroEnabled({'hideZero': 'true'}), isTrue);
+    });
+
+    test('padded " TRUE " -> true (space-insensitive)', () {
+      expect(hideZeroEnabled({'hideZero': ' TRUE '}), isTrue);
+    });
+
+    test('"FALSE" -> false', () {
+      expect(hideZeroEnabled({'hideZero': 'FALSE'}), isFalse);
+    });
+
+    test('empty string -> false', () {
+      expect(hideZeroEnabled({'hideZero': ''}), isFalse);
+    });
+
+    test('absent key -> false', () {
+      expect(hideZeroEnabled(<String, dynamic>{}), isFalse);
+    });
+
+    test('bool true coerces via toString -> true', () {
+      // Server never sends bool (spec §4 Q2) -- this documents the coercion,
+      // it isn't relied on by any known config source.
+      expect(hideZeroEnabled({'hideZero': true}), isTrue);
+    });
+
+    test('non-Map component (null) -> false', () {
+      expect(hideZeroEnabled(null), isFalse);
+    });
+
+    test('non-Map component (String) -> false', () {
+      expect(hideZeroEnabled('x'), isFalse);
     });
   });
 }

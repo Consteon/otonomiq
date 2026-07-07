@@ -148,7 +148,7 @@ class _VehicleCustodyHeaderState extends State<VehicleCustodyHeader> {
       final DriverHomeState s = getDriverHomeState(widget.scrName);
       if (s.vehicleId.value != derivedVehicleId) {
         s.vehicleId.value = derivedVehicleId;
-        s.vehicleIdResolved = true;
+        s.vehicleIdResolved.value = true;
       }
     });
   }
@@ -178,6 +178,12 @@ class _VehicleCustodyHeaderState extends State<VehicleCustodyHeader> {
       // Step 1: Find vehicle doc and publish vehicleId.
       final Map<String, dynamic>? vehicleDoc = _findVehicleDoc();
       _publishVehicleId(vehicleDoc);
+
+      // Publish activeTrip from vehicle_check data (GAP A fix for P5:
+      // CustodyNotification has no gate widget pointing at vehicle_check,
+      // so evaluateGateSearch never fires resolveAndPublishActiveTrip on
+      // this page). Safe: idempotent + deferred + guarded.
+      resolveAndPublishActiveTrip(widget.scrName, _checkCode);
 
       // Step 2: Read plate from the vehicle doc (same doc).
       final String plateField =

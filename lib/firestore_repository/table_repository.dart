@@ -60,8 +60,14 @@ Future<int> getNumber(String documentName) async {
     return newCounterValue;
   } catch (e) {
     debugPrint("Error getting new number: $e");
-    // Return a default or error value.
-    return 0;
+    // Do NOT return 0: a 0 counter forges a plausible tnm ("...0") that
+    // passes isGeneratedTnmValid. Rethrow so the ONLY call chain
+    // (firestoreSequential -> _getCounterValue, global2.dart) hits its own
+    // catch and yields the 'COUNTER_ERR' sentinel, which the tnm validator
+    // rejects -- no doc is ever written with a corrupt number. Offline this
+    // path is unreachable from task_create_submit (CTA gated), so the
+    // rethrow is defense-in-depth for flaky-online failures.
+    rethrow;
   }
 } // End of getNumber
 
@@ -1509,6 +1515,9 @@ Future<List<String>> writeUpdateEventRow(
         .where((b) => b.trim().isNotEmpty)
         .toList();
 
+    // ── A: entry breadcrumb ──────────────────────────────────────────────
+    devPrint('[writeUpdateEventRow] REACHED: ${blocks.length} block(s)');
+
     for (final block in blocks) {
       try {
         final UpdateEventTarget t = parseUpdateEventRow(block);
@@ -1526,6 +1535,8 @@ Future<List<String>> writeUpdateEventRow(
 
         // Resolve + type-coerce search values, then build the AND query.
         dynamic query = firestoreDb.collection(path);
+        // ── B: collect per-clause diagnostics for 0-match reporting ──────
+        final List<String> clauseLog = [];
         for (final c in t.conditions) {
           final String resolved = resolveValueTokens(
             c.value,
@@ -1535,13 +1546,20 @@ Future<List<String>> writeUpdateEventRow(
             timeReceived: timeReceived,
             receivingPage: receivingPage,
           );
-          query = query.where(c.key, isEqualTo: _parseSearchValue(resolved));
+          final dynamic parsedValue = _parseSearchValue(resolved);
+          devPrint('[writeUpdateEventRow] clause: ${c.key}=$resolved -> '
+              'parsedType=${parsedValue.runtimeType}');
+          clauseLog.add('${c.key}=$resolved(${parsedValue.runtimeType})');
+          query = query.where(c.key, isEqualTo: parsedValue);
         }
         final snap = await query.get();
         final docs = snap.docs;
 
         if (docs.isEmpty) {
           devPrint('[writeUpdateEventRow] 0 match at $path; skip (no create)');
+          // ── C: loud 0-match (errorReport = always-on + Crashlytics) ────
+          errorReport('updateEventRow 0-match: '
+              '[${clauseLog.join(', ')}] at $path');
           result.add('ok: no match (skipped)');
           continue;
         }
@@ -1991,7 +2009,9 @@ Future<void> subscribeToMapCollection(
         for (final d in snap.docs) {
           final dynamic data = d.data();
           if (data is Map) {
-            docs.add(Map<String, dynamic>.from(data));
+            final Map<String, dynamic> doc = Map<String, dynamic>.from(data);
+            doc['__docId'] = d.id;
+            docs.add(doc);
           }
         }
         mapTableContent[code] = docs;
@@ -2181,7 +2201,7 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
             var docRef = firestoreDb
                 .collection(proxyCollectionName)
                 .doc(ssid ?? 'ErrorInLoadHistory');
-            docRef.update({'i': imageMapStr});
+            safeFsUpdate(docRef, {'i': imageMapStr}, 'saveImageMap');
           } catch (fErr) {
             // error in firebase, do nothing
           } // end try
@@ -2255,7 +2275,7 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
             var docRef = firestoreDb
                 .collection(proxyCollectionName)
                 .doc(ssid ?? 'ErrorInLoadHistory');
-            docRef.update({'h': historyStr});
+            safeFsUpdate(docRef, {'h': historyStr}, 'saveHistory');
           } catch (fErr) {
             // error in firebase, do nothing
           } // end try
@@ -2433,8 +2453,6 @@ Future saveHistory() async {
         (await waitUntilNotNullScreenTx(functionName, '#INTERFACE_KEY', 20))
             .toString();
     try {
-      FirebaseFirestore.instance.settings =
-          const Settings(persistenceEnabled: true);
       dynamic docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
       docRef.update({
         'h': historyStr,
@@ -2460,8 +2478,6 @@ Future archiveHistory() async {
         (await waitUntilNotNullScreenTx(myFunctionName, '#INTERFACE_KEY', 20))
             .toString();
     try {
-      FirebaseFirestore.instance.settings =
-          const Settings(persistenceEnabled: true);
       dynamic docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
       docRef.update({
         'h2': historyStr,
@@ -2584,6 +2600,40 @@ bool isNoMatchResult(String s) =>
 final Map<int, int> _historySyncRetry = {};
 const int historySyncRetryMax = 5;
 
+/// In-memory count of consecutive cycles a history record has been DEFERRED
+/// because its embedded image was still unresolved (`aum__`) after
+/// replaceLocalImageToUrl. A dead/exhausted image resolves to defaultImage and
+/// sends immediately, so this counter only accrues for an image that keeps
+/// THROWING on upload (genuinely stuck — replaceLocalImageToUrl returns its
+/// input unchanged on exception, api.dart:541). Once it reaches
+/// historyImageRetryMax the remaining aum__ markers are swapped for
+/// defaultImage and the record is sent, so a single stuck image can't
+/// head-of-line-wedge the whole queue forever. Mirrors _historySyncRetry (the
+/// table-CRUD poison cap). In-memory only: reset on send and on app restart,
+/// which is acceptable — a transient upload failure clears within a few online
+/// cycles and a truly poison image is logged loudly before it's dropped.
+final Map<int, int> _historyImageRetry = {};
+const int historyImageRetryMax = 5;
+
+/// Pure decision for the historySync image-defer cap. Given whether we're
+/// force-sending, whether the resolved content still holds an `aum__` marker,
+/// and how many cycles this record has already deferred on that image
+/// (`newTries`, already incremented for the current cycle), returns true when
+/// historySync should DEFER (wait one more cycle, shipping the image with its
+/// record as designed) and false when it should PROCEED to send (no pending
+/// image, force-send, or the cap was reached and the image will be dropped to
+/// defaultImage). Extracted so the cap arithmetic is unit-testable without
+/// Firestore or the history locks.
+bool shouldDeferForImage({
+  required bool forceSend,
+  required bool hasAum,
+  required int newTries,
+  int max = historyImageRetryMax,
+}) {
+  if (forceSend || !hasAum) return false;
+  return newTries < max;
+}
+
 Future historySync(String source, bool forceSend) async {
   // sent unsent history to event
   // trim history at the end
@@ -2606,8 +2656,6 @@ Future historySync(String source, bool forceSend) async {
         debugPrint('execute $functionName');
         if (historySyncLock.queueLock(functionName)) {
           try {
-            FirebaseFirestore.instance.settings =
-                const Settings(persistenceEnabled: false);
             // SubmitBloc submitBloc = state['#SUBMIT_BLOC'];
             bool moreHistory = true;
             bool continueSendingHistory = true;
@@ -2650,10 +2698,14 @@ Future historySync(String source, bool forceSend) async {
                   if (tableContent[historyName][i][9] <= 0) {
                     unsentHistoryFound = true;
                     historyIndex = i;
-                    if ((tableContent[historyName][i][2].contains('aum__'))) {
-                      // continueSendingHistory = false;
-                      continueSendingHistory = forceSend;
-                    }
+                    // Image-poison no longer halts the whole queue here: the
+                    // oldest-unsent record now always flows into the send block
+                    // below, where replaceLocalImageToUrl resolves a dead image
+                    // to defaultImage and a per-record cap (_historyImageRetry /
+                    // historyImageRetryMax) bounds a genuinely-stuck one. (Was:
+                    // if the record held aum__, continueSendingHistory=forceSend
+                    // forced the send-gate false and wedged the entire queue
+                    // head-of-line on one un-uploadable image. Do NOT re-add.)
                   } // end if (tableContent[historyName][i][9] == 0)
                 } // end for (int i = 0; i < tableContent[historyName].length)
               } catch (e1) {
@@ -2666,10 +2718,48 @@ Future historySync(String source, bool forceSend) async {
                     tableContent[historyName][historyIndex];
                 debugPrint(
                     'historySync processing historyId ${eventHistory[0]}');
+                final int historyId = eventHistory[0] as int;
                 String eventTemp = await replaceLocalImageToUrl(
                     eventHistory[2]); // send image to cloud
-                if (!forceSend && eventTemp.contains('aum__')) {
-                  devPrint('*** image not sent, skip historySync');
+                // Image-poison backstop. replaceLocalImageToUrl above resolves a
+                // dead/exhausted image to defaultImage (aum__ gone -> sends
+                // normally); it only leaves aum__ when the upload keeps throwing
+                // (genuinely stuck). Deferring such a record forever is the
+                // head-of-line wedge this fix removes: bound the defers with a
+                // per-record cap mirroring _historySyncRetry. Under the cap keep
+                // deferring (image ships with its record, as designed); at the
+                // cap drop the stuck image to defaultImage, log loudly, and
+                // PROCEED so this record and the backlog behind it can drain.
+                final bool hasAum = eventTemp.contains('aum__');
+                final bool imagePending = !forceSend && hasAum;
+                int imgTries = _historyImageRetry[historyId] ?? 0;
+                if (imagePending) {
+                  imgTries += 1;
+                  _historyImageRetry[historyId] = imgTries;
+                }
+                bool deferForImage = false;
+                if (shouldDeferForImage(
+                    forceSend: forceSend, hasAum: hasAum, newTries: imgTries)) {
+                  devPrint('*** image not sent, defer historySync historyId '
+                      '$historyId ($imgTries/$historyImageRetryMax)');
+                  deferForImage = true;
+                } else if (imagePending) {
+                  // Cap reached: the image stayed unresolvable for
+                  // historyImageRetryMax cycles. Drop it to defaultImage so this
+                  // record (and everything queued behind it) can finally send.
+                  errorReport('historySync image lost for historyId $historyId '
+                      'after $imgTries cycles; replacing with defaultImage to '
+                      'unblock queue.');
+                  _historyImageRetry.remove(historyId);
+                  eventTemp = eventTemp.replaceAll(
+                      RegExp(r'aum__(.*?)__mua'), defaultImage);
+                  // Persist the cleaned content now so the doc "c" field and the
+                  // table-CRUD eventRowString both carry defaultImage even if the
+                  // location-parse try/catch below skips its own eventHistory[2]
+                  // assignment.
+                  eventHistory[2] = eventTemp;
+                }
+                if (deferForImage) {
                   moreHistory = false;
                 } else {
                   await historyLock('$functionName 2');
@@ -2841,6 +2931,10 @@ Future historySync(String source, bool forceSend) async {
                               'writeToEvent returned false');
                         }
                         if (updateEventStr.isNotEmpty) {
+                          devPrint('[historySync] dispatching '
+                              'writeUpdateEventRow for historyId '
+                              '${eventHistory[0]}, updateEventStr '
+                              'length=${updateEventStr.length}');
                           final res = await writeUpdateEventRow(
                               updateEventStr, eventRowString);
                           tally('writeUpdateEventRow', resultOk(res), res);
@@ -2862,7 +2956,6 @@ Future historySync(String source, bool forceSend) async {
                     final bool partial = opsAttempted > 0 &&
                         opsSucceeded > 0 &&
                         opsSucceeded < opsAttempted;
-                    final int historyId = eventHistory[0] as int;
 
                     if (allFailed) {
                       // Nothing landed -> retrying the whole record next cycle
@@ -2893,6 +2986,7 @@ Future historySync(String source, bool forceSend) async {
                             'historySync PARTIAL table write for historyId $historyId ($opsSucceeded/$opsAttempted ok); marking sent to avoid duplicate rows on retry.');
                       }
                       _historySyncRetry.remove(historyId);
+                      _historyImageRetry.remove(historyId);
                       await docReference.set(dataSent).then((value) async {
                         debugPrint(
                             'historySync doc $docName sent dataSent $dataSent');

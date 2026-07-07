@@ -22,13 +22,13 @@ class GoogleLoginButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      height: 52,
+      height: 54,
       child: OutlinedButton(
         style: OutlinedButton.styleFrom(
           backgroundColor: Colors.white,
           side: BorderSide(color: Colors.grey.shade300),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
           ),
           elevation: 0,
         ),
@@ -49,9 +49,10 @@ class GoogleLoginButton extends StatelessWidget {
               child: Text(
                 _component['google'] ?? 'Masuk dengan Google',
                 style: TextStyle(
-                  color: Colors.grey.shade700,
+                  color: Colors.grey.shade800,
                   fontSize: 15,
-                  fontWeight: FontWeight.w500,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.1,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),

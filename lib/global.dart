@@ -1889,6 +1889,17 @@ String phoneCleanup(String ph) {
       RegExp("^0|^62|^65|^60|^63|^66|^66|^1|^673|^61|^52"), "");
 } // end of phoneCleanup
 
+/// Adaptive -> canonical Indonesian "62"+national.
+/// Handles 08.., 8.., 89.., +62.., 62.., 6289.., separators. Idempotent.
+/// Self-contained: does NOT read #COUNTRY (login-safe).
+String phoneCanonical62(String inp) {
+  String d = inp.replaceAll(RegExp('[^0-9]'), '');
+  d = d.replaceFirst(RegExp('^62'), '');
+  d = d.replaceFirst(RegExp('^0'), '');
+  if (d.isEmpty) return '';
+  return '62$d';
+} // end of phoneCanonical62
+
 void errorReport(dynamic e, [StackTrace? stack]) {
   // Log unconditionally (debugPrint prints in release too) AND forward to
   // Crashlytics as a non-fatal for remote capture — the hundreds of
@@ -1910,6 +1921,41 @@ void devPrint(dynamic e) {
     debugPrint(e.toString());
   }
 } // end of devPrint
+
+/// Fire-and-forget-safe Firestore document `update()`.
+///
+/// A raw `docRef.update(map)` that is NOT awaited (and lacks `.catchError`)
+/// turns any write rejection into an UNHANDLED async error: it escapes to
+/// `platformDispatcher.onError` (main.dart) and is recorded as a FATAL crash,
+/// with no app frames in the stack (the async gap drops them). The repetitive
+/// `[cloud_firestore/invalid-argument]` crashes were exactly this shape.
+///
+/// This wrapper:
+///   * skips an empty map (`update({})` is itself rejected as invalid-argument),
+///   * routes any rejection to [errorReport] (Crashlytics NON-fatal), tagged
+///     with the doc path + payload, so the offending write becomes visible
+///     instead of killing the app.
+///
+/// [ref] is `dynamic` so it also accepts the app's dynamically-typed refs
+/// (e.g. `firestoreDb.collection(...).doc(...)`); it is cast to
+/// [DocumentReference] internally. Returns the (already guarded) write Future
+/// so a caller may still await it — it resolves normally even on failure.
+Future<void> safeFsUpdate(dynamic ref, Map<String, dynamic> data, String tag) {
+  if (data.isEmpty) {
+    devPrint('[safeFsUpdate] $tag skipped empty update');
+    return Future<void>.value();
+  }
+  DocumentReference docRef;
+  try {
+    docRef = ref as DocumentReference;
+  } catch (e) {
+    errorReport('[safeFsUpdate] $tag not a DocumentReference: $e');
+    return Future<void>.value();
+  }
+  return docRef.update(data).catchError((Object e) {
+    errorReport('[safeFsUpdate] $tag ${docRef.path} data=$data err=$e');
+  });
+} // end of safeFsUpdate
 
 /// Forward [e] to [errorReport] (Crashlytics non-fatal) UNLESS it is a handled
 /// [TimeoutException] from a best-effort read / time fetch. Those recover

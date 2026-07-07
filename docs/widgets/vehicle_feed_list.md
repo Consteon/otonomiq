@@ -15,6 +15,8 @@ task (route state) to derive each vehicle's tier (loading / custody_pending /
 in_route / returning / completed). Groups into 4 sections with per-tier card
 styling and action buttons.
 
+> **Trip sequence:** tier derivation anchors to the NEWEST opening per vehicle (sort by `t` desc, non-closed preferred) and scopes the task rollup by trip — but ONLY when that opening is non-closed (an active trip): scope = tasks with `tr == opening __docId` OR `tr` empty (unstamped = admin-created / not yet executed, they belong to the active trip). When every opening is closed (between trips) there is NO trip scope — all (vv, today) tasks roll up, so tasks created for the next trip stay visible on the card. Fallback to (vv, today) also applies when no task matches the active trip (pre-CF data). The `completed` tier is no longer emitted — a closed vehicle returns to the `loading` backlog once `dv`/`dn` are cleared.
+
 ## Signature / Constructor
 
 Same 7-param SDUI pattern.
@@ -57,6 +59,11 @@ Same 7-param SDUI pattern.
   no item category resolves. **On-device QA:** verify the derived
   `{docId}/item` path actually resolves item `ic` categories on the live
   tenant.
+- **Summary status scope:** The category summary counts items ONLY from tasks
+  with raw `tst == 'assigned'` (the `kLoadableStatus` constant in
+  `vehicle_feed_support.dart`). Completed, failed, and load_rejected tasks are
+  excluded from the summary. Tier derivation and stop-progress are NOT affected
+  -- they receive the full task set. See `warehouse-feed-summary-status` plan.
 - Card tap writes `#ACTIVE_VEHICLE` (tapped `lv`) then routes to
   `openingRoute` (loading) / `closingRoute` (returning) via
   `routeStack.push` before `gotoRoute`. Dead/empty route = silent no-op.

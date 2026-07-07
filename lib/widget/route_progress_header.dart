@@ -142,17 +142,41 @@ class _RouteProgressHeaderState extends State<RouteProgressHeader> {
   /// Reads `lv` from the doc returned by `_findVehicleDoc()`.
   /// W1: deferred to a post-frame callback — never set an Rx that a mounted
   /// dependent Obx (the gate card) reads synchronously inside build.
+  ///
+  /// Sets `vehicleIdResolved = true` once the stock_location subscription has
+  /// delivered data, EVEN when `derivedVehicleId` is empty (unassigned driver).
+  /// Without this, the downstream gate `vehicleIdResolved && vehicleId.isEmpty`
+  /// never fires and unassigned drivers see other vehicles' cards.
+  ///
+  /// The "data loaded" signal is `mapTableContent.containsKey(_stockLocationCode)`:
+  /// `subscribeToMapCollection` sets `mapTableContent[code]` only when the first
+  /// Firestore snapshot arrives. Before that, `containsKey` is false, so we do
+  /// NOT set `vehicleIdResolved` prematurely (which would flash "unassigned" for
+  /// an assigned driver whose vehicle doc hasn't arrived yet).
   void _publishVehicleId(Map<String, dynamic>? vehicleDoc) {
     final String derivedVehicleId =
         (vehicleDoc?['lv'] ?? '').toString().trim();
     final DriverHomeState state = getDriverHomeState(widget.scrName);
-    if (state.vehicleId.value == derivedVehicleId) return;
+
+    // Data-loaded signal: stock_location subscription has delivered at least
+    // one snapshot. Before that, mapTableContent[_stockLocationCode] is absent.
+    final bool dataLoaded = _stockLocationCode.isNotEmpty &&
+        mapTableContent.containsKey(_stockLocationCode);
+
+    // Skip when both vehicleId value and resolved flag are already current.
+    if (state.vehicleId.value == derivedVehicleId &&
+        state.vehicleIdResolved.value == dataLoaded) {
+      return;
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final DriverHomeState s = getDriverHomeState(widget.scrName);
       if (s.vehicleId.value != derivedVehicleId) {
         s.vehicleId.value = derivedVehicleId;
-        s.vehicleIdResolved = true;
+      }
+      if (dataLoaded && !s.vehicleIdResolved.value) {
+        s.vehicleIdResolved.value = true;
       }
     });
   }

@@ -56,7 +56,7 @@ void main() {
       final state = getDriverHomeState('TestDriverScreen');
       state.vehicleId.value = 'V123';
       state.confirmed.value = true;
-      state.vehicleIdResolved = true;
+      state.vehicleIdResolved.value = true;
 
       // Verify it exists.
       expect(driverHomeStates.containsKey('TestDriverScreen'), true);
@@ -73,7 +73,7 @@ void main() {
       final state = getDriverHomeState('FreshScreen');
       expect(state.vehicleId.value, '');
       expect(state.confirmed.value, false);
-      expect(state.vehicleIdResolved, false);
+      expect(state.vehicleIdResolved.value, false);
     });
   });
 

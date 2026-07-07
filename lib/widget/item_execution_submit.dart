@@ -145,6 +145,10 @@ class ItemExecutionSubmit extends StatefulWidget {
     );
     if (!success) {
       devPrint('[_doActualWrite] writeNativeFields failed for scrName=$scrName');
+    } else if (!internetConnected()) {
+      // Silent hook path (no BuildContext): devPrint only, per design.
+      devPrint('[_doActualWrite] offline: write queued locally for '
+          'scrName=$scrName (auto-sync when online)');
     }
     return success;
   }

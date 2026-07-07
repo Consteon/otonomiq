@@ -152,7 +152,11 @@ class _CustodyRevealState extends State<CustodyReveal> {
     setState(() {});
   }
 
-  /// Find the first matching vehicle_check opening doc.
+  /// Find the best matching vehicle_check opening doc.
+  ///
+  /// Multi-trip: when the config search matches multiple same-day openings,
+  /// [pickActiveOpening] provides a deterministic tie-break (newest non-closed
+  /// by `t` desc). Non-opening docs fall back to matched.first.
   Map<String, dynamic>? _findCheckDoc() {
     if (_checkCode.isEmpty) return null;
     final List<Map<String, dynamic>> docs = List<Map<String, dynamic>>.from(
@@ -162,7 +166,12 @@ class _CustodyRevealState extends State<CustodyReveal> {
     if (rawSearch.isEmpty) return docs.isNotEmpty ? docs.first : null;
     final List<Map<String, dynamic>> matched =
         filterDriverHomeDocs(docs, rawSearch, widget.scrName);
-    return matched.isNotEmpty ? matched.first : null;
+    if (matched.isEmpty) return null;
+    // Deterministic tie-break for opening docs (newest non-closed).
+    // Falls back to matched.first when no opening-shaped docs are present
+    // (non-vehicle_check table — preserves old behavior).
+    final Map<String, dynamic>? activeOpening = pickActiveOpening(matched);
+    return activeOpening ?? matched.first;
   }
 
   /// Extract an array field from the check doc.
@@ -309,13 +318,41 @@ class _CustodyRevealState extends State<CustodyReveal> {
       final String rawSearch =
           (widget.component['search'] ?? '').toString().trim();
 
-      final bool success = await writeNativeFields(
-        component: widget.component,
-        rawTable: rawTable,
-        rawSearch: rawSearch,
-        scrName: widget.scrName,
-        patch: patch,
-      );
+      // R2-A: Direct cst flip -- bypass broken history queue (BUG2).
+      // The updateEventRow DSL on P7/P8 CustodyEventSubmit was supposed
+      // to flip cst via saveSend -> historySync -> writeUpdateEventRow,
+      // but historySync never sends the record ("no history sent" every
+      // cycle, proven on-device). Folding cst into this existing patch
+      // targets the SAME opening doc that already receives ip/dp/rs.
+      // writeNativeFields is type-agnostic (whereIn:[String, Number]) so
+      // no eq() needed. Mirrors C1 close (custody_count_submit.dart:660-668).
+      patch['cst'] = 'custody_confirmed';
+
+      // Doc-id resolution: reuse _findCheckDoc (the same read-path picker
+      // that selected the opening doc the user just reviewed). Write by
+      // doc-id to avoid the >1 match refusal on multi-trip same-day.
+      final String docId =
+          (_findCheckDoc()?['__docId'] ?? '').toString().trim();
+
+      bool success = false;
+      if (docId.isNotEmpty) {
+        success = await createNativeDoc(
+          component: widget.component,
+          rawTable: rawTable,
+          docId: docId,
+          docMap: patch,
+        );
+      }
+      if (!success) {
+        // Fallback: search-based write (single-trip / no subscription data)
+        success = await writeNativeFields(
+          component: widget.component,
+          rawTable: rawTable,
+          rawSearch: rawSearch,
+          scrName: widget.scrName,
+          patch: patch,
+        );
+      }
 
       if (!success) {
         if (mounted) {
@@ -327,6 +364,19 @@ class _CustodyRevealState extends State<CustodyReveal> {
           );
         }
         return;
+      }
+
+      // Offline: write is queued locally (SDK persistence) -- tell the user.
+      // internetConnectionFlag read directly (global.dart:263); this file
+      // does not import api.dart.
+      if (!internetConnectionFlag.value && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:
+                Text('Tersimpan offline — dikirim otomatis saat online'),
+            duration: Duration(seconds: 2),
+          ),
+        );
       }
 
       _navigateTo(rawRoute);

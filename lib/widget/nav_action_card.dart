@@ -120,6 +120,13 @@ class _NavActionCardState extends State<NavActionCard> {
       // vehicleId; confirmed kept reactive even though gating is self-driven).
       dhState.confirmed.value;
       dhState.vehicleId.value;
+      dhState.activeTrip.value; // register activeTrip dependency (GAP B fix)
+
+      // ── Vehicle scope gate (scope-leak prevention) ──────────────────
+      // When the driver has no assigned vehicle, hide the card entirely.
+      if (dhState.vehicleIdResolved.value && dhState.vehicleId.value.isEmpty) {
+        return const SizedBox.shrink();
+      }
 
       // Fix 2: self-gate on own gateTable/gateSearch, not DriverHomeState.confirmed
       final String rawGateSearch =

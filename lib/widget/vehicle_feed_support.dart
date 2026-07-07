@@ -3,6 +3,18 @@ import 'package:intl/intl.dart';
 import 'driver_home_support.dart'; // stopStatusOf, todayEpochMidnightWib
 import 'dsl_eq.dart';
 
+/// The only task status that contributes to the category summary (load
+/// preview). Tasks with any other status (completed, failed, load_rejected,
+/// etc.) are excluded from the summary count.
+///
+/// Compared against the RAW `tst` field value (trimmed), NOT the normalized
+/// `stopStatusOf` result -- stopStatusOf folds both `assigned` and
+/// `load_rejected` into `'pending'`, so using it would leak rejected tasks
+/// into the summary.
+///
+/// See: warehouse-feed-summary-status dev spec section 2/3.
+const String kLoadableStatus = 'assigned';
+
 // ─── Tier enum ────────────────────────────────────────────────────────────────
 
 /// Vehicle tier in the H1 feed. Evaluation order matters (see [deriveVehicleTier]).
@@ -124,12 +136,25 @@ VehicleTier deriveVehicleTier({
   // 1. dv empty -> loading (backlog, no date filter)
   if (dv.isEmpty) return VehicleTier.loading;
 
-  // 5. closing doc exists OR opening cst == closed -> completed
-  //    (evaluated before 2-4 because closing-exists is terminal)
+  // Trip-sequence: closing-doc-exists or cst=='closed' no longer maps to
+  // completed. Closed vehicles return to backlog immediately (dv/dn cleared
+  // on close -> dv.isEmpty guard above returns VehicleTier.loading).
+  // If dv/dn clear races (dv still set when cst is already closed), fall
+  // through to the default loading fallback below.
+  //
+  // NOTE for coder: VehicleTier.completed remains in the enum but is now
+  // never emitted by this function. groupFeedBySections still has a
+  // `case VehicleTier.completed:` that adds to the `selesai` list, but
+  // that list will always be empty. The `if (selesai.isNotEmpty)` guard
+  // (vehicle_feed_support.dart:467) prevents the "Selesai Hari Ini"
+  // section header from rendering. Verify during manual testing that no
+  // empty section appears. Leave the enum value in place (removal has wider
+  // blast radius across grouping, computeSnapshot, card-tap routing,
+  // card rendering in vehicle_feed_list.dart).
   final String cst = openingDoc != null
       ? (openingDoc[cstField] ?? '').toString().trim()
       : '';
-  if (closingDoc != null || cst == 'closed') return VehicleTier.completed;
+  if (cst == 'closed') return VehicleTier.loading;
 
   // 2. cst == awaiting_custody -> custody_pending
   if (cst == 'awaiting_custody') return VehicleTier.custodyPending;
@@ -352,14 +377,55 @@ List<VehicleFeedEntry> buildVehicleFeed({
     final List<Map<String, dynamic>> openings = openingByVv[lv] ?? const [];
     final List<Map<String, dynamic>> closings = closingByVv[lv] ?? const [];
 
-    // Pick the first opening/closing doc (there should be at most one active)
-    final Map<String, dynamic>? openingDoc =
-        openings.isNotEmpty ? openings.first : null;
+    // Pick the NEWEST opening doc (sort by t desc). Multi-trip: the newest
+    // non-closed opening is the active trip; if all are closed, the newest
+    // closed one is used (tier derives loading via dv-empty or cst-closed).
+    Map<String, dynamic>? openingDoc;
+    if (openings.isNotEmpty) {
+      final List<Map<String, dynamic>> sorted =
+          List<Map<String, dynamic>>.from(openings)
+            ..sort((a, b) {
+              final int tA =
+                  int.tryParse((a['t'] ?? '0').toString().trim()) ?? 0;
+              final int tB =
+                  int.tryParse((b['t'] ?? '0').toString().trim()) ?? 0;
+              return tB.compareTo(tA); // desc
+            });
+      // Prefer a non-closed opening (active trip) over a closed one.
+      openingDoc = sorted.firstWhere(
+        (d) => (d['cst'] ?? '').toString().trim() != 'closed',
+        orElse: () => sorted.first,
+      );
+    }
+    // Closing doc: not used for tier anymore (completed branch removed).
+    // Kept for VehicleFeedEntry.closingDoc (display/future use).
     final Map<String, dynamic>? closingDoc =
         closings.isNotEmpty ? closings.first : null;
 
-    // Task docs for this vehicle today
-    final List<Map<String, dynamic>> lvTasks = tasksByVv[lv] ?? const [];
+    // Task docs for this vehicle: scoped by trip (task.tr == opening doc-id)
+    // ONLY when the picked opening is non-closed (an active trip). A closed
+    // opening is a finished trip -- scoping to its docId would show the old
+    // trip's stamped tasks and hide new-trip tasks created before the next
+    // opening exists. Unstamped tasks (tr empty: admin-created, not yet
+    // executed) belong to the active trip, so they pass the scope too.
+    final List<Map<String, dynamic>> allVvTasks = tasksByVv[lv] ?? const [];
+    final bool openingActive = openingDoc != null &&
+        (openingDoc[cstField] ?? '').toString().trim() != 'closed';
+    final String activeOpeningId = openingActive
+        ? (openingDoc['__docId'] ?? '').toString()
+        : '';
+    List<Map<String, dynamic>> lvTasks;
+    if (activeOpeningId.isNotEmpty) {
+      final List<Map<String, dynamic>> trScoped = allVvTasks.where((t) {
+        final String tr = (t['tr'] ?? '').toString().trim();
+        return tr.isEmpty || tr == activeOpeningId;
+      }).toList();
+      // Fallback: if no tasks match tr (pre-CF), use all (vv, today) tasks.
+      // ponytail: fallback removed when CF stamping is confirmed live.
+      lvTasks = trScoped.isNotEmpty ? trScoped : allVvTasks;
+    } else {
+      lvTasks = allVvTasks;
+    }
 
     // Derive tier
     final VehicleTier tier = deriveVehicleTier(
@@ -371,17 +437,16 @@ List<VehicleFeedEntry> buildVehicleFeed({
       tstField: tstField,
     );
 
-    // Completed tier: scope to today only (opening cdt must match today)
-    if (tier == VehicleTier.completed) {
-      final String cdt = openingDoc != null
-          ? (openingDoc['cdt'] ?? '').toString().trim()
-          : '';
-      if (!eq(cdt, todayEpoch)) continue; // older trip: drop from feed
-    }
+    // (Completed-tier cdt filter removed: completed branch no longer emitted.)
 
-    // Category summary
+    // Category summary -- scoped to loadable (assigned) tasks only.
+    // Tier (line 365) and stop-progress (line 388) deliberately keep the full
+    // lvTasks. See: warehouse-feed-summary-status spec section 3/4.
+    final List<Map<String, dynamic>> summaryTasks = lvTasks
+        .where((t) => (t[tstField] ?? '').toString().trim() == kLoadableStatus)
+        .toList();
     final Map<String, int> catCounts =
-        countDistinctItemsByCategory(lvTasks, categoryMap, itemsField: itemsField);
+        countDistinctItemsByCategory(summaryTasks, categoryMap, itemsField: itemsField);
     final String catSummary = formatCategorySummary(catCounts);
 
     // Stop progress

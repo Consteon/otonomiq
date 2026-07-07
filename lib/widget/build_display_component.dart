@@ -247,20 +247,16 @@ Widget buildDisplayComponent(
         ),
         height: (component['height'] ?? 0.0).toDouble(),
         padding: EdgeInsets.fromLTRB(lPad, tPad, rPad, bPad),
-        child: Row(
-          mainAxisAlignment: maaSwitch(component['alignment'] ?? 'start'),
-          children: <Widget>[
-            Expanded(
-              child: displayImage(
-                imageUrl: component['url'] ?? defaultImage,
-                cached: true,
-              ),
-              // child: FadeInImage.memoryNetwork(
-              //     fit: BoxFit.contain,
-              //     placeholder: kTransparentImage,
-              //     image: component['url']),
-            ),
-          ],
+        // Always centered: the old Row honored component['alignment'] but its
+        // Expanded child filled the row anyway, so alignment was inert and
+        // off-center logos came from oversized image canvases. contain+Center
+        // makes centering deterministic regardless of JSON or image size.
+        child: Center(
+          child: displayImage(
+            imageUrl: component['url'] ?? defaultImage,
+            cached: true,
+            fit: BoxFit.contain,
+          ),
         ),
       );
     } catch (e) {

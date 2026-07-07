@@ -48,6 +48,7 @@ void main() {
       String catField = 'cd',
       String qtyField = 'qt',
       Map<String, String> catToLabel = const {},
+      bool hideZero = false,
     }) {
       final Map<String, Map<String, int>> grouped = {};
       final List<String> order = [];
@@ -71,13 +72,16 @@ void main() {
 
       final List<Map<String, dynamic>> result = [];
       for (final String itemId in order) {
+        final Map<String, int> qtys = grouped[itemId]!;
+        // Mirrors the real _computeInventory guard exactly.
+        if (hideZero && qtys.values.every((v) => v == 0)) continue;
         final String displayName =
             itemNameMap[itemId]?.isNotEmpty == true
                 ? itemNameMap[itemId]!
                 : itemId;
         result.add({
           'name': displayName,
-          'buckets': grouped[itemId],
+          'buckets': qtys,
         });
       }
       return result;
@@ -189,6 +193,41 @@ void main() {
       ];
       final result = computeInventory(docs, mapWithEmpty, catToLabel: catMap);
       expect(result[0]['name'], '31');
+    });
+
+    test('hideZero=true drops item with all buckets 0, keeps item with qt>0',
+        () {
+      final docs = [
+        {'ii': '31', 'cd': 'full', 'qt': '0'},
+        {'ii': '31', 'cd': 'empty', 'qt': '0'},
+        {'ii': '32', 'cd': 'full', 'qt': '5'},
+      ];
+      final result =
+          computeInventory(docs, nameMap, catToLabel: catMap, hideZero: true);
+      expect(result.length, 1);
+      expect(result[0]['name'], 'Aqua 600ml'); // 32 kept, 31 dropped
+    });
+
+    test('hideZero=true keeps 0 full / 1 empty (every()==0 not sum==0)', () {
+      final docs = [
+        {'ii': '31', 'cd': 'full', 'qt': '0'},
+        {'ii': '31', 'cd': 'empty', 'qt': '1'},
+      ];
+      final result =
+          computeInventory(docs, nameMap, catToLabel: catMap, hideZero: true);
+      expect(result.length, 1);
+      expect((result[0]['buckets'] as Map)['isi'], 0);
+      expect((result[0]['buckets'] as Map)['kosong'], 1);
+    });
+
+    test('hideZero=false (default) still shows all-zero item', () {
+      final docs = [
+        {'ii': '31', 'cd': 'full', 'qt': '0'},
+        {'ii': '31', 'cd': 'empty', 'qt': '0'},
+      ];
+      final result = computeInventory(docs, nameMap, catToLabel: catMap);
+      expect(result.length, 1);
+      expect((result[0]['buckets'] as Map)['isi'], 0);
     });
   });
 }

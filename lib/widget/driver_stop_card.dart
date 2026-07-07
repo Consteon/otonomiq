@@ -167,6 +167,15 @@ class _DriverStopCardState extends State<DriverStopCard> {
       // vehicleId; confirmed kept reactive even though gating is self-driven).
       dhState.confirmed.value;
       dhState.vehicleId.value;
+      dhState.activeTrip.value; // register activeTrip dependency (GAP B fix)
+
+      // ── Vehicle scope gate (scope-leak prevention) ──────────────────
+      // When the driver has no assigned vehicle, hide the card entirely.
+      // Prevents rendering the pending "N tujuan" preview with empty data,
+      // and critically prevents Tolak/Konfirmasi buttons from appearing.
+      if (dhState.vehicleIdResolved.value && dhState.vehicleId.value.isEmpty) {
+        return const SizedBox.shrink();
+      }
 
       // Fix 2: self-gate on own gateTable/gateSearch for locked/active state
       final String rawGateSearch =

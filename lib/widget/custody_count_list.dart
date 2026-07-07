@@ -152,7 +152,11 @@ class _CustodyCountListState extends State<CustodyCountList> {
     }
   }
 
-  /// Find the first matching vehicle_check opening doc.
+  /// Find the best matching vehicle_check opening doc.
+  ///
+  /// Multi-trip: when the config search matches multiple same-day openings,
+  /// [pickActiveOpening] provides a deterministic tie-break (newest non-closed
+  /// by `t` desc). Non-opening docs fall back to matched.first.
   Map<String, dynamic>? _findCheckDoc() {
     if (_checkCode.isEmpty) return null;
     final List<Map<String, dynamic>> docs =
@@ -163,7 +167,12 @@ class _CustodyCountListState extends State<CustodyCountList> {
     if (rawSearch.isEmpty) return docs.isNotEmpty ? docs.first : null;
     final List<Map<String, dynamic>> matched =
         filterDriverHomeDocs(docs, rawSearch, widget.scrName);
-    return matched.isNotEmpty ? matched.first : null;
+    if (matched.isEmpty) return null;
+    // Deterministic tie-break for opening docs (newest non-closed).
+    // Falls back to matched.first when no opening-shaped docs are present
+    // (non-vehicle_check table — preserves old behavior).
+    final Map<String, dynamic>? activeOpening = pickActiveOpening(matched);
+    return activeOpening ?? matched.first;
   }
 
   /// Extract the ie[] items array from the check doc.

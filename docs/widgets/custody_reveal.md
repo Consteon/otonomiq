@@ -17,6 +17,8 @@ a status-tinted shared `CustodyStepper` (big centered driver qty + status line,
 italic "Warehouse: N" above: green match / violet over / amber under), an
 overall callout banner, and computed branch buttons.
 
+> **Trip sequence:** `_findCheckDoc` applies `pickActiveOpening` (from `driver_home_support.dart`) for a deterministic multi-opening tie-break (newest non-closed by `t` desc), so P7 targets the active trip when a same-day closed trip also matches the config search.
+
 The reveal page is now EDITABLE: the driver can adjust counts inline via -/+
 on each item. Edits trigger live recomputation of per-item match/selisih
 status, overall match/mismatch, callout banner, and branch button labels.

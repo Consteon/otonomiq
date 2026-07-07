@@ -483,7 +483,18 @@ Position positionCopy(Position? position) {
 
 Future<dynamic> callHttpPost(dynamic uri, dynamic param) async {
   if (await internetConnectedCheck()) {
-    return await http.post(uri, body: param);
+    // http.post throws ClientException on a mid-request connection reset
+    // ("Software caused connection abort") even when connectivity checked OK a
+    // moment earlier. The caller (callEventFunction) does NOT await this, so an
+    // uncaught throw escapes its (sync) try/catch and becomes a FATAL crash via
+    // platformDispatcher.onError. Catch here, report non-fatal, return a
+    // sentinel string (mirrors the "No internet connection" path below).
+    try {
+      return await http.post(uri, body: param);
+    } catch (e) {
+      errorReport('callHttpPost $uri: $e');
+      return "Http post failed";
+    }
   } else {
     return "No internet connection";
   } // end if (internetConnected())
@@ -712,7 +723,8 @@ Future<String> renamePath({
   return finalImagePath;
 } // end of renamePath
 
-Widget displayImage({String imageUrl = defaultImage, bool cached = true}) {
+Widget displayImage(
+    {String imageUrl = defaultImage, bool cached = true, BoxFit? fit}) {
   const int duration = 100;
   String finalUrl = defaultImage;
   late Widget result;
@@ -742,6 +754,7 @@ Widget displayImage({String imageUrl = defaultImage, bool cached = true}) {
       if (cached) {
         result = CachedNetworkImage(
           imageUrl: finalUrl,
+          fit: fit, // null = old behavior; callers opt in (e.g. IMG logo)
           placeholder: (context, url) => Container(
             color: Colors.transparent, // Set transparency
             width: double.infinity, // Match image size
@@ -1255,7 +1268,15 @@ Future<void> openInWebView(
       builder: (ctx) => Scaffold(
         appBar: AppBar(
           backgroundColor: Theme.of(context).primaryColor,
-          title: Text(title ?? url),
+          foregroundColor: Colors.white,
+          title: Text(
+            title ?? url,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ),
         body: Builder(
           builder: (BuildContext context) {
@@ -1395,10 +1416,10 @@ Future setStatus(msgId, status) async {
   var statusUpdate = {
     "st": 101, // set to no need action
   };
-  FirebaseFirestore.instance
-      .collection(firestoreNotif + "/msg")
-      .doc(msgId)
-      .update(statusUpdate);
+  safeFsUpdate(
+      FirebaseFirestore.instance.collection(firestoreNotif + "/msg").doc(msgId),
+      statusUpdate,
+      'setStatus');
 
   final notifRef = FirebaseFirestore.instance.doc(firestoreNotif);
   await FirebaseFirestore.instance.runTransaction((Transaction tx) async {
@@ -1436,10 +1457,12 @@ Future sendMessage(mTo, mFrom, mDisplay, mData, mIn, mStatus) async {
     await messageCollection.add(msg).then((doc) {
       msgId = doc.id;
       var updateData = {"id": msgId};
-      FirebaseFirestore.instance
-          .collection("$sendCollection/msg")
-          .doc(msgId)
-          .update(updateData);
+      safeFsUpdate(
+          FirebaseFirestore.instance
+              .collection("$sendCollection/msg")
+              .doc(msgId),
+          updateData,
+          'sendMessage');
     });
 
     try {
@@ -1483,7 +1506,7 @@ Future<int> resetVid(List<dynamic> targets) async {
           .then((res) {
             String proxy = '';
             if (target[1] != null && target[1].isNotEmpty) {
-              userData = {'e': '-', 'u': '-', 'i': phoneWithoutCC(target[1])};
+              userData = {'e': '-', 'u': '-', 'i': phoneCanonical62(target[1])};
               operationString = 'reset-device-update-phone-number';
             } else {
               userData = {'e': '-', 'u': '-'};
@@ -1493,11 +1516,11 @@ Future<int> resetVid(List<dynamic> targets) async {
             for (dynamic dvc in res.docs) {
               dynamic dvcRef = dvc.reference;
               proxy = dvc.data()['lif'];
-              dvcRef.update(dvcData); //= write updated data to user dvc
+              safeFsUpdate(
+                  dvcRef, dvcData, 'resetVid-dvc'); //= write updated data to user dvc
               if (!parentUpdated) {
-                dvcRef.parent.parent.update(
-                  userData,
-                ); //= write updated data to user
+                safeFsUpdate(dvcRef.parent.parent, userData,
+                    'resetVid-user'); //= write updated data to user
                 parentUpdated = true;
               } // if (!parentUpdated)
             } // end for (dynamic dvc in dvcDocs)
@@ -1505,7 +1528,7 @@ Future<int> resetVid(List<dynamic> targets) async {
               proxy,
               target[2],
               operationString,
-              phoneWithCC(target[1]),
+              phoneCanonical62(target[1]),
             );
             return 1;
           });
@@ -1957,6 +1980,13 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
           debugCount = 5214;
           errorReport(e);
         }
+        // The first-time settings POST above failed (timeout/network): the
+        // inner catch reported it but `response` is still null. Bail here
+        // instead of falling through to `jsonDecode(response.body)` — that
+        // null-deref was the `NoSuchMethodError: getter 'body' on null` that
+        // surfaced from the outer catch. `firstTimeRun` means `@screenUI` was
+        // empty, so there is no cached page to construct from anyway.
+        if (response == null) return;
         dynamic getResult = jsonDecode(response.body);
         debugCount = 5215;
         trace(debugCount);
@@ -2630,7 +2660,12 @@ Future<String> appendToSheetOld(dynamic val) async {
         .timeout(const Duration(seconds: 10));
 
     TimerBloc timerBloc = state['#TIMER_BLOC'];
-    timerBloc.add(Start(duration: state['#TIMER_DURATION']));
+    // Guard (see appendToSheet): skip the timer when #TIMER_DURATION is absent
+    // rather than crash on Start(null). Same null-only-safe fix.
+    final dynamic timerDuration = state['#TIMER_DURATION'];
+    if (timerDuration is int) {
+      timerBloc.add(Start(duration: timerDuration));
+    }
   } catch (e) {
     errorReport(e);
   }
@@ -2673,7 +2708,7 @@ Future runSheetStartup(String lif, String clt) async {
 
     try {
       if (internetConnected()) {
-        http.post(Uri.parse(startupUrl), body: bodyElement);
+        callHttpPost(Uri.parse(startupUrl), bodyElement);
         debugPrint('call ${functionName['runStartup']} function');
         appStartupRun = true;
       }
@@ -2814,7 +2849,7 @@ Future signOut() async {
     // housekeeping (in=false) is non-critical and must NEVER abort the logout
     // UI reset below — otherwise the shell stays on the (nav-less) home page.
     try {
-      myDocRef?.update(updateData);
+      if (myDocRef != null) safeFsUpdate(myDocRef, updateData, 'signOut');
     } catch (e) {
       devPrint('signOut firestore update skipped: $e');
     }
@@ -3397,7 +3432,7 @@ Future<int> launchCheck() async {
     updateData["pk1"] = state['publicKey'];
     var docRef = state['#FS_REF']; //= get user doc reference for firestore
     result = 9927;
-    docRef.update(updateData); //= write updated data to user dpc
+    safeFsUpdate(docRef, updateData, 'loginUpdate'); //= write updated data to user dpc
     result = 9928;
     docRef = state['#MSG_REF']; //= get message doc reference for firestore
     FirebaseFirestore.instance.runTransaction((Transaction tx) async {
@@ -3531,6 +3566,7 @@ Future getFirestoreUserData(
       .where('u', isEqualTo: myUid)
       .get();
   var recFound = uidUser.docs.length;
+  final bool matchedByUid = recFound >= 1;
   if (recFound < 1) {
     // Uid not found in firebase
     uidUser = await FirebaseFirestore.instance
@@ -3550,15 +3586,30 @@ Future getFirestoreUserData(
     } else {
       // Email and TBD not found, check invitation
       // var nowTime = DateTime.now().millisecondsSinceEpoch;
-      uidUser = await FirebaseFirestore.instance
-          .collection(topCollection) // search data in firebase with invitation
-          .where(
-            'i',
-            isEqualTo: inv == "" ? "OtonomiqInvitationNotExist..." : inv,
-          )
-          // .where('e', isEqualTo: "-") // Find invitation that is not used
-          // .where('x', isGreaterThan: nowTime)
-          .get();
+      final canon62 = phoneCanonical62(inv);
+      final legacy = phoneCleanup(inv);
+      final forms = <String>{
+        if (canon62.isNotEmpty) canon62,
+        if (legacy.isNotEmpty) legacy,
+      };
+      if (forms.isEmpty) {
+        uidUser = await FirebaseFirestore.instance
+            .collection(topCollection)
+            .where(
+              'i',
+              isEqualTo: 'OtonomiqInvitationNotExist...',
+            )
+            .get();
+      } else {
+        uidUser = await FirebaseFirestore.instance
+            .collection(
+              topCollection,
+            ) // search data in firebase with invitation
+            .where('i', whereIn: forms.toList())
+            // .where('e', isEqualTo: "-") // Find invitation that is not used
+            // .where('x', isGreaterThan: nowTime)
+            .get();
+      }
       recFound = uidUser.docs.length;
       if (recFound <= 0) {
         // Not found
@@ -3609,6 +3660,17 @@ Future getFirestoreUserData(
     //= user exist
     var ref2 = uidUser.docs[0].reference; //= get only the first uid found
     user = uidUser.docs[0].data(); //= record user tier 1
+    // Phone-match gate: on the uid-match path, verify that the typed phone
+    // matches the stored phone. Skip if stored i is empty (no phone on record).
+    // Decision mirrored by gatePassesMirror in
+    // test/login_phone_match_gate_test.dart — keep the two in sync.
+    if (matchedByUid) {
+      final storedI = (user['i'] ?? '').toString().trim();
+      if (storedI.isNotEmpty &&
+          phoneCanonical62(inv) != phoneCanonical62(storedI)) {
+        return 3; // PhoneNotMatch — typed phone != registered i (uid path)
+      }
+    }
     if (user["d"] == 1) {
       //= found regular user
       await ref2 //= get dvc entry
@@ -3717,7 +3779,7 @@ void registerNewInvitationLogin(String proxy, String email) {
   var qParams = {"d": ";0$data"};
   var uri = Uri.https(autsorzFunctionDomain, functionName['InvLogin'], qParams);
   try {
-    http.post(uri);
+    callHttpPost(uri, null);
   } catch (e) {
     errorReport(e);
   }
@@ -3738,7 +3800,7 @@ void registerDeviceOperation(
     qParams,
   );
   try {
-    http.post(uri);
+    callHttpPost(uri, null);
   } catch (e) {
     errorReport(e);
   }
@@ -4295,6 +4357,8 @@ void saveSend(
     }
 
     if (updateEventString.isNotEmpty) {
+      devPrint('[saveSend] updateEventRow composed, '
+          'length=${updateEventString.length}');
       tableString =
           '${tableString ?? ''}${separator[0]}$updateString${separator[0]}$deleteString${separator[0]}$eventString${separator[0]}$updateEventString';
     } else if (eventString.isNotEmpty) {
@@ -4632,7 +4696,17 @@ Future<String> appendToSheet(
     ); // append to firestore
     submitBloc.add(LoadSubmit()); // refresh cache
     TimerBloc timerBloc = state['#TIMER_BLOC'];
-    timerBloc.add(Start(duration: state['#TIMER_DURATION']));
+    // Guard: #TIMER_DURATION is set only by the standard submit widgets right
+    // before saveSend (ftz_row_of_button_2, otq_txf, ftz_checker, ...). Direct
+    // saveSend callers (custody_count_submit O1/C1) leave it null; Start.duration
+    // is a non-nullable int, so an unguarded add throws "Null is not a subtype of
+    // int" here — AFTER AddSubmit — aborting appendToSheet before actionUnLock and
+    // stranding the history record (evidence + updateEventRow) unsent. Skip the
+    // timer when absent; those callers navigate themselves.
+    final dynamic timerDuration = state['#TIMER_DURATION'];
+    if (timerDuration is int) {
+      timerBloc.add(Start(duration: timerDuration));
+    }
     actionUnLock('appendToSheet');
   } catch (e) {
     setDataOK('1');

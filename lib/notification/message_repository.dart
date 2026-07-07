@@ -42,9 +42,8 @@ class FirebaseMessageRepository implements MessageRepository {
 
   @override
   Future<void> updateMessage(Message update) {
-    return messageCollection
-        .doc(update.messageId)
-        .update(update.toEntity().toDocument());
+    return safeFsUpdate(messageCollection.doc(update.messageId),
+        update.toEntity().toDocument(), 'updateMessage');
   }
 
 }

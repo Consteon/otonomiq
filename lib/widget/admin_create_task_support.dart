@@ -337,7 +337,7 @@ class AdminCreateTaskSupport {
   /// [nowMs] -- optional override for testing; defaults to
   ///   getNowMillisecondFromEpoch().
   ///
-  /// Mirrors _generateCnm in custody_count_submit.dart (WIB-aware date).
+  /// Mirrors genOpeningCnm in driver_home_support.dart (WIB-aware date).
   /// The HHmmss suffix provides per-second uniqueness for same-client
   /// same-day tasks. Collision is astronomically unlikely in practice
   /// (admin creates ~10 tasks/day).
@@ -433,7 +433,7 @@ class AdminCreateTaskSupport {
     required String gl,
     required String cv,
     required String cn,
-    required String tdt,
+    required int tdt,
     required int t,
     required List<Map<String, dynamic>> itArray,
     required String tableVid,

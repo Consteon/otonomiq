@@ -57,7 +57,7 @@
  */
 
 const bool demoVersion = false;
-const appName = 'Otonomiq';
+const appName = 'Autsorz';
 const appsKey = "3"; //= will be used for cloud function. Should be an Apps Id.
 const bool devModeConst = false; // true : using devSystem; false using system
 const defaultAppVid = 60936087747650; // todo replace with otonomiq vid
@@ -83,7 +83,7 @@ const defaultCloudConfig = {
   "devSystemRange": "Json!B6:E49",
   "devScreenRange": "Json!B51:E",
   "localeChecksum": "Locale!B15",
-  "localeRange": "Locale!B17:C"
+  "localeRange": "Locale!B17:C",
 };
 
 const defaultOfflineLoginPage = {
@@ -97,7 +97,7 @@ const defaultOfflineLoginPage = {
       "height": 120,
       "alignment": "left",
       "beforeSpacing": 0,
-      "afterSpacing": 0
+      "afterSpacing": 0,
     },
     {
       "type": "SIGNUP",
@@ -112,7 +112,7 @@ const defaultOfflineLoginPage = {
       "text1":
           "Saya telah membaca dan setuju dengan Syarat dan Ketentuan, Pemberitahuan Privasi, dan Peraturan Layanan tertulis di link ini.",
       "text2": "Saya Setuju",
-      "text3": "Nomor Ponsel Terdaftar",
+      "text3": "Nomor ponsel terdaftar",
       "text4": "Contoh : 08xxx",
       "text5": "Masuk",
       "text6": "Nomor ponsel tidak valid",
@@ -123,11 +123,11 @@ const defaultOfflineLoginPage = {
       "text11": "Akun dalam kondisi terblokir",
       "text12": "Login gagal",
       "route": "_Invitation",
-      "google": "Masuk menggunakan Google"
-    }
-  ]
+      "google": "Masuk menggunakan Google",
+    },
+  ],
 };
-final defaultGuestLine = defaultCloudConfig[
-    "signupIdx"]; // login page in guess | Proxy JSON row 50 + defaultGuessLine
+final defaultGuestLine =
+    defaultCloudConfig["signupIdx"]; // login page in guess | Proxy JSON row 50 + defaultGuessLine
 final String defaultGuestHome = defaultCloudConfig["guestRoute"]
     .toString(); // login page in guess | Proxy JSON row 50 + defaultGuessLine

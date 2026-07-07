@@ -2,7 +2,7 @@
           package="com.otonomiq.master1">
 
     <application
-            android:label="Otq App"
+            android:label="Autsorz"
             android:icon="@mipmap/ic_launcher"
             android:usesCleartextTraffic="false">
         <!-- Set custom default icon. This is used when no icon is set for incoming notification messages.

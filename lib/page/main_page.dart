@@ -22,6 +22,7 @@ import '../otq_icons.dart';
 import '../widget/approver_sticky_bar.dart';
 import '../widget/logout_transition_support.dart';
 import '../widget/build_theme.dart';
+import '../widget/offline_banner.dart';
 import '../widget/otq_bottom_nav_bar.dart';
 import 'package:get/get.dart';
 
@@ -51,12 +52,13 @@ class MainPageState extends State<MainPage> {
   // image_upload/qr_gps/invitation and is out of scope here. The warm-cache
   // restore path leaves this false (instant, spinner-free).
   static bool logoutInProgress = false;
-  // One-shot flag: true once the cache-first navbar restore has been attempted
-  // for this MainPageState instance. Reset implicitly by auth-state changes
-  // (Authenticated creates a new MainPage(key: UniqueKey()) -> new State, so a
-  // fresh instance field starts false again). Instance (NOT static) on purpose:
-  // the restore must run once per shell, and each new auth shell re-attempts it.
-  bool _navbarCacheRestored = false;
+  // Memo for the per-build authed navbar restore below. _authedRawMemo is the
+  // raw @authedSystemUI prefs string last parsed; _authedBarLenMemo is the
+  // authed bottomBar length from it (-1 = absent/invalid). Re-parsed only when
+  // the raw string changes, so the restore's length check stays cheap every
+  // build instead of a full JSON decode per frame.
+  String? _authedRawMemo;
+  int _authedBarLenMemo = -1;
   ScrollController scrollController = ScrollController();
   bool touch = false;
   String _lastScrolledPage = home;
@@ -610,38 +612,51 @@ class MainPageState extends State<MainPage> {
                         // (prefs reads are sync after init) so the full bottomBar
                         // paints immediately instead of staggering in after the
                         // live readSettings round-trip.
-                        if (!_navbarCacheRestored) {
-                          _navbarCacheRestored = true;
-                          try {
-                            final cachedAuthed =
-                                prefs.getString('@authedSystemUI');
-                            if (shouldRestoreAuthedSystemUI(cachedAuthed)) {
-                              final cachedSystem = json.decode(cachedAuthed!);
-                              final cachedBar =
-                                  cachedSystem[mobile]?['bottomBar'];
-                              final currentBar =
-                                  systemUIComponent[mobile]?['bottomBar'];
-                              // Restore only when the cache has MORE items than
-                              // the current in-memory data (i.e. in-memory is
-                              // stale/guest). If the in-memory data already has
-                              // the full bar (readSettings succeeded before this
-                              // frame), skip — no work needed.
-                              //
-                              // ASSUMPTION (QA note): the guest bottomBar is
-                              // strictly SHORTER than the authed one (guest =
-                              // home-only, authed = full). A tenant whose guest
-                              // bar happens to equal the authed item count would
-                              // NOT trigger the restore (length gate fails) and
-                              // would still see the one-frame stagger.
-                              if (cachedBar is List &&
-                                  currentBar is List &&
-                                  cachedBar.length > currentBar.length) {
-                                systemUIComponent = cachedSystem;
-                              }
-                            }
-                          } catch (e) {
-                            devPrint('navbar cache-first restore failed: $e');
+                        // Re-evaluated EVERY build (NOT one-shot): the live
+                        // in-memory bottomBar can be reverted to the guest
+                        // (home-only) bar by a guest-scoped proxy refresh or a
+                        // guest-key readSettings that fires AFTER login, and a
+                        // one-shot restore could never recover from that late
+                        // clobber (the reported "home navbar shows only a single
+                        // home icon" bug). Decoding @authedSystemUI every frame
+                        // would be wasteful, so the authed bar length is memoized
+                        // and re-parsed only when the raw prefs string changes.
+                        try {
+                          final cachedAuthed =
+                              prefs.getString('@authedSystemUI');
+                          if (cachedAuthed != _authedRawMemo) {
+                            _authedRawMemo = cachedAuthed;
+                            _authedBarLenMemo =
+                                shouldRestoreAuthedSystemUI(cachedAuthed)
+                                    ? (json.decode(cachedAuthed!)[mobile]
+                                            ['bottomBar'] as List)
+                                        .length
+                                    : -1;
                           }
+                          final currentBar =
+                              systemUIComponent[mobile]?['bottomBar'];
+                          // Restore only when the cached authed bar has MORE
+                          // items than the live bar (live is stale/guest). A
+                          // legit authed update keeps the full bar, so the gate
+                          // fails and never clobbers it.
+                          //
+                          // ASSUMPTION (QA note): the guest bottomBar is strictly
+                          // SHORTER than the authed one (guest = home-only,
+                          // authed = full). A tenant whose guest bar equals the
+                          // authed item count would NOT trigger the restore.
+                          if (_authedBarLenMemo > 0 &&
+                              (currentBar is! List ||
+                                  _authedBarLenMemo > currentBar.length)) {
+                            // Fresh decode (not aliasing the memo) so a later
+                            // in-place proxy write to systemUIComponent can't
+                            // corrupt the comparison baseline. Mutating the
+                            // global (vs a read-only pick) keeps handleNavTap's
+                            // bottomBar[i] route lookup in range with the bar the
+                            // navbar just rendered.
+                            systemUIComponent = json.decode(_authedRawMemo!);
+                          }
+                        } catch (e) {
+                          devPrint('navbar authed-bar restore failed: $e');
                         }
                         // --- end cache-first restore ---
                         if (screenUIComponent[pageName]?['hideBottomBar'] ==
@@ -683,7 +698,8 @@ class MainPageState extends State<MainPage> {
                         );
                       },
                     ),
-                    body: byPass == 1
+                    body: OfflineBannerHost(
+                      child: byPass == 1
                         ? const NotificationList()
                         : Stack(
                             children: <Widget>[
@@ -1114,6 +1130,7 @@ class MainPageState extends State<MainPage> {
                                 const WaitScreen(),
                             ],
                           ), // Stack closure=========
+                    ), // end OfflineBannerHost
                   ),
           );
           return v;

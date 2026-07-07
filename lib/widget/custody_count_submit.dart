@@ -63,6 +63,7 @@ class CustodyCountSubmit extends StatefulWidget {
 class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
   String _workforceCode = ''; // O1: workforce subscription code
   String _stockLocationCode = ''; // O1: stock_location subscription code
+  String _vehicleCheckCode = ''; // C1: vehicle_check subscription code
   List<String> _textArray = [];
 
   bool get _isOpening =>
@@ -77,6 +78,7 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
     _parseText();
     _subscribeWorkforce();
     _subscribeStockLocation();
+    _subscribeVehicleCheck();
   }
 
   void _parseText() {
@@ -97,15 +99,20 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
   /// (no spurious P6 sub).
   void _subscribeWorkforce() {
     if (!_isOpening && !_isClosing) return;
-    final String rawTable =
-        (widget.component['workforceTable'] ?? '').toString().trim();
+    final String rawTable = (widget.component['workforceTable'] ?? '')
+        .toString()
+        .trim();
     if (rawTable.isEmpty) return;
     final String appVid = resolveAppVid(widget.component);
     final TablePath tp = parseTablePath(rawTable);
     if (tp.tableDocId.isNotEmpty) {
       _workforceCode = '${tp.tableDocId}/${tp.subColl}';
       subscribeToMapCollection(
-          appVid, tp.tableDocId, tp.subColl, _workforceCode);
+        appVid,
+        tp.tableDocId,
+        tp.subColl,
+        _workforceCode,
+      );
     }
   }
 
@@ -121,21 +128,49 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
   void _subscribeStockLocation() {
     if (!_isOpening) return;
     final String appVid = resolveAppVid(widget.component);
-    final String rawWhTable =
-        (widget.component['warehouseTable'] ?? '').toString().trim();
+    final String rawWhTable = (widget.component['warehouseTable'] ?? '')
+        .toString()
+        .trim();
     TablePath? tp;
     if (rawWhTable.isNotEmpty) {
       tp = parseTablePath(rawWhTable);
     } else {
-      final String rawCheckTable =
-          (widget.component['checkTable'] ?? '').toString().trim();
+      final String rawCheckTable = (widget.component['checkTable'] ?? '')
+          .toString()
+          .trim();
       final String docId = parseTablePath(rawCheckTable).tableDocId;
       if (docId.isNotEmpty) tp = TablePath(docId, 'stock_location');
     }
     if (tp != null && tp.tableDocId.isNotEmpty && tp.subColl.isNotEmpty) {
       _stockLocationCode = '${tp.tableDocId}/${tp.subColl}';
       subscribeToMapCollection(
-          appVid, tp.tableDocId, tp.subColl, _stockLocationCode);
+        appVid,
+        tp.tableDocId,
+        tp.subColl,
+        _stockLocationCode,
+      );
+    }
+  }
+
+  /// Subscribe to the vehicle_check collection so C1 close can resolve the
+  /// active opening doc-id and count existing openings for cnm suffix.
+  /// C1 only: early-returns for O1/P6.
+  void _subscribeVehicleCheck() {
+    if (!_isClosing) return;
+    final String rawCheckTable = (widget.component['checkTable'] ?? '')
+        .toString()
+        .trim();
+    if (rawCheckTable.isEmpty) return;
+    final String appVid = resolveAppVid(widget.component);
+    final TablePath tp = parseTablePath(rawCheckTable);
+    if (tp.tableDocId.isNotEmpty) {
+      _vehicleCheckCode = '${tp.tableDocId}/${tp.subColl}';
+      subscribeToMapCollection(
+        appVid,
+        tp.tableDocId,
+        tp.subColl,
+        _vehicleCheckCode,
+      );
     }
   }
 
@@ -146,13 +181,15 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
     final Map<String, dynamic> screenTx = transactionStore.state.screenTx;
     final String checkerVid = (screenTx['#VID'] ?? '').toString().trim();
     if (checkerVid.isEmpty) return '';
-    final List<Map<String, dynamic>> docs =
-        List<Map<String, dynamic>>.from(
-            mapTableContent[_workforceCode] ?? const []);
-    final String vidField =
-        (widget.component['vidField'] ?? 'VID').toString().trim();
-    final String nameField =
-        (widget.component['nameField'] ?? 'n').toString().trim();
+    final List<Map<String, dynamic>> docs = List<Map<String, dynamic>>.from(
+      mapTableContent[_workforceCode] ?? const [],
+    );
+    final String vidField = (widget.component['vidField'] ?? 'VID')
+        .toString()
+        .trim();
+    final String nameField = (widget.component['nameField'] ?? 'n')
+        .toString()
+        .trim();
     for (final Map<String, dynamic> doc in docs) {
       final String vid = (doc[vidField] ?? '').toString().trim();
       if (vid == checkerVid) {
@@ -160,17 +197,6 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       }
     }
     return '';
-  }
-
-  /// Generate the deterministic opening doc id: CHK-{vehicleId}-{yyyyMMdd(WIB)}.
-  String _generateCnm(String vehicleId) {
-    const int wibOffsetMs = 25200000; // UTC+7
-    final int nowMs = getNowMillisecondFromEpoch();
-    final DateTime wibNow =
-        DateTime.fromMillisecondsSinceEpoch(nowMs + wibOffsetMs, isUtc: true);
-    final String dateStr =
-        '${wibNow.year}${wibNow.month.toString().padLeft(2, '0')}${wibNow.day.toString().padLeft(2, '0')}';
-    return 'CHK-$vehicleId-$dateStr';
   }
 
   /// Resolve the vehicle id for warehouse opening/closing doc writes (O1/C1).
@@ -186,8 +212,9 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
   /// Without this the opening doc wrote `vv:""` + `cnm:"CHK--{date}"`, which H1's
   /// openingGate (`vv◼{lv}`) could not match -> vehicle stuck in `loading`.
   String _resolveWarehouseVehicleId(Map<String, dynamic> screenTx) {
-    final String published =
-        getDriverHomeState(widget.scrName).vehicleId.value.trim();
+    final String published = getDriverHomeState(
+      widget.scrName,
+    ).vehicleId.value.trim();
     if (published.isNotEmpty) return published;
     return (screenTx['#ACTIVE_VEHICLE'] ?? '').toString().trim();
   }
@@ -201,11 +228,15 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
     String result = resolveDriverCurlyTokens(raw, widget.scrName);
     if (result.contains('{checkerName}')) {
       result = result.replaceAll(
-          '{checkerName}', checkerName.isNotEmpty ? checkerName : '{checkerName}');
+        '{checkerName}',
+        checkerName.isNotEmpty ? checkerName : '{checkerName}',
+      );
     }
     if (result.contains('{genCnm}')) {
       result = result.replaceAll(
-          '{genCnm}', genCnm.isNotEmpty ? genCnm : '{genCnm}');
+        '{genCnm}',
+        genCnm.isNotEmpty ? genCnm : '{genCnm}',
+      );
     }
     return result;
   }
@@ -216,8 +247,9 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
     if (CustodyCountSubmit._writing[widget.scrName] == true) return; // debounce
 
     // 1. Build ip[]
-    final Map<String, CountEntry> countMap =
-        CustodyCountList.getCountMap(widget.scrName);
+    final Map<String, CountEntry> countMap = CustodyCountList.getCountMap(
+      widget.scrName,
+    );
     final List<Map<String, dynamic>> ipArray = <Map<String, dynamic>>[];
     for (final entry in countMap.values) {
       ipArray.add(entry.toIpMap());
@@ -227,40 +259,91 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
 
     // 2. Read table + search from component
     final String rawTable = (widget.component['table'] ?? '').toString().trim();
-    final String rawSearch =
-        (widget.component['search'] ?? '').toString().trim();
-    final String writeField =
-        (widget.component['writeField'] ?? 'ip').toString().trim();
+    final String rawSearch = (widget.component['search'] ?? '')
+        .toString()
+        .trim();
+    final String writeField = (widget.component['writeField'] ?? 'ip')
+        .toString()
+        .trim();
 
     if (rawTable.isEmpty || rawSearch.isEmpty) {
       _showSnackBar(context, 'Konfigurasi tidak lengkap');
       return;
     }
 
-    // 3. Write natively
+    // 3. Resolve target doc-id from the same subscription the count-list
+    //    populates (mapTableContent). Write by doc-id when available;
+    //    fall back to search-based writeNativeFields for single-trip /
+    //    pre-trip data.
     CustodyCountSubmit._writing[widget.scrName] = true;
     // Trigger rebuild to show spinner
     CustodyCountList.countRev.value++;
 
     try {
-      final bool success = await writeNativeFields(
-        component: widget.component,
-        rawTable: rawTable,
-        rawSearch: rawSearch,
-        scrName: widget.scrName,
-        patch: {writeField: ipArray},
-      );
+      // 3a. Doc-id resolution (byte-identical to custody_count_list._findCheckDoc)
+      String docId = '';
+      final TablePath tp = parseTablePath(rawTable);
+      if (tp.tableDocId.isNotEmpty && tp.subColl.isNotEmpty) {
+        final String checkCode = '${tp.tableDocId}/${tp.subColl}';
+        final List<Map<String, dynamic>> docs =
+            List<Map<String, dynamic>>.from(
+                mapTableContent[checkCode] ?? const []);
+        if (rawSearch.isNotEmpty && docs.isNotEmpty) {
+          final List<Map<String, dynamic>> matched =
+              filterDriverHomeDocs(docs, rawSearch, widget.scrName);
+          if (matched.isNotEmpty) {
+            final Map<String, dynamic>? picked = pickActiveOpening(matched);
+            final Map<String, dynamic> target = picked ?? matched.first;
+            docId = (target['__docId'] ?? '').toString().trim();
+          }
+        }
+      }
+
+      // 3b. Write: prefer doc-id (createNativeDoc), fall back to search
+      bool success = false;
+      if (docId.isNotEmpty) {
+        success = await createNativeDoc(
+          component: widget.component,
+          rawTable: rawTable,
+          docId: docId,
+          docMap: {writeField: ipArray},
+        );
+      }
+      if (!success) {
+        // Fallback: search-based write (single-trip / no subscription data)
+        success = await writeNativeFields(
+          component: widget.component,
+          rawTable: rawTable,
+          rawSearch: rawSearch,
+          scrName: widget.scrName,
+          patch: {writeField: ipArray},
+        );
+      }
 
       if (!success) {
+        print(
+          '[CustodyCountSubmit] native write failed: table=$rawTable, '
+          'search=$rawSearch, field=$writeField, '
+          'path=${docId.isNotEmpty ? "docid($docId)" : "search"}',
+        );
         if (context.mounted) {
           _showSnackBar(context, 'Gagal menyimpan data');
         }
         return;
       }
 
+      // Offline: write is queued locally (SDK persistence) -- tell the user.
+      if (!internetConnected() && context.mounted) {
+        _showSnackBar(
+          context,
+          'Tersimpan offline — dikirim otomatis saat online',
+        );
+      }
+
       // 4. Navigate to custodyReveal
-      final String rawRoute =
-          (widget.component['route'] ?? '').toString().trim();
+      final String rawRoute = (widget.component['route'] ?? '')
+          .toString()
+          .trim();
       final String route = stripRouteWrapper(rawRoute);
       if (route.isEmpty) return;
 
@@ -296,19 +379,23 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       final String vehicleId = _resolveWarehouseVehicleId(screenTx);
       final String checkerVid = (screenTx['#VID'] ?? '').toString().trim();
       final String checkerName = _resolveCheckerName();
-      final String genCnm = _generateCnm(vehicleId);
+      // genCnm uses the seq from the opening count (computed below after
+      // today/nowMs). Moved to after the count resolution.
       // Resolve warehouseId with precedence (config override > #ACTIVE_WAREHOUSE
       // [task.gl-derived] > stock_location lt=='warehouse' fallback, spec §2.1).
-      final String rawWhCfg =
-          (widget.component['warehouseId'] ?? '').toString().trim();
+      final String rawWhCfg = (widget.component['warehouseId'] ?? '')
+          .toString()
+          .trim();
       final String cfgResolved = rawWhCfg.isEmpty
           ? ''
           : resolveDriverCurlyTokens(rawWhCfg, widget.scrName);
-      final String whFromStore =
-          (screenTx['#ACTIVE_WAREHOUSE'] ?? '').toString().trim();
+      final String whFromStore = (screenTx['#ACTIVE_WAREHOUSE'] ?? '')
+          .toString()
+          .trim();
       final List<Map<String, dynamic>> stockDocs =
           List<Map<String, dynamic>>.from(
-              mapTableContent[_stockLocationCode] ?? const []);
+            mapTableContent[_stockLocationCode] ?? const [],
+          );
       final String warehouseId = resolveWarehouseId(
         configResolved: cfgResolved,
         fromStore: whFromStore,
@@ -319,9 +406,11 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       // THIS submit (step 5) stay consistent with the native gl write. Cleared
       // on route change by ExecutorDesignateCard.clearO1State (no stale leak).
       if (whFromStore.isEmpty && warehouseId.isNotEmpty) {
-        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-          '#ACTIVE_WAREHOUSE': warehouseId,
-        })));
+        transactionStore.dispatch(
+          UpdateScreenTxAction(
+            ScreenTransaction({'#ACTIVE_WAREHOUSE': warehouseId}),
+          ),
+        );
       }
       // NOTE: #CHOSEN_DRIVER_VID / #CHOSEN_DRIVER_NAME are NOT read into locals
       // here -- the designate `updateEventRow` DSL resolves {chosenVid} /
@@ -329,18 +418,36 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       final String today = todayEpochMidnightWib();
       final int nowMs = getNowMillisecondFromEpoch();
 
+      // Trip sequence: count existing same-day openings for this vehicle
+      // to determine the cnm suffix (seq). First opening = 1 (no suffix).
+      final String rawCheckTable = (widget.component['checkTable'] ?? '')
+          .toString()
+          .trim();
+      final openingState = await fetchOpeningState(
+        component: widget.component,
+        rawTable: rawCheckTable,
+        vehicleId: vehicleId,
+        today: today,
+      );
+      final int seq = openingState.todayCount + 1;
+      final String genCnm = genOpeningCnm(vehicleId, nowMs: nowMs, seq: seq);
+
       // W1: warn if warehouseId is empty (no tasks today)
       if (warehouseId.isEmpty) {
-        devPrint('[O1 submit] WARNING: warehouseId empty (no tasks today for '
-            'vehicle $vehicleId). Opening doc gl will be empty.');
+        devPrint(
+          '[O1 submit] WARNING: warehouseId empty (no tasks today for '
+          'vehicle $vehicleId). Opening doc gl will be empty.',
+        );
       }
 
       // 2. Build ie[] from the count store (BOTH count-list instances share
       //    the same per-scrName store).
-      final Map<String, CountEntry> countMap =
-          CustodyCountList.getCountMap(widget.scrName);
-      final String writeCond =
-          (widget.component['writeCond'] ?? 'full').toString().trim();
+      final Map<String, CountEntry> countMap = CustodyCountList.getCountMap(
+        widget.scrName,
+      );
+      final String writeCond = (widget.component['writeCond'] ?? 'full')
+          .toString()
+          .trim();
       final List<Map<String, dynamic>> ieArray = <Map<String, dynamic>>[];
       for (final entry in countMap.values) {
         ieArray.add({
@@ -360,14 +467,11 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       // 3. Build the FULL opening doc map (scalars + ie[] array).
       //    Phase B: `cdt`/`ldt` are Number (epoch-ms) per the runtime type
       //    contract (eq-match {today}); `t` is int (chronological sort).
-      final String rawCheckTable =
-          (widget.component['checkTable'] ?? '').toString().trim();
+      // rawCheckTable already declared above (trip sequence count).
       // I3: envelope tablevid so the native opening doc matches the shape of
       //     DSL-created vehicle_check docs (vidtable override, else docId).
-      final String tableVid = (widget.component['vidtable'] ?? '')
-          .toString()
-          .trim()
-          .isNotEmpty
+      final String tableVid =
+          (widget.component['vidtable'] ?? '').toString().trim().isNotEmpty
           ? (widget.component['vidtable'] ?? '').toString().trim()
           : parseTablePath(rawCheckTable).tableDocId;
       final Map<String, dynamic> openingDoc = <String, dynamic>{
@@ -407,34 +511,99 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
         return; // NO nav on failure
       }
 
-      // 5. Designate driver + audit Event via saveSend. When action is
+      // 4b. Designate driver DIRECTLY on the stock_location row (dv/dn),
+      //     bypassing the offline history queue. The config's
+      //     `updateEventRow`->saveSend->historySync path does NOT sync this
+      //     record on-device (historySync reports "no history sent"), so the
+      //     designation never landed. A direct `writeNativeFields` merge onto
+      //     the EXISTING stock_location row is offline-safe (Firestore SDK
+      //     persistence), type-agnostic on `lv`, and mirrors the opening-doc
+      //     `createNativeDocAutoId` above that already lands.
+      //     (See memory: project_warehouse_o1_designation_no_sync.)
+      final String chosenVid = (screenTx['#CHOSEN_DRIVER_VID'] ?? '')
+          .toString()
+          .trim();
+      final String chosenName = (screenTx['#CHOSEN_DRIVER_NAME'] ?? '')
+          .toString()
+          .trim();
+      if (chosenVid.isEmpty) {
+        // Submit is gated on a chosen driver; guard defensively so an empty
+        // vid can never blank an existing dv/dn.
+        if (context.mounted) {
+          _showSnackBar(context, 'Pilih pengemudi dulu');
+        }
+        return;
+      }
+      // stock_location lives in the same container as checkTable
+      // (vehicle_check), subcollection `stock_location`; honor the optional
+      // `warehouseTable` override (mirrors _subscribeStockLocation).
+      final String rawWhTable = (widget.component['warehouseTable'] ?? '')
+          .toString()
+          .trim();
+      final String stockDocId = rawWhTable.isNotEmpty
+          ? parseTablePath(rawWhTable).tableDocId
+          : parseTablePath(rawCheckTable).tableDocId;
+      final bool designated = await writeNativeFields(
+        component: widget.component,
+        rawTable: '$stockDocId//stock_location',
+        rawSearch: 'lv\u{25FC}$vehicleId',
+        scrName: widget.scrName,
+        patch: {'dv': chosenVid, 'dn': chosenName},
+      );
+      if (!designated) {
+        if (context.mounted) {
+          _showSnackBar(context, 'Gagal menetapkan pengemudi');
+        }
+        return; // NO nav on failure
+      }
+
+      // Offline: both native writes (opening doc + dv/dn) are queued locally
+      // (SDK persistence) -- tell the user before saveSend/navigation.
+      if (!internetConnected() && context.mounted) {
+        _showSnackBar(
+          context,
+          'Tersimpan offline — dikirim otomatis saat online',
+        );
+      }
+
+      // 5. Audit Event via saveSend (evidence + GPS). Designation is now done
+      //    directly above; the component's `updateEventRow` still rides
+      //    saveSend but is a harmless idempotent no-op (writes the same dv/dn
+      //    if/when the history queue is ever fixed). When action is
       //    'savesend', the component's addToEvent is preserved so saveSend
       //    writes an Event audit row (evidence) + GPS. When action is absent,
       //    addToEvent is stripped (legacy byte-identical behavior).
-      final Map<String, dynamic> saveSendComponent =
-          Map<String, dynamic>.from(widget.component as Map);
+      final Map<String, dynamic> saveSendComponent = Map<String, dynamic>.from(
+        widget.component as Map,
+      );
       final bool hasSaveSendAction =
           (widget.component['action'] ?? '').toString().trim().toLowerCase() ==
-              'savesend';
+          'savesend';
       if (!hasSaveSendAction) {
         // Legacy: strip addToEvent (existing behavior before savesend plug)
         saveSendComponent.remove('addToEvent');
       }
       // Pre-resolve curly tokens in updateEventRow
-      final String rawUER =
-          (saveSendComponent['updateEventRow'] ?? '').toString();
+      final String rawUER = (saveSendComponent['updateEventRow'] ?? '')
+          .toString();
       if (rawUER.isNotEmpty) {
-        saveSendComponent['updateEventRow'] =
-            _resolveO1Tokens(rawUER, checkerName, genCnm);
+        saveSendComponent['updateEventRow'] = _resolveO1Tokens(
+          rawUER,
+          checkerName,
+          genCnm,
+        );
       }
       // Pre-resolve {checkerName} in addToEvent. This token is widget-local
       // (workforce lookup), NOT handled by resolveDriverCurlyTokens.
       if (hasSaveSendAction) {
-        final String rawATE =
-            (saveSendComponent['addToEvent'] ?? '').toString();
+        final String rawATE = (saveSendComponent['addToEvent'] ?? '')
+            .toString();
         if (rawATE.isNotEmpty) {
-          saveSendComponent['addToEvent'] =
-              _resolveO1Tokens(rawATE, checkerName, genCnm);
+          saveSendComponent['addToEvent'] = _resolveO1Tokens(
+            rawATE,
+            checkerName,
+            genCnm,
+          );
         }
       }
 
@@ -444,8 +613,7 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       late String locString;
       final int gpsPos;
       if (widget.component['gpsPosition'] is String) {
-        gpsPos =
-            int.tryParse(widget.component['gpsPosition'].toString()) ?? 0;
+        gpsPos = int.tryParse(widget.component['gpsPosition'].toString()) ?? 0;
       } else {
         gpsPos = widget.component['gpsPosition'] ?? 0;
       }
@@ -460,8 +628,13 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
         locString = getLocationString('', '', '', locSensor);
       }
 
-      saveSend(timeStamp, widget.scrName, saveSendComponent, locString,
-          defaultVid());
+      saveSend(
+        timeStamp,
+        widget.scrName,
+        saveSendComponent,
+        locString,
+        defaultVid(),
+      );
 
       // 6. Navigate (chain-aware, mirrors custody_event_submit)
       final dynamic chain = widget.component['chain'];
@@ -470,8 +643,9 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
           await doChain(context, widget.scrName, chain);
         }
       } else {
-        final String rawRoute =
-            (widget.component['route'] ?? '').toString().trim();
+        final String rawRoute = (widget.component['route'] ?? '')
+            .toString()
+            .trim();
         final String route = stripRouteWrapper(rawRoute);
         if (route.isNotEmpty && routeExist(route)) {
           routeStack.push(route);
@@ -507,16 +681,41 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       final String vehicleId = _resolveWarehouseVehicleId(screenTx);
       final String checkerVid = (screenTx['#VID'] ?? '').toString().trim();
       final String checkerName = _resolveCheckerName();
-      final String warehouseId =
-          (screenTx['#ACTIVE_WAREHOUSE'] ?? '').toString().trim();
+      final String warehouseId = (screenTx['#ACTIVE_WAREHOUSE'] ?? '')
+          .toString()
+          .trim();
       final String today = todayEpochMidnightWib();
       final int nowMs = getNowMillisecondFromEpoch();
 
+      // Trip sequence: single Firestore query resolves active opening doc-id
+      // for targeted close AND count of today's openings for cnm suffix.
+      final String rawCheckTable = (widget.component['checkTable'] ?? '')
+          .toString()
+          .trim();
+      final openingState = await fetchOpeningState(
+        component: widget.component,
+        rawTable: rawCheckTable,
+        vehicleId: vehicleId,
+        today: today,
+      );
+      final String activeDocId = openingState.activeDocId;
+      // seq: the seq of the trip being CLOSED (= the active opening).
+      // If we can identify which seq this opening is, use the count of
+      // today's openings. Fallback: seq=1.
+      final int seq = openingState.todayCount > 0 ? openingState.todayCount : 1;
+
       // Deterministic doc numbers (cnm/vnm field values; same nowMs ->
       // same WIB date stamp). Docs themselves use Firestore auto-ids.
-      final String closingCnm = genClosingCnm(vehicleId, nowMs: nowMs);
-      final String investigationVnm =
-          genInvestigationVnm(vehicleId, nowMs: nowMs);
+      final String closingCnm = genClosingCnm(
+        vehicleId,
+        nowMs: nowMs,
+        seq: seq,
+      );
+      final String investigationVnm = genInvestigationVnm(
+        vehicleId,
+        nowMs: nowMs,
+        seq: seq,
+      );
 
       // I3: #ACTIVE_WAREHOUSE is published by O1's count-list earlier in the
       // SAME trip and reused here. If empty (degrade-safe), gl stays empty:
@@ -524,13 +723,16 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       // doc would add a network round-trip on the offline-first submit path,
       // so we leave it empty per the plan's degrade-safe judgment.
       if (warehouseId.isEmpty) {
-        devPrint('[C1 submit] WARNING: warehouseId empty for '
-            'vehicle $vehicleId. Closing doc gl will be empty.');
+        devPrint(
+          '[C1 submit] WARNING: warehouseId empty for '
+          'vehicle $vehicleId. Closing doc gl will be empty.',
+        );
       }
 
       // 2. Build ip[] from count store
-      final Map<String, CountEntry> countMap =
-          CustodyCountList.getCountMap(widget.scrName);
+      final Map<String, CountEntry> countMap = CustodyCountList.getCountMap(
+        widget.scrName,
+      );
       final List<Map<String, dynamic>> ipArray = <Map<String, dynamic>>[];
       for (final entry in countMap.values) {
         ipArray.add(entry.toIpMap());
@@ -556,13 +758,10 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       );
 
       // 4. Build closing doc map (scalars + ip[] + dp[] + rs)
-      final String rawCheckTable =
-          (widget.component['checkTable'] ?? '').toString().trim();
+      // rawCheckTable already declared above (trip sequence resolution).
       // I3 pattern (from O1): envelope tablevid
-      final String tableVid = (widget.component['vidtable'] ?? '')
-              .toString()
-              .trim()
-              .isNotEmpty
+      final String tableVid =
+          (widget.component['vidtable'] ?? '').toString().trim().isNotEmpty
           ? (widget.component['vidtable'] ?? '').toString().trim()
           : parseTablePath(rawCheckTable).tableDocId;
 
@@ -605,24 +804,71 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
         return; // NO nav on failure
       }
 
-      // 6. Close the opening doc `cst` -> 'closed' via field search.
-      //    After Phase B (auto-id), the opening doc's Firestore doc id is
-      //    unknown; find it by (cty=opening, vv=vehicleId, cdt=today).
-      //    writeNativeFields is type-agnostic (whereIn:[String, Number])
-      //    so it finds the doc whether cdt was stored as String (legacy)
-      //    or Number (Phase B). Non-blocking: failure is logged only.
-      final String closeSearch =
-          'cty\u{25FC}opening\u{2B58}vv\u{25FC}$vehicleId\u{2B58}cdt\u{25FC}$today';
-      final bool closed = await writeNativeFields(
-        component: widget.component,
-        rawTable: rawCheckTable,
-        rawSearch: closeSearch,
-        scrName: widget.scrName,
-        patch: <String, dynamic>{'cst': 'closed'},
-      );
+      // Offline: closing doc is queued locally (SDK persistence); the
+      // cst-close + investigation writes below queue the same way.
+      if (!internetConnected() && context.mounted) {
+        _showSnackBar(
+          context,
+          'Tersimpan offline — dikirim otomatis saat online',
+        );
+      }
+
+      // 6. Close the SPECIFIC active opening doc `cst` -> 'closed'.
+      //    Multi-trip: the old search (cty+vv+cdt) matches ALL same-day
+      //    openings -> writeNativeFields refuses (>1 match). Use the resolved
+      //    activeDocId to write directly by doc-id via createNativeDoc
+      //    (set-merge: only patches 'cst', leaves other fields intact).
+      //    Fallback: if activeDocId resolution failed, attempt old search.
+      bool closed = false;
+      if (activeDocId.isNotEmpty) {
+        closed = await createNativeDoc(
+          component: widget.component,
+          rawTable: rawCheckTable,
+          docId: activeDocId,
+          docMap: <String, dynamic>{'cst': 'closed'},
+        );
+      }
       if (!closed) {
-        devPrint('[C1 submit] WARNING: opening doc cst-close failed via '
-            'search ($closeSearch). Proceeding (closing doc already written).');
+        // Fallback: search-based close (single-trip / pre-trip data)
+        final String closeSearch =
+            'cty\u{25FC}opening\u{2B58}vv\u{25FC}$vehicleId\u{2B58}cdt\u{25FC}$today';
+        closed = await writeNativeFields(
+          component: widget.component,
+          rawTable: rawCheckTable,
+          rawSearch: closeSearch,
+          scrName: widget.scrName,
+          patch: <String, dynamic>{'cst': 'closed'},
+        );
+        if (!closed) {
+          devPrint(
+            '[C1 submit] WARNING: opening doc cst-close failed. '
+            'Proceeding (closing doc already written).',
+          );
+        }
+      }
+
+      // 6b. Clear dv/dn on the stock_location row (designation reset).
+      //     Mirrors how O1 designates at line 445: same table/search shape
+      //     (lv◼vehicleId on stock_location), empty-string values.
+      //     Non-blocking: failure is logged only.
+      final String rawWhTable = (widget.component['warehouseTable'] ?? '')
+          .toString()
+          .trim();
+      final String stockDocId = rawWhTable.isNotEmpty
+          ? parseTablePath(rawWhTable).tableDocId
+          : parseTablePath(rawCheckTable).tableDocId;
+      final bool dvCleared = await writeNativeFields(
+        component: widget.component,
+        rawTable: '$stockDocId//stock_location',
+        rawSearch: 'lv\u{25FC}$vehicleId',
+        scrName: widget.scrName,
+        patch: <String, dynamic>{'dv': '', 'dn': ''},
+      );
+      if (!dvCleared) {
+        devPrint(
+          '[C1 submit] WARNING: dv/dn clear failed for $vehicleId. '
+          'Proceeding (closing doc already written).',
+        );
       }
 
       // 7. R2 only: create investigation doc
@@ -647,15 +893,19 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
             docMap: investDoc,
           );
           if (!investCreated) {
-            devPrint('[C1 submit] WARNING: investigation doc creation failed '
-                'for $investigationVnm. Proceeding to R2 anyway.');
+            devPrint(
+              '[C1 submit] WARNING: investigation doc creation failed '
+              'for $investigationVnm. Proceeding to R2 anyway.',
+            );
             // Proceed to R2 -- the closing doc is already written; the
             // investigation failure is not user-blocking (supervisor can
             // manually create from the discrepancy data).
           }
         } else {
-          devPrint('[C1 submit] WARNING: investigationTable config empty. '
-              'Skipping investigation doc creation.');
+          devPrint(
+            '[C1 submit] WARNING: investigationTable config empty. '
+            'Skipping investigation doc creation.',
+          );
         }
       }
 
@@ -664,27 +914,33 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       //     must NOT cancel the count or block navigation.
       final bool hasSaveSendAction =
           (widget.component['action'] ?? '').toString().trim().toLowerCase() ==
-              'savesend';
+          'savesend';
       if (hasSaveSendAction) {
         try {
           final Map<String, dynamic> saveSendComponent =
               Map<String, dynamic>.from(widget.component as Map);
           // Pre-resolve {checkerName} in addToEvent (widget-local token)
-          final String rawATE =
-              (saveSendComponent['addToEvent'] ?? '').toString();
+          final String rawATE = (saveSendComponent['addToEvent'] ?? '')
+              .toString();
           if (rawATE.isNotEmpty) {
-            saveSendComponent['addToEvent'] =
-                _resolveO1Tokens(rawATE, checkerName, '');
+            saveSendComponent['addToEvent'] = _resolveO1Tokens(
+              rawATE,
+              checkerName,
+              '',
+            );
           }
           // Mirror O1: pre-resolve the widget-local {checkerName} in
           // updateEventRow too. C1's current config has none, but a future
           // search-bearing updateEventRow with {checkerName} would otherwise
           // inject the literal token into a Firestore query (silent 0-match).
-          final String rawUER =
-              (saveSendComponent['updateEventRow'] ?? '').toString();
+          final String rawUER = (saveSendComponent['updateEventRow'] ?? '')
+              .toString();
           if (rawUER.isNotEmpty) {
-            saveSendComponent['updateEventRow'] =
-                _resolveO1Tokens(rawUER, checkerName, '');
+            saveSendComponent['updateEventRow'] = _resolveO1Tokens(
+              rawUER,
+              checkerName,
+              '',
+            );
           }
           // GPS capture: real GPS when gpsPosition > 0
           late int saveSendTs;
@@ -703,12 +959,16 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
           } else {
             saveSendTs = await getRealTime();
             final OtqState locSensor = OtqState();
-            locSensor.nowTime =
-                DateTime.fromMillisecondsSinceEpoch(saveSendTs);
+            locSensor.nowTime = DateTime.fromMillisecondsSinceEpoch(saveSendTs);
             saveSendLoc = getLocationString('', '', '', locSensor);
           }
-          saveSend(saveSendTs, widget.scrName, saveSendComponent,
-              saveSendLoc, defaultVid());
+          saveSend(
+            saveSendTs,
+            widget.scrName,
+            saveSendComponent,
+            saveSendLoc,
+            defaultVid(),
+          );
         } catch (saveSendErr) {
           // Best-effort: log only, do NOT cancel navigation or native write.
           devPrint('[C1 submit] saveSend audit failed: $saveSendErr');
@@ -716,12 +976,15 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       }
 
       // 8. Nav by rs: matched -> matchRoute (R1), discrepancy -> mismatchRoute
-      final String matchRoute =
-          (widget.component['matchRoute'] ?? '').toString().trim();
-      final String mismatchRoute =
-          (widget.component['mismatchRoute'] ?? '').toString().trim();
-      final String targetRoute =
-          reconcile.rs == 'matched' ? matchRoute : mismatchRoute;
+      final String matchRoute = (widget.component['matchRoute'] ?? '')
+          .toString()
+          .trim();
+      final String mismatchRoute = (widget.component['mismatchRoute'] ?? '')
+          .toString()
+          .trim();
+      final String targetRoute = reconcile.rs == 'matched'
+          ? matchRoute
+          : mismatchRoute;
       final String route = stripRouteWrapper(targetRoute);
       if (route.isNotEmpty && routeExist(route)) {
         routeStack.push(route);
@@ -751,12 +1014,14 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       // live when a driver is picked on the ExecutorDesignateCard.
       ExecutorDesignateCard.chosenRev.value;
 
-      final Map<String, CountEntry> countMap =
-          CustodyCountList.getCountMap(widget.scrName);
+      final Map<String, CountEntry> countMap = CustodyCountList.getCountMap(
+        widget.scrName,
+      );
 
       final int total = countMap.length;
       final int n = countMap.values.where((e) => e.qty > 0).length;
-      final bool isWriting = CustodyCountSubmit._writing[widget.scrName] ?? false;
+      final bool isWriting =
+          CustodyCountSubmit._writing[widget.scrName] ?? false;
 
       final bool enabled;
       final String label;
@@ -772,14 +1037,15 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
         bgColor = enabled && !isWriting
             ? const Color(0xFF0D9488) // teal-600
             : const Color(0xFFD1D5DB); // gray-300
-        textColor =
-            enabled && !isWriting ? Colors.white : const Color(0xFF6B7280);
+        textColor = enabled && !isWriting
+            ? Colors.white
+            : const Color(0xFF6B7280);
       } else if (_isOpening) {
         // O1: gate on driver chosen (#CHOSEN_DRIVER_VID non-empty).
-        final Map<String, dynamic> screenTx =
-            transactionStore.state.screenTx;
-        final String chosenVid =
-            (screenTx['#CHOSEN_DRIVER_VID'] ?? '').toString().trim();
+        final Map<String, dynamic> screenTx = transactionStore.state.screenTx;
+        final String chosenVid = (screenTx['#CHOSEN_DRIVER_VID'] ?? '')
+            .toString()
+            .trim();
         enabled = chosenVid.isNotEmpty;
         label = enabled
             ? _t(0, 'Simpan Pengecekan')
@@ -788,8 +1054,9 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
         bgColor = enabled && !isWriting
             ? const Color(0xFF0D9488) // teal-600
             : const Color(0xFFD1D5DB); // gray-300
-        textColor =
-            enabled && !isWriting ? Colors.white : const Color(0xFF6B7280);
+        textColor = enabled && !isWriting
+            ? Colors.white
+            : const Color(0xFF6B7280);
       } else {
         // P6 path (UNCHANGED).
         enabled = total > 0 && n == total;
@@ -806,7 +1073,11 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
 
       return Padding(
         padding: EdgeInsets.fromLTRB(
-            widget.lPad, widget.tPad, widget.rPad, widget.bPad),
+          widget.lPad,
+          widget.tPad,
+          widget.rPad,
+          widget.bPad,
+        ),
         child: SizedBox(
           width: double.infinity,
           height: 48,
@@ -858,10 +1129,7 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
 
   void _showSnackBar(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        duration: const Duration(seconds: 2),
-      ),
+      SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
     );
   }
 }

@@ -361,11 +361,21 @@ StatsSummary computeStatsSummary(
   return StatsSummary(total, noVisit, typed);
 }
 
-/// Replace `{key}` tokens in `raw` with `screenTx[key]` (missing → left literal).
+/// Replace `{key}` tokens in `raw` with `screenTx[key]`.
+///
+/// Missing key (null) -> left as literal `{key}`.
+/// Empty value (`""` / whitespace) -> left as literal `{key}` (defense-in-depth:
+/// aligns with `resolveDriverCurlyTokens` which already leaves the literal for
+/// empty tokens; an empty resolved value would create an empty search clause,
+/// which `filterByMultiClause` / `filterByCharCodeEquality` independently
+/// catch as "match nothing", but leaving the literal preserves the
+/// `value.contains('{')` guard as a visible signal).
 String resolveScreenTxTokens(String raw, Map<String, dynamic> screenTx) {
   return raw.replaceAllMapped(RegExp(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}'), (m) {
     final v = screenTx[m.group(1)];
-    return v == null ? m.group(0)! : v.toString();
+    if (v == null) return m.group(0)!;
+    final String sv = v.toString();
+    return isTokenEmpty(sv) ? m.group(0)! : sv;
   });
 }
 

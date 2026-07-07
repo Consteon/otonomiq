@@ -71,7 +71,7 @@ void main() {
       );
     });
 
-    test('closing doc exists -> completed (overrides cst)', () {
+    test('closing doc exists -> ignored for tier (trip-sequence: falls through to cst)', () {
       expect(
         deriveVehicleTier(
           dv: '111',
@@ -79,17 +79,17 @@ void main() {
           closingDoc: {'cty': 'closing'},
           taskDocs: [{'tst': 'assigned'}],
         ),
-        VehicleTier.completed,
+        VehicleTier.inRoute,
       );
     });
 
-    test('cst == closed -> completed', () {
+    test('cst == closed -> loading (trip-sequence: backlog, completed tier removed)', () {
       expect(
         deriveVehicleTier(
           dv: '111',
           openingDoc: {'cst': 'closed'},
         ),
-        VehicleTier.completed,
+        VehicleTier.loading,
       );
     });
 
@@ -384,7 +384,7 @@ void main() {
       expect(feed[1].tier, VehicleTier.custodyPending); // V2: awaiting_custody
     });
 
-    test('completed filtered by today', () {
+    test('closed opening + dv set -> loading backlog (completed-drop removed)', () {
       final stockDocs = <Map<String, dynamic>>[
         {'lv': 'V1', 'ln': 'B 1234', 'dv': 'D1', 'dn': 'Driver1'},
       ];
@@ -399,7 +399,11 @@ void main() {
         todayEpoch: '123', // today != 999
       );
 
-      expect(feed, isEmpty); // old completed trip dropped
+      // Trip-sequence (Task 11): the completed tier + its cdt-drop are removed.
+      // A closed opening whose vehicle still has dv set now derives `loading`
+      // and surfaces in the backlog (ready to re-open) instead of being dropped.
+      expect(feed.length, 1);
+      expect(feed.first.tier, VehicleTier.loading);
     });
 
     test('empty stock_location docs -> empty feed', () {
@@ -421,6 +425,7 @@ void main() {
         {
           'vv': 'V1',
           'tdt': '123',
+          'tst': 'assigned',
           'it': [
             {'ii': 'A1'},
             {'ii': 'L1'},
@@ -438,6 +443,468 @@ void main() {
       );
 
       expect(feed.first.categorySummary, '1 returnable \u{00B7} 1 consumable');
+    });
+  });
+
+  // ── buildVehicleFeed summary status-scope (warehouse-feed-summary-status) ──
+
+  group('buildVehicleFeed summary status-scope', () {
+    // Shared fixture: a stock_location with no driver (-> loading tier).
+    // Tier is loading because dv is empty; this is intentional so we can test
+    // the summary independently of tier transitions (loading has no date filter
+    // on the completed-drop gate, so the entry always appears).
+    final baseStock = <Map<String, dynamic>>[
+      {'lv': 'V1', 'ln': 'B 1234 XY', 'dv': '', 'dn': ''},
+    ];
+    final catMap = <String, String>{
+      'A1': 'returnable',
+      'A2': 'returnable',
+      'L1': 'consumable',
+    };
+
+    test('all tasks completed -> categorySummary is empty', () {
+      // Two tasks, both completed. Before the fix this would yield
+      // "2 returnable . 1 consumable"; after the fix, empty.
+      final tasks = <Map<String, dynamic>>[
+        {
+          'vv': 'V1',
+          'tdt': '100',
+          'tst': 'completed',
+          'it': [
+            {'ii': 'A1'},
+            {'ii': 'L1'},
+          ],
+        },
+        {
+          'vv': 'V1',
+          'tdt': '100',
+          'tst': 'completed',
+          'it': [
+            {'ii': 'A2'},
+          ],
+        },
+      ];
+
+      final feed = buildVehicleFeed(
+        stockDocs: baseStock,
+        vehicleCheckDocs: [],
+        taskDocs: tasks,
+        categoryMap: catMap,
+        todayEpoch: '100',
+      );
+
+      expect(feed.length, 1);
+      expect(feed.first.categorySummary, '',
+          reason: 'Completed tasks must not contribute to summary');
+    });
+
+    test('mix of assigned + completed -> summary counts only assigned items', () {
+      final tasks = <Map<String, dynamic>>[
+        {
+          'vv': 'V1',
+          'tdt': '100',
+          'tst': 'assigned',
+          'it': [
+            {'ii': 'A1'},
+          ],
+        },
+        {
+          'vv': 'V1',
+          'tdt': '100',
+          'tst': 'completed',
+          'it': [
+            {'ii': 'A2'},
+            {'ii': 'L1'},
+          ],
+        },
+      ];
+
+      final feed = buildVehicleFeed(
+        stockDocs: baseStock,
+        vehicleCheckDocs: [],
+        taskDocs: tasks,
+        categoryMap: catMap,
+        todayEpoch: '100',
+      );
+
+      expect(feed.length, 1);
+      // Only the assigned task's item A1 (returnable) appears.
+      expect(feed.first.categorySummary, '1 returnable',
+          reason: 'Only assigned task items contribute to summary');
+    });
+
+    test('tier and stop-progress unchanged by summary scope', () {
+      // custody_confirmed + all tasks completed -> tier = returning.
+      // Stop progress: done=2, total=2 (all tasks counted).
+      // Summary: empty (no assigned tasks).
+      final stock = <Map<String, dynamic>>[
+        {'lv': 'V1', 'ln': 'B 1234 XY', 'dv': 'D1', 'dn': 'Driver'},
+      ];
+      final checks = <Map<String, dynamic>>[
+        {'cty': 'opening', 'vv': 'V1', 'cst': 'custody_confirmed', 'cdt': '100'},
+      ];
+      final tasks = <Map<String, dynamic>>[
+        {
+          'vv': 'V1',
+          'tdt': '100',
+          'tst': 'completed',
+          'it': [
+            {'ii': 'A1'},
+          ],
+        },
+        {
+          'vv': 'V1',
+          'tdt': '100',
+          'tst': 'completed',
+          'it': [
+            {'ii': 'L1'},
+          ],
+        },
+      ];
+
+      final feed = buildVehicleFeed(
+        stockDocs: stock,
+        vehicleCheckDocs: checks,
+        taskDocs: tasks,
+        categoryMap: catMap,
+        todayEpoch: '100',
+      );
+
+      expect(feed.length, 1);
+      final entry = feed.first;
+      // Tier: custody_confirmed + all completed + no closing -> returning
+      expect(entry.tier, VehicleTier.returning,
+          reason: 'Tier must see all statuses including completed');
+      // Stop progress: both tasks count
+      expect(entry.stopsTotal, 2,
+          reason: 'Stop progress total must count ALL tasks');
+      expect(entry.stopsDone, 2,
+          reason: 'Stop progress done must count completed tasks');
+      // Summary: empty because no assigned tasks
+      expect(entry.categorySummary, '',
+          reason: 'Summary must exclude completed tasks');
+    });
+
+    test('no tasks at all -> empty summary (regression guard)', () {
+      final feed = buildVehicleFeed(
+        stockDocs: baseStock,
+        vehicleCheckDocs: [],
+        taskDocs: [],
+        categoryMap: catMap,
+        todayEpoch: '100',
+      );
+
+      expect(feed.length, 1);
+      expect(feed.first.categorySummary, '',
+          reason: 'No tasks -> no summary');
+      expect(feed.first.stopsTotal, 0);
+      expect(feed.first.stopsDone, 0);
+    });
+
+    // ── load_rejected exclusion ──────────────────────────────────────────────
+
+    test('load_rejected task excluded from summary (raw-status filter)', () {
+      // stopStatusOf('load_rejected') -> 'pending', which is the same result as
+      // stopStatusOf('assigned') -> 'pending'. A normalized filter would wrongly
+      // include load_rejected tasks in the summary. The raw comparison
+      // (tst.trim() == kLoadableStatus) must drop load_rejected.
+      final tasks = <Map<String, dynamic>>[
+        {
+          'vv': 'V1',
+          'tdt': '100',
+          'tst': 'load_rejected',
+          'it': [
+            {'ii': 'A1'},
+            {'ii': 'L1'},
+          ],
+        },
+      ];
+
+      final feed = buildVehicleFeed(
+        stockDocs: baseStock,
+        vehicleCheckDocs: [],
+        taskDocs: tasks,
+        categoryMap: catMap,
+        todayEpoch: '100',
+      );
+
+      expect(feed.length, 1);
+      expect(feed.first.categorySummary, '',
+          reason: 'load_rejected must be excluded from summary by raw-tst filter, '
+              'not the normalized stopStatusOf result');
+      // Stop progress must still count the task in the total (it is not done).
+      expect(feed.first.stopsTotal, 1,
+          reason: 'load_rejected task contributes to stop total (tier uses full list)');
+      expect(feed.first.stopsDone, 0,
+          reason: 'load_rejected is not done/failed; stop-done unchanged');
+    });
+
+    // ── missing / empty tst ──────────────────────────────────────────────────
+
+    test('task with absent tst key excluded from summary', () {
+      // No 'tst' key at all: (doc[tstField] ?? '').toString().trim() -> ''.
+      // '' != 'assigned' -> excluded.
+      final tasks = <Map<String, dynamic>>[
+        {
+          'vv': 'V1',
+          'tdt': '100',
+          // deliberately no 'tst' key
+          'it': [{'ii': 'A1'}],
+        },
+      ];
+
+      final feed = buildVehicleFeed(
+        stockDocs: baseStock,
+        vehicleCheckDocs: [],
+        taskDocs: tasks,
+        categoryMap: catMap,
+        todayEpoch: '100',
+      );
+
+      expect(feed.first.categorySummary, '',
+          reason: 'Absent tst field resolves to empty string; not assigned -> excluded from summary');
+    });
+
+    test('task with tst=empty string excluded from summary', () {
+      // tst: '' trims to ''; '' != 'assigned' -> excluded.
+      final tasks = <Map<String, dynamic>>[
+        {
+          'vv': 'V1',
+          'tdt': '100',
+          'tst': '',
+          'it': [{'ii': 'L1'}],
+        },
+      ];
+
+      final feed = buildVehicleFeed(
+        stockDocs: baseStock,
+        vehicleCheckDocs: [],
+        taskDocs: tasks,
+        categoryMap: catMap,
+        todayEpoch: '100',
+      );
+
+      expect(feed.first.categorySummary, '',
+          reason: 'Empty tst string -> not assigned -> excluded from summary');
+    });
+
+    // ── whitespace / case sensitivity ────────────────────────────────────────
+
+    test('tst=" assigned " (whitespace-padded) is trimmed and counted in summary', () {
+      // kLoadableStatus comparison uses .trim() before ==; padding must be stripped.
+      final tasks = <Map<String, dynamic>>[
+        {
+          'vv': 'V1',
+          'tdt': '100',
+          'tst': ' assigned ',
+          'it': [{'ii': 'A1'}],
+        },
+      ];
+
+      final feed = buildVehicleFeed(
+        stockDocs: baseStock,
+        vehicleCheckDocs: [],
+        taskDocs: tasks,
+        categoryMap: catMap,
+        todayEpoch: '100',
+      );
+
+      expect(feed.first.categorySummary, '1 returnable',
+          reason: 'Whitespace-padded "assigned" must be trimmed and matched; '
+              'item must appear in summary');
+    });
+
+    test('tst="Assigned" (capital A) is NOT counted in summary (filter is case-sensitive)', () {
+      // The filter is (t[tstField] ?? '').toString().trim() == kLoadableStatus.
+      // kLoadableStatus = 'assigned' (lowercase). No toLower applied -> case-sensitive.
+      // This documents current behavior: server must send lowercase 'assigned'.
+      final tasks = <Map<String, dynamic>>[
+        {
+          'vv': 'V1',
+          'tdt': '100',
+          'tst': 'Assigned',
+          'it': [{'ii': 'A1'}],
+        },
+      ];
+
+      final feed = buildVehicleFeed(
+        stockDocs: baseStock,
+        vehicleCheckDocs: [],
+        taskDocs: tasks,
+        categoryMap: catMap,
+        todayEpoch: '100',
+      );
+
+      expect(feed.first.categorySummary, '',
+          reason: 'Filter is case-sensitive: "Assigned" != "assigned"; '
+              'item must NOT appear in summary');
+    });
+
+    // ── multi-assigned aggregation + distinct dedup ──────────────────────────
+
+    test('two assigned tasks sharing the same item id -> counted once (distinct dedup)', () {
+      // A1 appears in both tasks; countDistinctItemsByCategory must dedup by Set.
+      final tasks = <Map<String, dynamic>>[
+        {
+          'vv': 'V1',
+          'tdt': '100',
+          'tst': 'assigned',
+          'it': [{'ii': 'A1'}],
+        },
+        {
+          'vv': 'V1',
+          'tdt': '100',
+          'tst': 'assigned',
+          'it': [{'ii': 'A1'}],
+        },
+      ];
+
+      final feed = buildVehicleFeed(
+        stockDocs: baseStock,
+        vehicleCheckDocs: [],
+        taskDocs: tasks,
+        categoryMap: catMap,
+        todayEpoch: '100',
+      );
+
+      expect(feed.first.categorySummary, '1 returnable',
+          reason: 'Same item id across two assigned tasks must be deduped to one');
+    });
+
+    test('two assigned tasks with distinct item ids -> both counted (cross-task aggregation)', () {
+      // A1 and A2 are both returnable. Each appears in one task; together = 2 returnable.
+      final tasks = <Map<String, dynamic>>[
+        {
+          'vv': 'V1',
+          'tdt': '100',
+          'tst': 'assigned',
+          'it': [{'ii': 'A1'}],
+        },
+        {
+          'vv': 'V1',
+          'tdt': '100',
+          'tst': 'assigned',
+          'it': [{'ii': 'A2'}],
+        },
+      ];
+
+      final feed = buildVehicleFeed(
+        stockDocs: baseStock,
+        vehicleCheckDocs: [],
+        taskDocs: tasks,
+        categoryMap: catMap,
+        todayEpoch: '100',
+      );
+
+      expect(feed.first.categorySummary, '2 returnable',
+          reason: 'Two assigned tasks with distinct ids must each contribute: '
+              '2 distinct returnable items');
+      // Stop progress must count both tasks in total.
+      expect(feed.first.stopsTotal, 2,
+          reason: 'Stop progress total must include all tasks regardless of status');
+    });
+  });
+
+  // ── buildVehicleFeed trip scoping (task.tr vs opening __docId) ────────────
+
+  group('buildVehicleFeed trip scoping', () {
+    final baseStock = <Map<String, dynamic>>[
+      {'lv': 'V1', 'ln': 'B 1234 XY', 'dv': '', 'dn': ''},
+    ];
+    final catMap = <String, String>{
+      'A1': 'returnable',
+      'A2': 'returnable',
+      'L1': 'consumable',
+    };
+
+    test(
+        'REGRESSION: closed trip-1 opening + new unstamped trip-2 tasks '
+        '-> summary shows the new tasks', () {
+      // Trip 1 done: opening OP1 closed, its tasks stamped tr=OP1, completed.
+      // Trip 2: 3 new tasks created (tst=assigned, no tr yet), next opening
+      // not created yet. Before the fix the feed scoped tasks to OP1 (the
+      // closed opening still carried its __docId), so only trip-1's completed
+      // tasks survived and the summary went empty -- the new tasks vanished
+      // from the card.
+      final checks = <Map<String, dynamic>>[
+        {'cty': 'opening', 'vv': 'V1', 'cst': 'closed', 't': '100', '__docId': 'OP1'},
+      ];
+      final tasks = <Map<String, dynamic>>[
+        {'vv': 'V1', 'tdt': '100', 'tst': 'completed', 'tr': 'OP1', 'it': [{'ii': 'A1'}]},
+        {'vv': 'V1', 'tdt': '100', 'tst': 'assigned', 'it': [{'ii': 'A2'}]},
+        {'vv': 'V1', 'tdt': '100', 'tst': 'assigned', 'it': [{'ii': 'L1'}]},
+      ];
+
+      final feed = buildVehicleFeed(
+        stockDocs: baseStock,
+        vehicleCheckDocs: checks,
+        taskDocs: tasks,
+        categoryMap: catMap,
+        todayEpoch: '100',
+      );
+
+      expect(feed.length, 1);
+      expect(feed.first.categorySummary, '1 returnable \u{00B7} 1 consumable',
+          reason: 'New unstamped assigned tasks must appear when the only '
+              'opening is closed (finished trip must not claim the scope)');
+    });
+
+    test('active opening scopes out other-trip stamped tasks, keeps unstamped', () {
+      // Trip 2 opening OP2 active. Trip-1 tasks stamped OP1 must be dropped;
+      // unstamped tasks (admin-created, not yet executed) and OP2-stamped
+      // tasks both belong to the active trip.
+      final checks = <Map<String, dynamic>>[
+        {'cty': 'opening', 'vv': 'V1', 'cst': 'closed', 't': '100', '__docId': 'OP1'},
+        {'cty': 'opening', 'vv': 'V1', 'cst': 'custody_confirmed', 't': '200', '__docId': 'OP2'},
+      ];
+      final stock = <Map<String, dynamic>>[
+        {'lv': 'V1', 'ln': 'B 1234 XY', 'dv': 'D1', 'dn': 'Driver'},
+      ];
+      final tasks = <Map<String, dynamic>>[
+        {'vv': 'V1', 'tdt': '100', 'tst': 'completed', 'tr': 'OP1', 'it': [{'ii': 'A1'}]},
+        {'vv': 'V1', 'tdt': '100', 'tst': 'completed', 'tr': 'OP2', 'it': [{'ii': 'A2'}]},
+        {'vv': 'V1', 'tdt': '100', 'tst': 'assigned', 'it': [{'ii': 'L1'}]},
+      ];
+
+      final feed = buildVehicleFeed(
+        stockDocs: stock,
+        vehicleCheckDocs: checks,
+        taskDocs: tasks,
+        categoryMap: catMap,
+        todayEpoch: '100',
+      );
+
+      expect(feed.length, 1);
+      final entry = feed.first;
+      // Scope = OP2-stamped + unstamped: 2 tasks, 1 done.
+      expect(entry.stopsTotal, 2,
+          reason: 'OP1-stamped task excluded; OP2 + unstamped counted');
+      expect(entry.stopsDone, 1);
+      expect(entry.tier, VehicleTier.inRoute,
+          reason: 'Unstamped assigned task keeps the trip open');
+      expect(entry.categorySummary, '1 consumable',
+          reason: 'Only the assigned unstamped task feeds the summary');
+    });
+
+    test('active opening + all tasks stamped other trip -> fallback to all (pre-CF)', () {
+      final checks = <Map<String, dynamic>>[
+        {'cty': 'opening', 'vv': 'V1', 'cst': 'custody_confirmed', 't': '200', '__docId': 'OP2'},
+      ];
+      final tasks = <Map<String, dynamic>>[
+        {'vv': 'V1', 'tdt': '100', 'tst': 'assigned', 'tr': 'OP1', 'it': [{'ii': 'A1'}]},
+      ];
+
+      final feed = buildVehicleFeed(
+        stockDocs: baseStock,
+        vehicleCheckDocs: checks,
+        taskDocs: tasks,
+        categoryMap: catMap,
+        todayEpoch: '100',
+      );
+
+      expect(feed.first.stopsTotal, 1,
+          reason: 'No task matches the active trip -> (vv, today) fallback keeps all');
+      expect(feed.first.categorySummary, '1 returnable');
     });
   });
 }

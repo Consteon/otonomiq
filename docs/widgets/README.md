@@ -63,6 +63,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | ListStatisticCard | [list_statistic_card.md](list_statistic_card.md) | draft | Per-point patrol/cleaning statistic list with optional typed-location merge |
 | NavActionCard | [nav_action_card.md](nav_action_card.md) | draft | Return-vehicle CTA card (muted/active by allClosed) for DriverHome P4 |
 | NoticeBar | [notice_bar.md](notice_bar.md) | draft | Notification strip/callout with variant-driven colors, optional icon, up to 3 text tiers |
+| OfflineBannerHost | [offline_banner.md](offline_banner.md) | draft | Global offline strip above the MainPage body (Obx on internetConnectionFlag); structural shell widget, not a dispatch branch |
 | ReturnHeader | [return_header.md](return_header.md) | draft | Back arrow + label + title header for P12 ReturnVehicle |
 | PreconditionGateCard | [precondition_gate_card.md](precondition_gate_card.md) | draft | Custody gate card (pending/confirmed) for DriverHome P4 |
 | RouteFeedHeader | [route_feed_header.md](route_feed_header.md) | draft | Sticky 3-row route header (identity, progress, drop/pickup stats) and vehicleId publisher for P10 TaskFeed |
@@ -106,7 +107,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | LocationDetector | [location_detector.md](location_detector.md) | done | GPS location status with inside/outside site detection via LQR reference points |
 | QrGps | [qr_gps.md](qr_gps.md) | todo | QR + GPS |
 | GpsSend | [gps_send.md](gps_send.md) | todo | Send GPS coordinates |
-| AttendanceQrSelfieGpsVerify | [attendance_qr_selfie_gps_verify.md](attendance_qr_selfie_gps_verify.md) | todo | Attendance verification (QR + selfie + GPS) |
+| AttendanceQrSelfieGpsVerify | [attendance_qr_selfie_gps_verify.md](attendance_qr_selfie_gps_verify.md) | draft | Attendance verification (QR + selfie + GPS) |
 
 ### Action / Button
 | Widget | File | Status | Description |

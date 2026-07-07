@@ -305,8 +305,7 @@ class UserRepository {
           myUid,
           myEmail,
           country,
-          phoneCleanup(
-              inv)); //= get user data. If uid not defined, will try search email, if fail get new vid
+          inv); //= get user data. If uid not defined, will try search email, if fail get new vid
       if (sw1 != null) {
         debugPrint(
             '[LOGINPERF] getFirestoreUserData = ${sw1.elapsedMilliseconds}ms');

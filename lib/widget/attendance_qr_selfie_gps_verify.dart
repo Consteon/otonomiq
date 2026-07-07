@@ -15,6 +15,8 @@ import '../global.dart';
 import '../model/otq_state.dart';
 import '../redux/screen_transaction.dart';
 import 'ftz_scanner_screen.dart';
+import 'photo_camera.dart';
+import '../firestore_repository/firestore_generic_repository.dart';
 
 part '../part/build_part/attend_qr_gps_selfie_state_part.dart';
 
@@ -80,6 +82,17 @@ class AttendQrGpsSelfie extends StatefulWidget {
 } // end of class AttendQrGpsSelfie
 
 class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
+  /// Pads a text array (output of diamondTextToList) to at least 31 elements.
+  /// Index 26 defaults to 'Scan QR' (existing QR scanner title).
+  /// Indexes 27-30 default to '' (filled from sheet config when present).
+  static List padTextArray(List input) {
+    final List result = List.from(input);
+    while (result.length < 31) {
+      result.add(result.length == 26 ? 'Scan QR' : '');
+    }
+    return result;
+  }
+
   bool change = true;
   final controller = TextEditingController(text: '-');
   bool tapped = false;
@@ -232,6 +245,69 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
         return nearestName;
       } catch (_) {}
       return null;
+    }
+
+    // The scanned QR uniquely identifies its location; use ITS registered name
+    // (#LQR_LIST[qrKey][0]) instead of the nearest-by-GPS name, which picks the
+    // wrong site when two QRs (e.g. BSD A / BSD B) sit close together.
+    String? locationNameFromScannedLqr(String? qrKey) {
+      if (qrKey == null || qrKey.isEmpty) return null;
+      final dynamic lqrList = transactionStore.state.screenTx['#LQR_LIST'];
+      if (lqrList == null || lqrList is! Map) return null;
+      final dynamic entry = lqrList[qrKey];
+      if (entry is List && entry.isNotEmpty) {
+        final String name = entry[0].toString();
+        if (name.isNotEmpty) return name;
+      }
+      return null;
+    }
+
+    // Per-scanned-QR geofence. Returns true (→ caller aborts the write & shows
+    // "Diluar Area Absensi") when out-of-position is NOT allowed AND the current
+    // GPS is beyond the SCANNED QR's own tolerance zone. Opt-in via
+    // outPositionAllowed:FALSE (default TRUE = out-of-position allowed = no gate),
+    // same flag as the pre-scan geofence. Fail-open on missing data / parse error.
+    // Zone = tolerance + accuracy*2 (same buffer as the pre-scan check here).
+    Future<bool> blockIfOutsideScannedLqr(String? qrKey, double lat, double lng,
+        double accuracy, List tArray) async {
+      final bool outPositionAllowed = (widget.component['outPositionAllowed']
+                  ?.toString()
+                  .toUpperCase() ??
+              'TRUE') !=
+          'FALSE';
+      if (outPositionAllowed) return false;
+      if (qrKey == null || qrKey.isEmpty) return false;
+      final dynamic lqrList = transactionStore.state.screenTx['#LQR_LIST'];
+      if (lqrList == null || lqrList is! Map) return false;
+      final dynamic entry = lqrList[qrKey];
+      if (entry is! List || entry.length < 4) return false;
+      double distance;
+      double zone2;
+      try {
+        final double targetLat = (entry[1] as num).toDouble();
+        final double targetLng = (entry[2] as num).toDouble();
+        final double tolerance = (entry[3] as num).toDouble();
+        zone2 = tolerance + accuracy * 2;
+        distance = Geolocator.distanceBetween(lat, lng, targetLat, targetLng);
+      } catch (_) {
+        return false; // fail-open: never block on bad data
+      }
+      debugPrint(
+          '[qr-geofence] scanned=$qrKey distance=${distance.toStringAsFixed(1)}m zone2=${zone2.toStringAsFixed(1)}m block=${distance > zone2}');
+      if (distance <= zone2) return false;
+      if (context.mounted) {
+        await Get.dialog(AlertDialog(
+          title: Text(tArray.length > 24 ? tArray[24] : 'Diluar Area Absensi'),
+          content: Text(tArray.length > 25 ? tArray[25] : ''),
+          actions: [
+            TextButton(
+              child: Text(tArray.length > 8 ? tArray[8] : 'OK'),
+              onPressed: () => Get.back(),
+            ),
+          ],
+        ));
+      }
+      return true;
     }
 
     Future<void> processData(tArray, String dialogText1, String selfieUrl,
@@ -387,10 +463,9 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
       String resultOk = empty;
       String finalQrText = empty;
       String mock = 'Unknown';
-      dynamic tArray = diamondTextToList(widget.component['text'] ?? []);
-      while (tArray.length < 27) {
-        tArray.add(tArray.length == 26 ? 'Scan QR' : '');
-      }
+      // ponytail: ?? '' is intentional — diamondTextToList(String) would TypeError
+      // on the old ?? [] fallback if component['text'] were null
+      List tArray = padTextArray(diamondTextToList(widget.component['text'] ?? ''));
 
       // Platform messages may fail, so we use a try/catch PlatformException.
       try {
@@ -492,6 +567,14 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
             } catch (e) {
               errorReport(e);
             }
+            // Per-scanned-QR geofence (see blockIfOutsideScannedLqr). resultOk is
+            // already the valid location name, so returning it exits the scan loop
+            // cleanly without a rescan; setDataOK('2') leaves the page (no write).
+            if (await blockIfOutsideScannedLqr(finalQrText, position!.latitude,
+                position!.longitude, position!.accuracy, tArray)) {
+              setDataOK('2');
+              return resultOk;
+            }
             actionLock('qrDataProcess attendance_qr_selfie_gps_verify');
             // pool.play(scannerBeep);
             vibrate(duration: 100);
@@ -568,7 +651,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
             await attendanceSuccessDialog(
                 title: tArray[2] ?? '-- Title --',
                 message1: dialogText1 ?? "Success message1",
-                message2: locationNameFromLqrRef(locSensor.latitude,
+                message2: locationNameFromScannedLqr(finalQrText) ??
+                    locationNameFromLqrRef(locSensor.latitude,
                         locSensor.longitude, locSensor.accuracy) ??
                     (placeMark.isNotEmpty
                         ? "${placeMark[0].subLocality ?? ''}, ${(placeMark[0].locality ?? '').replaceFirst(RegExp(r'^[Kk]ecamatan\s+'), '')}, ${(placeMark[0].subAdministrativeArea ?? '').replaceFirst(RegExp(r'^([Kk]abupaten|[Kk]ota)\s+'), '')} ${placeMark[0].postalCode ?? ''}"
@@ -813,12 +897,9 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
       bool qrCancel = false;
       String selfieUrl = '';
       String qrResult = '';
-      dynamic tArray = diamondTextToList(widget.component['text'] ?? []);
-      // This widget reads text slots up to index 26 (26 = QR button label).
-      // Tenants whose sheet supplies fewer fields must not crash on access.
-      while (tArray.length < 27) {
-        tArray.add(tArray.length == 26 ? 'Scan QR' : '');
-      }
+      // ponytail: ?? '' is intentional — diamondTextToList(String) would TypeError
+      // on the old ?? [] fallback if component['text'] were null
+      List tArray = padTextArray(diamondTextToList(widget.component['text'] ?? ''));
       if (widget.component['opMode'] == 'qr-checker-single' ||
           widget.component['opMode'] == 'qr-checker-continuous') {
         qrPhoto = true;
@@ -933,16 +1014,363 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
       }
     } // end of acquireQrSelfie
 
+    Future<void> doQrSelfieFlow(List textArray, OtqState currentData) async {
+      // ponytail: all-in-one inner function; split when testable seams emerge
+      try {
+        // --- §3 step 1 (geofence) handled by caller via stacked case ---
+
+        // --- §3 step 2: QR scan loop (indefinite until valid or cancel) ---
+        dynamic p;
+        dynamic q;
+        await Future.wait([omLqrReaderP(), osLqrMakerQ()]).then((res) {
+          p = res[0];
+          q = res[1];
+        });
+
+        String finalQrText = '';
+        bool qrValid = false;
+        while (!qrValid) {
+          String? qrText = await attendanceTakeQR(
+              textArray.length > 26 ? textArray[26] : 'Scan QR',
+              '_OtqQR1',
+              widget.component,
+              'loc');
+
+          // User cancelled the scanner
+          if (qrText == null ||
+              qrText == 'null' ||
+              qrText == emptyString ||
+              qrText.isEmpty) {
+            setDataOK('2');
+            return;
+          }
+
+          // Validate QR via lqrVerify + #LQR_LIST lookup
+          String verifiedQr = await lqrVerify(p, q, qrText);
+          if (verifiedQr != errorString) {
+            final dynamic lqrList =
+                transactionStore.state.screenTx['#LQR_LIST'];
+            if (lqrList != null &&
+                lqrList is Map &&
+                lqrList[verifiedQr] != null) {
+              finalQrText = verifiedQr;
+              qrValid = true;
+            }
+          }
+
+          if (!qrValid) {
+            // Show invalid-QR dialog with Scan Lagi / Batal (§3 step 2 loop)
+            bool rescan = false;
+            await Get.dialog(AlertDialog(
+              title: Text(textArray.length > 9
+                  ? (textArray[9] ?? 'QR salah')
+                  : 'QR salah'),
+              content: Text(textArray.length > 10
+                  ? (textArray[10] ?? '')
+                  : ''),
+              actions: <Widget>[
+                TextButton(
+                  child: Text(textArray.length > 1
+                      ? (textArray[1] ?? 'Batal')
+                      : 'Batal'),
+                  onPressed: () {
+                    rescan = false;
+                    Get.back();
+                  },
+                ),
+                TextButton(
+                  child: Text(textArray.length > 11
+                      ? (textArray[11] ?? 'Scan Lagi')
+                      : 'Scan Lagi'),
+                  onPressed: () {
+                    rescan = true;
+                    Get.back();
+                  },
+                ),
+              ],
+            ));
+            if (!rescan) {
+              setDataOK('2');
+              return;
+            }
+            // Loop continues to re-scan
+          }
+        } // end QR scan loop
+
+        // Per-scanned-QR geofence: the scanned QR's OWN location must be in range
+        // (fixes "scan BSD A while nearest BSD B" — reject if you're not AT the
+        // scanned QR). Checked here (pre-camera) so a rejected scan wastes no
+        // selfie/upload. Opt-in via outPositionAllowed:FALSE, like the pre-scan gate.
+        if (await blockIfOutsideScannedLqr(finalQrText, currentData.latitude,
+            currentData.longitude, currentData.accuracy, textArray)) {
+          setDataOK('2');
+          return;
+        }
+
+        // --- §3 step 2→3 transition: Scenario resolution (actionLast switch) ---
+        late String dialogText1;
+        late String fromLinkOption;
+        int nowTime = await getRealTime();
+
+        switch (widget.component['actionLast'] ?? "Checkpoint") {
+          case 'clock-out':
+            dialogText1 = textArray[3] ?? "--Bad Text#4--";
+            fromLinkOption = 'normal-clock-in';
+            break;
+
+          case 'clock-in':
+            if ((widget.component['timeClockOut1'] ?? 0) <= nowTime &&
+                nowTime <= (widget.component['timeClockOut2'] ?? 0)) {
+              dialogText1 = textArray[4] ?? "--Bad Text#5--";
+              fromLinkOption = 'normal-clock-out';
+            } else {
+              // W1 fix: barrierDismissible: false prevents LateInitializationError
+              // on dialogText1/fromLinkOption if user dismisses barrier without
+              // pressing a button. Existing modes are NOT changed.
+              await Get.dialog(
+                  AlertDialog(
+                    title: Text(textArray[15] ?? "--Bad Text#16--"),
+                    content: Text(textArray[16] ?? "--Bad Text#17--"),
+                    actions: <Widget>[
+                      TextButton(
+                        child: Text(textArray[18] ?? "--Bad Text#19--"),
+                        onPressed: () {
+                          dialogText1 = textArray[5] ?? "--Bad Text#6--";
+                          fromLinkOption = 'clock-out-overtime';
+                          Get.back();
+                        },
+                      ),
+                      TextButton(
+                        child: Text(textArray[17] ?? "--Bad Text#18--"),
+                        onPressed: () {
+                          dialogText1 = textArray[6] ?? "--Bad Text#7--";
+                          fromLinkOption = 'forgot-clock-out';
+                          Get.back();
+                        },
+                      ),
+                    ],
+                  ),
+                  barrierDismissible: false);
+            }
+            break;
+
+          default: // Checkpoint, scenario 5
+            // For qr-selfie checkpoint: use tArray[30] (qr+selfie specific text)
+            // falling back to tArray[7] if tArray[30] is empty (pad default)
+            String qrSelfieMsg = (textArray.length > 30 &&
+                    textArray[30] != null &&
+                    textArray[30].toString().isNotEmpty)
+                ? textArray[30]
+                : (textArray[7] ?? "--Bad Text#8--");
+            dialogText1 = qrSelfieMsg;
+            fromLinkOption = 'checkpoint';
+        } // end actionLast switch
+
+        // §3 step 3: QR valid → straight to selfie camera (no dialog; user feedback).
+        // Let the just-closed QR scanner (mobile_scanner) release the physical
+        // camera before the selfie camera (camera plugin) opens. Without this
+        // settle the two plugins contend for the same hardware and the selfie
+        // preview comes up blank white (mirrors ftz_checker's checkerTakePicture).
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        // --- §3 step 3→4 transition: Front-camera selfie ---
+        List<CameraDescription>? cams = transactionStore
+            .state.screenTx['#CAMS'] as List<CameraDescription>?;
+        if (cams == null || cams.isEmpty) {
+          setDataOK('2');
+          return;
+        }
+        transactionStore.dispatch(
+            UpdateScreenTxAction(ScreenTransaction({'#CAMERA': true})));
+
+        int maxSize = (widget.component['imgWidth'] ?? 540) >
+                (widget.component['imgHeight'] ?? 540)
+            ? widget.component['imgWidth'] ?? 540
+            : widget.component['imgHeight'] ?? 540;
+        String uniqueFilename =
+            '${widget.component['filename'] ?? 'file'}_${const Uuid().v4().replaceAll('-', '')}';
+
+        String capturedPath;
+        try {
+          capturedPath = await acquireCamera(
+            cams,
+            widget.component['label'] ?? 'Camera',
+            'front',
+            maxSize,
+            widget.component['quality'] ?? 80,
+            h,
+            w,
+          );
+        } catch (eCam) {
+          errorReport(eCam);
+          capturedPath = emptyString;
+        }
+        transactionStore.dispatch(
+            UpdateScreenTxAction(ScreenTransaction({'#CAMERA': false})));
+
+        if (capturedPath == emptyString || capturedPath.isEmpty) {
+          setDataOK('2');
+          return;
+        }
+
+        // --- §3 step 3→4 transition: Synchronous upload with retry ---
+        // C2 fix: normalize the camera capture path ONCE before the retry loop.
+        // saveImageToCloud internally calls renamePath which MOVES the OTQC-artifact
+        // camera file on first call. If the upload fails, the original capturedPath
+        // no longer exists and retries would fail forever with invalidPathPrefix02.
+        // By calling renamePath here, we get the stable otq_images/ path; subsequent
+        // renamePath calls inside saveImageToCloud see no OTQC artifact and return
+        // the path unchanged (api.dart:709-711 else-branch).
+        String stablePath = await renamePath(
+          originalImagePath: capturedPath,
+          folder: widget.component['folder'] ?? 'default',
+          fileName: uniqueFilename,
+        );
+
+        String uploadedUrl = '';
+        bool uploadSuccess = false;
+        while (!uploadSuccess) {
+          List<String> uploadResult = await saveImageToCloud(
+            imagePath: stablePath,
+            folder: widget.component['folder'] ?? 'default',
+            rawFileName: uniqueFilename,
+          );
+          if (uploadResult.length > 1 &&
+              isValidImageUrl(uploadResult[1])) {
+            uploadedUrl = uploadResult[1];
+            uploadSuccess = true;
+          } else {
+            // Upload failed — offer retry (re-upload same file, not re-capture)
+            bool retryUpload = false;
+            await Get.dialog(AlertDialog(
+              title: Text(textList['Fail'] ?? 'Gagal'),
+              content: Text(textList['Retry'] ??
+                  'Gagal, coba ulangi sekali lagi.'),
+              actions: <Widget>[
+                TextButton(
+                  child: Text(textArray.length > 1
+                      ? (textArray[1] ?? 'Batal')
+                      : 'Batal'),
+                  onPressed: () {
+                    retryUpload = false;
+                    Get.back();
+                  },
+                ),
+                TextButton(
+                  child: Text(textArray.length > 8
+                      ? (textArray[8] ?? 'OK')
+                      : 'OK'),
+                  onPressed: () {
+                    retryUpload = true;
+                    Get.back();
+                  },
+                ),
+              ],
+            ));
+            if (!retryUpload) {
+              setDataOK('2');
+              return;
+            }
+            // Loop continues to re-upload same stable file
+          }
+        } // end upload retry loop
+
+        // --- §3 step 4: Write attendance (ONCE) ---
+        Position? position;
+        List<Placemark> placeMark = [];
+        int writeTime = 0;
+
+        await Future.wait([
+          getLocation(),
+          getRealTime(),
+        ]).then((res) {
+          position = res[0];
+          writeTime = res[1];
+        });
+
+        if (position == null) {
+          setDataOK('1');
+          await attendanceDialog(
+              title: textList['Fail'] ?? 'Gagal',
+              message: 'Gagal, tidak dapat membaca lokasi GPS.',
+              okString: textArray.length > 8
+                  ? (textArray[8] ?? 'Ok')
+                  : 'Ok');
+          return;
+        }
+
+        try {
+          placeMark = await placemarkFromCoordinates(
+              position!.latitude, position!.longitude);
+        } catch (e) {
+          errorReport(e);
+        }
+
+        actionLock('qrSelfie write attendance_qr_selfie_gps_verify');
+        vibrate(duration: 100);
+
+        widget.component['route'] =
+            widget.component['route'] ?? home;
+        OtqState locSensor = OtqState().getDataFrom(
+            DateTime.fromMillisecondsSinceEpoch(writeTime),
+            position!,
+            placeMark);
+        String locString = getLocationString(
+            finalQrText, uploadedUrl, fromLinkOption, locSensor);
+        saveData(widget.scrName, locString);
+        routeStack.pop();
+
+        await attendanceSuccessDialog(
+            title: textArray.length > 2
+                ? (textArray[2] ?? '-- Title --')
+                : '-- Title --',
+            message1: dialogText1,
+            message2: locationNameFromScannedLqr(finalQrText) ??
+                locationNameFromLqrRef(locSensor.latitude,
+                    locSensor.longitude, locSensor.accuracy) ??
+                (placeMark.isNotEmpty
+                    ? "${placeMark[0].subLocality ?? ''}, ${(placeMark[0].locality ?? '').replaceFirst(RegExp(r'^[Kk]ecamatan\s+'), '')}, ${(placeMark[0].subAdministrativeArea ?? '').replaceFirst(RegExp(r'^([Kk]abupaten|[Kk]ota)\s+'), '')} ${placeMark[0].postalCode ?? ''}"
+                    : ""),
+            message3:
+                '$plusMinus ${position == null ? "-" : position!.accuracy.round()}m',
+            okString: textArray.length > 8 ? textArray[8] : 'Ok');
+      } catch (e) {
+        errorReport(e);
+        setDataOK('2');
+        Get.dialog(AlertDialog(
+          title: Text(textList['Fail'] ?? 'Gagal'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(textList['Retry'] ?? 'Gagal, coba ulangi.'),
+              Text('System: (${e.toString()})'),
+              const Text('Position: qr-selfie(1)'),
+              Text(textList['ScreenShot'] ?? ''),
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: Text(textList['OK'] ?? 'Ok'),
+              onPressed: () {
+                Get.back();
+              },
+            ),
+          ],
+        ));
+      }
+    } // end of doQrSelfieFlow
+
     media = MediaQuery.maybeOf(context);
     h = media?.size.height - 20;
     w = media.size.width - 20;
     const double defaultAspectRatio = 18 / 12;
     var topPad = 6.0;
     double fontSize = (widget.component['fontSize'] ?? 14.0).toDouble();
-    var textArray = diamondTextToList(widget.component['text']);
-    while (textArray.length < 27) {
-      textArray.add(textArray.length == 26 ? 'Scan QR' : '');
-    }
+    // ponytail: ?? '' is intentional — diamondTextToList(String) would TypeError
+    // on a null text; old code had no guard here at all
+    var textArray = padTextArray(diamondTextToList(widget.component['text'] ?? ''));
     Widget button1;
     if (widget.single) {
       button1 = Center(
@@ -1022,6 +1450,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                               gotoRoute(toGo);
                               break; // end case 'qr-checker-single'
 
+                            case 'qr-selfie':
                             case 'qr-single':
                               final bool fakeGpsAllowed = (widget
                                           .component['fakeGpsAllowed']
@@ -1145,9 +1574,20 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                 setDataOK('2');
                                 break;
                               }
-                              String myPage = '_OtqQR1';
-                              await acquireQrSelfie(myPage, widget.scrName,
-                                  widget.component, currentData, false);
+                              if ((widget.component['opMode'] ??
+                                      'gps-single') ==
+                                  'qr-selfie') {
+                                await doQrSelfieFlow(
+                                    textArray, currentData);
+                              } else {
+                                String myPage = '_OtqQR1';
+                                await acquireQrSelfie(
+                                    myPage,
+                                    widget.scrName,
+                                    widget.component,
+                                    currentData,
+                                    false);
+                              }
                               break;
 
                             case 'selfie':
@@ -1519,6 +1959,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                         }
                         break; // end case qr-checker-single
 
+                      case 'qr-selfie':
                       case 'qr-single':
                         final bool fakeGpsAllowed = (widget
                                     .component['fakeGpsAllowed']
@@ -1639,9 +2080,14 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                           setDataOK('2');
                           break;
                         }
-                        String myPage = '_OtqQR1';
-                        await acquireQrSelfie(myPage, widget.scrName,
-                            widget.component, currentData, false);
+                        if ((widget.component['opMode'] ?? 'gps-single') ==
+                            'qr-selfie') {
+                          await doQrSelfieFlow(textArray, currentData);
+                        } else {
+                          String myPage = '_OtqQR1';
+                          await acquireQrSelfie(myPage, widget.scrName,
+                              widget.component, currentData, false);
+                        }
                         break;
 
                       case 'selfie':

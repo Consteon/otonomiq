@@ -45,9 +45,8 @@ class FirebaseNotificationRepository implements NotificationRepository {
 
   @override
   Future<void> updateNotification(Notification update) {
-    return notificationCollection
-        .doc(update.vid)
-        .update(update.toEntity().toDocument());
+    return safeFsUpdate(notificationCollection.doc(update.vid),
+        update.toEntity().toDocument(), 'updateNotification');
   }
 
 //  @override

@@ -32,3 +32,24 @@ bool eq(dynamic a, dynamic b) {
   }
   return sa == sb; // string fallback
 }
+
+/// Whether a resolved token value is "empty" for search-DSL purposes.
+///
+/// Returns `true` when [value] is:
+///   - `null`
+///   - `""` (empty string)
+///   - whitespace-only (e.g. `"   "`)
+///
+/// This is the SINGLE source of truth for empty-token detection across the
+/// search-DSL layer. Used by `resolveScreenTxTokens` (leave literal when
+/// empty), `filterByMultiClause` (fail-closed on empty clause value), and
+/// `writeNativeFields` (refuse to write with empty search clause).
+///
+/// CRITICAL: the system clears `stock_location.dv` to `""` on closing
+/// (`dv◼⭘dn◼`), so `{vehicleId}` resolving from `dv◼{driverVid}` is born
+/// as `""` (not null). A null-only check would still leak. This function
+/// treats `""` as empty.
+bool isTokenEmpty(String? value) {
+  if (value == null) return true;
+  return value.trim().isEmpty;
+}

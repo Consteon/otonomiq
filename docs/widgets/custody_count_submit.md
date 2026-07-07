@@ -28,6 +28,7 @@ The widget has three code paths selected by `mode`:
   (cst -> closed via field search), optionally creates an investigation doc
   on discrepancy, then navigates by reconciliation result (matchRoute /
   mismatchRoute).
+- **Trip sequence (multi-trip/day):** C1 resolves the active opening by Firestore doc-id (`fetchOpeningState`) to close that SPECIFIC trip, clears `dv`/`dn` on stock_location (designation reset), and seq-suffixes the opening/closing/investigation cnm (`-2`, `-3`, …) when more than one opening exists that day.
 
 **saveSend plug (Phase A):** When the component sets `action: "savesend"`,
 O1 and C1 also run the saveSend pipeline after the native write -- preserving

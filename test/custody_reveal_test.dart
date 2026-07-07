@@ -529,4 +529,46 @@ void main() {
       expect(buildDpFromEdited(ie, editStore), isEmpty);
     });
   });
+
+  // -- cst flip in write patch (R2-A) ----------------------------------------
+
+  group('cst flip in write patch', () {
+    test('match path patch includes cst:custody_confirmed', () {
+      // Simulates the exact patch from CustodyReveal build (match path)
+      // + the cst augmentation from _writeAndNavigate.
+      final patch = <String, dynamic>{
+        'ip': [
+          {'ii': 'galon', 'cd': 'full', 'qt': 25},
+          {'ii': 'lpg12', 'cd': 'full', 'qt': 17},
+        ],
+        'rs': 'matched',
+      };
+      // _writeAndNavigate adds cst before writeNativeFields:
+      patch['cst'] = 'custody_confirmed';
+
+      expect(patch['cst'], 'custody_confirmed');
+      expect(patch['rs'], 'matched');
+      expect(patch.length, 3); // ip, rs, cst
+    });
+
+    test('mismatch path patch includes cst:custody_confirmed', () {
+      // Simulates the exact patch from CustodyReveal build (mismatch path)
+      // + the cst augmentation from _writeAndNavigate.
+      final patch = <String, dynamic>{
+        'ip': [
+          {'ii': 'galon', 'cd': 'full', 'qt': 25},
+        ],
+        'dp': [
+          {'ii': 'galon', 'cd': 'full', 'ex': 25, 'ac': 31, 'dl': 6},
+        ],
+        'rs': 'discrepancy_detected',
+      };
+      // _writeAndNavigate adds cst before writeNativeFields:
+      patch['cst'] = 'custody_confirmed';
+
+      expect(patch['cst'], 'custody_confirmed');
+      expect(patch['rs'], 'discrepancy_detected');
+      expect(patch.length, 4); // ip, dp, rs, cst
+    });
+  });
 }
