@@ -7,7 +7,8 @@ import 'admin_home_support.dart'; // executeUpdateEventRow
 ///
 /// Lists stock_location vehicles (lt=='vehicle'), shows plate + N task aktif.
 /// Tap + confirm -> [executeUpdateEventRow] merge via the `updateEventRow` DSL
-/// template (online-only, bypasses history queue).
+/// template (offline-aware: the SDK cache serves the query and queues the
+/// write; bypasses the history queue).
 ///
 /// NOT a dispatch branch -- launched imperatively via showModalBottomSheet.
 /// Shared between CoordinationSignalList (signal actions) and
@@ -86,11 +87,16 @@ class _VehiclePickerSheetState extends State<VehiclePickerSheet> {
     setState(() => _writing = false);
 
     if (success) {
+      final bool offline = !internetConnectionFlag.value;
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Berhasil'),
-          duration: Duration(seconds: 2),
+        SnackBar(
+          content: Text(
+            offline
+                ? 'Tersimpan offline — dikirim otomatis saat online'
+                : 'Berhasil',
+          ),
+          duration: const Duration(seconds: 2),
         ),
       );
     } else {

@@ -1,7 +1,9 @@
 import 'dart:core';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../notification/bloc.dart';
+
 import '../global.dart';
+import '../notification/bloc.dart';
 
 abstract class NotificationRepository {
   Future<void> addNewNotification(Notification notification);
@@ -14,8 +16,9 @@ class FirebaseNotificationRepository implements NotificationRepository {
   final notificationList = FirebaseFirestore.instance
       .collection(firestoreIO)
       .orderBy('lt', descending: true);
-  final notificationCollection =
-      FirebaseFirestore.instance.collection(firestoreIO);
+  final notificationCollection = FirebaseFirestore.instance.collection(
+    firestoreIO,
+  );
 
   @override
   Future<void> addNewNotification(Notification notification) {
@@ -30,34 +33,39 @@ class FirebaseNotificationRepository implements NotificationRepository {
   @override
   Stream<List<Notification>> notifications() {
     // the stream of notification
-//    return notificationList.snapshots().map((snapshot) {
+    //    return notificationList.snapshots().map((snapshot) {
     return FirebaseFirestore.instance
         .collection(firestoreIO)
         .orderBy('lt', descending: true)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs
-          .map((doc) =>
-              Notification.fromEntity(NotificationEntity.fromSnapshot(doc)))
-          .toList();
-    });
+          return snapshot.docs
+              .map(
+                (doc) => Notification.fromEntity(
+                  NotificationEntity.fromSnapshot(doc),
+                ),
+              )
+              .toList();
+        });
   }
 
   @override
   Future<void> updateNotification(Notification update) {
-    return notificationCollection
-        .doc(update.vid)
-        .update(update.toEntity().toDocument());
+    return safeFsUpdate(
+      notificationCollection.doc(update.vid),
+      update.toEntity().toDocument(),
+      'updateNotification',
+    );
   }
 
-//  @override
-//  Stream<List<Notification>> messages() {
-//    // the stream of messages between my vid and one other vid
-//    return messageList.snapshots().map((snapshot) {
-//      return snapshot.documents
-//          .map((doc) =>
-//          Notification.fromEntity(NotificationEntity.fromSnapshot(doc)))
-//          .toList();
-//    });
-//  }
+  //  @override
+  //  Stream<List<Notification>> messages() {
+  //    // the stream of messages between my vid and one other vid
+  //    return messageList.snapshots().map((snapshot) {
+  //      return snapshot.documents
+  //          .map((doc) =>
+  //          Notification.fromEntity(NotificationEntity.fromSnapshot(doc)))
+  //          .toList();
+  //    });
+  //  }
 }

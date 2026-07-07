@@ -63,6 +63,7 @@ class CustodyCountSubmit extends StatefulWidget {
 class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
   String _workforceCode = ''; // O1: workforce subscription code
   String _stockLocationCode = ''; // O1: stock_location subscription code
+  String _vehicleCheckCode = ''; // C1: vehicle_check subscription code
   List<String> _textArray = [];
 
   bool get _isOpening =>
@@ -77,6 +78,7 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
     _parseText();
     _subscribeWorkforce();
     _subscribeStockLocation();
+    _subscribeVehicleCheck();
   }
 
   void _parseText() {
@@ -150,6 +152,28 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
     }
   }
 
+  /// Subscribe to the vehicle_check collection so C1 close can resolve the
+  /// active opening doc-id and count existing openings for cnm suffix.
+  /// C1 only: early-returns for O1/P6.
+  void _subscribeVehicleCheck() {
+    if (!_isClosing) return;
+    final String rawCheckTable = (widget.component['checkTable'] ?? '')
+        .toString()
+        .trim();
+    if (rawCheckTable.isEmpty) return;
+    final String appVid = resolveAppVid(widget.component);
+    final TablePath tp = parseTablePath(rawCheckTable);
+    if (tp.tableDocId.isNotEmpty) {
+      _vehicleCheckCode = '${tp.tableDocId}/${tp.subColl}';
+      subscribeToMapCollection(
+        appVid,
+        tp.tableDocId,
+        tp.subColl,
+        _vehicleCheckCode,
+      );
+    }
+  }
+
   /// Resolve the logged-in checker's name from workforce where VID == #VID.
   /// Returns empty string if not found (degrade-safe: gn will be empty).
   String _resolveCheckerName() {
@@ -173,19 +197,6 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       }
     }
     return '';
-  }
-
-  /// Generate the deterministic opening doc id: CHK-{vehicleId}-{yyyyMMdd(WIB)}.
-  String _generateCnm(String vehicleId) {
-    const int wibOffsetMs = 25200000; // UTC+7
-    final int nowMs = getNowMillisecondFromEpoch();
-    final DateTime wibNow = DateTime.fromMillisecondsSinceEpoch(
-      nowMs + wibOffsetMs,
-      isUtc: true,
-    );
-    final String dateStr =
-        '${wibNow.year}${wibNow.month.toString().padLeft(2, '0')}${wibNow.day.toString().padLeft(2, '0')}';
-    return 'CHK-$vehicleId-$dateStr';
   }
 
   /// Resolve the vehicle id for warehouse opening/closing doc writes (O1/C1).
@@ -260,25 +271,76 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       return;
     }
 
-    // 3. Write natively
+    // 3. Resolve target doc-id from the same subscription the count-list
+    //    populates (mapTableContent). Write by doc-id when available;
+    //    fall back to search-based writeNativeFields for single-trip /
+    //    pre-trip data.
     CustodyCountSubmit._writing[widget.scrName] = true;
     // Trigger rebuild to show spinner
     CustodyCountList.countRev.value++;
 
     try {
-      final bool success = await writeNativeFields(
-        component: widget.component,
-        rawTable: rawTable,
-        rawSearch: rawSearch,
-        scrName: widget.scrName,
-        patch: {writeField: ipArray},
-      );
+      // 3a. Doc-id resolution (byte-identical to custody_count_list._findCheckDoc)
+      String docId = '';
+      final TablePath tp = parseTablePath(rawTable);
+      if (tp.tableDocId.isNotEmpty && tp.subColl.isNotEmpty) {
+        final String checkCode = '${tp.tableDocId}/${tp.subColl}';
+        final List<Map<String, dynamic>> docs = List<Map<String, dynamic>>.from(
+          mapTableContent[checkCode] ?? const [],
+        );
+        if (rawSearch.isNotEmpty && docs.isNotEmpty) {
+          final List<Map<String, dynamic>> matched = filterDriverHomeDocs(
+            docs,
+            rawSearch,
+            widget.scrName,
+          );
+          if (matched.isNotEmpty) {
+            final Map<String, dynamic>? picked = pickActiveOpening(matched);
+            final Map<String, dynamic> target = picked ?? matched.first;
+            docId = (target['__docId'] ?? '').toString().trim();
+          }
+        }
+      }
+
+      // 3b. Write: prefer doc-id (createNativeDoc), fall back to search
+      bool success = false;
+      if (docId.isNotEmpty) {
+        success = await createNativeDoc(
+          component: widget.component,
+          rawTable: rawTable,
+          docId: docId,
+          docMap: {writeField: ipArray},
+        );
+      }
+      if (!success) {
+        // Fallback: search-based write (single-trip / no subscription data)
+        success = await writeNativeFields(
+          component: widget.component,
+          rawTable: rawTable,
+          rawSearch: rawSearch,
+          scrName: widget.scrName,
+          patch: {writeField: ipArray},
+        );
+      }
 
       if (!success) {
+        print(
+          '[CustodyCountSubmit] native write failed: table=$rawTable, '
+          'search=$rawSearch, field=$writeField, '
+          'path=${docId.isNotEmpty ? "docid($docId)" : "search"}',
+        );
         if (context.mounted) {
           _showSnackBar(context, 'Gagal menyimpan data');
         }
         return;
+      }
+
+      // Offline: write is queued locally (SDK persistence) -- tell the user.
+      if (!internetConnected() && context.mounted) {
+        _showSnackBar(
+          context,
+          'Tersimpan offline — dikirim otomatis saat online',
+        );
       }
 
       // 4. Navigate to custodyReveal
@@ -320,7 +382,8 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       final String vehicleId = _resolveWarehouseVehicleId(screenTx);
       final String checkerVid = (screenTx['#VID'] ?? '').toString().trim();
       final String checkerName = _resolveCheckerName();
-      final String genCnm = _generateCnm(vehicleId);
+      // genCnm uses the seq from the opening count (computed below after
+      // today/nowMs). Moved to after the count resolution.
       // Resolve warehouseId with precedence (config override > #ACTIVE_WAREHOUSE
       // [task.gl-derived] > stock_location lt=='warehouse' fallback, spec §2.1).
       final String rawWhCfg = (widget.component['warehouseId'] ?? '')
@@ -358,6 +421,20 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       final String today = todayEpochMidnightWib();
       final int nowMs = getNowMillisecondFromEpoch();
 
+      // Trip sequence: count existing same-day openings for this vehicle
+      // to determine the cnm suffix (seq). First opening = 1 (no suffix).
+      final String rawCheckTable = (widget.component['checkTable'] ?? '')
+          .toString()
+          .trim();
+      final openingState = await fetchOpeningState(
+        component: widget.component,
+        rawTable: rawCheckTable,
+        vehicleId: vehicleId,
+        today: today,
+      );
+      final int seq = openingState.todayCount + 1;
+      final String genCnm = genOpeningCnm(vehicleId, nowMs: nowMs, seq: seq);
+
       // W1: warn if warehouseId is empty (no tasks today)
       if (warehouseId.isEmpty) {
         devPrint(
@@ -393,9 +470,7 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       // 3. Build the FULL opening doc map (scalars + ie[] array).
       //    Phase B: `cdt`/`ldt` are Number (epoch-ms) per the runtime type
       //    contract (eq-match {today}); `t` is int (chronological sort).
-      final String rawCheckTable = (widget.component['checkTable'] ?? '')
-          .toString()
-          .trim();
+      // rawCheckTable already declared above (trip sequence count).
       // I3: envelope tablevid so the native opening doc matches the shape of
       //     DSL-created vehicle_check docs (vidtable override, else docId).
       final String tableVid =
@@ -439,7 +514,65 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
         return; // NO nav on failure
       }
 
-      // 5. Designate driver + audit Event via saveSend. When action is
+      // 4b. Designate driver DIRECTLY on the stock_location row (dv/dn),
+      //     bypassing the offline history queue. The config's
+      //     `updateEventRow`->saveSend->historySync path does NOT sync this
+      //     record on-device (historySync reports "no history sent"), so the
+      //     designation never landed. A direct `writeNativeFields` merge onto
+      //     the EXISTING stock_location row is offline-safe (Firestore SDK
+      //     persistence), type-agnostic on `lv`, and mirrors the opening-doc
+      //     `createNativeDocAutoId` above that already lands.
+      //     (See memory: project_warehouse_o1_designation_no_sync.)
+      final String chosenVid = (screenTx['#CHOSEN_DRIVER_VID'] ?? '')
+          .toString()
+          .trim();
+      final String chosenName = (screenTx['#CHOSEN_DRIVER_NAME'] ?? '')
+          .toString()
+          .trim();
+      if (chosenVid.isEmpty) {
+        // Submit is gated on a chosen driver; guard defensively so an empty
+        // vid can never blank an existing dv/dn.
+        if (context.mounted) {
+          _showSnackBar(context, 'Pilih pengemudi dulu');
+        }
+        return;
+      }
+      // stock_location lives in the same container as checkTable
+      // (vehicle_check), subcollection `stock_location`; honor the optional
+      // `warehouseTable` override (mirrors _subscribeStockLocation).
+      final String rawWhTable = (widget.component['warehouseTable'] ?? '')
+          .toString()
+          .trim();
+      final String stockDocId = rawWhTable.isNotEmpty
+          ? parseTablePath(rawWhTable).tableDocId
+          : parseTablePath(rawCheckTable).tableDocId;
+      final bool designated = await writeNativeFields(
+        component: widget.component,
+        rawTable: '$stockDocId//stock_location',
+        rawSearch: 'lv\u{25FC}$vehicleId',
+        scrName: widget.scrName,
+        patch: {'dv': chosenVid, 'dn': chosenName},
+      );
+      if (!designated) {
+        if (context.mounted) {
+          _showSnackBar(context, 'Gagal menetapkan pengemudi');
+        }
+        return; // NO nav on failure
+      }
+
+      // Offline: both native writes (opening doc + dv/dn) are queued locally
+      // (SDK persistence) -- tell the user before saveSend/navigation.
+      if (!internetConnected() && context.mounted) {
+        _showSnackBar(
+          context,
+          'Tersimpan offline — dikirim otomatis saat online',
+        );
+      }
+
+      // 5. Audit Event via saveSend (evidence + GPS). Designation is now done
+      //    directly above; the component's `updateEventRow` still rides
+      //    saveSend but is a harmless idempotent no-op (writes the same dv/dn
+      //    if/when the history queue is ever fixed). When action is
       //    'savesend', the component's addToEvent is preserved so saveSend
       //    writes an Event audit row (evidence) + GPS. When action is absent,
       //    addToEvent is stripped (legacy byte-identical behavior).
@@ -557,12 +690,34 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       final String today = todayEpochMidnightWib();
       final int nowMs = getNowMillisecondFromEpoch();
 
+      // Trip sequence: single Firestore query resolves active opening doc-id
+      // for targeted close AND count of today's openings for cnm suffix.
+      final String rawCheckTable = (widget.component['checkTable'] ?? '')
+          .toString()
+          .trim();
+      final openingState = await fetchOpeningState(
+        component: widget.component,
+        rawTable: rawCheckTable,
+        vehicleId: vehicleId,
+        today: today,
+      );
+      final String activeDocId = openingState.activeDocId;
+      // seq: the seq of the trip being CLOSED (= the active opening).
+      // If we can identify which seq this opening is, use the count of
+      // today's openings. Fallback: seq=1.
+      final int seq = openingState.todayCount > 0 ? openingState.todayCount : 1;
+
       // Deterministic doc numbers (cnm/vnm field values; same nowMs ->
       // same WIB date stamp). Docs themselves use Firestore auto-ids.
-      final String closingCnm = genClosingCnm(vehicleId, nowMs: nowMs);
+      final String closingCnm = genClosingCnm(
+        vehicleId,
+        nowMs: nowMs,
+        seq: seq,
+      );
       final String investigationVnm = genInvestigationVnm(
         vehicleId,
         nowMs: nowMs,
+        seq: seq,
       );
 
       // I3: #ACTIVE_WAREHOUSE is published by O1's count-list earlier in the
@@ -606,9 +761,7 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       );
 
       // 4. Build closing doc map (scalars + ip[] + dp[] + rs)
-      final String rawCheckTable = (widget.component['checkTable'] ?? '')
-          .toString()
-          .trim();
+      // rawCheckTable already declared above (trip sequence resolution).
       // I3 pattern (from O1): envelope tablevid
       final String tableVid =
           (widget.component['vidtable'] ?? '').toString().trim().isNotEmpty
@@ -654,25 +807,70 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
         return; // NO nav on failure
       }
 
-      // 6. Close the opening doc `cst` -> 'closed' via field search.
-      //    After Phase B (auto-id), the opening doc's Firestore doc id is
-      //    unknown; find it by (cty=opening, vv=vehicleId, cdt=today).
-      //    writeNativeFields is type-agnostic (whereIn:[String, Number])
-      //    so it finds the doc whether cdt was stored as String (legacy)
-      //    or Number (Phase B). Non-blocking: failure is logged only.
-      final String closeSearch =
-          'cty\u{25FC}opening\u{2B58}vv\u{25FC}$vehicleId\u{2B58}cdt\u{25FC}$today';
-      final bool closed = await writeNativeFields(
-        component: widget.component,
-        rawTable: rawCheckTable,
-        rawSearch: closeSearch,
-        scrName: widget.scrName,
-        patch: <String, dynamic>{'cst': 'closed'},
-      );
+      // Offline: closing doc is queued locally (SDK persistence); the
+      // cst-close + investigation writes below queue the same way.
+      if (!internetConnected() && context.mounted) {
+        _showSnackBar(
+          context,
+          'Tersimpan offline — dikirim otomatis saat online',
+        );
+      }
+
+      // 6. Close the SPECIFIC active opening doc `cst` -> 'closed'.
+      //    Multi-trip: the old search (cty+vv+cdt) matches ALL same-day
+      //    openings -> writeNativeFields refuses (>1 match). Use the resolved
+      //    activeDocId to write directly by doc-id via createNativeDoc
+      //    (set-merge: only patches 'cst', leaves other fields intact).
+      //    Fallback: if activeDocId resolution failed, attempt old search.
+      bool closed = false;
+      if (activeDocId.isNotEmpty) {
+        closed = await createNativeDoc(
+          component: widget.component,
+          rawTable: rawCheckTable,
+          docId: activeDocId,
+          docMap: <String, dynamic>{'cst': 'closed'},
+        );
+      }
       if (!closed) {
+        // Fallback: search-based close (single-trip / pre-trip data)
+        final String closeSearch =
+            'cty\u{25FC}opening\u{2B58}vv\u{25FC}$vehicleId\u{2B58}cdt\u{25FC}$today';
+        closed = await writeNativeFields(
+          component: widget.component,
+          rawTable: rawCheckTable,
+          rawSearch: closeSearch,
+          scrName: widget.scrName,
+          patch: <String, dynamic>{'cst': 'closed'},
+        );
+        if (!closed) {
+          devPrint(
+            '[C1 submit] WARNING: opening doc cst-close failed. '
+            'Proceeding (closing doc already written).',
+          );
+        }
+      }
+
+      // 6b. Clear dv/dn on the stock_location row (designation reset).
+      //     Mirrors how O1 designates at line 445: same table/search shape
+      //     (lv◼vehicleId on stock_location), empty-string values.
+      //     Non-blocking: failure is logged only.
+      final String rawWhTable = (widget.component['warehouseTable'] ?? '')
+          .toString()
+          .trim();
+      final String stockDocId = rawWhTable.isNotEmpty
+          ? parseTablePath(rawWhTable).tableDocId
+          : parseTablePath(rawCheckTable).tableDocId;
+      final bool dvCleared = await writeNativeFields(
+        component: widget.component,
+        rawTable: '$stockDocId//stock_location',
+        rawSearch: 'lv\u{25FC}$vehicleId',
+        scrName: widget.scrName,
+        patch: <String, dynamic>{'dv': '', 'dn': ''},
+      );
+      if (!dvCleared) {
         devPrint(
-          '[C1 submit] WARNING: opening doc cst-close failed via '
-          'search ($closeSearch). Proceeding (closing doc already written).',
+          '[C1 submit] WARNING: dv/dn clear failed for $vehicleId. '
+          'Proceeding (closing doc already written).',
         );
       }
 

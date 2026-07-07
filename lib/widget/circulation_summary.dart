@@ -102,6 +102,7 @@ class _CirculationSummaryState extends State<CirculationSummary> {
     return Obx(() {
       final DriverHomeState dhState = getDriverHomeState(widget.scrName);
       dhState.vehicleId.value; // register dependency
+      dhState.activeTrip.value; // register activeTrip dependency (GAP B fix)
 
       final List<Map<String, dynamic>> tasks = _getFilteredTasks();
 

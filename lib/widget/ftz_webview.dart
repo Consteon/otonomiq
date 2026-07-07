@@ -30,7 +30,7 @@ class WebViewState extends State<WebView> {
               // Update loading bar.
             },
             onPageStarted: (String url) {},
-            onPageFinished: (String url) {},
+            onPageFinished: (String url) => _fitWidth(),
             onWebResourceError: (WebResourceError error) {},
             onNavigationRequest: (NavigationRequest request) {
               if (request.url.startsWith('https://www.youtube.com/')) {
@@ -54,7 +54,7 @@ class WebViewState extends State<WebView> {
               // Update loading bar.
             },
             onPageStarted: (String url) {},
-            onPageFinished: (String url) {},
+            onPageFinished: (String url) => _fitWidth(),
             onWebResourceError: (WebResourceError error) {},
             onNavigationRequest: (NavigationRequest request) {
               if (request.url.startsWith('https://www.youtube.com/')) {
@@ -68,23 +68,29 @@ class WebViewState extends State<WebView> {
     }
   }
 
+  // Make arbitrary/exported HTML fit the phone width: force a device-width
+  // viewport (these Google-Docs exports declare none) and neutralise their huge
+  // body padding/max-width (e.g. `body{max-width:468pt;padding:72pt}`) that
+  // otherwise squeezes text into a narrow column with big side gaps.
+  void _fitWidth() {
+    _controller.runJavaScript(
+      "var h=document.head||document.documentElement;"
+      "var m=document.querySelector('meta[name=viewport]');"
+      "if(!m){m=document.createElement('meta');m.name='viewport';h.appendChild(m);}"
+      "m.setAttribute('content','width=device-width, initial-scale=1');"
+      "var s=document.createElement('style');"
+      "s.innerHTML='html,body{max-width:100%!important;margin:0!important;"
+      "padding:16px!important;box-sizing:border-box!important;"
+      "overflow-x:hidden!important;}';"
+      "h.appendChild(s);",
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Web View'),
-      ),
-      body: SizedBox(
-        height: 400,
-        child: WebViewWidget(
-          controller: _controller, // Adjust as needed
-        ),
-      ),
-      // WebViewWidget(
-      //   onWebViewCreated: (controller) => _controller = controller,
-      //   initialUrl: widget.url,
-      //   javascriptMode: JavascriptMode.unrestricted, // Adjust as needed
-      // ),
-    );
+    // Callers (openInWebView / tos_page) already provide the Scaffold + AppBar,
+    // so this just fills the body — no inner AppBar, no fixed height (was 400,
+    // which cut the page off).
+    return WebViewWidget(controller: _controller);
   }
 }

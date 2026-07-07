@@ -526,6 +526,16 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
             }
           }
         }
+        // ── New-customer id-gen hook (B1-A) ───────────────────────────
+        // Generate a unique customer id (lv) and dispatch it into screenTx
+        // BEFORE saveData so the addToEvent `lv◼{newCustomerId}` resolves
+        // in saveSend (api.dart:4278 resolveDriverCurlyTokens). Also sets
+        // screenTx['kl'] so _republishClient + P4 submit carry the new id.
+        // Gate: only the N2 "Daftarkan" button carries this marker token;
+        // no custody/item-execution/other RBT addToEvent contains it.
+        if (hasNewCustomerIdMarker(componentForSave)) {
+          generateAndDispatchNewCustomerId();
+        }
         saveData(timeStamp, scrName, componentForSave, locString, send: send);
         if (routeExist(children[i]['route'])) {
           if (children[i]['route'] == scrName) {

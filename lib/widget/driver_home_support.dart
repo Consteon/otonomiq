@@ -1,4 +1,7 @@
+import 'dart:async'; // unawaited
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/widgets.dart'; // WidgetsBinding (deferred publish)
 import 'package:get/get.dart';
 
 import '../api.dart'; // getTableVid
@@ -22,11 +25,20 @@ class DriverHomeState {
 
   /// Internal: tracks whether vehicleId has been resolved at least once
   /// (distinguishes "empty because not loaded yet" from "genuinely no vehicle").
-  bool vehicleIdResolved = false;
+  /// Reactive so the card scope-gates (read inside Obx) rebuild deterministically
+  /// when the stock_location subscription resolves for an unassigned driver.
+  final RxBool vehicleIdResolved = false.obs;
 
   /// Driver display name (workforce doc field `n`, published by the header).
   /// Used by `resolveDriverCurlyTokens` for `{driverName}` token.
   final RxString driverName = ''.obs;
+
+  /// Active trip doc-id: Firestore doc-id of the newest non-closed
+  /// vehicle_check opening for this vehicle. Published by
+  /// [resolveAndPublishActiveTrip] (called from evaluateGateSearch as a
+  /// side-effect). Used by `resolveDriverCurlyTokens` for `{activeTrip}` token.
+  /// Empty when no active trip exists — fail-closed (pending-safe).
+  final RxString activeTrip = ''.obs;
 }
 
 /// Per-scrName state map. Accessed by header, gate card, TXT label, and
@@ -42,6 +54,135 @@ DriverHomeState getDriverHomeState(String scrName) {
 /// ApproverStickyBar.clearConfigs.
 void clearDriverHomeState(String scrName) {
   driverHomeStates.remove(scrName);
+}
+
+/// Pick the active (newest non-closed) opening from a list of docs.
+///
+/// Filters for `cty == 'opening'`, sorts by `t` desc, and prefers the newest
+/// doc whose `cst != 'closed'`. Falls back to the newest opening overall
+/// (even if closed) when all openings are closed. Returns `null` when the
+/// input contains no opening-shaped docs.
+///
+/// Shared by [resolveAndPublishActiveTrip] (driver pages) and
+/// `_findCheckDoc` in custody_count_list / custody_reveal (P6/P7).
+Map<String, dynamic>? pickActiveOpening(List<Map<String, dynamic>> docs) {
+  final List<Map<String, dynamic>> openings = <Map<String, dynamic>>[];
+  for (final doc in docs) {
+    if ((doc['cty'] ?? '').toString().trim() == 'opening') {
+      openings.add(doc);
+    }
+  }
+  if (openings.isEmpty) return null;
+  // Sort by t descending (newest first)
+  openings.sort((a, b) {
+    final int tA = int.tryParse((a['t'] ?? '0').toString().trim()) ?? 0;
+    final int tB = int.tryParse((b['t'] ?? '0').toString().trim()) ?? 0;
+    return tB.compareTo(tA);
+  });
+  // Prefer newest non-closed
+  for (final doc in openings) {
+    if ((doc['cst'] ?? '').toString().trim() != 'closed') return doc;
+  }
+  // All closed: return newest overall
+  return openings.first;
+}
+
+/// Compute the active trip doc-id from a list of vehicle_check docs.
+///
+/// Returns:
+/// - `null` when [docs] contains zero `cty=='opening'` entries (no openings;
+///   the caller should not treat this as definitive -- another table key may
+///   contain the openings).
+/// - `''` when openings exist but none are active for [vehicleId] (all
+///   `cst=='closed'` or no vv match) -- a legitimate fail-closed result.
+/// - A non-empty doc-id string when an active (non-closed) opening is found
+///   for [vehicleId].
+///
+/// Pure -- no Flutter/Obx/WidgetsBinding deps. Shared by
+/// [resolveAndPublishActiveTrip] and the compute-on-read fallback in
+/// [resolveDriverCurlyTokens]. Uses [eq] for type-tolerant vv comparison
+/// (Number vs String) and [pickActiveOpening] for deterministic multi-opening
+/// selection.
+String? computeActiveTripDocId(
+  List<Map<String, dynamic>> docs,
+  String vehicleId,
+) {
+  if (vehicleId.isEmpty) return null;
+
+  // Gate: only return a definitive answer when docs contain opening-shaped
+  // entries. Zero openings means this table is not vehicle_check (or data
+  // hasn't loaded) -- return null so the caller can try the next key.
+  bool hasAnyOpening = false;
+  for (final doc in docs) {
+    if ((doc['cty'] ?? '').toString().trim() == 'opening') {
+      hasAnyOpening = true;
+      break;
+    }
+  }
+  if (!hasAnyOpening) return null;
+
+  // Filter to this vehicle's docs.
+  final List<Map<String, dynamic>> vvDocs = <Map<String, dynamic>>[];
+  for (final doc in docs) {
+    if (eq((doc['vv'] ?? '').toString().trim(), vehicleId)) {
+      vvDocs.add(doc);
+    }
+  }
+
+  final Map<String, dynamic>? picked = pickActiveOpening(vvDocs);
+  // If picked is non-null but closed, treat as no active trip.
+  if (picked != null && (picked['cst'] ?? '').toString().trim() != 'closed') {
+    return (picked['__docId'] ?? '').toString();
+  }
+  return ''; // openings exist but none active for this vehicle
+}
+
+/// Schedule a deferred publish of [docId] into
+/// [DriverHomeState.activeTrip] for [scrName].
+///
+/// Mirrors the deferred pattern in [resolveAndPublishActiveTrip]: guards
+/// against same-value no-op and re-reads state inside the callback (route
+/// change may have cleared it). Used by both [resolveAndPublishActiveTrip]
+/// and the compute-on-read fallback in [resolveDriverCurlyTokens].
+void _deferActiveTripPublish(String scrName, String docId) {
+  final DriverHomeState state = getDriverHomeState(scrName);
+  if (state.activeTrip.value == docId) return; // already current
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    final DriverHomeState? s = driverHomeStates[scrName];
+    if (s == null) return; // route changed, state cleared
+    if (s.activeTrip.value != docId) {
+      s.activeTrip.value = docId;
+    }
+  });
+}
+
+/// Resolve the active trip doc-id from vehicle_check data in mapTableContent.
+///
+/// Delegates to [computeActiveTripDocId] for the pure compute (vv-filter via
+/// [eq], [pickActiveOpening], cst!='closed' -> docId). Publishes the result
+/// into [DriverHomeState.activeTrip] via [_deferActiveTripPublish].
+///
+/// Called as a side-effect from [evaluateGateSearch] and from
+/// [VehicleCustodyHeader.build] (P5). Publish is deferred via
+/// [WidgetsBinding.instance.addPostFrameCallback] to avoid setState-during-build.
+///
+/// Gate: when [computeActiveTripDocId] returns null (no opening-shaped docs),
+/// returns without publishing -- preserves current activeTrip to avoid
+/// clobbering from a sibling widget whose gateCode targets a different table.
+void resolveAndPublishActiveTrip(String scrName, String checkCode) {
+  if (checkCode.isEmpty) return;
+  final DriverHomeState state = getDriverHomeState(scrName);
+  final String vehicleId = state.vehicleId.value;
+  if (vehicleId.isEmpty) return;
+
+  final List<Map<String, dynamic>> docs = List<Map<String, dynamic>>.from(
+    mapTableContent[checkCode] ?? const [],
+  );
+
+  final String? result = computeActiveTripDocId(docs, vehicleId);
+  if (result == null) return; // no openings -> preserve current activeTrip
+
+  _deferActiveTripPublish(scrName, result);
 }
 
 // ─── appVid resolution (shared by all 5 DriverHome widgets) ────────────────
@@ -117,6 +258,7 @@ Future<String?> readDriverLogin() async {
 ///   {chosenVid}     -> screenTx['#CHOSEN_DRIVER_VID'] (driver chosen on O1)
 ///   {chosenName}    -> screenTx['#CHOSEN_DRIVER_NAME'] (driver name chosen on O1)
 ///   {warehouseId}   -> screenTx['#ACTIVE_WAREHOUSE'] (gudang from task gl)
+///   {activeTrip}   -> DriverHomeState.activeTrip (active vehicle_check opening doc-id)
 ///   {now}           -> getNowMillisecondFromEpoch().toString() (epoch-ms now)
 ///   {today}      -> todayEpochMidnightWib() (epoch-ms of WIB midnight)
 ///
@@ -178,6 +320,32 @@ String resolveDriverCurlyTokens(String raw, String scrName) {
       case 'warehouseId':
         final String v = (screenTx['#ACTIVE_WAREHOUSE'] ?? '').toString();
         return v.isNotEmpty ? v : m.group(0)!;
+      case 'activeTrip':
+        final String v = state.activeTrip.value;
+        if (v.isNotEmpty) return v;
+        // Compute-on-read fallback: scan mapTableContent for vehicle_check
+        // tables when the deferred publisher hasn't fired yet (GAP A fix).
+        // Pages without a gate widget pointing at vehicle_check never call
+        // resolveAndPublishActiveTrip, so activeTrip stays empty. This
+        // fallback computes the docId directly from the subscription data.
+        final String vid = state.vehicleId.value;
+        if (vid.isEmpty) return m.group(0)!;
+        for (final String key in mapTableContent.keys) {
+          if (!key.endsWith('/vehicle_check')) continue;
+          final List<Map<String, dynamic>> checkDocs =
+              List<Map<String, dynamic>>.from(mapTableContent[key] ?? const []);
+          final String? result = computeActiveTripDocId(checkDocs, vid);
+          if (result == null) continue; // no openings in this key
+          if (result.isNotEmpty) {
+            // Schedule deferred publish so state converges for Obx
+            // consumers that touch activeTrip (Part 3).
+            _deferActiveTripPublish(scrName, result);
+            return result;
+          }
+          // result == '' -> openings exist but none active -> fail-closed
+          return m.group(0)!;
+        }
+        return m.group(0)!;
       case 'now':
         return getNowMillisecondFromEpoch().toString();
       case 'today':
@@ -187,8 +355,8 @@ String resolveDriverCurlyTokens(String raw, String scrName) {
         // and non-empty. Otherwise leave literal for resolveScreenTxTokens.
         // Reserved tokens (vehicleId, driverName, tnm, today, driverVid,
         // activeTaskVid, rejectTaskVid, checkerVid, userVid, userName,
-        // activeVehicle, chosenVid, chosenName, warehouseId, now) are
-        // handled by switch cases above and never reach here.
+        // activeVehicle, chosenVid, chosenName, warehouseId, activeTrip, now)
+        // are handled by switch cases above and never reach here.
         final String bareVal = (screenTx[name] ?? '').toString();
         return bareVal.isNotEmpty ? bareVal : m.group(0)!;
     }
@@ -308,14 +476,20 @@ void writeRouteParams(String? rawDsl, String scrName) {
 /// is the field/value separator). All clauses must match for a doc to pass.
 ///
 /// Token resolution (`{key}`) must be done BEFORE calling this.
-/// If any clause has an empty value or still contains an unresolved token
-/// (contains `{`), returns empty list (pending/safe default).
 ///
-/// [docs] — the Firestore map docs to filter.
-/// [resolvedConditions] — the conditions string AFTER autheniumDecode + token
+/// **FAIL-CLOSED CONTRACT (scope-leak prevention):**
+/// If ANY clause has an empty resolved value (null, `""`, or whitespace-only
+/// per [isTokenEmpty]) OR still contains an unresolved `{key}` token, the
+/// ENTIRE query returns an empty list -- "match nothing", NOT "drop the
+/// clause". This prevents data leaks when a scope token like `{vehicleId}`
+/// resolves empty: the remaining clauses (e.g. `tdt◼{today}`) must NOT run
+/// unscoped.
+///
+/// [docs] -- the Firestore map docs to filter.
+/// [resolvedConditions] -- the conditions string AFTER autheniumDecode + token
 ///   resolution (already contains literal `◼` and `⭘` chars).
 ///
-/// Returns matching docs, or empty list if no match or unresolvable token.
+/// Returns matching docs, or empty list if no match or unresolvable/empty token.
 List<Map<String, dynamic>> filterByMultiClause(
   List<Map<String, dynamic>> docs,
   String resolvedConditions,
@@ -331,13 +505,14 @@ List<Map<String, dynamic>> filterByMultiClause(
     if (trimmed.isEmpty) continue;
     // Split on first ◼ (field/value separator)
     final int sep = trimmed.indexOf('\u{25FC}');
-    if (sep < 0) continue; // malformed clause — skip
+    if (sep < 0) continue; // malformed clause -- skip
     final String field = trimmed.substring(0, sep).trim();
     final String value = trimmed.substring(sep + 1).trim();
     if (field.isEmpty) continue;
-    // Unresolved token guard: if value still has `{` (unresolved curly token),
-    // bail to empty (pending).
-    if (value.isEmpty || value.contains('{')) {
+    // FAIL-CLOSED: empty resolved value OR unresolved {token} -> match nothing.
+    // "Empty" covers null, "", and whitespace-only (isTokenEmpty).
+    // This is the primary defense against scope leaks from empty tokens.
+    if (isTokenEmpty(value) || value.contains('{')) {
       return const [];
     }
     pairs.add(MapEntry(field, value));
@@ -403,6 +578,13 @@ bool evaluateGateSearch(String gateCode, String rawGateSearch, String scrName) {
   final List<Map<String, dynamic>> gateDocs = List<Map<String, dynamic>>.from(
     mapTableContent[gateCode] ?? const [],
   );
+  // Side-effect: attempt activeTrip resolution from the gate docs.
+  // Skips publish when docs contain zero cty=='opening' entries (gate targets
+  // a non-vehicle_check table, or subscription not loaded). When openings ARE
+  // present but none active for this vv, publishes '' (legitimate all-closed
+  // clear). Publish is deferred via addPostFrameCallback (Task 3c).
+  // Cost: one in-memory scan, no I/O.
+  resolveAndPublishActiveTrip(scrName, gateCode);
   final List<Map<String, dynamic>> matched = filterDriverHomeDocs(
     gateDocs,
     rawGateSearch,
@@ -653,6 +835,18 @@ String aggregateActualSummary(
     parts.add('${totals[id]} $name');
   }
   return parts.join(' \u{00B7} '); // middle dot separator
+}
+
+// ─── hideZero flag read (shared) ────────────────────────────────────────────
+
+/// True when [component]'s `hideZero` config equals the string "TRUE"
+/// (case/space-insensitive). The server sends String "TRUE", never bool `true`
+/// — a `== true` / bool-parse check never fires (spec §4 Q2). Single read used
+/// by INVENTORY_BUCKET_CARD, ITEM_EXECUTION_LIST pivot, PRECONDITION_GATE_CARD.
+bool hideZeroEnabled(dynamic component) {
+  if (component is! Map) return false; // server JSON is dynamic (convention #7)
+  return (component['hideZero'] ?? '').toString().trim().toUpperCase() ==
+      'TRUE';
 }
 
 // ─── Gate-card cargo manifest (preconditionGateCard) ───────────────────────
@@ -1543,35 +1737,40 @@ String _wibDateStamp(int nowMs) {
       '${wibNow.day.toString().padLeft(2, '0')}';
 }
 
-/// Generate the deterministic OPENING vehicle_check doc id.
+/// Generate the OPENING vehicle_check display id.
 ///
-/// Format: `CHK-{vehicleId}-{YYYYMMDD}` (no suffix). Mirrors O1's private
-/// `_generateCnm` EXACTLY so the C1 closing flow can patch the same opening
-/// doc by id (W1: close `cst` via `createNativeDoc` set-merge, no search
-/// ambiguity). Uses WIB (UTC+7) date. Pure function; [nowMs] overridable.
-String genOpeningCnm(String vehicleId, {int? nowMs}) {
+/// Format:
+///   seq <= 1 -> `CHK-{vehicleId}-{YYYYMMDD}` (backward compat, no suffix)
+///   seq > 1  -> `CHK-{vehicleId}-{YYYYMMDD}-{seq}` (multi-trip suffix)
+///
+/// [seq] is 1-based: first opening of the day = 1 (no suffix), second = 2, etc.
+/// Doc-id uniqueness is Firestore auto-id; cnm is display-only.
+String genOpeningCnm(String vehicleId, {int? nowMs, int seq = 1}) {
   final int now = nowMs ?? getNowMillisecondFromEpoch();
-  return 'CHK-$vehicleId-${_wibDateStamp(now)}';
+  final String base = 'CHK-$vehicleId-${_wibDateStamp(now)}';
+  return seq > 1 ? '$base-$seq' : base;
 }
 
-/// Generate the deterministic CLOSING vehicle_check doc id.
+/// Generate the CLOSING vehicle_check display id.
 ///
-/// Format: `CHK-{vehicleId}-{YYYYMMDD}-C` (suffix `-C` distinguishes from
-/// the opening doc `CHK-{vehicleId}-{YYYYMMDD}` -- no collision).
-///
-/// Uses WIB (UTC+7) date. Pure function; [nowMs] overridable for tests.
-String genClosingCnm(String vehicleId, {int? nowMs}) {
+/// Format:
+///   seq <= 1 -> `CHK-{vehicleId}-{YYYYMMDD}-C`
+///   seq > 1  -> `CHK-{vehicleId}-{YYYYMMDD}-{seq}-C`
+String genClosingCnm(String vehicleId, {int? nowMs, int seq = 1}) {
   final int now = nowMs ?? getNowMillisecondFromEpoch();
-  return 'CHK-$vehicleId-${_wibDateStamp(now)}-C';
+  final String base = 'CHK-$vehicleId-${_wibDateStamp(now)}';
+  return seq > 1 ? '$base-$seq-C' : '$base-C';
 }
 
-/// Generate the deterministic investigation doc id.
+/// Generate the investigation doc display id.
 ///
-/// Format: `INV-{vehicleId}-{YYYYMMDD}`. Pure function; [nowMs] overridable
-/// for tests.
-String genInvestigationVnm(String vehicleId, {int? nowMs}) {
+/// Format:
+///   seq <= 1 -> `INV-{vehicleId}-{YYYYMMDD}`
+///   seq > 1  -> `INV-{vehicleId}-{YYYYMMDD}-{seq}`
+String genInvestigationVnm(String vehicleId, {int? nowMs, int seq = 1}) {
   final int now = nowMs ?? getNowMillisecondFromEpoch();
-  return 'INV-$vehicleId-${_wibDateStamp(now)}';
+  final String base = 'INV-$vehicleId-${_wibDateStamp(now)}';
+  return seq > 1 ? '$base-$seq' : base;
 }
 
 // ─── Native Firestore write (bypasses history queue) ───────────────────────
@@ -1676,7 +1875,15 @@ Future<bool> writeNativeFields({
         : query.where(anchor.key, isEqualTo: anchor.value);
 
     // 5. Execute + client-side AND filter (String compare, type-agnostic).
-    final snap = await query.get();
+    //    Offline (flag false): force Source.cache so the query resolves
+    //    immediately from the SDK cache instead of waiting on a server
+    //    timeout (pattern: firestore_generic_repository.dart:104). Online:
+    //    default serverAndCache, unchanged. If the flag is stale-true while
+    //    actually offline, the SDK's own cache fallback still answers, just
+    //    slower.
+    final snap = internetConnected()
+        ? await query.get()
+        : await query.get(const GetOptions(source: Source.cache));
     final List<dynamic> matched = snap.docs.where((d) {
       final Map<String, dynamic> data = Map<String, dynamic>.from(
         d.data() as Map,
@@ -1699,10 +1906,23 @@ Future<bool> writeNativeFields({
       return false;
     }
 
-    // 6. Set-merge
-    await matched.first.reference.set(patch, SetOptions(merge: true));
+    // 6. Set-merge -- fire-and-forget. The Firestore write Future only
+    //    resolves on SERVER ack, so awaiting it hangs the UI offline. SDK
+    //    persistence (pinned in main.dart) queues the write and syncs when
+    //    online. All honest-fail paths already returned false above; a late
+    //    server rejection surfaces via errorReport only (accepted).
+    unawaited(
+      matched.first.reference
+          .set(patch, SetOptions(merge: true))
+          .then((_) {
+            devPrint('[writeNativeFields] acked $path/${matched.first.id}');
+          })
+          .catchError((Object e) {
+            errorReport('[writeNativeFields] late-fail $path: $e');
+          }),
+    );
     devPrint(
-      '[writeNativeFields] merged $patch into $path/${matched.first.id}',
+      '[writeNativeFields] queued $patch into $path/${matched.first.id}',
     );
     return true;
   } catch (e, st) {
@@ -1751,11 +1971,21 @@ Future<bool> createNativeDoc({
     final String path =
         '$mobileTable/$appVid/$mobileTableCollection/${tp.tableDocId}/${tp.subColl}';
 
-    await firestoreDb
-        .collection(path)
-        .doc(docId)
-        .set(docMap, SetOptions(merge: true));
-    devPrint('[createNativeDoc] wrote $path/$docId');
+    // Fire-and-forget: the write Future only resolves on SERVER ack (hangs
+    // offline). SDK persistence queues it; late failure -> errorReport.
+    unawaited(
+      firestoreDb
+          .collection(path)
+          .doc(docId)
+          .set(docMap, SetOptions(merge: true))
+          .then((_) {
+            devPrint('[createNativeDoc] acked $path/$docId');
+          })
+          .catchError((Object e) {
+            errorReport('[createNativeDoc] late-fail $path/$docId: $e');
+          }),
+    );
+    devPrint('[createNativeDoc] queued $path/$docId');
     return true;
   } catch (e, st) {
     devPrint('[createNativeDoc] error: $e\n$st');
@@ -1790,13 +2020,104 @@ Future<bool> createNativeDocAutoId({
     final String appVid = resolveAppVid(component);
     final String path =
         '$mobileTable/$appVid/$mobileTableCollection/${tp.tableDocId}/${tp.subColl}';
-    await firestoreDb.collection(path).add(docMap);
-    devPrint('[createNativeDocAutoId] wrote auto-id doc to $path');
+    // .doc() generates the auto-id CLIENT-side (exactly what .add() does
+    // internally), so the id is known for logging without awaiting the
+    // server. The set() Future only resolves on SERVER ack (hangs offline)
+    // -- fire-and-forget; SDK persistence queues it; late failure ->
+    // errorReport.
+    final dynamic ref = firestoreDb.collection(path).doc();
+    unawaited(
+      ref
+          .set(docMap)
+          .then((_) {
+            devPrint('[createNativeDocAutoId] acked $path/${ref.id}');
+          })
+          .catchError((Object e) {
+            errorReport(
+              '[createNativeDocAutoId] late-fail $path/${ref.id}: $e',
+            );
+          }),
+    );
+    devPrint('[createNativeDocAutoId] queued auto-id doc $path/${ref.id}');
     return true;
   } catch (e, st) {
     devPrint('[createNativeDocAutoId] error: $e\n$st');
     errorReport('[createNativeDocAutoId] $e');
     return false;
+  }
+}
+
+/// Fetch the active opening doc-id AND the count of today's openings for a
+/// vehicle in a single Firestore round-trip.
+///
+/// Returns a record `(activeDocId, todayCount)`:
+///   `activeDocId`: doc-id of the newest non-closed opening ('' if none).
+///   `todayCount`: number of opening docs whose cdt matches [today].
+///
+/// Server-side anchor: cty=opening + vv whereIn [String, num].
+/// Client-side: counts docs with eq(cdt, today); finds newest cst != 'closed'.
+/// Offline: Source.cache fallback.
+///
+/// For use in warehouse O1 (needs todayCount for seq) and C1 (needs both
+/// activeDocId for targeted close + todayCount for closing cnm seq).
+Future<({String activeDocId, int todayCount})> fetchOpeningState({
+  required dynamic component,
+  required String rawTable,
+  required String vehicleId,
+  required String today,
+}) async {
+  if (vehicleId.isEmpty) return (activeDocId: '', todayCount: 0);
+  try {
+    final TablePath tp = parseTablePath(rawTable);
+    if (tp.tableDocId.isEmpty || tp.subColl.isEmpty) {
+      return (activeDocId: '', todayCount: 0);
+    }
+    final String appVid = resolveAppVid(component);
+    final String path =
+        '$mobileTable/$appVid/$mobileTableCollection/${tp.tableDocId}/${tp.subColl}';
+
+    // Type-agnostic anchor on vv (mirrors writeNativeFields :1672-1683)
+    final num? numVid = num.tryParse(vehicleId);
+    final List<Object> vvValues = numVid != null
+        ? <Object>[vehicleId, numVid]
+        : <Object>[vehicleId];
+    dynamic query = firestoreDb
+        .collection(path)
+        .where('cty', isEqualTo: 'opening')
+        .where('vv', whereIn: vvValues);
+
+    final snap = internetConnected()
+        ? await query.get()
+        : await query.get(const GetOptions(source: Source.cache));
+
+    // Client-side: count today's openings + find newest non-closed
+    int todayCount = 0;
+    final List<dynamic> nonClosed = <dynamic>[];
+    for (final d in snap.docs) {
+      final Map<String, dynamic> data = Map<String, dynamic>.from(
+        d.data() as Map,
+      );
+      if (eq((data['cdt'] ?? '').toString().trim(), today)) todayCount++;
+      final String cst = (data['cst'] ?? '').toString().trim();
+      if (cst != 'closed') nonClosed.add(d);
+    }
+
+    String activeDocId = '';
+    if (nonClosed.isNotEmpty) {
+      nonClosed.sort((dynamic a, dynamic b) {
+        final int tA =
+            int.tryParse(((a.data() as Map)['t'] ?? '0').toString()) ?? 0;
+        final int tB =
+            int.tryParse(((b.data() as Map)['t'] ?? '0').toString()) ?? 0;
+        return tB.compareTo(tA); // desc
+      });
+      activeDocId = nonClosed.first.id.toString();
+    }
+
+    return (activeDocId: activeDocId, todayCount: todayCount);
+  } catch (e) {
+    devPrint('[fetchOpeningState] error: $e');
+    return (activeDocId: '', todayCount: 0);
   }
 }
 
@@ -1944,5 +2265,47 @@ String resolveWarehouseId({
     typeField: typeField,
     typeValue: typeValue,
     idField: idField,
+  );
+}
+
+// ─── New-customer id-gen hook (B1-A: admin create-task) ──────────────────
+
+/// Whether a component's `addToEvent` carries the `{newCustomerId}` marker
+/// token, indicating the N2 new-customer submit button that needs a
+/// client-side id-gen hook in `doSaveProcedure`.
+///
+/// Gate is airtight: only the N2 "Daftarkan & Lanjut" button (screen
+/// `vertikaTeknoLokaciptaNewCustomer`) carries this token in its addToEvent
+/// config. No custody / item-execution / other RBT addToEvent contains it.
+/// The marker is plain ASCII `{newCustomerId}` — `autheniumDecode`
+/// (global.dart:1130) does NOT encode/decode `{` or `}`, so the raw
+/// `component['addToEvent']` string always contains the literal token.
+///
+/// Pure — directly testable (no Firestore/Redux dependency).
+bool hasNewCustomerIdMarker(dynamic component) {
+  final String raw = (component['addToEvent'] ?? '').toString();
+  return raw.contains('{newCustomerId}');
+}
+
+/// Generate a unique customer identifier (`lv`) and dispatch it into
+/// `screenTx` so:
+///   (a) the addToEvent field `lv◼{newCustomerId}` resolves in `saveSend`
+///       (api.dart:4278 `resolveDriverCurlyTokens` default case reads
+///       `screenTx['newCustomerId']` at line 194), writing `lv` to the
+///       stock_location doc;
+///   (b) `screenTx['kl']` carries the new customer's id to P2/P4 — the
+///       durable carrier that `_republishClient` (task_item_builder.dart:223)
+///       and `task_create_submit._onSubmit` (line 124-126 fallback) read.
+///
+/// Uses `firestoreDb.collection('_').doc().id` (20-char Firestore auto-ID,
+/// generated locally, offline-safe). The dispatch is synchronous (Redux);
+/// `screenTx` is updated before this function returns.
+///
+/// Called from `doSaveProcedure` (ftz_row_of_button_2.dart) BEFORE
+/// `saveData(...)`, gated by [hasNewCustomerIdMarker].
+void generateAndDispatchNewCustomerId() {
+  final String lv = firestoreDb.collection('_').doc().id.toString();
+  transactionStore.dispatch(
+    UpdateScreenTxAction(ScreenTransaction({'newCustomerId': lv, 'kl': lv})),
   );
 }

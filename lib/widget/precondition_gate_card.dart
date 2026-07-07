@@ -251,9 +251,7 @@ class _PreconditionGateCardState extends State<PreconditionGateCard> {
     final String qtyField = (widget.component['qtyField'] ?? 'qt')
         .toString()
         .trim();
-    final bool hideZero =
-        (widget.component['hideZero'] ?? '').toString().trim().toUpperCase() ==
-        'TRUE';
+    final bool hideZero = hideZeroEnabled(widget.component);
 
     return aggregateManifestFromIe(
       ieArray,
@@ -306,9 +304,7 @@ class _PreconditionGateCardState extends State<PreconditionGateCard> {
     final String excludeStatus = (widget.component['excludeStatus'] ?? '')
         .toString()
         .trim();
-    final bool hideZero =
-        (widget.component['hideZero'] ?? '').toString().trim().toUpperCase() ==
-        'TRUE';
+    final bool hideZero = hideZeroEnabled(widget.component);
 
     return aggregateManifestItems(
       itemDocs,
@@ -361,6 +357,14 @@ class _PreconditionGateCardState extends State<PreconditionGateCard> {
       final DriverHomeState dhState = getDriverHomeState(widget.scrName);
       // Touch vehicleId.value to register Obx dependency.
       dhState.vehicleId.value;
+
+      // ── Vehicle scope gate (scope-leak prevention) ──────────────────
+      // When the driver has no assigned vehicle, hide the card entirely.
+      // Belt-and-suspenders with filterByMultiClause's fail-closed guard.
+      if (dhState.vehicleIdResolved.value && dhState.vehicleId.value.isEmpty) {
+        _publishConfirmed(dhState, false);
+        return const SizedBox.shrink();
+      }
 
       // ── Existence gate (spec section 8 item 1) ───────────────────────
       // When gateSearch is configured (non-empty), hide the card entirely

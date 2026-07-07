@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
@@ -60,6 +61,19 @@ void main() async {
   // safe to render this early.
   runApp(const _BootstrapLoadingApp());
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Firestore offline persistence: pinned ONCE, immediately after
+  // Firebase.initializeApp and BEFORE any Firestore use (globalInit below is
+  // the first user). Settings cannot change after the first Firestore call,
+  // and the old per-call-site toggles in table_repository.dart fought each
+  // other (historySync set false, saveHistory set true). Native direct
+  // writes (writeNativeFields / createNativeDoc*) rely on this cache to
+  // queue offline writes and serve offline queries. persistenceEnabled:true
+  // matches the mobile SDK default, so a hot-restart re-assignment is a
+  // no-op (no settings-mismatch throw). Cache size stays default.
+  FirebaseFirestore.instance.settings = const Settings(
+    persistenceEnabled: true,
+  );
 
   // Crash reporting. Disabled in debug so dev runs don't pollute the console.
   // Captures uncaught Flutter framework errors and async/platform errors;

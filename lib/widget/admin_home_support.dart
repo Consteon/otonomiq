@@ -1,4 +1,6 @@
-import 'package:cloud_firestore/cloud_firestore.dart'; // SetOptions
+import 'dart:async'; // unawaited
+
+import 'package:cloud_firestore/cloud_firestore.dart'; // SetOptions, GetOptions, Source
 import 'package:flutter/material.dart'; // Color/Colors for AdminTierColors
 
 import '../api.dart'; // getNowMillisecondFromEpoch, autheniumDecode, devPrint, errorReport
@@ -450,8 +452,9 @@ bool evaluateGate(Map<String, dynamic> doc, String gateDsl) {
 /// with [tokens], parses the DSL via [parseUpdateEventRow], builds a Firestore
 /// query from the search conditions, and does a single-doc set-merge.
 ///
-/// Returns true on success, false on error (0 matches, >1 matches, bad DSL,
-/// network error, or offline).
+/// Returns true on success (the set-merge is queued fire-and-forget; the SDK
+/// cache serves the query offline), false on error (0 matches, >1 matches,
+/// bad DSL, unresolved token).
 ///
 /// [rawDsl] -- the raw `component['updateEventRow']` DSL template string.
 /// [tokens] -- map of `{tokenName}` -> literal replacement value.
@@ -555,8 +558,12 @@ Future<bool> executeUpdateEventRow({
       query = query.where(key, isEqualTo: typedValue);
     }
 
-    // 6. Execute query + uniqueness guard
-    final snap = await query.get();
+    // 6. Execute query + uniqueness guard. Offline (flag false): force
+    //    Source.cache so the query resolves immediately from the SDK cache
+    //    instead of waiting on a server timeout.
+    final snap = internetConnected()
+        ? await query.get()
+        : await query.get(const GetOptions(source: Source.cache));
     final docs = snap.docs;
     if (docs.isEmpty) {
       devPrint('[executeUpdateEventRow] 0 matches at $path; cannot write');
@@ -583,9 +590,20 @@ Future<bool> executeUpdateEventRow({
         patch[k] = num.tryParse(v.toString()) ?? v;
       }
     });
-    await docs.first.reference.set(patch, SetOptions(merge: true));
+    // Fire-and-forget: the write Future only resolves on SERVER ack (hangs
+    // offline). SDK persistence queues it; late failure -> errorReport.
+    unawaited(
+      docs.first.reference
+          .set(patch, SetOptions(merge: true))
+          .then((_) {
+            devPrint('[executeUpdateEventRow] acked $path/${docs.first.id}');
+          })
+          .catchError((Object e) {
+            errorReport('[executeUpdateEventRow] late-fail $path: $e');
+          }),
+    );
     devPrint(
-      '[executeUpdateEventRow] merged $patch into $path/${docs.first.id}',
+      '[executeUpdateEventRow] queued $patch into $path/${docs.first.id}',
     );
     return true;
   } catch (e, st) {

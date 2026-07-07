@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../api.dart' show openInWebView;
 import '../../../global.dart';
 import '../../../login/api/user_repository.dart';
 import '../../../login/bloc_authentication/bloc.dart';
@@ -328,272 +329,359 @@ class _LoginFormState extends State<LoginForm> {
           return OverlayPortal(
             controller: _spinnerOverlay,
             overlayChildBuilder: _buildSpinnerOverlay,
-            child: Stack(
-              children: [
-                Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        darkPrimary,
-                        HSLColor.fromColor(
-                          primary,
-                        ).withLightness(0.08).toColor(),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // Decorative circles
-                Positioned(
-                  top: -60,
-                  right: -40,
-                  child: Container(
-                    width: 200,
-                    height: 200,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withValues(alpha: 0.04),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  bottom: 80,
-                  left: -60,
-                  child: Container(
-                    width: 160,
-                    height: 160,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withValues(alpha: 0.03),
-                    ),
-                  ),
-                ),
-
-                SafeArea(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
+            // Light layout on the page's own background: the form used to
+            // paint a dark gradient inside its bounds, which clashed with the
+            // light logo strip the page JSON renders above it. maxWidth keeps
+            // the card phone-sized on tablets/landscape.
+            child: SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 440),
                     child: Form(
                       child: Column(
                         children: [
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 16),
 
                           Text(
                             widget.component['subtitle'] ??
                                 'Masuk ke akun Anda',
+                            textAlign: TextAlign.center,
                             style: TextStyle(
-                              fontSize: 15,
-                              color: darkPrimary.withValues(alpha: 0.5),
-                              fontWeight: FontWeight.w500,
-                              letterSpacing: 0.3,
+                              fontSize: 24,
+                              color: darkPrimary,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.3,
+                              height: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            widget.component['subtitle2'] ??
+                                'Gunakan nomor ponsel terdaftar Anda',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey.shade600,
+                              height: 1.4,
                             ),
                           ),
 
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 20),
 
-                          // Login card
-                          Container(
-                            padding: const EdgeInsets.all(24),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(20),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.15),
-                                  blurRadius: 30,
-                                  offset: const Offset(0, 12),
-                                  spreadRadius: -4,
-                                ),
-                              ],
+                          // Login card — one entrance motion for the whole
+                          // card (fade + rise), everything else stays still.
+                          TweenAnimationBuilder<double>(
+                            tween: Tween(begin: 0.0, end: 1.0),
+                            duration: const Duration(milliseconds: 350),
+                            curve: Curves.easeOutCubic,
+                            builder: (context, t, child) => Opacity(
+                              opacity: t,
+                              child: Transform.translate(
+                                offset: Offset(0, 16 * (1 - t)),
+                                child: child,
+                              ),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                // Invitation / phone input
-                                TextField(
-                                  textAlign: TextAlign.center,
-                                  controller: _invController,
-                                  keyboardType: TextInputType.phone,
-                                  inputFormatters: [
-                                    FilteringTextInputFormatter.allow(
-                                      RegExp('[0-9]+'),
-                                    ),
-                                  ],
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    letterSpacing: 2.0,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                  decoration: InputDecoration(
-                                    labelText: widget.component['text3'],
-                                    hintText: widget.component['text4'],
-                                    filled: true,
-                                    fillColor: Colors.grey.shade50,
-                                    prefixIcon: Icon(
-                                      Icons.phone_android_rounded,
-                                      color: Colors.grey.shade400,
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(14),
-                                      borderSide: BorderSide(
-                                        color: Colors.grey.shade200,
-                                      ),
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(14),
-                                      borderSide: BorderSide(
-                                        color: Colors.grey.shade200,
-                                      ),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(14),
-                                      borderSide: BorderSide(
-                                        color: accentColor,
-                                        width: 1.5,
-                                      ),
-                                    ),
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      vertical: 16,
-                                      horizontal: 16,
-                                    ),
-                                  ),
+                            child: Container(
+                              padding: const EdgeInsets.all(24),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(24),
+                                border: Border.all(
+                                  color: Colors.black.withValues(alpha: 0.05),
                                 ),
-
-                                // TOS checkbox below input
-                                if (!state.isWaitingSmsCode) ...[
-                                  const SizedBox(height: 16),
-                                  GestureDetector(
-                                    onTap: _onTosOKTabbed,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 12,
-                                        horizontal: 12,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.04),
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.06),
+                                    blurRadius: 32,
+                                    offset: const Offset(0, 12),
+                                    spreadRadius: -4,
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  // Invitation / phone input
+                                  TextField(
+                                    controller: _invController,
+                                    keyboardType: TextInputType.phone,
+                                    autofillHints: const [
+                                      AutofillHints.telephoneNumber,
+                                    ],
+                                    inputFormatters: [
+                                      FilteringTextInputFormatter.allow(
+                                        RegExp('[0-9]+'),
                                       ),
-                                      decoration: BoxDecoration(
-                                        color: _tosOk
-                                            ? accentColor.withValues(
-                                                alpha: 0.08,
-                                              )
-                                            : Colors.grey.shade50,
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(
-                                          color: _tosOk
-                                              ? accentColor.withValues(
-                                                  alpha: 0.3,
-                                                )
-                                              : Colors.grey.shade200,
+                                    ],
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      letterSpacing: 0.5,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    decoration: InputDecoration(
+                                      labelText: widget.component['text3'],
+                                      hintText: widget.component['text4'],
+                                      filled: true,
+                                      fillColor: Colors.grey.shade50,
+                                      prefixIcon: Padding(
+                                        padding: const EdgeInsets.only(
+                                          left: 10,
+                                          right: 8,
+                                        ),
+                                        child: Container(
+                                          width: 38,
+                                          height: 38,
+                                          decoration: BoxDecoration(
+                                            color: accentColor.withValues(
+                                              alpha: 0.10,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              11,
+                                            ),
+                                          ),
+                                          child: Icon(
+                                            Icons.phone_android_rounded,
+                                            size: 20,
+                                            color: accentColor,
+                                          ),
                                         ),
                                       ),
-                                      child: Row(
-                                        children: [
-                                          Container(
-                                            width: 22,
-                                            height: 22,
-                                            decoration: BoxDecoration(
-                                              color: _tosOk
-                                                  ? accentColor
-                                                  : Colors.transparent,
-                                              borderRadius:
-                                                  BorderRadius.circular(6),
-                                              border: Border.all(
+                                      // minHeight 0: with a min-height the
+                                      // decorator stretches the 38px tile to
+                                      // fill the whole field height.
+                                      prefixIconConstraints:
+                                          const BoxConstraints(minWidth: 56),
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                        borderSide: BorderSide(
+                                          color: Colors.grey.shade200,
+                                        ),
+                                      ),
+                                      enabledBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                        borderSide: BorderSide(
+                                          color: Colors.grey.shade200,
+                                        ),
+                                      ),
+                                      focusedBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                        borderSide: BorderSide(
+                                          color: accentColor,
+                                          width: 1.8,
+                                        ),
+                                      ),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            vertical: 18,
+                                            horizontal: 16,
+                                          ),
+                                    ),
+                                  ),
+
+                                  // TOS checkbox below input
+                                  if (!state.isWaitingSmsCode) ...[
+                                    const SizedBox(height: 16),
+                                    GestureDetector(
+                                      onTap: _onTosOKTabbed,
+                                      behavior: HitTestBehavior.opaque,
+                                      child: AnimatedContainer(
+                                        duration: const Duration(
+                                          milliseconds: 200,
+                                        ),
+                                        curve: Curves.easeOut,
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 12,
+                                          horizontal: 12,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: _tosOk
+                                              ? accentColor.withValues(
+                                                  alpha: 0.08,
+                                                )
+                                              : Colors.grey.shade50,
+                                          borderRadius: BorderRadius.circular(
+                                            14,
+                                          ),
+                                          border: Border.all(
+                                            color: _tosOk
+                                                ? accentColor.withValues(
+                                                    alpha: 0.35,
+                                                  )
+                                                : Colors.grey.shade200,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            AnimatedContainer(
+                                              duration: const Duration(
+                                                milliseconds: 200,
+                                              ),
+                                              curve: Curves.easeOut,
+                                              width: 24,
+                                              height: 24,
+                                              decoration: BoxDecoration(
                                                 color: _tosOk
                                                     ? accentColor
-                                                    : Colors.grey.shade300,
-                                                width: 2,
+                                                    : Colors.transparent,
+                                                borderRadius:
+                                                    BorderRadius.circular(7),
+                                                border: Border.all(
+                                                  color: _tosOk
+                                                      ? accentColor
+                                                      : Colors.grey.shade400,
+                                                  width: 2,
+                                                ),
                                               ),
+                                              child: _tosOk
+                                                  ? const Icon(
+                                                      Icons.check,
+                                                      size: 17,
+                                                      color: Colors.white,
+                                                    )
+                                                  : null,
                                             ),
-                                            child: _tosOk
-                                                ? const Icon(
-                                                    Icons.check,
-                                                    size: 16,
-                                                    color: Colors.white,
-                                                  )
-                                                : null,
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Flexible(
-                                            child: GestureDetector(
-                                              onTap: () {
-                                                gotoRoute(widget.tosRoute!);
-                                              },
-                                              child: Text(
-                                                widget.tosText!,
-                                                style: TextStyle(
-                                                  fontSize: 13,
-                                                  color: Colors.grey.shade700,
-                                                  height: 1.4,
+                                            const SizedBox(width: 12),
+                                            Flexible(
+                                              child: GestureDetector(
+                                                onTap: () {
+                                                  // ponytail: single-language ToS
+                                                  // — skip the 1-item _Legal menu
+                                                  // and open the regulation URL
+                                                  // directly. Auto-reverts to the
+                                                  // menu if _Legal ever holds >1
+                                                  // item (e.g. multi-language).
+                                                  final route =
+                                                      widget.tosRoute!;
+                                                  final kids =
+                                                      screenUIComponent[route]?['children'];
+                                                  if (kids is List &&
+                                                      kids.length == 1 &&
+                                                      kids[0] is Map &&
+                                                      kids[0]['route']
+                                                          is String &&
+                                                      (kids[0]['route']
+                                                              as String)
+                                                          .toLowerCase()
+                                                          .startsWith('http')) {
+                                                    final rawTitle =
+                                                        kids[0]['title'];
+                                                    openInWebView(
+                                                      context,
+                                                      kids[0]['route'],
+                                                      // "Peraturan Layanan
+                                                      // (Bahasa Indonesia)" ->
+                                                      // "Peraturan Layanan"
+                                                      rawTitle is String
+                                                          ? rawTitle
+                                                                .split('(')
+                                                                .first
+                                                                .trim()
+                                                          : widget.tosText,
+                                                    );
+                                                  } else {
+                                                    gotoRoute(route);
+                                                  }
+                                                },
+                                                child: Text(
+                                                  widget.tosText!,
+                                                  style: TextStyle(
+                                                    fontSize: 13,
+                                                    color: Colors.grey.shade700,
+                                                    height: 1.4,
+                                                  ),
                                                 ),
                                               ),
                                             ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+
+                                  const SizedBox(height: 20),
+
+                                  // Divider
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Divider(
+                                          color: Colors.grey.shade200,
+                                        ),
+                                      ),
+                                      Container(
+                                        margin: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                        ),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 6,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade100,
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          widget.component['divider'] ??
+                                              'Masuk dengan',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.grey.shade600,
+                                            fontWeight: FontWeight.w600,
+                                            letterSpacing: 0.3,
+                                          ),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: Divider(
+                                          color: Colors.grey.shade200,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 20),
+
+                                  // Social buttons — enabled only when TOS checked & phone filled
+                                  AbsorbPointer(
+                                    absorbing: !_isLoginReady(),
+                                    child: AnimatedOpacity(
+                                      opacity: _isLoginReady() ? 1.0 : 0.45,
+                                      duration: const Duration(
+                                        milliseconds: 200,
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          if (sinner) ...[
+                                            AppleLoginButton(
+                                              key: _appleBtnKey,
+                                              component: widget.component,
+                                              country: _countryController.text,
+                                              inv: _invController.text,
+                                            ),
+                                            const SizedBox(height: 12),
+                                          ],
+                                          GoogleLoginButton(
+                                            key: _googleBtnKey,
+                                            component: widget.component,
+                                            country: _countryController.text,
+                                            inv: _invController.text,
                                           ),
                                         ],
                                       ),
                                     ),
                                   ),
                                 ],
-
-                                const SizedBox(height: 20),
-
-                                // Divider
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Divider(
-                                        color: Colors.grey.shade200,
-                                      ),
-                                    ),
-                                    Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 16,
-                                      ),
-                                      child: Text(
-                                        widget.component['divider'] ??
-                                            'Masuk dengan',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey.shade400,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: Divider(
-                                        color: Colors.grey.shade200,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 20),
-
-                                // Social buttons — enabled only when TOS checked & phone filled
-                                if (sinner)
-                                  AbsorbPointer(
-                                    absorbing: !_isLoginReady(),
-                                    child: Opacity(
-                                      opacity: _isLoginReady() ? 1.0 : 0.4,
-                                      child: AppleLoginButton(
-                                        key: _appleBtnKey,
-                                        component: widget.component,
-                                        country: _countryController.text,
-                                        inv: _invController.text,
-                                      ),
-                                    ),
-                                  ),
-                                if (sinner) const SizedBox(height: 12),
-                                AbsorbPointer(
-                                  absorbing: !_isLoginReady(),
-                                  child: Opacity(
-                                    opacity: _isLoginReady() ? 1.0 : 0.4,
-                                    child: GoogleLoginButton(
-                                      key: _googleBtnKey,
-                                      component: widget.component,
-                                      country: _countryController.text,
-                                      inv: _invController.text,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
                           ),
 
@@ -605,7 +693,7 @@ class _LoginFormState extends State<LoginForm> {
                                 '© ${DateTime.now().year} $thisAppName',
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.white.withValues(alpha: 0.35),
+                              color: Colors.grey.shade500,
                             ),
                           ),
                           const SizedBox(height: 24),
@@ -614,7 +702,7 @@ class _LoginFormState extends State<LoginForm> {
                     ),
                   ),
                 ),
-              ],
+              ),
             ),
           );
         },
@@ -683,6 +771,11 @@ class _LoginFormState extends State<LoginForm> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _phoneController.dispose();
+    _smsCodeController.dispose();
+    _vidController.dispose();
+    _invController.dispose();
+    _countryController.dispose();
     super.dispose();
   }
 

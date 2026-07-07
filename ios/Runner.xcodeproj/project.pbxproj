@@ -659,7 +659,7 @@
 					"${PODS_ROOT}/GoogleMLKit/MLKitCore/Sources",
 				);
 				INFOPLIST_FILE = Runner/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Otq App";
+				INFOPLIST_KEY_CFBundleDisplayName = "Autsorz";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1008,7 +1008,7 @@
 					"${PODS_ROOT}/GoogleMLKit/MLKitCore/Sources",
 				);
 				INFOPLIST_FILE = Runner/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Otq App";
+				INFOPLIST_KEY_CFBundleDisplayName = "Autsorz";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1191,7 +1191,7 @@
 					"${PODS_ROOT}/GoogleMLKit/MLKitCore/Sources",
 				);
 				INFOPLIST_FILE = Runner/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Otq App";
+				INFOPLIST_KEY_CFBundleDisplayName = "Autsorz";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
 				LD_RUNPATH_SEARCH_PATHS = (

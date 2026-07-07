@@ -24,6 +24,7 @@ import '../widget/approver_sticky_bar.dart';
 import '../widget/build_theme.dart';
 import '../widget/link_widget.dart';
 import '../widget/logout_transition_support.dart';
+import '../widget/offline_banner.dart';
 import '../widget/otq_bottom_nav_bar.dart';
 
 class MainPage extends StatefulWidget {
@@ -53,12 +54,13 @@ class MainPageState extends State<MainPage> {
   // image_upload/qr_gps/invitation and is out of scope here. The warm-cache
   // restore path leaves this false (instant, spinner-free).
   static bool logoutInProgress = false;
-  // One-shot flag: true once the cache-first navbar restore has been attempted
-  // for this MainPageState instance. Reset implicitly by auth-state changes
-  // (Authenticated creates a new MainPage(key: UniqueKey()) -> new State, so a
-  // fresh instance field starts false again). Instance (NOT static) on purpose:
-  // the restore must run once per shell, and each new auth shell re-attempts it.
-  bool _navbarCacheRestored = false;
+  // Memo for the per-build authed navbar restore below. _authedRawMemo is the
+  // raw @authedSystemUI prefs string last parsed; _authedBarLenMemo is the
+  // authed bottomBar length from it (-1 = absent/invalid). Re-parsed only when
+  // the raw string changes, so the restore's length check stays cheap every
+  // build instead of a full JSON decode per frame.
+  String? _authedRawMemo;
+  int _authedBarLenMemo = -1;
   ScrollController scrollController = ScrollController();
   bool touch = false;
   String _lastScrolledPage = home;
@@ -632,39 +634,50 @@ class MainPageState extends State<MainPage> {
                       // (prefs reads are sync after init) so the full bottomBar
                       // paints immediately instead of staggering in after the
                       // live readSettings round-trip.
-                      if (!_navbarCacheRestored) {
-                        _navbarCacheRestored = true;
-                        try {
-                          final cachedAuthed = prefs.getString(
-                            '@authedSystemUI',
-                          );
-                          if (shouldRestoreAuthedSystemUI(cachedAuthed)) {
-                            final cachedSystem = json.decode(cachedAuthed!);
-                            final cachedBar =
-                                cachedSystem[mobile]?['bottomBar'];
-                            final currentBar =
-                                systemUIComponent[mobile]?['bottomBar'];
-                            // Restore only when the cache has MORE items than
-                            // the current in-memory data (i.e. in-memory is
-                            // stale/guest). If the in-memory data already has
-                            // the full bar (readSettings succeeded before this
-                            // frame), skip — no work needed.
-                            //
-                            // ASSUMPTION (QA note): the guest bottomBar is
-                            // strictly SHORTER than the authed one (guest =
-                            // home-only, authed = full). A tenant whose guest
-                            // bar happens to equal the authed item count would
-                            // NOT trigger the restore (length gate fails) and
-                            // would still see the one-frame stagger.
-                            if (cachedBar is List &&
-                                currentBar is List &&
-                                cachedBar.length > currentBar.length) {
-                              systemUIComponent = cachedSystem;
-                            }
-                          }
-                        } catch (e) {
-                          devPrint('navbar cache-first restore failed: $e');
+                      // Re-evaluated EVERY build (NOT one-shot): the live
+                      // in-memory bottomBar can be reverted to the guest
+                      // (home-only) bar by a guest-scoped proxy refresh or a
+                      // guest-key readSettings that fires AFTER login, and a
+                      // one-shot restore could never recover from that late
+                      // clobber (the reported "home navbar shows only a single
+                      // home icon" bug). Decoding @authedSystemUI every frame
+                      // would be wasteful, so the authed bar length is memoized
+                      // and re-parsed only when the raw prefs string changes.
+                      try {
+                        final cachedAuthed = prefs.getString('@authedSystemUI');
+                        if (cachedAuthed != _authedRawMemo) {
+                          _authedRawMemo = cachedAuthed;
+                          _authedBarLenMemo =
+                              shouldRestoreAuthedSystemUI(cachedAuthed)
+                              ? (json.decode(cachedAuthed!)[mobile]['bottomBar']
+                                        as List)
+                                    .length
+                              : -1;
                         }
+                        final currentBar =
+                            systemUIComponent[mobile]?['bottomBar'];
+                        // Restore only when the cached authed bar has MORE
+                        // items than the live bar (live is stale/guest). A
+                        // legit authed update keeps the full bar, so the gate
+                        // fails and never clobbers it.
+                        //
+                        // ASSUMPTION (QA note): the guest bottomBar is strictly
+                        // SHORTER than the authed one (guest = home-only,
+                        // authed = full). A tenant whose guest bar equals the
+                        // authed item count would NOT trigger the restore.
+                        if (_authedBarLenMemo > 0 &&
+                            (currentBar is! List ||
+                                _authedBarLenMemo > currentBar.length)) {
+                          // Fresh decode (not aliasing the memo) so a later
+                          // in-place proxy write to systemUIComponent can't
+                          // corrupt the comparison baseline. Mutating the
+                          // global (vs a read-only pick) keeps handleNavTap's
+                          // bottomBar[i] route lookup in range with the bar the
+                          // navbar just rendered.
+                          systemUIComponent = json.decode(_authedRawMemo!);
+                        }
+                      } catch (e) {
+                        devPrint('navbar authed-bar restore failed: $e');
                       }
                       // --- end cache-first restore ---
                       if (screenUIComponent[pageName]?['hideBottomBar'] ==
@@ -709,401 +722,296 @@ class MainPageState extends State<MainPage> {
                       );
                     },
                   ),
-                  body: byPass == 1
-                      ? const NotificationList()
-                      : Stack(
-                          children: <Widget>[
-                            // Text(gpsTime),
-                            // Text(displayRefresher.toString()),
-                            BlocBuilder<
-                              AuthenticationBloc,
-                              AuthenticationState
-                            >(
-                              builder: (context, authState) {
-                                if (authState is Unauthenticated) {
-                                  return Container(
-                                    padding: EdgeInsets.fromLTRB(
-                                      lPad,
-                                      tPad,
-                                      rPad,
-                                      bPad,
-                                    ),
-                                    child: Center(
-                                      child: SingleChildScrollView(
-                                        controller: scrollController,
-                                        child: Column(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: pageElements,
+                  body: OfflineBannerHost(
+                    child: byPass == 1
+                        ? const NotificationList()
+                        : Stack(
+                            children: <Widget>[
+                              // Text(gpsTime),
+                              // Text(displayRefresher.toString()),
+                              BlocBuilder<
+                                AuthenticationBloc,
+                                AuthenticationState
+                              >(
+                                builder: (context, authState) {
+                                  if (authState is Unauthenticated) {
+                                    return Container(
+                                      padding: EdgeInsets.fromLTRB(
+                                        lPad,
+                                        tPad,
+                                        rPad,
+                                        bPad,
+                                      ),
+                                      child: Center(
+                                        child: SingleChildScrollView(
+                                          controller: scrollController,
+                                          child: Column(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: pageElements,
+                                          ),
                                         ),
                                       ),
+                                    );
+                                  }
+                                  // Padding sits on the ListView (not a wrapping
+                                  // Container) so the list clips to the FULL
+                                  // viewport. Inset items look identical; items
+                                  // that opt out via a negative margin (e.g. the
+                                  // full-bleed admin header) can reach the screen
+                                  // edge / AppBar without being re-clipped.
+                                  return Builder(
+                                    builder: (context) => ListView.builder(
+                                      controller: scrollController,
+                                      padding: EdgeInsets.fromLTRB(
+                                        lPad,
+                                        tPad,
+                                        rPad,
+                                        bPad,
+                                      ),
+                                      itemCount: pageElements.length,
+                                      itemBuilder: (context, position) {
+                                        return pageElements[position];
+                                      },
                                     ),
                                   );
-                                }
-                                // Padding sits on the ListView (not a wrapping
-                                // Container) so the list clips to the FULL
-                                // viewport. Inset items look identical; items
-                                // that opt out via a negative margin (e.g. the
-                                // full-bleed admin header) can reach the screen
-                                // edge / AppBar without being re-clipped.
-                                return Builder(
-                                  builder: (context) => ListView.builder(
-                                    controller: scrollController,
-                                    padding: EdgeInsets.fromLTRB(
-                                      lPad,
-                                      tPad,
-                                      rPad,
-                                      bPad,
-                                    ),
-                                    itemCount: pageElements.length,
-                                    itemBuilder: (context, position) {
-                                      return pageElements[position];
-                                    },
-                                  ),
-                                );
-                              },
-                            ),
-                            // Sticky bottom bar (approval/incident buttons)
-                            ValueListenableBuilder<String>(
-                              valueListenable:
-                                  ApproverStickyBar.activeBarScreen,
-                              builder: (_, route, _) => ValueListenableBuilder<int>(
-                                valueListenable: ApproverStickyBar.version,
-                                builder: (_, _, _) => ValueListenableBuilder<bool>(
-                                  valueListenable:
-                                      ApproverStickyBar.overlaysHidden,
-                                  builder: (ctx, hidden, _) =>
-                                      ValueListenableBuilder<WidgetBuilder?>(
-                                        valueListenable: ApproverStickyBar.slot,
-                                        builder: (ctx, slotBuilder, _) {
-                                          final configs =
-                                              ApproverStickyBar.getConfigs(
-                                                route,
-                                              );
-                                          debugPrint(
-                                            '[StickyBar] activeBarScreen='
-                                            '"$route" configs=${configs?.length} '
-                                            'hidden=$hidden',
-                                          );
-                                          // Slot mode (commentbox screens): the
-                                          // timeline's bottom comment-box overlay
-                                          // already hosts the approve/reject bar via
-                                          // ApproverStickyBar.slot. Suppress this
-                                          // body-level copy, else the bar renders
-                                          // twice (stacked) at the screen bottom.
-                                          if (slotBuilder != null) {
-                                            return const SizedBox.shrink();
-                                          }
-                                          if (hidden ||
-                                              configs == null ||
-                                              configs.isEmpty) {
-                                            return const SizedBox.shrink();
-                                          }
-                                          final bottomInset = MediaQuery.of(
-                                            ctx,
-                                          ).viewInsets.bottom;
-                                          if (bottomInset > 0) {
-                                            return const SizedBox.shrink();
-                                          }
-                                          return Align(
-                                            alignment: Alignment.bottomCenter,
-                                            child: Material(
-                                              color: Colors.white,
-                                              elevation: 8,
-                                              child: SafeArea(
-                                                top: false,
-                                                child: Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                        bottom: 12,
-                                                      ),
-                                                  child: StickyBarRenderer(
-                                                    configs: configs,
-                                                  ),
+                                },
+                              ),
+                              // Sticky bottom bar (approval/incident buttons)
+                              ValueListenableBuilder<String>(
+                                valueListenable:
+                                    ApproverStickyBar.activeBarScreen,
+                                builder: (_, route, _) => ValueListenableBuilder<int>(
+                                  valueListenable: ApproverStickyBar.version,
+                                  builder: (_, _, _) => ValueListenableBuilder<bool>(
+                                    valueListenable:
+                                        ApproverStickyBar.overlaysHidden,
+                                    builder: (ctx, hidden, _) => ValueListenableBuilder<WidgetBuilder?>(
+                                      valueListenable: ApproverStickyBar.slot,
+                                      builder: (ctx, slotBuilder, _) {
+                                        final configs =
+                                            ApproverStickyBar.getConfigs(route);
+                                        debugPrint(
+                                          '[StickyBar] activeBarScreen='
+                                          '"$route" configs=${configs?.length} '
+                                          'hidden=$hidden',
+                                        );
+                                        // Slot mode (commentbox screens): the
+                                        // timeline's bottom comment-box overlay
+                                        // already hosts the approve/reject bar via
+                                        // ApproverStickyBar.slot. Suppress this
+                                        // body-level copy, else the bar renders
+                                        // twice (stacked) at the screen bottom.
+                                        if (slotBuilder != null) {
+                                          return const SizedBox.shrink();
+                                        }
+                                        if (hidden ||
+                                            configs == null ||
+                                            configs.isEmpty) {
+                                          return const SizedBox.shrink();
+                                        }
+                                        final bottomInset = MediaQuery.of(
+                                          ctx,
+                                        ).viewInsets.bottom;
+                                        if (bottomInset > 0) {
+                                          return const SizedBox.shrink();
+                                        }
+                                        return Align(
+                                          alignment: Alignment.bottomCenter,
+                                          child: Material(
+                                            color: Colors.white,
+                                            elevation: 8,
+                                            child: SafeArea(
+                                              top: false,
+                                              child: Padding(
+                                                padding: const EdgeInsets.only(
+                                                  bottom: 12,
+                                                ),
+                                                child: StickyBarRenderer(
+                                                  configs: configs,
                                                 ),
                                               ),
                                             ),
-                                          );
-                                        },
-                                      ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
-                            //------ Login bloc listener---------
-                            BlocListener(
-                              bloc: _loginBloc,
-                              listener: (BuildContext contextLogin, LoginState loginState) {
-                                if (loginState.isFailure) {
-                                  if (loginState.loginStatus == 2) {
-                                    showDialog(
-                                      context: context,
-                                      builder: (BuildContext context) {
-                                        return AlertDialog(
-                                          title: const Text(
-                                            "Other user logged in",
-                                          ),
-                                          content: const Text(
-                                            "Ada pemakai lain yang sedang memakai invitasi ini. Silahkan pergunakan nomor invitasi lain",
-                                          ), // show dialog
-                                          actions: <Widget>[
-                                            TextButton(
-                                              child: const Text("OK"),
-                                              onPressed: () {
-                                                setState(() {
-                                                  wait = false;
-                                                });
-                                                Navigator.of(context).pop();
-                                              },
-                                            ),
-                                          ],
-                                        );
-                                      },
-                                    );
-                                  } else if (loginState.loginStatus == 3) {
-                                    showDialog(
-                                      context: context,
-                                      builder: (BuildContext context) {
-                                        return AlertDialog(
-                                          title: const Text(
-                                            "Invitation Code Not Match",
-                                          ),
-                                          content: const Text(
-                                            "Kode Undangan tidak ada.",
-                                          ),
-                                          actions: <Widget>[
-                                            TextButton(
-                                              child: const Text("OK"),
-                                              onPressed: () {
-                                                BlocProvider.of<LoginBloc>(
-                                                  context,
-                                                ).add(
-                                                  const TosOKTabbed(
-                                                    tosOk: true,
-                                                  ),
-                                                );
-                                                setState(() {
-                                                  wait = false;
-                                                  touch = !touch;
-                                                });
-                                                Navigator.of(context).pop();
-                                              },
-                                            ),
-                                          ],
-                                        );
-                                      },
-                                    );
-                                  } else if (loginState.loginStatus == 7) {
-                                    showDialog(
-                                      context: context,
-                                      builder: (BuildContext context) {
-                                        return AlertDialog(
-                                          title: const Text(
-                                            "Invitation Code has been used before",
-                                          ),
-                                          content: const Text(
-                                            "Kode undangan telah dipakai oleh pengguna lain. Silahkan hubungi bagian administrasi.",
-                                          ),
-                                          actions: <Widget>[
-                                            TextButton(
-                                              child: const Text("OK"),
-                                              onPressed: () {
-                                                setState(() {
-                                                  wait = false;
-                                                });
-                                                Navigator.of(context).pop();
-                                              },
-                                            ),
-                                          ],
-                                        );
-                                      },
-                                    );
-                                  } else if (loginState.loginStatus == 1) {
-                                    showDialog(
-                                      context: context,
-                                      builder: (BuildContext context) {
-                                        return AlertDialog(
-                                          title: const Text("Full !"),
-                                          content: const Text(
-                                            "Wah!, banyak sekali yang mendaftar. Sementara ini tidak dapat menambah pemakai baru. Kami sedang terus menambah kapasitas, silahkan coba beberapa jam lagi",
-                                          ), // show dialog
-                                          actions: <Widget>[
-                                            TextButton(
-                                              child: const Text("OK"),
-                                              onPressed: () {
-                                                setState(() {
-                                                  wait = false;
-                                                });
-                                                Navigator.of(context).pop();
-                                              },
-                                            ),
-                                          ],
-                                        );
-                                      },
-                                    );
-                                  } else if (loginState.loginStatus == 4) {
-                                    showDialog(
-                                      context: context,
-                                      builder: (BuildContext context) {
-                                        return AlertDialog(
-                                          title: const Text("Sign in error"),
-                                          content: const Text(
-                                            "Terjadi kesalahan pada saat sign in, silahkan coba beberapa jam lagi",
-                                          ), // show dialog
-                                          actions: <Widget>[
-                                            TextButton(
-                                              child: const Text("OK"),
-                                              onPressed: () {
-                                                setState(() {
-                                                  wait = false;
-                                                });
-                                                Navigator.of(context).pop();
-                                              },
-                                            ),
-                                          ],
-                                        );
-                                      },
-                                    );
-                                  } else if (loginState.loginStatus == 5) {
-                                    showDialog(
-                                      context: context,
-                                      builder: (BuildContext context) {
-                                        return AlertDialog(
-                                          title: const Text("Sign in error"),
-                                          content: const Text(
-                                            "Terjadi kesalahan pada saat autorisasi akun Google, silahkan coba lagi",
-                                          ),
-                                          actions: <Widget>[
-                                            TextButton(
-                                              child: const Text("OK"),
-                                              onPressed: () {
-                                                setState(() {
-                                                  wait = false;
-                                                });
-                                                Navigator.of(context).pop();
-                                              },
-                                            ),
-                                          ],
-                                        );
-                                      },
-                                    );
-                                  } else {
-                                    showDialog(
-                                      context: context,
-                                      builder: (BuildContext context) {
-                                        return AlertDialog(
-                                          title: const Text("Login failed"),
-                                          content: const Text(
-                                            "Login anda gagal. Kemungkinan karena koneksi internet anda terganggu. Silahkan coba beberapa saat lagi",
-                                          ), // show dialog
-                                          actions: <Widget>[
-                                            TextButton(
-                                              child: const Text("OK"),
-                                              onPressed: () {
-                                                setState(() {
-                                                  wait = false;
-                                                });
-                                                Navigator.of(context).pop();
-                                              },
-                                            ),
-                                          ],
-                                        );
-                                      },
-                                    );
-                                  }
-                                } else if (loginState.isSuccess) {
-                                  BlocProvider.of<AuthenticationBloc>(
-                                    context,
-                                  ).add(LoggedIn());
-                                  BlocProvider.of<NotificationBloc>(
-                                    context,
-                                  ).add(LoadNotification());
-                                  // } else if (loginState.inLoginProcess) {
-                                  //   return LoginWaitScreen();
-                                } // end if loginState.isFailure
-                              },
-                              child: BlocBuilder<TimerBloc, TimerState>(
-                                buildWhen: (previousState, currentState) =>
-                                    currentState.runtimeType !=
-                                    previousState.runtimeType,
-                                builder: (context, state) {
-                                  Widget ret;
-                                  if (state is Finished) {
-                                    wait = false;
-                                  }
-                                  if ((state is Running &&
-                                      state.duration > 0)) {
-                                    // || this.wait) {
-                                    ret = const WaitScreen();
-                                  } else {
-                                    if (state is Finished) {
-                                      oldSettingUpShouldBeDeleted().then((
-                                        aRes,
-                                      ) {
-                                        var state =
-                                            transactionStore.state.screenTx;
-                                        var lifKey = state['#INTERFACE_KEY'];
-                                        readSettings(lifKey, 1).then((_) {
-                                          var nxPage = state['#NEXTROUTE'];
-                                          routeStack.push(nxPage); //?
-                                          transactionStore.add(
-                                            UpdateScreenTxAction(
-                                              ScreenTransaction({
-                                                '#REFRESH': false,
-                                              }),
-                                            ),
-                                          );
-                                          List<Widget> newElementList =
-                                              reloadPage(nxPage);
-                                          setState(() {
-                                            pageName = nxPage;
-                                            pageElements = newElementList;
-                                            wait = false;
-                                          });
-
-                                          transactionStore.dispatch(
-                                            UpdateScreenTxAction(
-                                              ScreenTransaction({
-                                                '#CURRENT_ROUTE': nxPage,
-                                              }),
-                                            ),
-                                          ); // set state #CURRENT_ROUTE
-                                          if (scrollController.hasClients) {
-                                            scrollController.jumpTo(0.0);
-                                          }
-                                          state['#TIMER_BLOC'].dispatch(
-                                            Reset(),
-                                          ); // reset timer state to Ready
-                                        });
-                                      });
-                                    }
-                                    ret = const SizedBox(
-                                      width: 0.0,
-                                      height: 0.0,
-                                    );
-                                  }
-                                  return ret;
-                                },
-                              ),
-                            ),
-
-                            //======== MainBloc Listener & Builder ===========
-                            BlocListener<MainBloc, MainState>(
-                              listener: (context, mState) {
-                                switch (mState.mainState) {
-                                  case -1: // wrong pin
-                                    {
+                              //------ Login bloc listener---------
+                              BlocListener(
+                                bloc: _loginBloc,
+                                listener: (BuildContext contextLogin, LoginState loginState) {
+                                  if (loginState.isFailure) {
+                                    if (loginState.loginStatus == 2) {
                                       showDialog(
                                         context: context,
                                         builder: (BuildContext context) {
                                           return AlertDialog(
-                                            title: Text(mState.str1),
-                                            content: Text(
-                                              mState.str2,
+                                            title: const Text(
+                                              "Other user logged in",
+                                            ),
+                                            content: const Text(
+                                              "Ada pemakai lain yang sedang memakai invitasi ini. Silahkan pergunakan nomor invitasi lain",
                                             ), // show dialog
                                             actions: <Widget>[
                                               TextButton(
                                                 child: const Text("OK"),
                                                 onPressed: () {
+                                                  setState(() {
+                                                    wait = false;
+                                                  });
+                                                  Navigator.of(context).pop();
+                                                },
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      );
+                                    } else if (loginState.loginStatus == 3) {
+                                      showDialog(
+                                        context: context,
+                                        builder: (BuildContext context) {
+                                          return AlertDialog(
+                                            title: const Text(
+                                              "Invitation Code Not Match",
+                                            ),
+                                            content: const Text(
+                                              "Kode Undangan tidak ada.",
+                                            ),
+                                            actions: <Widget>[
+                                              TextButton(
+                                                child: const Text("OK"),
+                                                onPressed: () {
+                                                  BlocProvider.of<LoginBloc>(
+                                                    context,
+                                                  ).add(
+                                                    const TosOKTabbed(
+                                                      tosOk: true,
+                                                    ),
+                                                  );
+                                                  setState(() {
+                                                    wait = false;
+                                                    touch = !touch;
+                                                  });
+                                                  Navigator.of(context).pop();
+                                                },
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      );
+                                    } else if (loginState.loginStatus == 7) {
+                                      showDialog(
+                                        context: context,
+                                        builder: (BuildContext context) {
+                                          return AlertDialog(
+                                            title: const Text(
+                                              "Invitation Code has been used before",
+                                            ),
+                                            content: const Text(
+                                              "Kode undangan telah dipakai oleh pengguna lain. Silahkan hubungi bagian administrasi.",
+                                            ),
+                                            actions: <Widget>[
+                                              TextButton(
+                                                child: const Text("OK"),
+                                                onPressed: () {
+                                                  setState(() {
+                                                    wait = false;
+                                                  });
+                                                  Navigator.of(context).pop();
+                                                },
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      );
+                                    } else if (loginState.loginStatus == 1) {
+                                      showDialog(
+                                        context: context,
+                                        builder: (BuildContext context) {
+                                          return AlertDialog(
+                                            title: const Text("Full !"),
+                                            content: const Text(
+                                              "Wah!, banyak sekali yang mendaftar. Sementara ini tidak dapat menambah pemakai baru. Kami sedang terus menambah kapasitas, silahkan coba beberapa jam lagi",
+                                            ), // show dialog
+                                            actions: <Widget>[
+                                              TextButton(
+                                                child: const Text("OK"),
+                                                onPressed: () {
+                                                  setState(() {
+                                                    wait = false;
+                                                  });
+                                                  Navigator.of(context).pop();
+                                                },
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      );
+                                    } else if (loginState.loginStatus == 4) {
+                                      showDialog(
+                                        context: context,
+                                        builder: (BuildContext context) {
+                                          return AlertDialog(
+                                            title: const Text("Sign in error"),
+                                            content: const Text(
+                                              "Terjadi kesalahan pada saat sign in, silahkan coba beberapa jam lagi",
+                                            ), // show dialog
+                                            actions: <Widget>[
+                                              TextButton(
+                                                child: const Text("OK"),
+                                                onPressed: () {
+                                                  setState(() {
+                                                    wait = false;
+                                                  });
+                                                  Navigator.of(context).pop();
+                                                },
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      );
+                                    } else if (loginState.loginStatus == 5) {
+                                      showDialog(
+                                        context: context,
+                                        builder: (BuildContext context) {
+                                          return AlertDialog(
+                                            title: const Text("Sign in error"),
+                                            content: const Text(
+                                              "Terjadi kesalahan pada saat autorisasi akun Google, silahkan coba lagi",
+                                            ),
+                                            actions: <Widget>[
+                                              TextButton(
+                                                child: const Text("OK"),
+                                                onPressed: () {
+                                                  setState(() {
+                                                    wait = false;
+                                                  });
+                                                  Navigator.of(context).pop();
+                                                },
+                                              ),
+                                            ],
+                                          );
+                                        },
+                                      );
+                                    } else {
+                                      showDialog(
+                                        context: context,
+                                        builder: (BuildContext context) {
+                                          return AlertDialog(
+                                            title: const Text("Login failed"),
+                                            content: const Text(
+                                              "Login anda gagal. Kemungkinan karena koneksi internet anda terganggu. Silahkan coba beberapa saat lagi",
+                                            ), // show dialog
+                                            actions: <Widget>[
+                                              TextButton(
+                                                child: const Text("OK"),
+                                                onPressed: () {
+                                                  setState(() {
+                                                    wait = false;
+                                                  });
                                                   Navigator.of(context).pop();
                                                 },
                                               ),
@@ -1112,67 +1020,170 @@ class MainPageState extends State<MainPage> {
                                         },
                                       );
                                     }
-                                    break;
-                                }
-                              },
-                              child: BlocBuilder<MainBloc, MainState>(
-                                builder: (context, mState) {
-                                  Widget displayScreen;
+                                  } else if (loginState.isSuccess) {
+                                    BlocProvider.of<AuthenticationBloc>(
+                                      context,
+                                    ).add(LoggedIn());
+                                    BlocProvider.of<NotificationBloc>(
+                                      context,
+                                    ).add(LoadNotification());
+                                    // } else if (loginState.inLoginProcess) {
+                                    //   return LoginWaitScreen();
+                                  } // end if loginState.isFailure
+                                },
+                                child: BlocBuilder<TimerBloc, TimerState>(
+                                  buildWhen: (previousState, currentState) =>
+                                      currentState.runtimeType !=
+                                      previousState.runtimeType,
+                                  builder: (context, state) {
+                                    Widget ret;
+                                    if (state is Finished) {
+                                      wait = false;
+                                    }
+                                    if ((state is Running &&
+                                        state.duration > 0)) {
+                                      // || this.wait) {
+                                      ret = const WaitScreen();
+                                    } else {
+                                      if (state is Finished) {
+                                        oldSettingUpShouldBeDeleted().then((
+                                          aRes,
+                                        ) {
+                                          var state =
+                                              transactionStore.state.screenTx;
+                                          var lifKey = state['#INTERFACE_KEY'];
+                                          readSettings(lifKey, 1).then((_) {
+                                            var nxPage = state['#NEXTROUTE'];
+                                            routeStack.push(nxPage); //?
+                                            transactionStore.add(
+                                              UpdateScreenTxAction(
+                                                ScreenTransaction({
+                                                  '#REFRESH': false,
+                                                }),
+                                              ),
+                                            );
+                                            List<Widget> newElementList =
+                                                reloadPage(nxPage);
+                                            setState(() {
+                                              pageName = nxPage;
+                                              pageElements = newElementList;
+                                              wait = false;
+                                            });
+
+                                            transactionStore.dispatch(
+                                              UpdateScreenTxAction(
+                                                ScreenTransaction({
+                                                  '#CURRENT_ROUTE': nxPage,
+                                                }),
+                                              ),
+                                            ); // set state #CURRENT_ROUTE
+                                            if (scrollController.hasClients) {
+                                              scrollController.jumpTo(0.0);
+                                            }
+                                            state['#TIMER_BLOC'].dispatch(
+                                              Reset(),
+                                            ); // reset timer state to Ready
+                                          });
+                                        });
+                                      }
+                                      ret = const SizedBox(
+                                        width: 0.0,
+                                        height: 0.0,
+                                      );
+                                    }
+                                    return ret;
+                                  },
+                                ),
+                              ),
+
+                              //======== MainBloc Listener & Builder ===========
+                              BlocListener<MainBloc, MainState>(
+                                listener: (context, mState) {
                                   switch (mState.mainState) {
-                                    case 900: // need pin hash
+                                    case -1: // wrong pin
                                       {
-                                        //                                        displayScreen = Container(
-                                        //                                          height: 200,
-                                        //                                          width: 200,
-                                        //                                          color: Colors.green,
-                                        //                                        );
-                                        var np = linkElement['_NewPin'];
-                                        var len = np!.length;
-                                        displayScreen = Container(
-                                          color: Colors.white,
-                                          child: ListView.builder(
-                                            controller: scrollController,
-                                            itemCount: len,
-                                            itemBuilder: (context, position) {
-                                              return linkElement['_NewPin']![position];
-                                            },
-                                          ),
+                                        showDialog(
+                                          context: context,
+                                          builder: (BuildContext context) {
+                                            return AlertDialog(
+                                              title: Text(mState.str1),
+                                              content: Text(
+                                                mState.str2,
+                                              ), // show dialog
+                                              actions: <Widget>[
+                                                TextButton(
+                                                  child: const Text("OK"),
+                                                  onPressed: () {
+                                                    Navigator.of(context).pop();
+                                                  },
+                                                ),
+                                              ],
+                                            );
+                                          },
                                         );
                                       }
                                       break;
-
-                                    default:
-                                      {
-                                        displayScreen = const SizedBox(
-                                          width: 0.0,
-                                          height: 0.0,
-                                        ); // default
-                                      }
                                   }
-                                  return displayScreen;
                                 },
+                                child: BlocBuilder<MainBloc, MainState>(
+                                  builder: (context, mState) {
+                                    Widget displayScreen;
+                                    switch (mState.mainState) {
+                                      case 900: // need pin hash
+                                        {
+                                          //                                        displayScreen = Container(
+                                          //                                          height: 200,
+                                          //                                          width: 200,
+                                          //                                          color: Colors.green,
+                                          //                                        );
+                                          var np = linkElement['_NewPin'];
+                                          var len = np!.length;
+                                          displayScreen = Container(
+                                            color: Colors.white,
+                                            child: ListView.builder(
+                                              controller: scrollController,
+                                              itemCount: len,
+                                              itemBuilder: (context, position) {
+                                                return linkElement['_NewPin']![position];
+                                              },
+                                            ),
+                                          );
+                                        }
+                                        break;
+
+                                      default:
+                                        {
+                                          displayScreen = const SizedBox(
+                                            width: 0.0,
+                                            height: 0.0,
+                                          ); // default
+                                        }
+                                    }
+                                    return displayScreen;
+                                  },
+                                ),
                               ),
-                            ),
-                            // The login spinner overlay was removed: it
-                            // watched the TOP-LEVEL LoginBloc, but the
-                            // loading state (isSubmitting) is only ever
-                            // emitted by the social/credential handlers on the
-                            // NESTED LoginForm bloc, so this overlay never
-                            // fired in the live flow. The login_form /
-                            // invitation_form modal dialog (PopScope, blocks
-                            // back) is the real single spinner.
-                            // Logout spinner overlay: shown only while
-                            // signOut() is re-fetching the login page over the
-                            // network (cold/corrupt guest snapshot). Gated on
-                            // the scoped MainPageState.logoutInProgress flag,
-                            // which signOut() toggles via rootThis.setState.
-                            // The warm-cache restore never sets it, so the
-                            // common logout stays instant (no overlay). Last in
-                            // the Stack so it paints over the stale home body.
-                            if (MainPageState.logoutInProgress)
-                              const WaitScreen(),
-                          ],
-                        ), // Stack closure=========
+                              // The login spinner overlay was removed: it
+                              // watched the TOP-LEVEL LoginBloc, but the
+                              // loading state (isSubmitting) is only ever
+                              // emitted by the social/credential handlers on the
+                              // NESTED LoginForm bloc, so this overlay never
+                              // fired in the live flow. The login_form /
+                              // invitation_form modal dialog (PopScope, blocks
+                              // back) is the real single spinner.
+                              // Logout spinner overlay: shown only while
+                              // signOut() is re-fetching the login page over the
+                              // network (cold/corrupt guest snapshot). Gated on
+                              // the scoped MainPageState.logoutInProgress flag,
+                              // which signOut() toggles via rootThis.setState.
+                              // The warm-cache restore never sets it, so the
+                              // common logout stays instant (no overlay). Last in
+                              // the Stack so it paints over the stale home body.
+                              if (MainPageState.logoutInProgress)
+                                const WaitScreen(),
+                            ],
+                          ), // Stack closure=========
+                  ), // end OfflineBannerHost
                 ),
         );
         return v;

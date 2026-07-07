@@ -1,7 +1,9 @@
 import 'dart:core';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../notification/bloc.dart';
+
 import '../global.dart';
+import '../notification/bloc.dart';
 
 abstract class MessageRepository {
   Future<void> addNewMessage(Message message);
@@ -12,7 +14,7 @@ abstract class MessageRepository {
 
 class FirebaseMessageRepository implements MessageRepository {
   final messageCollection = FirebaseFirestore.instance.collection(firestoreMsg);
-  final messageList =FirebaseFirestore.instance
+  final messageList = FirebaseFirestore.instance
       .collection(firestoreMsg)
       .orderBy('tr', descending: true);
 
@@ -29,22 +31,24 @@ class FirebaseMessageRepository implements MessageRepository {
   @override
   Stream<List<Message>> messages() {
     // the stream of message
-//    return messageList.snapshots().map((snapshot) {
+    //    return messageList.snapshots().map((snapshot) {
     return FirebaseFirestore.instance
         .collection(firestoreMsg)
-        .orderBy('tr', descending: true).snapshots().map((snapshot) {
-      return snapshot.docs
-          .map((doc) =>
-          Message.fromEntity(MessageEntity.fromSnapshot(doc)))
-          .toList();
-    });
+        .orderBy('tr', descending: true)
+        .snapshots()
+        .map((snapshot) {
+          return snapshot.docs
+              .map((doc) => Message.fromEntity(MessageEntity.fromSnapshot(doc)))
+              .toList();
+        });
   }
 
   @override
   Future<void> updateMessage(Message update) {
-    return messageCollection
-        .doc(update.messageId)
-        .update(update.toEntity().toDocument());
+    return safeFsUpdate(
+      messageCollection.doc(update.messageId),
+      update.toEntity().toDocument(),
+      'updateMessage',
+    );
   }
-
 }

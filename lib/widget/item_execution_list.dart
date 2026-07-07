@@ -775,6 +775,7 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
         .trim();
     final String rawSlots = (widget.component['slots'] ?? '').toString().trim();
     final List<PivotSlot> slots = parsePivotSlots(rawSlots);
+    final bool hideZero = hideZeroEnabled(widget.component); // spec §2b
 
     if (groupKey.isEmpty || pivotField.isEmpty || slots.isEmpty) {
       return const SizedBox.shrink();
@@ -831,6 +832,20 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
         in groups.entries) {
       final String ii = entry.key;
       final List<Map<String, dynamic>> group = entry.value;
+
+      // Expected per slot up front, so hideZero can skip BEFORE seeding
+      // countStore (skipped items must not enter ip[] -- spec §2b).
+      final List<int> expecteds = <int>[
+        for (final PivotSlot slot in slots)
+          pivotExpected(group, pivotField, slot.value, valueField),
+      ];
+      // ponytail: skips items all-zero AT LOAD (the flood case). An
+      // already-seeded item that transitions to all-zero mid-session is NOT
+      // pruned from countMap -- asset_cache is stable during a closing count,
+      // and pruning would risk discarding a checker's entered discrepancy.
+      // Add a prune pass only if that transition is ever observed.
+      if (hideZero && expecteds.every((v) => v == 0)) continue;
+
       final ItemDetail? detail = itemDetailMap[ii];
       final String name = (detail != null && detail.name.isNotEmpty)
           ? detail.name
@@ -838,13 +853,9 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
       final String category = detail?.category ?? '';
 
       final List<_PivotSlotData> slotData = <_PivotSlotData>[];
-      for (final PivotSlot slot in slots) {
-        final int expected = pivotExpected(
-          group,
-          pivotField,
-          slot.value,
-          valueField,
-        );
+      for (int s = 0; s < slots.length; s++) {
+        final PivotSlot slot = slots[s];
+        final int expected = expecteds[s];
         final String countKey = '${ii}__${slot.value}';
 
         // Seed count store (putIfAbsent for once-only seed at qty 0).

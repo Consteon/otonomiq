@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../api.dart'; // getNowMillisecondFromEpoch
-import '../global.dart'; // transactionStore, routeStack, gotoRoute, routeExist, errorReport, diamondTextToList, autheniumDecode
+import '../firestore_repository/table_repository.dart'; // subscribeToMapCollection
+import '../global.dart'; // transactionStore, routeStack, gotoRoute, routeExist, errorReport, diamondTextToList, autheniumDecode, mapTableContent
 import '../global2.dart'; // txfController, txfControllerCheck, generateAutoNumber, addToTxfController, WidgetUpdateController
 import 'admin_create_task_support.dart';
 import 'admin_home_support.dart'; // AdminTierColors
@@ -62,10 +63,56 @@ class TaskCreateSubmit extends StatefulWidget {
 class _TaskCreateSubmitState extends State<TaskCreateSubmit> {
   List<String> _textArray = [];
 
+  /// stock_location subscription code (`<container>/stock_location`).
+  /// Populated by [_subscribeStockLocation] in initState so the origin-
+  /// warehouse fallback (single `lt=='warehouse'` doc -> `lv`) can resolve at
+  /// submit time. Instance field (recreated per widget) -> no clear hook needed.
+  String _stockLocationCode = '';
+
   @override
   void initState() {
     super.initState();
     _parseText();
+    _subscribeStockLocation();
+  }
+
+  /// Subscribe to the `stock_location` collection so [_onSubmit] can resolve
+  /// the origin warehouse `gl` from the single `lt=='warehouse'` doc when both
+  /// the config `originWarehouse` and `#ACTIVE_WAREHOUSE` are empty (the admin
+  /// create-task flow, spec §256). Mirrors
+  /// custody_count_submit._subscribeStockLocation (O1) and reuses the O1
+  /// helpers resolveWarehouseId / lookupWarehouseLv.
+  ///
+  /// Table path: optional `warehouseTable` config override, else derived from
+  /// the task `table`'s container id + the `stock_location` subcollection (same
+  /// container as the task table). Idempotent (subscribeToMapCollection dedups
+  /// via _mapSubscribed), so this reuses any live stock_location subscription
+  /// (e.g. H1 VehicleFeedList) rather than opening a duplicate. Deploy-free:
+  /// no new config field is required.
+  void _subscribeStockLocation() {
+    final String appVid = resolveAppVid(widget.component);
+    final String rawWhTable = (widget.component['warehouseTable'] ?? '')
+        .toString()
+        .trim();
+    TablePath? tp;
+    if (rawWhTable.isNotEmpty) {
+      tp = parseTablePath(rawWhTable);
+    } else {
+      final String rawTaskTable = (widget.component['table'] ?? '')
+          .toString()
+          .trim();
+      final String docId = parseTablePath(rawTaskTable).tableDocId;
+      if (docId.isNotEmpty) tp = TablePath(docId, 'stock_location');
+    }
+    if (tp != null && tp.tableDocId.isNotEmpty && tp.subColl.isNotEmpty) {
+      _stockLocationCode = '${tp.tableDocId}/${tp.subColl}';
+      subscribeToMapCollection(
+        appVid,
+        tp.tableDocId,
+        tp.subColl,
+        _stockLocationCode,
+      );
+    }
   }
 
   void _parseText() {
@@ -89,6 +136,16 @@ class _TaskCreateSubmitState extends State<TaskCreateSubmit> {
 
   Future<void> _onSubmit(BuildContext context) async {
     if (TaskCreateSubmit._writing[widget.scrName] == true) return;
+
+    // Offline gate (decision 5): task creation needs the ONLINE counter
+    // transaction (generate_number -> getNumber runTransaction) and must
+    // never enqueue a create with a forged tnm. Short-circuit BEFORE
+    // _processRunCommands so the counter is untouched. The wizard/draft
+    // stays fully editable offline; only this final CTA blocks.
+    if (!internetConnected()) {
+      _showSnackBar(context, 'Butuh koneksi untuk membuat task');
+      return;
+    }
 
     TaskCreateSubmit._writing[widget.scrName] = true;
     TaskItemBuilder.draftRev.value++; // trigger rebuild to show spinner
@@ -144,14 +201,32 @@ class _TaskCreateSubmitState extends State<TaskCreateSubmit> {
           ? draftVeh['vv']!
           : (screenTx[vvKey] ?? '').toString().trim();
 
-      // 2. gl (origin warehouse) from component config or screenTx
-      String gl = (widget.component['originWarehouse'] ?? '').toString().trim();
-      if (gl.isEmpty) {
-        final String glKey = (widget.component['glKey'] ?? 'gl')
-            .toString()
-            .trim();
-        gl = (screenTx[glKey] ?? '').toString().trim();
-      }
+      // 2. gl (origin warehouse). Precedence mirrors O1 (custody_count_submit
+      //    _onTapO1, spec §256): config `originWarehouse` >
+      //    screenTx['#ACTIVE_WAREHOUSE'] > single stock_location lt=='warehouse'
+      //    -> lv. Reuses resolveWarehouseId / lookupWarehouseLv
+      //    (driver_home_support.dart). The previous glKey (bare 'gl') tier is
+      //    dropped: nothing dispatches a bare 'gl' key in the admin create-task
+      //    flow (always empty), and the documented origin-warehouse store key is
+      //    '#ACTIVE_WAREHOUSE' (documentation.md:272).
+      final String rawWhCfg = (widget.component['originWarehouse'] ?? '')
+          .toString()
+          .trim();
+      final String cfgResolved = rawWhCfg.isEmpty
+          ? ''
+          : resolveDriverCurlyTokens(rawWhCfg, widget.scrName);
+      final String whFromStore = (screenTx['#ACTIVE_WAREHOUSE'] ?? '')
+          .toString()
+          .trim();
+      final List<Map<String, dynamic>> stockDocs =
+          List<Map<String, dynamic>>.from(
+            mapTableContent[_stockLocationCode] ?? const [],
+          );
+      final String gl = resolveWarehouseId(
+        configResolved: cfgResolved,
+        fromStore: whFromStore,
+        stockDocs: stockDocs,
+      );
 
       // 3. Creator (admin, NOT driver)
       final String cv = (screenTx['#VID'] ?? '').toString().trim();
@@ -214,7 +289,12 @@ class _TaskCreateSubmitState extends State<TaskCreateSubmit> {
 
       // 6. Time
       final int nowMs = getNowMillisecondFromEpoch();
-      final String tdt = todayEpochMidnightWib();
+      // Canonical: tdt is a Number (epoch-ms WIB midnight), mirroring O1's
+      // `cdt: int.parse(today)` (custody_count_submit.dart:378).
+      // todayEpochMidnightWib() returns int.toString() -> always parseable.
+      // Write-safe: reads are type-tolerant (dsl-eq-type-tolerance) and there
+      // is no server-side where('tdt') query.
+      final int tdt = int.parse(todayEpochMidnightWib());
 
       // 7. tableVid
       final String tableVid =

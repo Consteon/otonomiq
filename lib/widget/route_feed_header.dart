@@ -161,18 +161,38 @@ class _RouteFeedHeaderState extends State<RouteFeedHeader> {
   }
 
   /// Derive and publish vehicleId from the stock_location vehicle doc.
-  /// Mirrors route_progress_header._publishVehicleId (rph:145-158).
+  /// Mirrors route_progress_header._publishVehicleId.
   /// W1: deferred to post-frame — never set an Rx during build.
+  ///
+  /// Sets `vehicleIdResolved = true` once the stock_location subscription has
+  /// delivered data, EVEN when `derivedVehicleId` is empty (unassigned driver).
+  /// The "data loaded" signal is `mapTableContent.containsKey(_stockLocationCode)`:
+  /// before the first Firestore snapshot, `containsKey` is false, preventing a
+  /// premature "unassigned" flash for assigned drivers.
   void _publishVehicleId(Map<String, dynamic>? vehicleDoc) {
     final String derivedVehicleId = (vehicleDoc?['lv'] ?? '').toString().trim();
     final DriverHomeState state = getDriverHomeState(widget.scrName);
-    if (state.vehicleId.value == derivedVehicleId) return;
+
+    // Data-loaded signal: stock_location subscription has delivered at least
+    // one snapshot. Before that, mapTableContent[_stockLocationCode] is absent.
+    final bool dataLoaded =
+        _stockLocationCode.isNotEmpty &&
+        mapTableContent.containsKey(_stockLocationCode);
+
+    // Skip when both vehicleId value and resolved flag are already current.
+    if (state.vehicleId.value == derivedVehicleId &&
+        state.vehicleIdResolved.value == dataLoaded) {
+      return;
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final DriverHomeState s = getDriverHomeState(widget.scrName);
       if (s.vehicleId.value != derivedVehicleId) {
         s.vehicleId.value = derivedVehicleId;
-        s.vehicleIdResolved = true;
+      }
+      if (dataLoaded && !s.vehicleIdResolved.value) {
+        s.vehicleIdResolved.value = true;
       }
     });
   }
@@ -211,6 +231,7 @@ class _RouteFeedHeaderState extends State<RouteFeedHeader> {
       // --- Reactive reads (register Obx dependencies) ---
       final DriverHomeState dhState = getDriverHomeState(widget.scrName);
       dhState.vehicleId.value;
+      dhState.activeTrip.value; // register activeTrip dependency (GAP B fix)
 
       // Workforce (driver name)
       mapTableContent[_workforceCode]; // register dependency

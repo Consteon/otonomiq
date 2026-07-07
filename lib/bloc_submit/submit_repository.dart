@@ -1,10 +1,11 @@
 import 'dart:core';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../api.dart';
 import '../bloc_submit/bloc.dart';
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
-
-import '../api.dart';
 
 abstract class SubmitRepository {
   Future<void> addNewSubmit2(Submit message);
@@ -17,13 +18,16 @@ abstract class SubmitRepository {
 class FirebaseSubmitRepository implements SubmitRepository {
   // final submitInstance = FirebaseFirestore.instance;
 
-  final submitCollection =
-      FirebaseFirestore.instance.collection(firestoreEventCollection);
+  final submitCollection = FirebaseFirestore.instance.collection(
+    firestoreEventCollection,
+  );
   // final submitDoc =FirebaseFirestore.instance.doc(eventDoc);
   final submitDoc = FirebaseFirestore.instance
       .collection(firestoreEventCollection)
-      .where('ss',
-          isEqualTo: transactionStore.state.screenTx['#INTERFACE_KEY']);
+      .where(
+        'ss',
+        isEqualTo: transactionStore.state.screenTx['#INTERFACE_KEY'],
+      );
 
   @override
   Future<void> addNewSubmit2(Submit submit) async {
@@ -97,16 +101,18 @@ class FirebaseSubmitRepository implements SubmitRepository {
         .where('ss', isEqualTo: state['#INTERFACE_KEY'])
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs
-          .map((doc) => Submit.fromEntity(SubmitEntity.fromSnapshot(doc)))
-          .toList();
-    });
+          return snapshot.docs
+              .map((doc) => Submit.fromEntity(SubmitEntity.fromSnapshot(doc)))
+              .toList();
+        });
   }
 
   @override
   Future<void> updateSubmit(Submit update) {
-    return submitCollection
-        .doc(update.ss)
-        .update(update.toEntity().toDocument());
+    return safeFsUpdate(
+      submitCollection.doc(update.ss),
+      update.toEntity().toDocument(),
+      'updateSubmit',
+    );
   }
 }

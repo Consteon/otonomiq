@@ -311,6 +311,7 @@ class _TaskFeedListState extends State<TaskFeedList> {
       // Touch vehicleId to register Obx dependency (search uses {vehicleId}).
       final DriverHomeState dhState = getDriverHomeState(widget.scrName);
       dhState.vehicleId.value;
+      dhState.activeTrip.value; // register activeTrip dependency (GAP B fix)
 
       final List<Map<String, dynamic>> tasks = _getFilteredTasks();
 
