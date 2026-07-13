@@ -374,6 +374,19 @@ Map<String, List<Map<String, dynamic>>> groupBySv(
   return m;
 }
 
+/// Group docs by an arbitrary field value. Mirrors [groupBySv] but
+/// parameterized. Skips docs where the key field is absent or empty.
+Map<String, List<Map<String, dynamic>>> groupByField(
+    List<Map<String, dynamic>> docs, String keyField) {
+  final Map<String, List<Map<String, dynamic>>> m = {};
+  for (final d in docs) {
+    final String k = (d[keyField] ?? '').toString();
+    if (k.isEmpty) continue;
+    (m[k] ??= <Map<String, dynamic>>[]).add(d);
+  }
+  return m;
+}
+
 /// Attendance roll-up for one cost center's workers.
 class KehadiranAgg {
   final int hadir;

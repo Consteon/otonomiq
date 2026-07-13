@@ -79,7 +79,8 @@ class _RouteFeedHeaderState extends State<RouteFeedHeader> {
     if (rawWorkforceTable.isNotEmpty) {
       final TablePath wtp = parseTablePath(rawWorkforceTable);
       if (wtp.tableDocId.isNotEmpty) {
-        _workforceCode = '${wtp.tableDocId}/${wtp.subColl}';
+        // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+        _workforceCode = '$appVid/${wtp.tableDocId}/${wtp.subColl}';
         subscribeToMapCollection(
             appVid, wtp.tableDocId, wtp.subColl, _workforceCode);
       }
@@ -91,7 +92,7 @@ class _RouteFeedHeaderState extends State<RouteFeedHeader> {
     if (rawVehicleTable.isNotEmpty) {
       final TablePath vtp = parseTablePath(rawVehicleTable);
       if (vtp.tableDocId.isNotEmpty) {
-        _stockLocationCode = '${vtp.tableDocId}/${vtp.subColl}';
+        _stockLocationCode = '$appVid/${vtp.tableDocId}/${vtp.subColl}';
         subscribeToMapCollection(
             appVid, vtp.tableDocId, vtp.subColl, _stockLocationCode);
       }
@@ -103,7 +104,7 @@ class _RouteFeedHeaderState extends State<RouteFeedHeader> {
     if (rawTaskTable.isNotEmpty) {
       final TablePath ttp = parseTablePath(rawTaskTable);
       if (ttp.tableDocId.isNotEmpty) {
-        _taskCode = '${ttp.tableDocId}/${ttp.subColl}';
+        _taskCode = '$appVid/${ttp.tableDocId}/${ttp.subColl}';
         subscribeToMapCollection(
             appVid, ttp.tableDocId, ttp.subColl, _taskCode);
       }

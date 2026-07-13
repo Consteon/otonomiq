@@ -499,4 +499,43 @@ void main() {
       expect(spans.length, 1);
     });
   });
+
+  group('groupByField', () {
+    test('groups docs by the given field, skips empty', () {
+      final docs = <Map<String, dynamic>>[
+        {'sv': '11', 'ln': 'A'},
+        {'sv': '11', 'ln': 'B'},
+        {'sv': '22', 'ln': 'C'},
+        {'ln': 'D'}, // no sv -> skipped
+        {'sv': '', 'ln': 'E'}, // empty sv -> skipped
+      ];
+      final g = groupByField(docs, 'sv');
+      expect(g.keys.length, 2);
+      expect(g['11']!.length, 2);
+      expect(g['22']!.length, 1);
+      expect(g.containsKey(''), isFalse);
+    });
+
+    test('missing field entirely -> skipped', () {
+      final docs = <Map<String, dynamic>>[
+        {'a': '1'},
+        {'b': '2'},
+      ];
+      final g = groupByField(docs, 'sv');
+      expect(g, isEmpty);
+    });
+
+    test('empty input -> empty output', () {
+      final g = groupByField(const [], 'sv');
+      expect(g, isEmpty);
+    });
+
+    test('numeric field values are stringified', () {
+      final docs = <Map<String, dynamic>>[
+        {'sv': 83674161979544, 'ln': 'X'},
+      ];
+      final g = groupByField(docs, 'sv');
+      expect(g['83674161979544']!.length, 1);
+    });
+  });
 }

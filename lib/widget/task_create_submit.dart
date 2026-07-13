@@ -103,7 +103,8 @@ class _TaskCreateSubmitState extends State<TaskCreateSubmit> {
       if (docId.isNotEmpty) tp = TablePath(docId, 'stock_location');
     }
     if (tp != null && tp.tableDocId.isNotEmpty && tp.subColl.isNotEmpty) {
-      _stockLocationCode = '${tp.tableDocId}/${tp.subColl}';
+      // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+      _stockLocationCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
       subscribeToMapCollection(
           appVid, tp.tableDocId, tp.subColl, _stockLocationCode);
     }

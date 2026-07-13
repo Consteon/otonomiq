@@ -94,8 +94,10 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
     final TablePath tp = parseTablePath(rawTable);
     final String appVid = (widget.component['vidtable'] ?? '').toString().trim();
     if (tp.tableDocId.isEmpty || appVid.isEmpty) return;
-    _siteCode = '${tp.tableDocId}/${tp.subColl}';
-    _eventCode = '${tp.tableDocId}/event';
+    // vid-scoped keys: mapTableContent/_mapSubscribed key by code without vid,
+    // so a same tableDocId/subColl on another tenant would dedup our stream away.
+    _siteCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
+    _eventCode = '$appVid/${tp.tableDocId}/event';
     subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _siteCode);
     subscribeToMapCollection(appVid, tp.tableDocId, 'event', _eventCode);
   }

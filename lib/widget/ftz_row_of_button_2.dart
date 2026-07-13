@@ -23,6 +23,7 @@ import 'do_chain.dart';
 import 'driver_home_support.dart';
 import 'item_execution_list.dart';
 import 'item_execution_submit.dart';
+import 'where_eq_type_tolerant.dart';
 
 // display a row of buttons
 
@@ -311,8 +312,8 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
                           FirebaseFirestore.instance.collection(
                               'MobileTable/$tableVid/tables/$tableName/content');
 
-                      QuerySnapshot querySnapshot = await contentRef
-                          .where(searchField, isEqualTo: searchValue)
+                      QuerySnapshot querySnapshot = await whereEqTypeTolerant(
+                              contentRef, searchField, searchValue)
                           .limit(1)
                           .get();
 
@@ -934,9 +935,10 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
                                                   'MobileTable/$tableVid/tables/$tableName/content');
 
                                           QuerySnapshot querySnapshot =
-                                              await contentRef
-                                                  .where(searchField,
-                                                      isEqualTo: searchValue)
+                                              await whereEqTypeTolerant(
+                                                      contentRef,
+                                                      searchField,
+                                                      searchValue)
                                                   .limit(1)
                                                   .get();
 

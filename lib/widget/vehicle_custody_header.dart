@@ -88,7 +88,8 @@ class _VehicleCustodyHeaderState extends State<VehicleCustodyHeader> {
     final String rawTable = (widget.component['table'] ?? '').toString().trim();
     final TablePath tp = parseTablePath(rawTable);
     if (tp.tableDocId.isNotEmpty) {
-      _checkCode = '${tp.tableDocId}/${tp.subColl}';
+      // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+      _checkCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
       subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _checkCode);
     }
 
@@ -98,7 +99,7 @@ class _VehicleCustodyHeaderState extends State<VehicleCustodyHeader> {
     if (rawVehicleTable.isNotEmpty) {
       final TablePath vtp = parseTablePath(rawVehicleTable);
       if (vtp.tableDocId.isNotEmpty) {
-        _slCode = '${vtp.tableDocId}/${vtp.subColl}';
+        _slCode = '$appVid/${vtp.tableDocId}/${vtp.subColl}';
         subscribeToMapCollection(appVid, vtp.tableDocId, vtp.subColl, _slCode);
       }
     }

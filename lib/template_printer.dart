@@ -251,7 +251,7 @@ class TemplatePrinter {
   Future<List<int>> _processSingleLineLoop(String content,
       Map<String, String> attributes, Map<String, dynamic> context) async {
     List<int> bytes = [];
-    late final List<List<String>> sourceData;
+    late final List<dynamic> sourceData;
     final sourceName = attributes['source'];
 
     if (sourceName != null && sourceName.isNotEmpty) {
@@ -260,9 +260,15 @@ class TemplatePrinter {
         throw Exception(
             'Source "$sourceName" for LOOP not found or is not a List.');
       }
-      sourceData = (rawSourceData as List)
-          .map((row) => (row as List).map((cell) => cell.toString()).toList())
-          .toList();
+      // ponytail: Map-tolerance for keyed PRN variant. When source elements
+      // are Maps (e.g. li[] = [{ii,in,qt,hg,sub},...]), pass them through
+      // unchanged so {{item.in}}/{{item.qt}} resolve via _interpolate's
+      // Map path-traversal. Positional List elements (GasPink DO) are
+      // coerced to List<String> as before -- no regression.
+      sourceData = (rawSourceData as List).map((row) {
+        if (row is Map) return row;
+        return (row as List).map((cell) => cell.toString()).toList();
+      }).toList();
     } else {
       sourceData = [];
     }
@@ -296,7 +302,7 @@ class TemplatePrinter {
       Map<String, String> attributes, Map<String, dynamic> context,
       {List<List<String>>? items}) async {
     List<int> bytes = [];
-    late final List<List<String>> sourceData;
+    late final List<dynamic> sourceData;
     final sourceName = attributes['source'];
 
     if (items != null) {
@@ -306,9 +312,11 @@ class TemplatePrinter {
       if (rawSourceData == null || rawSourceData is! List)
         throw Exception(
             'Source "$sourceName" for LOOP not found or is not a List.');
-      sourceData = (rawSourceData as List)
-          .map((row) => (row as List).map((cell) => cell.toString()).toList())
-          .toList();
+      // ponytail: Map-tolerance for keyed PRN variant (same as single-line).
+      sourceData = (rawSourceData as List).map((row) {
+        if (row is Map) return row;
+        return (row as List).map((cell) => cell.toString()).toList();
+      }).toList();
     } else {
       sourceData = [];
     }
@@ -482,6 +490,14 @@ class TemplatePrinter {
       }
 
       if (format && formatter != null) {
+        // FIX-3: {{field|default:SomeText}} substitutes SomeText only when the
+        // resolved value is empty (inert on non-empty). Keeps white-label
+        // fallback text in the sheet template (e.g. {{by|default:Umum}}) rather
+        // than baking it into Dart -- the nota doc `by` field stays "".
+        final defaultMatch = RegExp(r'^default:(.*)$').firstMatch(formatter);
+        if (defaultMatch != null) {
+          return valueAsString.isEmpty ? defaultMatch.group(1)! : valueAsString;
+        }
         final idrMatch = RegExp(r'^idr(\d*)$').firstMatch(formatter);
         if (idrMatch != null) {
           return _formatIdr(valueAsString,

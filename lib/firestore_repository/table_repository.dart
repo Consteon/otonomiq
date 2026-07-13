@@ -82,6 +82,23 @@ Future<int> getNumber(String documentName) async {
 /// otherwise returns the content of the base table. Returns null if
 //  the document doesn't exist or an error occurs.
 
+/// Split a normalized keyed table name into `(tableDocId, contentSubColl)`.
+///
+/// A keyed `//` table normalizes (via `normalizeTableName`) to
+/// `<tableDocId>/<subColl>` (single slash), e.g. `84214220504259/report-incident`.
+/// The table-definition doc is `<tableDocId>` (even-segment, valid) and its rows
+/// live in the `<subColl>` subcollection alongside `content`. Passing the full
+/// slashed name straight to `.doc()` builds a 5-segment (odd) path → Firestore
+/// "Invalid document reference" and the table never loads. A plain name keeps
+/// the default `content` subcollection. Mirrors `splitKeyedTableName` (write path):
+/// boundary is the LAST slash; residual slashes in the doc part (multi-level keyed
+/// name) collapse to '%' so `.doc()` gets one valid segment.
+(String, String) _splitKeyedRead(String tableName) {
+  final int i = tableName.lastIndexOf('/');
+  if (i < 0) return (tableName, mobileTableContent);
+  return (tableName.substring(0, i).replaceAll('/', '%'), tableName.substring(i + 1));
+}
+
 Future<List<dynamic>?> readFromFirestoreTable(
   int tableVid,
   String tableCode,
@@ -91,8 +108,11 @@ Future<List<dynamic>?> readFromFirestoreTable(
 }) async {
   try {
     String collectionPath = 'MobileTable/$tableVid/tables';
+    // Keyed `//` tables: address the table-def doc by <tableDocId> only.
+    final (tableDocId, tableSubColl) = _splitKeyedRead(tableCode);
+    final bool isKeyed = tableSubColl != mobileTableContent;
     DocumentReference tableDocRef =
-        FirebaseFirestore.instance.collection(collectionPath).doc(tableCode);
+        FirebaseFirestore.instance.collection(collectionPath).doc(tableDocId);
 
     DocumentSnapshot documentSnapshot = await tableDocRef.get();
 
@@ -102,7 +122,8 @@ Future<List<dynamic>?> readFromFirestoreTable(
       String headerString = data['hd'] ?? '0${separator[6]}';
       final String indexString = (index != null) ? (index - 1).toString() : '';
 
-      if (data['tt'] == 'D') {
+      // Keyed tables are always dynamic subcollection tables (force type D).
+      if (data['tt'] == 'D' || isKeyed) {
         // If the table is a dynamic table, pass the filter string.
         await createInternalTableDynamic(
             internalTableCode, documentSnapshot, headerString,
@@ -1799,8 +1820,10 @@ Future<void> createInternalTableDynamic(
     int numOfField = -1;
     devPrint('rebuild table $tableCode with filter: "$indexTableString"');
 
-    // Start with the base query for the 'content' subcollection.
-    Query query = documentSnapshot.reference.collection('content');
+    // Start with the base query for the content subcollection. For keyed `//`
+    // tables this is the named subcollection (e.g. `report-incident`), not `content`.
+    final (_, contentSub) = _splitKeyedRead(tableCode);
+    Query query = documentSnapshot.reference.collection(contentSub);
     QuerySnapshot querySnapshot;
 
     // If a filter string is provided, parse it and apply it to the query.
@@ -2048,16 +2071,18 @@ Future subscribeToTable(
     } // end if (tableListener == null)
     if (needToListen) {
       devPrint('subscribeTable => $tableCode with filter: "$indexTableString"');
+      // Keyed `//` tables: address the table-def doc by <tableDocId> only
+      // (the full slashed name is an invalid odd-segment doc path).
+      final (tableDocId, tableSubColl) = _splitKeyedRead(tableCode);
+      final bool isKeyed = tableSubColl != mobileTableContent;
       dynamic docRef = firestoreDb
           .collection('$mobileTable/$tableVid/$mobileTableCollection')
-          // .collection(
-          //     '$mobileTable/${appCodeController.applicationTableVid}/$mobileTableCollection')
-          .doc(tableCode); // search in MobileTable\
+          .doc(tableDocId); // search in MobileTable
       bool docExists = (await docRef.get()).exists;
       if (!docExists) {
         docRef = firestoreDb
             .collection(tableDirectory)
-            .doc(tableCode); // search in TableDirectory
+            .doc(tableDocId); // search in TableDirectory
         docExists = (await docRef.get()).exists;
       } // end if (!docSnapshot.exists)
       if (docExists) {
@@ -2074,7 +2099,8 @@ Future subscribeToTable(
                 tableHeader[tableCode] = '';
                 tableType[tableCode] = '';
               } else {
-                if (event.data()['tt'] == 'D') {
+                if (event.data()['tt'] == 'D' || isKeyed) {
+                  // Keyed tables are always dynamic subcollection tables.
                   // Pass the filter string down to the handler function
                   await createInternalTableDynamic(
                       tableCode, event, event.data()['hd'],

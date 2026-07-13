@@ -151,7 +151,10 @@ List<Widget> buildPage(var componentList, String scrName,
     AdminCreateTaskSupport.clearAllDrafts();
     TaskItemBuilder.resetClientPublished(scrName);
     TaskCreateSubmit.resetWriting(scrName);
+    NotaCreateSubmit.resetWriting(scrName);
     TaskFeedList.clearFlatSearch(scrName);
+    CustomerOutstandingList.clearState(scrName);
+    AssetStockList.clearState(scrName);
   }
 
   dynamic userRepository = myState['#USER_REPOSITORY'];

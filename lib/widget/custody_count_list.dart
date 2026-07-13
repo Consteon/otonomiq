@@ -99,7 +99,8 @@ class _CustodyCountListState extends State<CustodyCountList> {
     final String rawTable = (widget.component['table'] ?? '').toString().trim();
     final TablePath tp = parseTablePath(rawTable);
     if (tp.tableDocId.isNotEmpty) {
-      _checkCode = '${tp.tableDocId}/${tp.subColl}';
+      // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+      _checkCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
       subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _checkCode);
     }
 
@@ -109,7 +110,7 @@ class _CustodyCountListState extends State<CustodyCountList> {
     if (rawJoinTable.isNotEmpty) {
       final TablePath jtp = parseTablePath(rawJoinTable);
       if (jtp.tableDocId.isNotEmpty) {
-        _itemCode = '${jtp.tableDocId}/${jtp.subColl}';
+        _itemCode = '$appVid/${jtp.tableDocId}/${jtp.subColl}';
         subscribeToMapCollection(
             appVid, jtp.tableDocId, jtp.subColl, _itemCode);
       }
@@ -124,7 +125,7 @@ class _CustodyCountListState extends State<CustodyCountList> {
           (widget.component['table'] ?? '').toString().trim();
       final TablePath ttp = parseTablePath(rawTaskTable);
       if (ttp.tableDocId.isNotEmpty) {
-        _taskCode = '${ttp.tableDocId}/${ttp.subColl}';
+        _taskCode = '$appVid/${ttp.tableDocId}/${ttp.subColl}';
         subscribeToMapCollection(
             appVid, ttp.tableDocId, ttp.subColl, _taskCode);
       }
@@ -144,7 +145,7 @@ class _CustodyCountListState extends State<CustodyCountList> {
       if (rawAcTable.isNotEmpty) {
         final TablePath actp = parseTablePath(rawAcTable);
         if (actp.tableDocId.isNotEmpty) {
-          _assetCacheCode = '${actp.tableDocId}/${actp.subColl}';
+          _assetCacheCode = '$appVid/${actp.tableDocId}/${actp.subColl}';
           subscribeToMapCollection(
               appVid, actp.tableDocId, actp.subColl, _assetCacheCode);
         }

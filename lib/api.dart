@@ -1978,7 +1978,10 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
           lastPages = response.body;
         } catch (e) {
           debugCount = 5214;
-          errorReport(e);
+          // A handled 15s timeout here recovers gracefully (bail below; no
+          // cached page on first run anyway), so it's Crashlytics noise —
+          // reportNonTimeout skips TimeoutException, forwards real errors.
+          reportNonTimeout(e);
         }
         // The first-time settings POST above failed (timeout/network): the
         // inner catch reported it but `response` is still null. Bail here
@@ -1987,6 +1990,15 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
         // surfaced from the outer catch. `firstTimeRun` means `@screenUI` was
         // empty, so there is no cached page to construct from anyway.
         if (response == null) return;
+        // Same class of bail as the null case: a gateway/proxy hiccup returns a
+        // plain-text body ("upstream request timeout"), not JSON — jsonDecode
+        // would throw FormatException on the startup path. First run has no
+        // cached page anyway, so bail.
+        final String rsBody = response.body.trimLeft();
+        if (rsBody.isEmpty || (rsBody[0] != '[' && rsBody[0] != '{')) {
+          devPrint('readSettingsStart: non-JSON body, bail: ${response.body}');
+          return;
+        }
         dynamic getResult = jsonDecode(response.body);
         debugCount = 5215;
         trace(debugCount);
@@ -2427,6 +2439,17 @@ Future<void> readSettingsContext(
     );
   }
   if (response != null) {
+    // The settings/pages payload is always a JSON array/object. A gateway or
+    // proxy hiccup returns a plain-text body instead (e.g. "upstream request
+    // timeout"); jsonDecode would throw FormatException, which pops a raw
+    // exception alert on a routine refresh AND logs a Crashlytics non-fatal.
+    // Detect the non-JSON body up front and keep the cached UI — the refresh
+    // chain (.then in main_page) still completes cleanly on cache.
+    final String rsBody = response.body.trimLeft();
+    if (rsBody.isEmpty || (rsBody[0] != '[' && rsBody[0] != '{')) {
+      devPrint('readSettingsContext: non-JSON body, keep cache: ${response.body}');
+      return;
+    }
     var getResult = [];
     try {
       getResult = jsonDecode(response.body);

@@ -63,7 +63,8 @@ class _ClosingContextRailState extends State<ClosingContextRail> {
     if (rawTable.isNotEmpty) {
       final TablePath tp = parseTablePath(rawTable);
       if (tp.tableDocId.isNotEmpty) {
-        _assetCacheCode = '${tp.tableDocId}/${tp.subColl}';
+        // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+        _assetCacheCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
         subscribeToMapCollection(
             appVid, tp.tableDocId, tp.subColl, _assetCacheCode);
       }
@@ -75,7 +76,7 @@ class _ClosingContextRailState extends State<ClosingContextRail> {
     if (rawCheckTable.isNotEmpty) {
       final TablePath ctp = parseTablePath(rawCheckTable);
       if (ctp.tableDocId.isNotEmpty) {
-        _checkCode = '${ctp.tableDocId}/${ctp.subColl}';
+        _checkCode = '$appVid/${ctp.tableDocId}/${ctp.subColl}';
         subscribeToMapCollection(
             appVid, ctp.tableDocId, ctp.subColl, _checkCode);
       }
@@ -87,7 +88,7 @@ class _ClosingContextRailState extends State<ClosingContextRail> {
     if (rawJoinTable.isNotEmpty) {
       final TablePath jtp = parseTablePath(rawJoinTable);
       if (jtp.tableDocId.isNotEmpty) {
-        _itemCode = '${jtp.tableDocId}/${jtp.subColl}';
+        _itemCode = '$appVid/${jtp.tableDocId}/${jtp.subColl}';
         subscribeToMapCollection(
             appVid, jtp.tableDocId, jtp.subColl, _itemCode);
       }

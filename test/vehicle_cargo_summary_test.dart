@@ -455,4 +455,71 @@ void main() {
       expect((spans[2] as TextSpan).text, ' + sisa muatan.');
     });
   });
+
+  // ── hideZero filtering (spec §2c) ─────────────────────────────────────
+
+  group('vehicleCargoSummary hideZero filtering', () {
+    // Tests the composed behavior: computePerItemCargoRows + hideZeroEnabled
+    // + the .where() filter, mirroring the widget's build method. The
+    // hideZeroEnabled helper itself is unit-tested in
+    // test/driver_home_support_test.dart; here we test the integration.
+
+    final nameMap = {
+      '31': 'Amidis Galon 19 Liter',
+      '32': 'Aqua 600ml',
+    };
+
+    /// Mirror of the widget's filter: computePerItemCargoRows then drop
+    /// all-zero rows when hideZero is true.
+    List<CargoItemRow> computeFiltered(
+      List<Map<String, dynamic>> docs,
+      Map<String, String> names, {
+      bool hideZero = false,
+    }) {
+      final rows = computePerItemCargoRows(docs, names);
+      if (!hideZero) return rows;
+      return rows.where((r) => r.fullQty != 0 || r.emptyQty != 0).toList();
+    }
+
+    test('hideZero=true drops item with full 0 AND empty 0', () {
+      final docs = <Map<String, dynamic>>[
+        {'ii': '31', 'cd': 'full', 'qt': '0'},
+        {'ii': '31', 'cd': 'empty', 'qt': '0'},
+        {'ii': '32', 'cd': 'full', 'qt': '5'},
+        {'ii': '32', 'cd': 'empty', 'qt': '0'},
+      ];
+      final rows = computeFiltered(docs, nameMap, hideZero: true);
+      expect(rows.length, 1);
+      expect(rows[0].displayName, 'Aqua 600ml'); // 32 kept, 31 dropped
+    });
+
+    test('hideZero=true keeps item with 0 full / 1 empty', () {
+      final docs = <Map<String, dynamic>>[
+        {'ii': '31', 'cd': 'full', 'qt': '0'},
+        {'ii': '31', 'cd': 'empty', 'qt': '1'},
+      ];
+      final rows = computeFiltered(docs, nameMap, hideZero: true);
+      expect(rows.length, 1);
+      expect(rows[0].fullQty, 0);
+      expect(rows[0].emptyQty, 1);
+    });
+
+    test('hideZero=false (default) still shows all-zero item', () {
+      final docs = <Map<String, dynamic>>[
+        {'ii': '31', 'cd': 'full', 'qt': '0'},
+        {'ii': '31', 'cd': 'empty', 'qt': '0'},
+      ];
+      final rows = computeFiltered(docs, nameMap);
+      expect(rows.length, 1);
+      expect(rows[0].fullQty, 0);
+      expect(rows[0].emptyQty, 0);
+    });
+
+    test('hideZeroEnabled reads String TRUE from component config', () {
+      // Confirms the helper reads the exact config shape the server sends.
+      expect(hideZeroEnabled({'hideZero': 'TRUE'}), isTrue);
+      expect(hideZeroEnabled({'hideZero': 'FALSE'}), isFalse);
+      expect(hideZeroEnabled(<String, dynamic>{}), isFalse);
+    });
+  });
 }

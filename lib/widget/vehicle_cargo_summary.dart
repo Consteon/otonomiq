@@ -95,7 +95,8 @@ class _VehicleCargoSummaryState extends State<VehicleCargoSummary> {
     if (rawVehicleTable.isNotEmpty) {
       final TablePath vtp = parseTablePath(rawVehicleTable);
       if (vtp.tableDocId.isNotEmpty) {
-        _slCode = '${vtp.tableDocId}/${vtp.subColl}';
+        // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+        _slCode = '$appVid/${vtp.tableDocId}/${vtp.subColl}';
         subscribeToMapCollection(
             appVid, vtp.tableDocId, vtp.subColl, _slCode);
       }
@@ -107,7 +108,7 @@ class _VehicleCargoSummaryState extends State<VehicleCargoSummary> {
     if (rawCacheTable.isNotEmpty) {
       final TablePath ctp = parseTablePath(rawCacheTable);
       if (ctp.tableDocId.isNotEmpty) {
-        _cacheCode = '${ctp.tableDocId}/${ctp.subColl}';
+        _cacheCode = '$appVid/${ctp.tableDocId}/${ctp.subColl}';
         subscribeToMapCollection(
             appVid, ctp.tableDocId, ctp.subColl, _cacheCode);
       }
@@ -123,13 +124,13 @@ class _VehicleCargoSummaryState extends State<VehicleCargoSummary> {
       final String mainTableDocId = ctp.tableDocId;
       if (!rawItemTable.contains('//') && mainTableDocId.isNotEmpty) {
         // Bare name: subscribe as subcollection under the cache table's docId
-        _itemCode = '$mainTableDocId/$rawItemTable';
+        _itemCode = '$appVid/$mainTableDocId/$rawItemTable';
         subscribeToMapCollection(
             appVid, mainTableDocId, rawItemTable, _itemCode);
       } else {
         final TablePath itp = parseTablePath(rawItemTable);
         if (itp.tableDocId.isNotEmpty) {
-          _itemCode = '${itp.tableDocId}/${itp.subColl}';
+          _itemCode = '$appVid/${itp.tableDocId}/${itp.subColl}';
           subscribeToMapCollection(
               appVid, itp.tableDocId, itp.subColl, _itemCode);
         }
@@ -263,7 +264,7 @@ class _VehicleCargoSummaryState extends State<VehicleCargoSummary> {
       // CHANGED: Step 5: Compute per-item rows via the shared pure helper
       // (replaces the fixed bucket computation; aggregation lives in
       // driver_home_support.dart, not here).
-      final List<CargoItemRow> itemRows = computePerItemCargoRows(
+      final List<CargoItemRow> rawRows = computePerItemCargoRows(
         cacheDocs,
         itemNameMap,
         itemUnitMap: itemUnitMap,
@@ -273,6 +274,14 @@ class _VehicleCargoSummaryState extends State<VehicleCargoSummary> {
         conditionFull: fullValue,
         conditionEmpty: emptyValue,
       );
+
+      // hideZero: drop items whose full AND empty are both 0 (stale
+      // asset_cache docs from past trips). Reuses the shared helper from
+      // driver_home_support.dart (same as INVENTORY_BUCKET_CARD et al.).
+      final bool hideZero = hideZeroEnabled(widget.component);
+      final List<CargoItemRow> itemRows = hideZero
+          ? rawRows.where((r) => r.fullQty != 0 || r.emptyQty != 0).toList()
+          : rawRows;
 
       // Text slots with defaults
       final String introA = _t(0, 'Serahkan kendaraan');

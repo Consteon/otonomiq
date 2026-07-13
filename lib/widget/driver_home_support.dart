@@ -472,6 +472,83 @@ void writeRouteParams(String? rawDsl, String scrName) {
   }
 }
 
+/// Resolve `{field}` curly tokens against a row's named-field Map.
+///
+/// Tokens whose name matches a non-empty key in [rowFields] are replaced with
+/// the stringified value. Tokens with no match (or empty value) are left as-is
+/// so the caller can fall back to [resolveDriverCurlyTokens] for session tokens
+/// like `{today}` or `{driverVid}`.
+///
+/// Pure function, no side effects. Safe to call with an empty map (returns
+/// [raw] unchanged). Uses the same single-brace regex as
+/// [resolveDriverCurlyTokens] -- `{{POS(0)}}` double-brace is NOT matched.
+String resolveRowCurlyTokens(String raw, Map<String, dynamic> rowFields) {
+  if (!raw.contains('{') || rowFields.isEmpty) return raw;
+  return raw.replaceAllMapped(
+    RegExp(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}'),
+    (Match m) {
+      final String name = m.group(1)!;
+      final dynamic val = rowFields[name];
+      if (val == null) return m.group(0)!; // leave for session fallback
+      final String s = val.toString().trim();
+      return s.isNotEmpty ? s : m.group(0)!; // empty = leave for fallback
+    },
+  );
+}
+
+/// Resolve routeParams with row-context-first resolution, then dispatch as
+/// bare screenTx keys. Designed for list/picker row taps where the tapped row
+/// provides named fields (e.g. `{lv}` -> `row['lv']`).
+///
+/// Pipeline:
+///   1. Null/empty [rawDsl] OR null [row] -> return (no-op). Null row is the
+///      adhoc-row case in PickerList -- no doc fields to resolve from.
+///   2. autheniumDecode the raw DSL (server encodes U+25FC/U+2B58 as
+///      _25FC_/_2B58_).
+///   3. parseRouteParams -> list of key/rawValue pairs (REUSED, not reinvented).
+///   4. For each value:
+///      a. Resolve `{field}` from [row] via [resolveRowCurlyTokens].
+///      b. If still contains `{`, resolve via [resolveDriverCurlyTokens]
+///         (session/driver tokens like {vehicleId}, {today}).
+///   5. Dispatch resolved non-empty pairs as bare screenTx keys.
+///
+/// Skips pairs whose resolved value is empty or still contains an unresolved
+/// `{` (pending-safe, same contract as [writeRouteParams]).
+///
+/// [rawDsl]  -- raw `component['routeParams']` string.
+/// [row]     -- the tapped row's named-field Map (nullable for adhoc rows).
+/// [scrName] -- screen name for [resolveDriverCurlyTokens] context.
+void writeRouteParamsFromRow(
+  String? rawDsl,
+  Map<String, dynamic>? row,
+  String scrName,
+) {
+  if (rawDsl == null || rawDsl.trim().isEmpty) return;
+  if (row == null) return;
+  final String decoded = autheniumDecode(rawDsl) ?? rawDsl;
+  final List<MapEntry<String, String>> pairs = parseRouteParams(decoded);
+  if (pairs.isEmpty) return;
+
+  final Map<String, dynamic> toDispatch = {};
+  for (final pair in pairs) {
+    // Step a: resolve from row fields first.
+    String resolved = resolveRowCurlyTokens(pair.value, row);
+    // Step b: fallback to session/driver tokens for anything still unresolved.
+    if (resolved.contains('{')) {
+      resolved = resolveDriverCurlyTokens(resolved, scrName);
+    }
+    // Skip empty or still-unresolved.
+    if (resolved.isEmpty || resolved.contains('{')) continue;
+    toDispatch[pair.key] = resolved;
+  }
+
+  if (toDispatch.isNotEmpty) {
+    transactionStore.dispatch(
+      UpdateScreenTxAction(ScreenTransaction(toDispatch)),
+    );
+  }
+}
+
 // ─── Multi-clause AND filter ───────────────────────────────────────────────
 
 /// Filter docs by a multi-clause AND condition string. Clauses are separated

@@ -75,7 +75,8 @@ class _PreconditionGateCardState extends State<PreconditionGateCard> {
     final TablePath tp = parseTablePath(rawTable);
     final String mainTableDocId = tp.tableDocId;
     if (mainTableDocId.isNotEmpty) {
-      _gateCode = '$mainTableDocId/${tp.subColl}';
+      // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+      _gateCode = '$appVid/$mainTableDocId/${tp.subColl}';
       subscribeToMapCollection(appVid, mainTableDocId, tp.subColl, _gateCode);
     }
 
@@ -90,7 +91,7 @@ class _PreconditionGateCardState extends State<PreconditionGateCard> {
         .trim();
     if (rawItemsTable.isNotEmpty) {
       if (!rawItemsTable.contains('//') && mainTableDocId.isNotEmpty) {
-        _itemsCode = '$mainTableDocId/$rawItemsTable';
+        _itemsCode = '$appVid/$mainTableDocId/$rawItemsTable';
         subscribeToMapCollection(
           appVid,
           mainTableDocId,
@@ -100,7 +101,7 @@ class _PreconditionGateCardState extends State<PreconditionGateCard> {
       } else {
         final TablePath itp = parseTablePath(rawItemsTable);
         if (itp.tableDocId.isNotEmpty) {
-          _itemsCode = '${itp.tableDocId}/${itp.subColl}';
+          _itemsCode = '$appVid/${itp.tableDocId}/${itp.subColl}';
           subscribeToMapCollection(
             appVid,
             itp.tableDocId,
@@ -118,7 +119,7 @@ class _PreconditionGateCardState extends State<PreconditionGateCard> {
         .trim();
     if (rawItemTable.isNotEmpty) {
       if (!rawItemTable.contains('//') && mainTableDocId.isNotEmpty) {
-        _itemCode = '$mainTableDocId/$rawItemTable';
+        _itemCode = '$appVid/$mainTableDocId/$rawItemTable';
         subscribeToMapCollection(
           appVid,
           mainTableDocId,
@@ -128,7 +129,7 @@ class _PreconditionGateCardState extends State<PreconditionGateCard> {
       } else {
         final TablePath itp = parseTablePath(rawItemTable);
         if (itp.tableDocId.isNotEmpty) {
-          _itemCode = '${itp.tableDocId}/${itp.subColl}';
+          _itemCode = '$appVid/${itp.tableDocId}/${itp.subColl}';
           subscribeToMapCollection(
             appVid,
             itp.tableDocId,
@@ -152,7 +153,7 @@ class _PreconditionGateCardState extends State<PreconditionGateCard> {
     if (rawGateTable.isNotEmpty) {
       final TablePath gtp = parseTablePath(rawGateTable);
       if (gtp.tableDocId.isNotEmpty) {
-        _existGateCode = '${gtp.tableDocId}/${gtp.subColl}';
+        _existGateCode = '$appVid/${gtp.tableDocId}/${gtp.subColl}';
         subscribeToMapCollection(
           appVid,
           gtp.tableDocId,
@@ -181,7 +182,11 @@ class _PreconditionGateCardState extends State<PreconditionGateCard> {
       rawSearch,
       widget.scrName,
     );
-    return matched.isNotEmpty ? matched.first : null;
+    if (matched.isEmpty) return null;
+    // Multi-trip: prefer newest non-closed opening (defensive; the live
+    // `search` config includes cst which already disambiguates, but this
+    // guards against future config changes that drop the cst clause).
+    return pickActiveOpening(matched) ?? matched.first;
   }
 
   /// Find the first vehicle_check OPENING doc matching gateSearch.
@@ -208,7 +213,10 @@ class _PreconditionGateCardState extends State<PreconditionGateCard> {
       rawGateSearch,
       widget.scrName,
     );
-    return matched.isNotEmpty ? matched.first : null;
+    if (matched.isEmpty) return null;
+    // Multi-trip: prefer newest non-closed opening (same pattern as
+    // custody_count_list._findCheckDoc:174).
+    return pickActiveOpening(matched) ?? matched.first;
   }
 
   /// Get the cargo manifest for the pending card display.

@@ -1,0 +1,12 @@
+# Launcher icons — autsorz brand.
+# Auto-detected (this is the tool's default config filename); regenerate with:
+#   dart run flutter_launcher_icons
+# White-label: for another brand, copy this to flutter_launcher_icons-<brand>.yaml,
+# point image_path at that brand's PNG, then:
+#   dart run flutter_launcher_icons -f flutter_launcher_icons-<brand>.yaml
+flutter_launcher_icons:
+  android: "ic_launcher"
+  ios: true
+  image_path: "assets/images/ic_launcher.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true # iOS rejects alpha; source PNG is RGBA

@@ -79,7 +79,8 @@ class _VehicleFeedHeaderState extends State<VehicleFeedHeader> {
     if (rawWorkforceTable.isNotEmpty) {
       final TablePath wtp = parseTablePath(rawWorkforceTable);
       if (wtp.tableDocId.isNotEmpty) {
-        _workforceCode = '${wtp.tableDocId}/${wtp.subColl}';
+        // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+        _workforceCode = '$appVid/${wtp.tableDocId}/${wtp.subColl}';
         subscribeToMapCollection(
             appVid, wtp.tableDocId, wtp.subColl, _workforceCode);
       }
@@ -91,7 +92,7 @@ class _VehicleFeedHeaderState extends State<VehicleFeedHeader> {
     if (rawTable.isNotEmpty) {
       final TablePath tp = parseTablePath(rawTable);
       if (tp.tableDocId.isNotEmpty) {
-        _stockLocationCode = '${tp.tableDocId}/${tp.subColl}';
+        _stockLocationCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
         subscribeToMapCollection(
             appVid, tp.tableDocId, tp.subColl, _stockLocationCode);
       }
@@ -109,7 +110,7 @@ class _VehicleFeedHeaderState extends State<VehicleFeedHeader> {
       final String tablePart = decoded.split('\u{2B58}').first.trim();
       final TablePath vtp = parseTablePath(tablePart);
       if (vtp.tableDocId.isNotEmpty) {
-        _vehicleCheckCode = '${vtp.tableDocId}/${vtp.subColl}';
+        _vehicleCheckCode = '$appVid/${vtp.tableDocId}/${vtp.subColl}';
         subscribeToMapCollection(
             appVid, vtp.tableDocId, vtp.subColl, _vehicleCheckCode);
       }
@@ -121,7 +122,7 @@ class _VehicleFeedHeaderState extends State<VehicleFeedHeader> {
     if (rawTaskTable.isNotEmpty) {
       final TablePath ttp = parseTablePath(rawTaskTable);
       if (ttp.tableDocId.isNotEmpty) {
-        _taskCode = '${ttp.tableDocId}/${ttp.subColl}';
+        _taskCode = '$appVid/${ttp.tableDocId}/${ttp.subColl}';
         subscribeToMapCollection(
             appVid, ttp.tableDocId, ttp.subColl, _taskCode);
       }
@@ -138,7 +139,7 @@ class _VehicleFeedHeaderState extends State<VehicleFeedHeader> {
       if (rawSL.isNotEmpty) {
         final TablePath sltp = parseTablePath(rawSL);
         if (sltp.tableDocId.isNotEmpty) {
-          _itemCode = '${sltp.tableDocId}/item';
+          _itemCode = '$appVid/${sltp.tableDocId}/item';
           subscribeToMapCollection(
               appVid, sltp.tableDocId, 'item', _itemCode);
         }
@@ -177,8 +178,17 @@ class _VehicleFeedHeaderState extends State<VehicleFeedHeader> {
       final Map<String, dynamic>? checkerDoc = _findCheckerDoc();
       final String nameField =
           (widget.component['nameField'] ?? 'n').toString();
-      final String checkerName =
+      String checkerName =
           (checkerDoc?[nameField] ?? '').toString().trim();
+      // Fallback to the logged-in user's name (#NAME) -- the same source the
+      // Admin header uses -- when no workforce doc resolves (workforceTable
+      // unconfigured or no #VID match). Guarantees the header shows who is
+      // logged in instead of a bare "-".
+      if (checkerName.isEmpty) {
+        checkerName = (transactionStore.state.screenTx['#NAME'] ?? '')
+            .toString()
+            .trim();
+      }
       final String initial = checkerName.isNotEmpty
           ? checkerName[0].toUpperCase()
           : '?';

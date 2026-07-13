@@ -99,7 +99,8 @@ class _AdminActiveTripListState extends State<AdminActiveTripList> {
     if (rawVcTable.isNotEmpty) {
       final TablePath vcp = parseTablePath(rawVcTable);
       if (vcp.tableDocId.isNotEmpty) {
-        _vcCode = '${vcp.tableDocId}/${vcp.subColl}';
+        // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+        _vcCode = '$appVid/${vcp.tableDocId}/${vcp.subColl}';
         subscribeToMapCollection(
             appVid, vcp.tableDocId, vcp.subColl, _vcCode);
       }
@@ -111,7 +112,7 @@ class _AdminActiveTripListState extends State<AdminActiveTripList> {
     if (rawTaskTable.isNotEmpty) {
       final TablePath tp = parseTablePath(rawTaskTable);
       if (tp.tableDocId.isNotEmpty) {
-        _taskCode = '${tp.tableDocId}/${tp.subColl}';
+        _taskCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
         subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _taskCode);
       }
     }
@@ -122,7 +123,7 @@ class _AdminActiveTripListState extends State<AdminActiveTripList> {
     if (rawSlTable.isNotEmpty) {
       final TablePath slp = parseTablePath(rawSlTable);
       if (slp.tableDocId.isNotEmpty) {
-        _slCode = '${slp.tableDocId}/${slp.subColl}';
+        _slCode = '$appVid/${slp.tableDocId}/${slp.subColl}';
         subscribeToMapCollection(
             appVid, slp.tableDocId, slp.subColl, _slCode);
       }
@@ -134,7 +135,7 @@ class _AdminActiveTripListState extends State<AdminActiveTripList> {
     if (rawWfTable.isNotEmpty) {
       final TablePath wtp = parseTablePath(rawWfTable);
       if (wtp.tableDocId.isNotEmpty) {
-        _wfCode = '${wtp.tableDocId}/${wtp.subColl}';
+        _wfCode = '$appVid/${wtp.tableDocId}/${wtp.subColl}';
         subscribeToMapCollection(
             appVid, wtp.tableDocId, wtp.subColl, _wfCode);
       }

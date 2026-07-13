@@ -527,4 +527,216 @@ void main() {
       expect(fullText[8], 'Selisih caption');
     });
   });
+
+  group('Multi-trip ie[] doc selection (vehicle-check-ie-trip-scope)', () {
+    // Tests the integration of filterDriverHomeDocs + pickActiveOpening that
+    // _matchedOpeningDoc and _matchedGateDoc now use. Scenario: trip-2 closed,
+    // trip-3 active, both share (vv, cdt). The card must pick trip-3.
+
+    setUp(() {
+      mapTableContent['trip_scope/vehicle_check'] = [
+        // Trip-2: closed, older
+        {
+          'cty': 'opening',
+          'vv': 'V300',
+          'cdt': '20260708',
+          'cst': 'closed',
+          't': 100,
+          '__docId': 'TRIP2',
+          'ie': [
+            {'ii': '31', 'cd': 'full', 'qt': 5},
+          ],
+        },
+        // Trip-3: active, newer
+        {
+          'cty': 'opening',
+          'vv': 'V300',
+          'cdt': '20260708',
+          'cst': 'awaiting_custody',
+          't': 200,
+          '__docId': 'TRIP3',
+          'ie': [
+            {'ii': '31', 'cd': 'full', 'qt': 10},
+            {'ii': '32', 'cd': 'full', 'qt': 7},
+          ],
+        },
+      ];
+      clearDriverHomeState('test_trip_scr');
+      getDriverHomeState('test_trip_scr').vehicleId.value = 'V300';
+    });
+
+    tearDown(() {
+      mapTableContent.remove('trip_scope/vehicle_check');
+      clearDriverHomeState('test_trip_scr');
+    });
+
+    test('pickActiveOpening picks trip-3 (newest non-closed) from multi-match',
+        () {
+      final docs = List<Map<String, dynamic>>.from(
+        mapTableContent['trip_scope/vehicle_check'] ?? const [],
+      );
+      // gateSearch without cst: matches both openings
+      final matched = filterDriverHomeDocs(
+        docs,
+        'cty\u{25FC}opening\u{2B58}vv\u{25FC}V300',
+        'test_trip_scr',
+      );
+      expect(matched.length, 2, reason: 'both openings match the search');
+
+      // The fix: pickActiveOpening picks trip-3
+      final picked = pickActiveOpening(matched);
+      expect(picked, isNotNull);
+      expect(picked!['__docId'], 'TRIP3');
+      expect(picked['cst'], 'awaiting_custody');
+
+      // ie[] from the picked doc is trip-3's manifest
+      final ie = picked['ie'] as List;
+      expect(ie.length, 2);
+      expect((ie[0] as Map)['qt'], 10);
+    });
+
+    test('single opening: pickActiveOpening returns it unchanged', () {
+      mapTableContent['trip_scope/vehicle_check'] = [
+        {
+          'cty': 'opening',
+          'vv': 'V300',
+          'cdt': '20260708',
+          'cst': 'awaiting_custody',
+          't': 100,
+          '__docId': 'ONLY',
+          'ie': [
+            {'ii': '31', 'cd': 'full', 'qt': 3},
+          ],
+        },
+      ];
+      final docs = List<Map<String, dynamic>>.from(
+        mapTableContent['trip_scope/vehicle_check'] ?? const [],
+      );
+      final matched = filterDriverHomeDocs(
+        docs,
+        'cty\u{25FC}opening\u{2B58}vv\u{25FC}V300',
+        'test_trip_scr',
+      );
+      expect(matched.length, 1);
+      final picked = pickActiveOpening(matched);
+      expect(picked?['__docId'], 'ONLY');
+    });
+
+    test('no openings: pickActiveOpening returns null, fallback to first', () {
+      mapTableContent['trip_scope/vehicle_check'] = [
+        {
+          'cty': 'closing',
+          'vv': 'V300',
+          'cdt': '20260708',
+          'cst': '',
+          't': 100,
+          '__docId': 'CLOSING',
+        },
+      ];
+      final docs = List<Map<String, dynamic>>.from(
+        mapTableContent['trip_scope/vehicle_check'] ?? const [],
+      );
+      final matched = filterDriverHomeDocs(
+        docs,
+        'cty\u{25FC}closing\u{2B58}vv\u{25FC}V300',
+        'test_trip_scr',
+      );
+      expect(matched.length, 1);
+      // pickActiveOpening returns null (no opening-shaped docs)
+      final picked = pickActiveOpening(matched);
+      expect(picked, isNull);
+      // fallback: matched.first (the closing doc, not an opening)
+      expect(matched.first['__docId'], 'CLOSING');
+    });
+
+    test('all openings closed: pickActiveOpening returns newest closed', () {
+      mapTableContent['trip_scope/vehicle_check'] = [
+        {
+          'cty': 'opening',
+          'vv': 'V300',
+          'cdt': '20260708',
+          'cst': 'closed',
+          't': 100,
+          '__docId': 'OLD_CLOSED',
+          'ie': [
+            {'ii': '31', 'cd': 'full', 'qt': 1},
+          ],
+        },
+        {
+          'cty': 'opening',
+          'vv': 'V300',
+          'cdt': '20260708',
+          'cst': 'closed',
+          't': 200,
+          '__docId': 'NEW_CLOSED',
+          'ie': [
+            {'ii': '31', 'cd': 'full', 'qt': 2},
+          ],
+        },
+      ];
+      final docs = List<Map<String, dynamic>>.from(
+        mapTableContent['trip_scope/vehicle_check'] ?? const [],
+      );
+      final matched = filterDriverHomeDocs(
+        docs,
+        'cty\u{25FC}opening\u{2B58}vv\u{25FC}V300',
+        'test_trip_scr',
+      );
+      expect(matched.length, 2);
+      // All closed: pickActiveOpening returns newest by t
+      final picked = pickActiveOpening(matched);
+      expect(picked?['__docId'], 'NEW_CLOSED');
+    });
+
+    test('empty mapTableContent: filterDriverHomeDocs returns empty', () {
+      mapTableContent.remove('trip_scope/vehicle_check');
+      final docs = List<Map<String, dynamic>>.from(
+        mapTableContent['trip_scope/vehicle_check'] ?? const [],
+      );
+      final matched = filterDriverHomeDocs(
+        docs,
+        'cty\u{25FC}opening\u{2B58}vv\u{25FC}V300',
+        'test_trip_scr',
+      );
+      expect(matched, isEmpty);
+      final picked = pickActiveOpening(matched);
+      expect(picked, isNull);
+    });
+
+    test('custody_confirmed trip-3 + closed trip-2: search with cst picks trip-3', () {
+      // Mirrors the _matchedGateDoc path (search includes cst).
+      mapTableContent['trip_scope/vehicle_check'] = [
+        {
+          'cty': 'opening',
+          'vv': 'V300',
+          'cdt': '20260708',
+          'cst': 'closed',
+          't': 100,
+          '__docId': 'TRIP2',
+        },
+        {
+          'cty': 'opening',
+          'vv': 'V300',
+          'cdt': '20260708',
+          'cst': 'custody_confirmed',
+          't': 200,
+          '__docId': 'TRIP3',
+        },
+      ];
+      final docs = List<Map<String, dynamic>>.from(
+        mapTableContent['trip_scope/vehicle_check'] ?? const [],
+      );
+      // search WITH cst filter: only trip-3 matches
+      final matched = filterDriverHomeDocs(
+        docs,
+        'cty\u{25FC}opening\u{2B58}vv\u{25FC}V300\u{2B58}cst\u{25FC}custody_confirmed',
+        'test_trip_scr',
+      );
+      expect(matched.length, 1);
+      expect(matched.first['__docId'], 'TRIP3');
+      // pickActiveOpening is a no-op (single match), but consistent
+      final picked = pickActiveOpening(matched);
+      expect(picked?['__docId'], 'TRIP3');
+    });
+  });
 }

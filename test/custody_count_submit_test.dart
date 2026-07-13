@@ -252,4 +252,27 @@ void main() {
       expect(cnm.contains('CHK--'), isFalse);
     });
   });
+
+  // ── buildReconciliation empty-maps (empty vehicle close) ───────────────
+  // Guards the C1 empty-vehicle close: an all-zero / hideZero vehicle yields
+  // an empty countMap, so both expected and actual are {}. Reconciliation must
+  // report 'matched' with no discrepancies (routes to WarehouseClosingMatch).
+
+  group('buildReconciliation empty maps (empty vehicle close)', () {
+    test('empty expected + empty actual -> matched, dp empty', () {
+      final result = buildReconciliation(expected: {}, actual: {});
+      expect(result.rs, 'matched');
+      expect(result.dp, isEmpty);
+    });
+
+    test('empty expected + non-empty actual -> discrepancy (surplus)', () {
+      final result = buildReconciliation(
+        expected: {},
+        actual: {'galon__full': 5},
+      );
+      expect(result.rs, 'discrepancy_detected');
+      expect(result.dp.length, 1);
+      expect(result.dp[0]['dl'], 5); // surplus
+    });
+  });
 }

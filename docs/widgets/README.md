@@ -36,7 +36,9 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | BuildDisplayComponent | [build_display_component.md](build_display_component.md) | todo | Dynamic display builder |
 | AdminActiveTripList | [admin_active_trip_list.md](admin_active_trip_list.md) | draft | Active trip cards (plate, driver, stop progress) for Admin H1 BERJALAN |
 | AdminCoordinationHeader | [admin_coordination_header.md](admin_coordination_header.md) | draft | Admin identity header (role, name+plate, translucent count chips) for H1 AdminHome |
+| AssetStockList | [asset_stock_list.md](asset_stock_list.md) | draft | Generic pivot-cube stock distribution (entity x pivot x condition) with summary strip, filter tabs, and proportion bar |
 | AdminOutstandingList | [admin_outstanding_list.md](admin_outstanding_list.md) | draft | Collapsible outstanding client list with aging-tier badges for Admin H1 PRIORITAS |
+| CustomerOutstandingList | [customer_outstanding_list.md](customer_outstanding_list.md) | draft | Full-page customer outstanding lookup with search, category-colored chips, aging tiers, and detail sheet |
 | AdminUpcomingTaskList | [admin_upcoming_task_list.md](admin_upcoming_task_list.md) | draft | Upcoming task cards with item roll-up and inline vehiclePicker for Admin H1 AKAN DATANG |
 | PickerList | [picker_list.md](picker_list.md) | draft | Generic single-select picker (any collection); capture id→token, optional per-row count badge + ad-hoc row; capture/navigate modes. SDUI `picker_list` (alias `vehicle_picker`) |
 | VehiclePickerSheet | [admin_vehicle_picker_sheet.md](admin_vehicle_picker_sheet.md) | draft | Reusable vehicle assign/reassign bottom-sheet (extracted from CoordinationSignalList) |
@@ -66,6 +68,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | OfflineBannerHost | [offline_banner.md](offline_banner.md) | draft | Global offline strip above the MainPage body (Obx on internetConnectionFlag); structural shell widget, not a dispatch branch |
 | ReturnHeader | [return_header.md](return_header.md) | draft | Back arrow + label + title header for P12 ReturnVehicle |
 | PreconditionGateCard | [precondition_gate_card.md](precondition_gate_card.md) | draft | Custody gate card (pending/confirmed) for DriverHome P4 |
+| ReceiptDoc | [receipt_doc.md](receipt_doc.md) | draft | Read-only on-screen nota card (config-named scalar fields + li[] line loop + depo header lookup); SDUI `RECEIPT_DOC` |
 | RouteFeedHeader | [route_feed_header.md](route_feed_header.md) | draft | Sticky 3-row route header (identity, progress, drop/pickup stats) and vehicleId publisher for P10 TaskFeed |
 | RouteProgressHeader | [route_progress_header.md](route_progress_header.md) | draft | Driver identity header with workforce lookup and vehicle publish |
 | TaskCreateSubmit | [task_create_submit.md](task_create_submit.md) | draft | Submit button for Admin create-task wizard (P4) |
@@ -77,6 +80,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | TaskManifestList | [task_manifest_list.md](task_manifest_list.md) | draft | Per-task accordion list with drop/pickup aggregates for P5 CustodyNotification |
 | VehicleCargoSummary | [vehicle_cargo_summary.md](vehicle_cargo_summary.md) | draft | Intro paragraph + cargo card (Sisa di Kendaraan) and vehicleId publisher for P12 ReturnVehicle |
 | TimelinePeriodic | [timeline_periodic.md](timeline_periodic.md) | draft | Config-driven event timeline (TIMELINE variant periodic) with period selector, badge chips, gap pills, image gallery |
+| TimelineLedger | [timeline_ledger.md](timeline_ledger.md) | draft | Config-generic grouped + expandable audit timeline (TIMELINE variant ledger) with category badge palette, period filter, flat/grouped modes |
 | OtqFormattedText | [otq_formatted_text.md](otq_formatted_text.md) | todo | Text with formatter |
 | TimePresence | [time_presence.md](time_presence.md) | done | Check-in time, live elapsed counter, and last action in 3-column card |
 | VehicleCustodyHeader | [vehicle_custody_header.md](vehicle_custody_header.md) | draft | Vehicle custody card (plate/event/loader/loadtime) and vehicleId publisher for P5 CustodyNotification |

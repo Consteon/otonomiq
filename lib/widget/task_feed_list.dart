@@ -153,7 +153,8 @@ class _TaskFeedListState extends State<TaskFeedList> {
     if (rawTable.isNotEmpty) {
       final TablePath tp = parseTablePath(rawTable);
       if (tp.tableDocId.isNotEmpty) {
-        _taskCode = '${tp.tableDocId}/${tp.subColl}';
+        // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+        _taskCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
         subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _taskCode);
       }
     }
@@ -166,7 +167,7 @@ class _TaskFeedListState extends State<TaskFeedList> {
     if (rawReturnGateTable.isNotEmpty) {
       final TablePath gtp = parseTablePath(rawReturnGateTable);
       if (gtp.tableDocId.isNotEmpty) {
-        _returnGateCode = '${gtp.tableDocId}/${gtp.subColl}';
+        _returnGateCode = '$appVid/${gtp.tableDocId}/${gtp.subColl}';
         subscribeToMapCollection(
             appVid, gtp.tableDocId, gtp.subColl, _returnGateCode);
       }
@@ -178,7 +179,7 @@ class _TaskFeedListState extends State<TaskFeedList> {
     if (rawBadgeTable.isNotEmpty) {
       final TablePath btp = parseTablePath(rawBadgeTable);
       if (btp.tableDocId.isNotEmpty) {
-        _badgeCode = '${btp.tableDocId}/${btp.subColl}';
+        _badgeCode = '$appVid/${btp.tableDocId}/${btp.subColl}';
         subscribeToMapCollection(
             appVid, btp.tableDocId, btp.subColl, _badgeCode);
       }
@@ -274,11 +275,16 @@ class _TaskFeedListState extends State<TaskFeedList> {
       }
       TaskItemBuilder.draftRev.value++;
     } else {
-      // Non-wizard flat mode: dispatch #ACTIVE_TASK (backward-compat)
+      // Non-wizard flat mode: publish the tapped row's id into #ACTIVE_TASK
+      // (backward-compat) AND a bare screenTx key named after idField, so the
+      // destination page's {idField} token resolves (e.g. walk-in history →
+      // PRN keyed search "nno◼{nno}"). Mirrors NOTA_CREATE_SUBMIT, which
+      // injects bare 'nno' on the transaction-flow route to the SAME page;
+      // without this the history-flow reprint fails "unresolved token".
       final String taskVid = (task[idField] ?? '').toString().trim();
       if (taskVid.isNotEmpty) {
         transactionStore.dispatch(UpdateScreenTxAction(
-            ScreenTransaction({'#ACTIVE_TASK': taskVid})));
+            ScreenTransaction({'#ACTIVE_TASK': taskVid, idField: taskVid})));
       }
     }
 

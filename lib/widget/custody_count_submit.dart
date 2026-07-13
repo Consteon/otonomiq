@@ -106,7 +106,8 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
     final String appVid = resolveAppVid(widget.component);
     final TablePath tp = parseTablePath(rawTable);
     if (tp.tableDocId.isNotEmpty) {
-      _workforceCode = '${tp.tableDocId}/${tp.subColl}';
+      // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+      _workforceCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
       subscribeToMapCollection(
         appVid,
         tp.tableDocId,
@@ -142,7 +143,7 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       if (docId.isNotEmpty) tp = TablePath(docId, 'stock_location');
     }
     if (tp != null && tp.tableDocId.isNotEmpty && tp.subColl.isNotEmpty) {
-      _stockLocationCode = '${tp.tableDocId}/${tp.subColl}';
+      _stockLocationCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
       subscribeToMapCollection(
         appVid,
         tp.tableDocId,
@@ -164,7 +165,7 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
     final String appVid = resolveAppVid(widget.component);
     final TablePath tp = parseTablePath(rawCheckTable);
     if (tp.tableDocId.isNotEmpty) {
-      _vehicleCheckCode = '${tp.tableDocId}/${tp.subColl}';
+      _vehicleCheckCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
       subscribeToMapCollection(
         appVid,
         tp.tableDocId,
@@ -284,7 +285,10 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       String docId = '';
       final TablePath tp = parseTablePath(rawTable);
       if (tp.tableDocId.isNotEmpty && tp.subColl.isNotEmpty) {
-        final String checkCode = '${tp.tableDocId}/${tp.subColl}';
+        // vid-scoped: must match custody_count_list's scoped _checkCode key,
+        // else this read-back misses the vehicle_check doc for the P6 write.
+        final String appVid = resolveAppVid(widget.component);
+        final String checkCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
         final List<Map<String, dynamic>> docs =
             List<Map<String, dynamic>>.from(
                 mapTableContent[checkCode] ?? const []);
@@ -739,10 +743,39 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       }
 
       if (ipArray.isEmpty) {
-        if (context.mounted) {
-          _showSnackBar(context, 'Tidak ada item untuk disimpan');
+        // Empty vehicle: confirm with checker before proceeding.
+        // Guard the async-gap context use (after the earlier await) before
+        // showDialog; finally still releases the writing lock on this return.
+        if (!context.mounted) return;
+        final bool? confirmed = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (BuildContext ctx) {
+            return AlertDialog(
+              title: const Text('Mobil Kosong?'),
+              content: const Text(
+                'Tidak ada item untuk diturunkan. '
+                'Konfirmasi tutup penutupan?',
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Batal'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: const Text('Ya, Tutup'),
+                ),
+              ],
+            );
+          },
+        );
+        if (confirmed != true) {
+          // Cancelled or dismissed: abort, release writing lock via finally.
+          return;
         }
-        return;
+        if (!context.mounted) return;
+        // Confirmed: fall through to reconciliation + closing doc write.
       }
 
       // 3. Reconcile: build expected/actual maps from count store
@@ -1029,10 +1062,11 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       final Color textColor;
 
       if (_isClosing) {
-        // C1: enabled once items are rendered (count starts at 0, which is a
-        // valid blind-count value; no driver-choose gate).
-        enabled = total > 0;
-        label = enabled ? _t(0, 'Simpan Penutupan') : 'TUNGGU DATA ITEM';
+        // C1: always enabled — empty vehicle (all zero / hideZero) is a valid
+        // closing state; the confirm dialog in _onTapClosing guards the empty
+        // case instead of disabling the button.
+        enabled = true;
+        label = _t(0, 'Simpan Penutupan');
         // C1 teal palette (custody closing semantics).
         bgColor = enabled && !isWriting
             ? const Color(0xFF0D9488) // teal-600
