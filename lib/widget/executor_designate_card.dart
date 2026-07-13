@@ -140,7 +140,8 @@ class _ExecutorDesignateCardState extends State<ExecutorDesignateCard> {
     final String appVid = resolveAppVid(widget.component);
     final TablePath tp = parseTablePath(rawTable);
     if (tp.tableDocId.isNotEmpty) {
-      _workforceCode = '${tp.tableDocId}/${tp.subColl}';
+      // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+      _workforceCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
       subscribeToMapCollection(
         appVid,
         tp.tableDocId,

@@ -144,6 +144,17 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
   String get _itemPriceField =>
       (widget.component['itemPriceField'] ?? 'harga').toString().trim();
 
+  /// Component mode: 'order' (default, admin create-task) or 'walkin' (POS).
+  /// Walkin mode: sale-only, qty >= 1, price seeded from priceSourceField.
+  String get _mode =>
+      (widget.component['mode'] ?? 'order').toString().trim().toLowerCase();
+
+  /// Config: field name on the item catalog doc that holds the walkin default
+  /// price. Default 'hrg' matches the new master item field for POS pricing.
+  /// Only read when _mode == 'walkin'; order mode uses _itemPriceField.
+  String get _priceSourceField =>
+      (widget.component['priceSourceField'] ?? 'hrg').toString().trim();
+
   void _subscribe() {
     final String appVid = resolveAppVid(widget.component);
 
@@ -154,7 +165,8 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
     if (rawItemTable.isNotEmpty) {
       final TablePath itp = parseTablePath(rawItemTable);
       if (itp.tableDocId.isNotEmpty) {
-        _itemCode = '${itp.tableDocId}/${itp.subColl}';
+        // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+        _itemCode = '$appVid/${itp.tableDocId}/${itp.subColl}';
         subscribeToMapCollection(
           appVid,
           itp.tableDocId,
@@ -171,7 +183,7 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
     if (rawClientTable.isNotEmpty) {
       final TablePath ctp = parseTablePath(rawClientTable);
       if (ctp.tableDocId.isNotEmpty) {
-        _clientCode = '${ctp.tableDocId}/${ctp.subColl}';
+        _clientCode = '$appVid/${ctp.tableDocId}/${ctp.subColl}';
         subscribeToMapCollection(
           appVid,
           ctp.tableDocId,
@@ -188,7 +200,7 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
     if (rawCacheTable.isNotEmpty) {
       final TablePath atp = parseTablePath(rawCacheTable);
       if (atp.tableDocId.isNotEmpty) {
-        _cacheCode = '${atp.tableDocId}/${atp.subColl}';
+        _cacheCode = '$appVid/${atp.tableDocId}/${atp.subColl}';
         subscribeToMapCollection(
           appVid,
           atp.tableDocId,
@@ -391,9 +403,17 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
           Navigator.of(context).pop(); // close sheet
           // Seed price from item catalog for sale rows (Convention #7:
           // dynamic guard via coerceNum -- field may be int, String, or absent)
-          final int seedPrice = txType == 'sale'
-              ? coerceNum(item[_itemPriceField]).toInt()
-              : 0;
+          final int seedPrice;
+          if (txType == 'sale') {
+            // ponytail: walkin seeds from priceSourceField (hrg), order from
+            // itemPriceField (harga). Same coerceNum guard for dynamic field.
+            final String priceField = _mode == 'walkin'
+                ? _priceSourceField
+                : _itemPriceField;
+            seedPrice = coerceNum(item[priceField]).toInt();
+          } else {
+            seedPrice = 0;
+          }
           _addItem(
             ii: (item[idField] ?? '').toString().trim(),
             itemName: (item[nameField] ?? '').toString().trim(),
@@ -420,11 +440,14 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
     // Default wt for refill so stored state matches the displayed toggle
     // (_waterToggle renders "Isi Ulang" active when wt != 'ro').
     final String defaultWt = tx == 'refill' ? 'refill' : '';
+    // ponytail: walkin seeds ps=1 (qty >= 1); order seeds ps=0.
+    final int seedPs = (_mode == 'walkin' && tx == 'sale') ? 1 : 0;
     draft.add(
       DraftItem(
         ii: ii,
         itemName: itemName,
         tx: tx,
+        ps: seedPs,
         cdo: defaultCdo,
         cdi: defaultCdi,
         wt: defaultWt,
@@ -508,7 +531,10 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
   /// Centered empty-state card: icon + text + CTA buttons.
   /// CTA set gated by the same txTypes config as _buildCtaRow.
   Widget _buildEmptyState(BuildContext context) {
-    final List<String> types = TaskItemBuilder.parseTxTypes(widget.component);
+    // ponytail: walkin mode forces sale-only regardless of txTypes config.
+    final List<String> types = _mode == 'walkin'
+        ? const ['sale']
+        : TaskItemBuilder.parseTxTypes(widget.component);
     final bool hasDeliver = types.contains('deliver');
     final List<String> secondaryTypes = types
         .where((t) => t != 'deliver')
@@ -902,25 +928,30 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
   }
 
   Widget _buildSaleBody(DraftItem item, int index) {
+    final bool isWalkin = _mode == 'walkin';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        _conditionToggle(
-          label: _t(3, 'Jual'),
-          value: item.cdo,
-          onChanged: (v) {
-            setState(() {
-              item.cdo = v;
-            });
-            TaskItemBuilder.draftRev.value++;
-          },
-        ),
-        const SizedBox(height: 8),
+        // Condition toggle (full/empty) -- order mode only.
+        // Walkin POS has no returnable condition concept.
+        if (!isWalkin) ...[
+          _conditionToggle(
+            label: _t(3, 'Jual'),
+            value: item.cdo,
+            onChanged: (v) {
+              setState(() {
+                item.cdo = v;
+              });
+              TaskItemBuilder.draftRev.value++;
+            },
+          ),
+          const SizedBox(height: 8),
+        ],
         _labeledStepper(
-          label: _t(3, 'Jual'),
+          label: isWalkin ? _t(2, 'Qty') : _t(3, 'Jual'),
           value: item.ps,
-          onDecrement: item.ps > 0
+          onDecrement: item.ps > (isWalkin ? 1 : 0)
               ? () {
                   setState(() {
                     item.ps--;
@@ -1272,7 +1303,10 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
   // in the order they appear. Absent/empty txTypes -> all 4 (backward-compat).
   // Unknown types silently skipped (only known types have picker/card support).
   Widget _buildCtaRow(BuildContext context) {
-    final List<String> types = TaskItemBuilder.parseTxTypes(widget.component);
+    // ponytail: walkin mode forces sale-only regardless of txTypes config.
+    final List<String> types = _mode == 'walkin'
+        ? const ['sale']
+        : TaskItemBuilder.parseTxTypes(widget.component);
     final List<Widget> buttons = [];
     for (final String tx in types) {
       final String? label = _ctaLabel(tx);

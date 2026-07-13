@@ -61,7 +61,9 @@ class _WorkerCardDetailKeyedState extends State<WorkerCardDetailKeyed> {
     );
     // `table` is mandatory — it determines the mapTableContent code we read.
     if (tp.tableDocId.isEmpty) return;
-    _code = '${tp.tableDocId}/${tp.subColl}';
+    // vid-scoped: without vid, another tenant's same tableDocId/subColl dedups
+    // our stream away (mapTableContent/_mapSubscribed key omits vid).
+    _code = '$appVid/${tp.tableDocId}/${tp.subColl}';
     // `vidtable` only needed to open our OWN subscription. If absent, fall back
     // to whatever a sibling (e.g. the worker list) already loaded under _code.
     if (appVid.isEmpty) return;

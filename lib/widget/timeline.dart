@@ -15,6 +15,7 @@ import '../api.dart';
 import '../firestore_repository/firestore_generic_repository.dart';
 import '../global.dart';
 import 'approver_sticky_bar.dart';
+import 'where_eq_type_tolerant.dart';
 
 class Timeline extends StatefulWidget {
   const Timeline({
@@ -294,7 +295,11 @@ class _TimelineState extends State<Timeline> {
         debugPrint('[Timeline] subscribing directly: ${_commentCollRef!.path}');
         Query query;
         if (_searchKey.isNotEmpty && _searchValue.isNotEmpty) {
-          query = _commentCollRef!.where(_searchKey, isEqualTo: _searchValue);
+          query = whereEqTypeTolerant(
+            _commentCollRef!,
+            _searchKey,
+            _searchValue,
+          );
         } else {
           query = _commentCollRef!;
         }

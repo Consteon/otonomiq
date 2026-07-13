@@ -201,7 +201,8 @@ class _PickerListState extends State<PickerList> {
     if (rawTable.isNotEmpty) {
       final TablePath tp = parseTablePath(rawTable);
       if (tp.tableDocId.isNotEmpty) {
-        _code = '${tp.tableDocId}/${tp.subColl}';
+        // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+        _code = '$appVid/${tp.tableDocId}/${tp.subColl}';
         subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _code);
       }
     }
@@ -212,7 +213,7 @@ class _PickerListState extends State<PickerList> {
     if (rawCountTable.isNotEmpty) {
       final TablePath cp = parseTablePath(rawCountTable);
       if (cp.tableDocId.isNotEmpty) {
-        _countCode = '${cp.tableDocId}/${cp.subColl}';
+        _countCode = '$appVid/${cp.tableDocId}/${cp.subColl}';
         subscribeToMapCollection(appVid, cp.tableDocId, cp.subColl, _countCode);
       }
     }
@@ -261,6 +262,12 @@ class _PickerListState extends State<PickerList> {
     }
 
     if (_mode == 'navigate') {
+      // routeParams: resolve from tapped row context + dispatch before nav.
+      writeRouteParamsFromRow(
+        widget.component['routeParams']?.toString(),
+        row,
+        widget.scrName,
+      );
       final String route = stripRouteWrapper(
         (widget.component['route'] ?? '').toString().trim(),
       );

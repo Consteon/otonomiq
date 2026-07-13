@@ -111,7 +111,8 @@ class _AdminUpcomingTaskListState extends State<AdminUpcomingTaskList> {
     if (rawTaskTable.isNotEmpty) {
       final TablePath tp = parseTablePath(rawTaskTable);
       if (tp.tableDocId.isNotEmpty) {
-        _taskCode = '${tp.tableDocId}/${tp.subColl}';
+        // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+        _taskCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
         subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _taskCode);
       }
     }
@@ -123,7 +124,7 @@ class _AdminUpcomingTaskListState extends State<AdminUpcomingTaskList> {
     if (rawSlTable.isNotEmpty) {
       final TablePath slp = parseTablePath(rawSlTable);
       if (slp.tableDocId.isNotEmpty) {
-        _slCode = '${slp.tableDocId}/${slp.subColl}';
+        _slCode = '$appVid/${slp.tableDocId}/${slp.subColl}';
         subscribeToMapCollection(appVid, slp.tableDocId, slp.subColl, _slCode);
       }
     }

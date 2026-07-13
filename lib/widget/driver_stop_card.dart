@@ -81,7 +81,8 @@ class _DriverStopCardState extends State<DriverStopCard> {
     final String rawTable = (widget.component['table'] ?? '').toString().trim();
     final TablePath tp = parseTablePath(rawTable);
     if (tp.tableDocId.isNotEmpty) {
-      _dataCode = '${tp.tableDocId}/${tp.subColl}';
+      // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+      _dataCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
       subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _dataCode);
     }
 
@@ -92,7 +93,7 @@ class _DriverStopCardState extends State<DriverStopCard> {
     if (rawGateTable.isNotEmpty) {
       final TablePath gtp = parseTablePath(rawGateTable);
       if (gtp.tableDocId.isNotEmpty) {
-        _gateCode = '${gtp.tableDocId}/${gtp.subColl}';
+        _gateCode = '$appVid/${gtp.tableDocId}/${gtp.subColl}';
         subscribeToMapCollection(
           appVid,
           gtp.tableDocId,

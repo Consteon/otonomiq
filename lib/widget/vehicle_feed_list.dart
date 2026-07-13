@@ -76,7 +76,8 @@ class _VehicleFeedListState extends State<VehicleFeedList> {
     if (rawTable.isNotEmpty) {
       final TablePath tp = parseTablePath(rawTable);
       if (tp.tableDocId.isNotEmpty) {
-        _stockLocationCode = '${tp.tableDocId}/${tp.subColl}';
+        // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+        _stockLocationCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
         subscribeToMapCollection(
           appVid,
           tp.tableDocId,
@@ -95,7 +96,7 @@ class _VehicleFeedListState extends State<VehicleFeedList> {
       final String tablePart = decoded.split('\u{2B58}').first.trim();
       final TablePath vtp = parseTablePath(tablePart);
       if (vtp.tableDocId.isNotEmpty) {
-        _vehicleCheckCode = '${vtp.tableDocId}/${vtp.subColl}';
+        _vehicleCheckCode = '$appVid/${vtp.tableDocId}/${vtp.subColl}';
         subscribeToMapCollection(
           appVid,
           vtp.tableDocId,
@@ -112,7 +113,7 @@ class _VehicleFeedListState extends State<VehicleFeedList> {
     if (rawTaskTable.isNotEmpty) {
       final TablePath ttp = parseTablePath(rawTaskTable);
       if (ttp.tableDocId.isNotEmpty) {
-        _taskCode = '${ttp.tableDocId}/${ttp.subColl}';
+        _taskCode = '$appVid/${ttp.tableDocId}/${ttp.subColl}';
         subscribeToMapCollection(
           appVid,
           ttp.tableDocId,
@@ -126,7 +127,7 @@ class _VehicleFeedListState extends State<VehicleFeedList> {
     if (rawTable.isNotEmpty) {
       final TablePath sltp = parseTablePath(rawTable);
       if (sltp.tableDocId.isNotEmpty) {
-        _itemCode = '${sltp.tableDocId}/item';
+        _itemCode = '$appVid/${sltp.tableDocId}/item';
         subscribeToMapCollection(appVid, sltp.tableDocId, 'item', _itemCode);
       }
     }

@@ -23,6 +23,7 @@ import 'do_chain.dart';
 import 'driver_home_support.dart';
 import 'item_execution_list.dart';
 import 'item_execution_submit.dart';
+import 'where_eq_type_tolerant.dart';
 
 // display a row of buttons
 
@@ -339,10 +340,11 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
                             'MobileTable/$tableVid/tables/$tableName/content',
                           );
 
-                      QuerySnapshot querySnapshot = await contentRef
-                          .where(searchField, isEqualTo: searchValue)
-                          .limit(1)
-                          .get();
+                      QuerySnapshot querySnapshot = await whereEqTypeTolerant(
+                        contentRef,
+                        searchField,
+                        searchValue,
+                      ).limit(1).get();
 
                       if (querySnapshot.docs.isNotEmpty) {
                         DocumentSnapshot doc = querySnapshot.docs.first;
@@ -1030,13 +1032,11 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
                                               );
 
                                           QuerySnapshot querySnapshot =
-                                              await contentRef
-                                                  .where(
-                                                    searchField,
-                                                    isEqualTo: searchValue,
-                                                  )
-                                                  .limit(1)
-                                                  .get();
+                                              await whereEqTypeTolerant(
+                                                contentRef,
+                                                searchField,
+                                                searchValue,
+                                              ).limit(1).get();
 
                                           if (querySnapshot.docs.isNotEmpty) {
                                             DocumentSnapshot doc =

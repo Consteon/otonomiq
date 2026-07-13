@@ -99,6 +99,21 @@ class DraftItem {
     return m;
   }
 
+  /// Serialize to the nota li[] element shape.
+  ///
+  /// Walkin POS lines: {ii, in, qt, hg, sub} -- all fields present, none
+  /// omitted. qt/hg/sub are int (Firestore Number). in is the item display
+  /// name (String). ii is the item id (String).
+  Map<String, dynamic> toLiMap() {
+    return <String, dynamic>{
+      'ii': ii,
+      'in': itemName,
+      'qt': ps, // walkin qty = sale qty (ps)
+      'hg': hg,
+      'sub': ps * hg,
+    };
+  }
+
   /// The primary quantity for this line's tx type (for display in summaries).
   int get primaryQty {
     switch (tx) {
@@ -284,6 +299,19 @@ class AdminCreateTaskSupport {
     return out;
   }
 
+  /// Convert draft items to the nota li[] array shape for Firestore.
+  ///
+  /// Returns an explicitly typed `List<Map<String, dynamic>>`.
+  /// Each element: {ii:String, in:String, qt:int, hg:int, sub:int}.
+  /// Empty draft -> empty list.
+  static List<Map<String, dynamic>> draftToLiArray(List<DraftItem> items) {
+    final List<Map<String, dynamic>> out = <Map<String, dynamic>>[];
+    for (final DraftItem item in items) {
+      out.add(item.toLiMap());
+    }
+    return out;
+  }
+
   /// Compute aggregate totals across all draft items.
   static TaskTotals computeTotals(List<DraftItem> items) {
     int drop = 0, pickup = 0, sale = 0, purchase = 0, refill = 0;
@@ -460,6 +488,63 @@ class AdminCreateTaskSupport {
       'tablevid': tableVid,
       'search': 'tnm\u{2605}$tnm',
     };
+  }
+
+  /// Assemble the complete nota doc map for Firestore.
+  ///
+  /// Pure -- all inputs are explicit parameters.
+  /// Canon: tot/qt/hg/sub/t = int (Number); everything else = String.
+  /// li[] elements carry ALL fields (ii, in, qt, hg, sub) -- none omitted.
+  static Map<String, dynamic> assembleNotaDoc({
+    required String nno,
+    required String src,
+    required String by,
+    required String bym,
+    required String gl,
+    required int tot,
+    required List<Map<String, dynamic>> liArray,
+    required String cv,
+    required String cn,
+    required int t,
+    required String ts,
+    required String tableVid,
+  }) {
+    return <String, dynamic>{
+      'nno': nno,
+      'src': src,
+      'ref': '',
+      'kl': '',
+      'by': by,
+      'bym': bym,
+      'st': 'LUNAS',
+      'gl': gl,
+      'tot': tot,
+      'li': liArray,
+      'cv': cv,
+      'cn': cn,
+      't': t,
+      'ts': ts,
+      'tablevid': tableVid,
+      'search': 'nno\u{2605}$nno',
+    };
+  }
+
+  /// Format an epoch-ms timestamp as a WIB (UTC+7) human-readable string.
+  ///
+  /// Returns "yyyy-MM-dd HH:mm" in WIB timezone.
+  /// Used for the nota `ts` field (human-readable receipt timestamp).
+  static String formatWibTimestamp(int epochMs) {
+    const int wibOffsetMs = 25200000; // UTC+7
+    final DateTime wibNow = DateTime.fromMillisecondsSinceEpoch(
+      epochMs + wibOffsetMs,
+      isUtc: true,
+    );
+    final String y = wibNow.year.toString();
+    final String mo = wibNow.month.toString().padLeft(2, '0');
+    final String d = wibNow.day.toString().padLeft(2, '0');
+    final String h = wibNow.hour.toString().padLeft(2, '0');
+    final String mi = wibNow.minute.toString().padLeft(2, '0');
+    return '$y-$mo-$d $h:$mi';
   }
 
   /// Whether [action] indicates savesend mode.

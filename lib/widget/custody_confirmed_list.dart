@@ -75,7 +75,8 @@ class _CustodyConfirmedListState extends State<CustodyConfirmedList> {
     final String rawTable = (widget.component['table'] ?? '').toString().trim();
     final TablePath tp = parseTablePath(rawTable);
     if (tp.tableDocId.isNotEmpty) {
-      _checkCode = '${tp.tableDocId}/${tp.subColl}';
+      // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+      _checkCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
       subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _checkCode);
     }
 
@@ -86,7 +87,7 @@ class _CustodyConfirmedListState extends State<CustodyConfirmedList> {
     if (rawJoinTable.isNotEmpty) {
       final TablePath jtp = parseTablePath(rawJoinTable);
       if (jtp.tableDocId.isNotEmpty) {
-        _itemCode = '${jtp.tableDocId}/${jtp.subColl}';
+        _itemCode = '$appVid/${jtp.tableDocId}/${jtp.subColl}';
         subscribeToMapCollection(
           appVid,
           jtp.tableDocId,

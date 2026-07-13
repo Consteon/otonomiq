@@ -209,7 +209,8 @@ class _ItemExecutionSubmitState extends State<ItemExecutionSubmit> {
     if (rawTable.isNotEmpty) {
       final TablePath tp = parseTablePath(rawTable);
       if (tp.tableDocId.isNotEmpty) {
-        _taskCode = '${tp.tableDocId}/${tp.subColl}';
+        // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+        _taskCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
         subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _taskCode);
       }
     }
@@ -518,7 +519,11 @@ Map<String, dynamic>? findActiveTaskDoc(dynamic component, String scrName) {
   if (rawTable.isEmpty) return null;
   final TablePath tp = parseTablePath(rawTable);
   if (tp.tableDocId.isEmpty) return null;
-  final String taskCode = '${tp.tableDocId}/${tp.subColl}';
+  // vid-scoped: must match ItemExecutionList/ItemExecutionSubmit's scoped
+  // _taskCode key, else this read-back misses the task doc and the actual
+  // write drops it[] actuals (only tst/tce land).
+  final String taskCode =
+      '${resolveAppVid(component)}/${tp.tableDocId}/${tp.subColl}';
   final List<Map<String, dynamic>> docs = List<Map<String, dynamic>>.from(
     mapTableContent[taskCode] ?? const [],
   );

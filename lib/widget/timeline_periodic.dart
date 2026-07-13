@@ -88,7 +88,9 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
         .toString()
         .trim();
     if (tp.tableDocId.isEmpty || appVid.isEmpty) return;
-    _eventCode = '${tp.tableDocId}/${tp.subColl}';
+    // vid-scoped: mapTableContent/_mapSubscribed key by code; without vid a
+    // same tableDocId/subColl on another tenant dedups our stream away.
+    _eventCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
     subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _eventCode);
   }
 

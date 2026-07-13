@@ -135,7 +135,8 @@ class _InventoryBucketCardState extends State<InventoryBucketCard> {
     final TablePath tp = parseTablePath(rawTable);
     final String mainTableDocId = tp.tableDocId;
     if (mainTableDocId.isNotEmpty) {
-      _dataCode = '$mainTableDocId/${tp.subColl}';
+      // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+      _dataCode = '$appVid/$mainTableDocId/${tp.subColl}';
       subscribeToMapCollection(appVid, mainTableDocId, tp.subColl, _dataCode);
     }
 
@@ -146,7 +147,7 @@ class _InventoryBucketCardState extends State<InventoryBucketCard> {
     if (rawGateTable.isNotEmpty) {
       final TablePath gtp = parseTablePath(rawGateTable);
       if (gtp.tableDocId.isNotEmpty) {
-        _gateCode = '${gtp.tableDocId}/${gtp.subColl}';
+        _gateCode = '$appVid/${gtp.tableDocId}/${gtp.subColl}';
         subscribeToMapCollection(
           appVid,
           gtp.tableDocId,
@@ -165,7 +166,7 @@ class _InventoryBucketCardState extends State<InventoryBucketCard> {
         .trim();
     if (rawItemTable.isNotEmpty) {
       if (!rawItemTable.contains('//') && mainTableDocId.isNotEmpty) {
-        _itemCode = '$mainTableDocId/$rawItemTable';
+        _itemCode = '$appVid/$mainTableDocId/$rawItemTable';
         subscribeToMapCollection(
           appVid,
           mainTableDocId,
@@ -175,7 +176,7 @@ class _InventoryBucketCardState extends State<InventoryBucketCard> {
       } else {
         final TablePath itp = parseTablePath(rawItemTable);
         if (itp.tableDocId.isNotEmpty) {
-          _itemCode = '${itp.tableDocId}/${itp.subColl}';
+          _itemCode = '$appVid/${itp.tableDocId}/${itp.subColl}';
           subscribeToMapCollection(
             appVid,
             itp.tableDocId,

@@ -132,7 +132,8 @@ class _AdminOutstandingListState extends State<AdminOutstandingList>
     if (rawAcTable.isNotEmpty) {
       final TablePath acp = parseTablePath(rawAcTable);
       if (acp.tableDocId.isNotEmpty) {
-        _acCode = '${acp.tableDocId}/${acp.subColl}';
+        // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+        _acCode = '$appVid/${acp.tableDocId}/${acp.subColl}';
         subscribeToMapCollection(appVid, acp.tableDocId, acp.subColl, _acCode);
       }
     }
@@ -144,7 +145,7 @@ class _AdminOutstandingListState extends State<AdminOutstandingList>
     if (rawSlTable.isNotEmpty) {
       final TablePath slp = parseTablePath(rawSlTable);
       if (slp.tableDocId.isNotEmpty) {
-        _slCode = '${slp.tableDocId}/${slp.subColl}';
+        _slCode = '$appVid/${slp.tableDocId}/${slp.subColl}';
         subscribeToMapCollection(appVid, slp.tableDocId, slp.subColl, _slCode);
       }
     }

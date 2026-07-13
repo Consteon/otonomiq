@@ -6,9 +6,9 @@ import '../firestore_repository/table_repository.dart'; // subscribeToMapCollect
 import '../global.dart'; // transactionStore, routeStack, gotoRoute, routeExist, errorReport, diamondTextToList, autheniumDecode, mapTableContent
 import '../global2.dart'; // txfController, txfControllerCheck, generateAutoNumber, addToTxfController, WidgetUpdateController
 import 'admin_create_task_support.dart';
+import 'driver_home_support.dart'; // todayEpochMidnightWib, createNativeDoc, createNativeDocAutoId, stripRouteWrapper
 import 'admin_home_support.dart'; // AdminTierColors
 import 'do_chain.dart';
-import 'driver_home_support.dart'; // todayEpochMidnightWib, createNativeDoc, createNativeDocAutoId, stripRouteWrapper
 import 'panel_card_support.dart'; // parseTablePath, TablePath
 import 'task_item_builder.dart'; // TaskItemBuilder.draftRev
 
@@ -105,7 +105,8 @@ class _TaskCreateSubmitState extends State<TaskCreateSubmit> {
       if (docId.isNotEmpty) tp = TablePath(docId, 'stock_location');
     }
     if (tp != null && tp.tableDocId.isNotEmpty && tp.subColl.isNotEmpty) {
-      _stockLocationCode = '${tp.tableDocId}/${tp.subColl}';
+      // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+      _stockLocationCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
       subscribeToMapCollection(
         appVid,
         tp.tableDocId,

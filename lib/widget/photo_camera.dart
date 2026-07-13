@@ -148,6 +148,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
   int flashIndex = 0;
   late bool gotPicture;
   bool _processing = false; // shutter busy: blocks re-entry, shows spinner
+  bool _finalizing = false; // preview shown; watermark still writing in bg
   List<IconData> flashIcons = [
     Icons.flash_auto_rounded,
     Icons.flash_on_rounded,
@@ -183,19 +184,19 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
       }
     }
     await Future.delayed(const Duration(milliseconds: 500));
-    switch (flashIndex) {
-      case 0:
-        controller!.setFlashMode(FlashMode.auto);
-        break;
+    controller!.setFlashMode(_flashModeFor(flashIndex));
+  }
+
+  FlashMode _flashModeFor(int index) {
+    switch (index) {
       case 1:
-        controller!.setFlashMode(FlashMode.always);
-        break;
+        return FlashMode.always;
       case 2:
-        controller!.setFlashMode(FlashMode.torch);
-        break;
+        return FlashMode.torch;
       case 3:
-        controller!.setFlashMode(FlashMode.off);
-        break;
+        return FlashMode.off;
+      default:
+        return FlashMode.auto;
     }
   }
 
@@ -400,85 +401,84 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                       ),
                       IconButton(
                         onPressed: () async {
-                          if (!gotPicture && !_processing) {
-                            setState(() => _processing = true);
+                          if (gotPicture || _processing || _finalizing) return;
+                          setState(() => _processing = true);
+                          try {
+                            await _initializeControllerFuture;
+                            final xFile = await controller!.takePicture();
+                            // restore flash for the next shot
+                            controller!.setFlashMode(_flashModeFor(flashIndex));
+
+                            // Show the just-captured frame IMMEDIATELY from the
+                            // raw file (native codec = instant). The multi-second
+                            // wait was the pure-Dart decode/resize/watermark
+                            // pipeline sitting BETWEEN the shutter and the
+                            // preview; it now runs AFTER, in the background, then
+                            // swaps in the watermarked file. Accept stays disabled
+                            // (_finalizing) until that swap, so the saved file is
+                            // always the watermarked one.
+                            final File rawFile = File(xFile.path);
+                            setState(() {
+                              currentImage = rawFile;
+                              gotPicture = true;
+                              _processing = false;
+                              _finalizing = true;
+                            });
+
+                            final String imagePath =
+                                "${xFile.path.split("/CAP")[0]}/$localImageArtifact${globalRandom.nextInt(999999999)}.jpg";
+                            final String formattedDateTime = DateFormat(
+                              dateTimeFormat,
+                            ).format(DateTime.now());
+                            final Uint8List rawBytes = await rawFile
+                                .readAsBytes();
+                            Uint8List watermarkedImage;
                             try {
-                              await _initializeControllerFuture;
-                              var xFile = await controller!.takePicture();
-                              controller!.setFlashMode(FlashMode.off);
-                              switch (flashIndex) {
-                                case 0:
-                                  controller!.setFlashMode(FlashMode.auto);
-                                  break;
-
-                                case 1:
-                                  controller!.setFlashMode(FlashMode.always);
-                                  break;
-
-                                case 2:
-                                  controller!.setFlashMode(FlashMode.torch);
-                                  break;
-
-                                case 3:
-                                  controller!.setFlashMode(FlashMode.off);
-                                  break;
-                              } // end switch
-                              String imagePath =
-                                  "${xFile.path.split("/CAP")[0]}/$localImageArtifact${globalRandom.nextInt(999999999).toString()}.jpg";
-                              final now = DateTime.now();
-                              final String formattedDateTime = DateFormat(
-                                dateTimeFormat,
-                              ).format(now);
-                              // Read bytes + run the CPU-heavy decode/resize/
-                              // watermark pipeline off the UI isolate (compute),
-                              // and use async file I/O, so the shutter no longer
-                              // freezes the UI on every capture.
-                              final Uint8List rawBytes = await File(
-                                xFile.path,
-                              ).readAsBytes();
+                              watermarkedImage = await compute(
+                                processCapturedImage,
+                                ImageProcessArgs(
+                                  bytes: rawBytes,
+                                  maxSize: widget.maxSize ?? 500,
+                                  quality: widget.quality ?? 80,
+                                  dateTime: formattedDateTime,
+                                ),
+                              );
+                            } catch (e) {
+                              errorReport('image processing error: $e');
+                              watermarkedImage = rawBytes;
+                            }
+                            bool wrote = false;
+                            try {
+                              await File(
+                                imagePath,
+                              ).writeAsBytes(watermarkedImage);
+                              wrote = true;
+                            } catch (e) {
+                              errorReport('write captured image error: $e');
+                            }
+                            if (!mounted) return;
+                            setState(() {
+                              // write failed -> keep the valid raw file rather
+                              // than pointing at a missing watermarked path.
+                              if (wrote) currentImage = File(imagePath);
+                              _finalizing = false;
+                            });
+                            // drop the raw temp only once the watermarked file
+                            // is safely written and now the shown image.
+                            if (wrote) {
                               try {
-                                await File(xFile.path).delete();
+                                await rawFile.delete();
                               } catch (e) {
                                 devPrint('delete temp capture error: $e');
                               }
-                              Uint8List watermarkedImage;
-                              try {
-                                watermarkedImage = await compute(
-                                  processCapturedImage,
-                                  ImageProcessArgs(
-                                    bytes: rawBytes,
-                                    maxSize: widget.maxSize ?? 500,
-                                    quality: widget.quality ?? 80,
-                                    dateTime: formattedDateTime,
-                                  ),
-                                );
-                              } catch (e) {
-                                errorReport('image processing error: $e');
-                                watermarkedImage = rawBytes;
-                              }
-                              try {
-                                await File(
-                                  imagePath,
-                                ).writeAsBytes(watermarkedImage);
-                              } catch (e) {
-                                errorReport('write captured image error: $e');
-                              }
+                            }
+                          } catch (e) {
+                            errorReport('capture error: $e');
+                            if (mounted) {
                               setState(() {
-                                // capturedImages.add(File(xFile.path));
-                                if (currentImage != null) {
-                                  currentImage!.delete();
-                                }
-                                currentImage = File(imagePath);
-                                // capturedImages.add(File(
-                                //     '/data/user/0/com.example.camera_app/cache/a1.jpg'));
-                                gotPicture = true;
                                 _processing = false;
+                                _finalizing = false;
                               });
-                            } catch (e) {
-                              errorReport('capture error: $e');
-                              if (mounted) {
-                                setState(() => _processing = false);
-                              }
                             }
                           }
                         },
@@ -554,7 +554,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                       ),
                       IconButton(
                         onPressed: () {
-                          if (gotPicture) {
+                          if (gotPicture && !_finalizing) {
                             inputPath = currentImage!.path;
                             widget.imageUrl[0] = currentImage!.path;
                             Get.back();
@@ -563,7 +563,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                         },
                         icon: Icon(
                           Icons.check_circle,
-                          color: !gotPicture
+                          color: !gotPicture || _finalizing
                               ? colorMap['disabled']
                               : colorMap['enabled'],
                           size: 40,

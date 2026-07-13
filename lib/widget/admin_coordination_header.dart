@@ -76,7 +76,8 @@ class _AdminCoordinationHeaderState extends State<AdminCoordinationHeader> {
     if (rawTaskTable.isNotEmpty) {
       final TablePath tp = parseTablePath(rawTaskTable);
       if (tp.tableDocId.isNotEmpty) {
-        _taskCode = '${tp.tableDocId}/${tp.subColl}';
+        // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+        _taskCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
         subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _taskCode);
       }
     }
@@ -88,7 +89,7 @@ class _AdminCoordinationHeaderState extends State<AdminCoordinationHeader> {
     if (rawSlTable.isNotEmpty) {
       final TablePath slp = parseTablePath(rawSlTable);
       if (slp.tableDocId.isNotEmpty) {
-        _slCode = '${slp.tableDocId}/${slp.subColl}';
+        _slCode = '$appVid/${slp.tableDocId}/${slp.subColl}';
         subscribeToMapCollection(appVid, slp.tableDocId, slp.subColl, _slCode);
       }
     }
@@ -100,7 +101,7 @@ class _AdminCoordinationHeaderState extends State<AdminCoordinationHeader> {
     if (rawVcTable.isNotEmpty) {
       final TablePath vcp = parseTablePath(rawVcTable);
       if (vcp.tableDocId.isNotEmpty) {
-        _vcCode = '${vcp.tableDocId}/${vcp.subColl}';
+        _vcCode = '$appVid/${vcp.tableDocId}/${vcp.subColl}';
         subscribeToMapCollection(appVid, vcp.tableDocId, vcp.subColl, _vcCode);
       }
     }
@@ -112,7 +113,7 @@ class _AdminCoordinationHeaderState extends State<AdminCoordinationHeader> {
     if (rawEvTable.isNotEmpty) {
       final TablePath evp = parseTablePath(rawEvTable);
       if (evp.tableDocId.isNotEmpty) {
-        _evCode = '${evp.tableDocId}/${evp.subColl}';
+        _evCode = '$appVid/${evp.tableDocId}/${evp.subColl}';
         subscribeToMapCollection(appVid, evp.tableDocId, evp.subColl, _evCode);
       }
     }
@@ -446,14 +447,19 @@ class _PulseDotState extends State<_PulseDot>
     with SingleTickerProviderStateMixin {
   static const double _core = 8;
 
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1600),
-  );
+  late final AnimationController _c;
 
   @override
   void initState() {
     super.initState();
+    // Construct eagerly here (element is mounting → createTicker is safe).
+    // A lazy `late final ... = AnimationController(...)` would defer creation
+    // to first access; an inactive dot never touches _c until dispose(), which
+    // then builds a controller on a deactivated element and crashes.
+    _c = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1600),
+    );
     if (widget.active) _c.repeat();
   }
 

@@ -190,7 +190,8 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
     if (rawTable.isNotEmpty) {
       final TablePath tp = parseTablePath(rawTable);
       if (tp.tableDocId.isNotEmpty) {
-        _taskCode = '${tp.tableDocId}/${tp.subColl}';
+        // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+        _taskCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
         subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _taskCode);
       }
     }
@@ -202,7 +203,7 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
     if (rawCapTable.isNotEmpty) {
       final TablePath ctp = parseTablePath(rawCapTable);
       if (ctp.tableDocId.isNotEmpty) {
-        _capCode = '${ctp.tableDocId}/${ctp.subColl}';
+        _capCode = '$appVid/${ctp.tableDocId}/${ctp.subColl}';
         subscribeToMapCollection(appVid, ctp.tableDocId, ctp.subColl, _capCode);
       }
     }
@@ -218,7 +219,7 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
     if (rawTable.isNotEmpty) {
       final TablePath tp = parseTablePath(rawTable);
       if (tp.tableDocId.isNotEmpty) {
-        _pivotCode = '${tp.tableDocId}/${tp.subColl}';
+        _pivotCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
         subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _pivotCode);
       }
     }
@@ -230,7 +231,7 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
     if (rawJoinTable.isNotEmpty) {
       final TablePath jtp = parseTablePath(rawJoinTable);
       if (jtp.tableDocId.isNotEmpty) {
-        _joinCode = '${jtp.tableDocId}/${jtp.subColl}';
+        _joinCode = '$appVid/${jtp.tableDocId}/${jtp.subColl}';
         subscribeToMapCollection(
           appVid,
           jtp.tableDocId,

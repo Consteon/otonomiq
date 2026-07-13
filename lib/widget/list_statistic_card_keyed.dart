@@ -78,7 +78,9 @@ class _ListStatisticCardKeyedState extends State<ListStatisticCardKeyed> {
         .toString()
         .trim();
     if (tp.tableDocId.isEmpty || appVid.isEmpty) return;
-    _code = '${tp.tableDocId}/${tp.subColl}';
+    // vid-scoped: without vid, another tenant's same tableDocId/subColl dedups
+    // our stream away (mapTableContent/_mapSubscribed key omits vid).
+    _code = '$appVid/${tp.tableDocId}/${tp.subColl}';
     subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _code);
   }
 

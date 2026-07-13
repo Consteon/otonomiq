@@ -33,7 +33,9 @@ class TemplatePrinter {
 
   /// Replaces item placeholders like `item[1]` in an expression with their actual numeric values.
   String _replaceItemPlaceholders(
-      String expression, Map<String, dynamic> context) {
+    String expression,
+    Map<String, dynamic> context,
+  ) {
     final List<dynamic>? itemData = context['item'] as List<dynamic>?;
     if (itemData == null) return expression;
 
@@ -50,7 +52,10 @@ class TemplatePrinter {
   }
 
   Future<List<int>> _processBlock(
-      int start, int end, Map<String, dynamic> context) async {
+    int start,
+    int end,
+    Map<String, dynamic> context,
+  ) async {
     List<int> bytes = [];
     int i = start;
 
@@ -86,33 +91,41 @@ class TemplatePrinter {
             bytes += _generator.qrcode(data, align: align, size: qrSize);
             break;
           case 'TEXT':
-            final singleLineContentMatch =
-                RegExp(r'^<TEXT[^>]*>([\s\S]*)<\/TEXT>$').firstMatch(line);
+            final singleLineContentMatch = RegExp(
+              r'^<TEXT[^>]*>([\s\S]*)<\/TEXT>$',
+            ).firstMatch(line);
             if (singleLineContentMatch != null) {
               final content = singleLineContentMatch.group(1)!;
-              bytes += _generator.text(_interpolate(content, context),
-                  styles: _getStyles(attributes));
+              bytes += _generator.text(
+                _interpolate(content, context),
+                styles: _getStyles(attributes),
+              );
             } else {
               if (endBlockIndex == -1)
                 throw Exception('Unclosed <TEXT> tag at line $i');
               final content = _lines.sublist(i + 1, endBlockIndex).join(';');
               bytes += _generator.text(
-                  _interpolate(content, context).replaceAll(';', '\n'),
-                  styles: _getStyles(attributes));
+                _interpolate(content, context).replaceAll(';', '\n'),
+                styles: _getStyles(attributes),
+              );
               i = endBlockIndex;
             }
             break;
           case 'ROW':
-            final singleLineRowMatch =
-                RegExp(r'^<ROW[^>]*>([\s\S]*)<\/ROW>$').firstMatch(line);
+            final singleLineRowMatch = RegExp(
+              r'^<ROW[^>]*>([\s\S]*)<\/ROW>$',
+            ).firstMatch(line);
             if (singleLineRowMatch != null) {
               final content = singleLineRowMatch.group(1)!;
               bytes += await _processSingleLineRow(content, context);
             } else {
               if (endBlockIndex == -1)
                 throw Exception('Unclosed <ROW> tag at line $i');
-              bytes +=
-                  await _processMultiLineRow(i + 1, endBlockIndex - 1, context);
+              bytes += await _processMultiLineRow(
+                i + 1,
+                endBlockIndex - 1,
+                context,
+              );
               i = endBlockIndex;
             }
             break;
@@ -120,21 +133,33 @@ class TemplatePrinter {
             if (endBlockIndex == -1)
               throw Exception('Unclosed <GROUP_BY> tag at line $i');
             bytes += await _processGroupBy(
-                i + 1, endBlockIndex - 1, attributes, context);
+              i + 1,
+              endBlockIndex - 1,
+              attributes,
+              context,
+            );
             i = endBlockIndex;
             break;
           case 'LOOP':
-            final singleLineLoopMatch =
-                RegExp(r'^<LOOP[^>]*>([\s\S]*)<\/LOOP>$').firstMatch(line);
+            final singleLineLoopMatch = RegExp(
+              r'^<LOOP[^>]*>([\s\S]*)<\/LOOP>$',
+            ).firstMatch(line);
             if (singleLineLoopMatch != null) {
               final content = singleLineLoopMatch.group(1)!;
-              bytes +=
-                  await _processSingleLineLoop(content, attributes, context);
+              bytes += await _processSingleLineLoop(
+                content,
+                attributes,
+                context,
+              );
             } else {
               if (endBlockIndex == -1)
                 throw Exception('Unclosed <LOOP> tag at line $i');
               bytes += await _processMultiLineLoop(
-                  i + 1, endBlockIndex - 1, attributes, context);
+                i + 1,
+                endBlockIndex - 1,
+                attributes,
+                context,
+              );
               i = endBlockIndex;
             }
             break;
@@ -153,21 +178,27 @@ class TemplatePrinter {
   }
 
   Future<List<int>> _processMultiLineRow(
-      int start, int end, Map<String, dynamic> context) async {
+    int start,
+    int end,
+    Map<String, dynamic> context,
+  ) async {
     final List<pos_utils.PosColumn> cols = [];
     int i = start;
     while (i <= end) {
       final line = _lines[i].trim();
-      final colMatch =
-          RegExp(r'^<COL\s*([^>]*)>([\s\S]*)<\/COL>').firstMatch(line);
+      final colMatch = RegExp(
+        r'^<COL\s*([^>]*)>([\s\S]*)<\/COL>',
+      ).firstMatch(line);
       if (colMatch != null) {
         final attributes = _parseAttributes(colMatch.group(1)!);
         final content = _interpolate(colMatch.group(2)!, context);
         final width = int.tryParse(attributes['width'] ?? '1') ?? 1;
-        final styles =
-            _getStyles(Map<String, String>.from(attributes)..remove('width'));
+        final styles = _getStyles(
+          Map<String, String>.from(attributes)..remove('width'),
+        );
         cols.add(
-            pos_utils.PosColumn(text: content, width: width, styles: styles));
+          pos_utils.PosColumn(text: content, width: width, styles: styles),
+        );
       }
       i++;
     }
@@ -175,25 +206,34 @@ class TemplatePrinter {
   }
 
   Future<List<int>> _processSingleLineRow(
-      String content, Map<String, dynamic> context) async {
+    String content,
+    Map<String, dynamic> context,
+  ) async {
     final List<pos_utils.PosColumn> cols = [];
-    final colMatches =
-        RegExp(r'<COL\s*([^>]*)>([\s\S]*?)<\/COL>').allMatches(content);
+    final colMatches = RegExp(
+      r'<COL\s*([^>]*)>([\s\S]*?)<\/COL>',
+    ).allMatches(content);
 
     for (final colMatch in colMatches) {
       final attributes = _parseAttributes(colMatch.group(1)!);
       final colContent = _interpolate(colMatch.group(2)!, context);
       final width = int.tryParse(attributes['width'] ?? '1') ?? 1;
-      final styles =
-          _getStyles(Map<String, String>.from(attributes)..remove('width'));
+      final styles = _getStyles(
+        Map<String, String>.from(attributes)..remove('width'),
+      );
       cols.add(
-          pos_utils.PosColumn(text: colContent, width: width, styles: styles));
+        pos_utils.PosColumn(text: colContent, width: width, styles: styles),
+      );
     }
     return _generator.row(cols);
   }
 
-  Future<List<int>> _processGroupBy(int start, int end,
-      Map<String, String> attributes, Map<String, dynamic> context) async {
+  Future<List<int>> _processGroupBy(
+    int start,
+    int end,
+    Map<String, String> attributes,
+    Map<String, dynamic> context,
+  ) async {
     List<int> bytes = [];
     final int colIndex = int.tryParse(attributes['column'] ?? '0') ?? 0;
     if (colIndex < 0) throw Exception('GROUP_BY column must be 0 or greater.');
@@ -205,9 +245,10 @@ class TemplatePrinter {
     final dynamic rawSourceData = tables[sourceName];
     if (rawSourceData == null || rawSourceData is! List)
       throw Exception(
-          'Source "$sourceName" for GROUP_BY not found or is not a List.');
+        'Source "$sourceName" for GROUP_BY not found or is not a List.',
+      );
 
-    final List<List<String>> sourceData = (rawSourceData as List)
+    final List<List<String>> sourceData = (rawSourceData)
         .map((row) => (row as List).map((cell) => cell.toString()).toList())
         .toList();
     final Map<String, List<List<String>>> groupedData = {};
@@ -236,10 +277,15 @@ class TemplatePrinter {
         bytes += await _processBlock(start, loopStartIndex - 1, groupContext);
         if (loopEndIndex == -1)
           throw Exception(
-              'Unclosed <LOOP> tag inside <GROUP_BY> at line $loopStartIndex');
+            'Unclosed <LOOP> tag inside <GROUP_BY> at line $loopStartIndex',
+          );
         bytes += await _processMultiLineLoop(
-            loopStartIndex + 1, loopEndIndex - 1, {}, groupContext,
-            items: entry.value);
+          loopStartIndex + 1,
+          loopEndIndex - 1,
+          {},
+          groupContext,
+          items: entry.value,
+        );
         bytes += await _processBlock(loopEndIndex + 1, end, groupContext);
       } else {
         bytes += await _processBlock(start, end, groupContext);
@@ -248,30 +294,40 @@ class TemplatePrinter {
     return bytes;
   }
 
-  Future<List<int>> _processSingleLineLoop(String content,
-      Map<String, String> attributes, Map<String, dynamic> context) async {
+  Future<List<int>> _processSingleLineLoop(
+    String content,
+    Map<String, String> attributes,
+    Map<String, dynamic> context,
+  ) async {
     List<int> bytes = [];
-    late final List<List<String>> sourceData;
+    late final List<dynamic> sourceData;
     final sourceName = attributes['source'];
 
     if (sourceName != null && sourceName.isNotEmpty) {
       final dynamic rawSourceData = tables[sourceName];
       if (rawSourceData == null || rawSourceData is! List) {
         throw Exception(
-            'Source "$sourceName" for LOOP not found or is not a List.');
+          'Source "$sourceName" for LOOP not found or is not a List.',
+        );
       }
-      sourceData = (rawSourceData as List)
-          .map((row) => (row as List).map((cell) => cell.toString()).toList())
-          .toList();
+      // ponytail: Map-tolerance for keyed PRN variant. When source elements
+      // are Maps (e.g. li[] = [{ii,in,qt,hg,sub},...]), pass them through
+      // unchanged so {{item.in}}/{{item.qt}} resolve via _interpolate's
+      // Map path-traversal. Positional List elements (GasPink DO) are
+      // coerced to List<String> as before -- no regression.
+      sourceData = (rawSourceData).map((row) {
+        if (row is Map) return row;
+        return (row as List).map((cell) => cell.toString()).toList();
+      }).toList();
     } else {
       sourceData = [];
     }
 
     for (final item in sourceData) {
       final itemContext = Map<String, dynamic>.from(context)..['item'] = item;
-      final commandMatches =
-          RegExp(r'<(\w+)\s*([^>]*?)(?:\/>|>([\s\S]*?)<\/\1>)')
-              .allMatches(content);
+      final commandMatches = RegExp(
+        r'<(\w+)\s*([^>]*?)(?:\/>|>([\s\S]*?)<\/\1>)',
+      ).allMatches(content);
 
       for (final match in commandMatches) {
         final command = match.group(1)!.toUpperCase();
@@ -292,11 +348,15 @@ class TemplatePrinter {
     return bytes;
   }
 
-  Future<List<int>> _processMultiLineLoop(int start, int end,
-      Map<String, String> attributes, Map<String, dynamic> context,
-      {List<List<String>>? items}) async {
+  Future<List<int>> _processMultiLineLoop(
+    int start,
+    int end,
+    Map<String, String> attributes,
+    Map<String, dynamic> context, {
+    List<List<String>>? items,
+  }) async {
     List<int> bytes = [];
-    late final List<List<String>> sourceData;
+    late final List<dynamic> sourceData;
     final sourceName = attributes['source'];
 
     if (items != null) {
@@ -305,10 +365,13 @@ class TemplatePrinter {
       final dynamic rawSourceData = tables[sourceName];
       if (rawSourceData == null || rawSourceData is! List)
         throw Exception(
-            'Source "$sourceName" for LOOP not found or is not a List.');
-      sourceData = (rawSourceData as List)
-          .map((row) => (row as List).map((cell) => cell.toString()).toList())
-          .toList();
+          'Source "$sourceName" for LOOP not found or is not a List.',
+        );
+      // ponytail: Map-tolerance for keyed PRN variant (same as single-line).
+      sourceData = (rawSourceData).map((row) {
+        if (row is Map) return row;
+        return (row as List).map((cell) => cell.toString()).toList();
+      }).toList();
     } else {
       sourceData = [];
     }
@@ -321,19 +384,24 @@ class TemplatePrinter {
   }
 
   void _processAccumulate(
-      Map<String, String> attributes, Map<String, dynamic> context) {
+    Map<String, String> attributes,
+    Map<String, dynamic> context,
+  ) {
     final expression = attributes['expression'];
     final variableName = attributes['into'];
     if (expression == null || variableName == null)
       throw Exception(
-          'ACCUMULATE requires "expression" and "into" attributes.');
+        'ACCUMULATE requires "expression" and "into" attributes.',
+      );
 
     String processedExpression = _replaceItemPlaceholders(expression, context);
 
     double numResult = 0.0;
     try {
-      final result = const ExpressionEvaluator()
-          .eval(Expression.parse(processedExpression), {});
+      final result = const ExpressionEvaluator().eval(
+        Expression.parse(processedExpression),
+        {},
+      );
       if (result is num) numResult = result.toDouble();
     } catch (e) {
       // ignore
@@ -367,13 +435,13 @@ class TemplatePrinter {
       // final number = double.tryParse(
       //         numberString.replaceAll('.', '').replaceAll(',', '.')) ??
       //     0.0;
-      final number = double.tryParse(
-          numberString.replaceAll(',', '')) ??
-          0.0;
+      final number = double.tryParse(numberString.replaceAll(',', '')) ?? 0.0;
       final formattedString = number.toStringAsFixed(decimalDigits);
       final parts = formattedString.split('.');
       final integerPart = parts[0].replaceAllMapped(
-          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.');
+        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+        (m) => '${m[1]}.',
+      );
       return decimalDigits > 0 ? '$integerPart,${parts[1]}' : integerPart;
     } catch (e) {
       return numberString;
@@ -386,15 +454,21 @@ class TemplatePrinter {
       final formattedString = number.toStringAsFixed(decimalDigits);
       final parts = formattedString.split('.');
       final integerPart = parts[0].replaceAllMapped(
-          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},');
+        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+        (m) => '${m[1]},',
+      );
       return decimalDigits > 0 ? '$integerPart.${parts[1]}' : integerPart;
     } catch (e) {
       return numberString;
     }
   }
 
-  String _interpolate(String text, Map<String, dynamic> context,
-      {bool evaluate = true, bool format = true}) {
+  String _interpolate(
+    String text,
+    Map<String, dynamic> context, {
+    bool evaluate = true,
+    bool format = true,
+  }) {
     return text.replaceAllMapped(RegExp(r'\{\{([^}]+)\}\}'), (match) {
       String valueAsString;
       final String fullKey = match.group(1)!.trim();
@@ -402,15 +476,16 @@ class TemplatePrinter {
       final String key = keyParts[0];
       final String? formatter = keyParts.length > 1 ? keyParts[1] : null;
 
-      final tableAccessMatch =
-          RegExp(r'^(\w+)\s*\[\s*(\d+)\s*\]\s*\[\s*(\d+)\s*\]$')
-              .firstMatch(key);
+      final tableAccessMatch = RegExp(
+        r'^(\w+)\s*\[\s*(\d+)\s*\]\s*\[\s*(\d+)\s*\]$',
+      ).firstMatch(key);
       if (tableAccessMatch != null) {
         try {
           final tableName = tableAccessMatch.group(1)!;
           final userRowIndex = int.parse(tableAccessMatch.group(2)!);
-          final colIndex =
-              int.parse(tableAccessMatch.group(3)!); // Column is 0-based
+          final colIndex = int.parse(
+            tableAccessMatch.group(3)!,
+          ); // Column is 0-based
 
           final rowIndex = userRowIndex - 1; // Row is 1-based
 
@@ -429,15 +504,17 @@ class TemplatePrinter {
           valueAsString = '!ERR!';
         }
       } else if (evaluate &&
-          (key.contains('*')
-              || key.contains('/')
-              || key.contains('+')
-              || key.contains('-') // file use '-' todo fix this
-          )) {
+          (key.contains('*') ||
+              key.contains('/') ||
+              key.contains('+') ||
+              key.contains('-') // file use '-' todo fix this
+              )) {
         String processedExpression = _replaceItemPlaceholders(key, context);
         try {
-          final result = const ExpressionEvaluator()
-              .eval(Expression.parse(processedExpression), {});
+          final result = const ExpressionEvaluator().eval(
+            Expression.parse(processedExpression),
+            {},
+          );
           valueAsString = (result is num && result % 1 == 0)
               ? result.toInt().toString()
               : result.toString();
@@ -482,15 +559,27 @@ class TemplatePrinter {
       }
 
       if (format && formatter != null) {
+        // FIX-3: {{field|default:SomeText}} substitutes SomeText only when the
+        // resolved value is empty (inert on non-empty). Keeps white-label
+        // fallback text in the sheet template (e.g. {{by|default:Umum}}) rather
+        // than baking it into Dart -- the nota doc `by` field stays "".
+        final defaultMatch = RegExp(r'^default:(.*)$').firstMatch(formatter);
+        if (defaultMatch != null) {
+          return valueAsString.isEmpty ? defaultMatch.group(1)! : valueAsString;
+        }
         final idrMatch = RegExp(r'^idr(\d*)$').firstMatch(formatter);
         if (idrMatch != null) {
-          return _formatIdr(valueAsString,
-              idrMatch.group(1)!.isEmpty ? 0 : int.parse(idrMatch.group(1)!));
+          return _formatIdr(
+            valueAsString,
+            idrMatch.group(1)!.isEmpty ? 0 : int.parse(idrMatch.group(1)!),
+          );
         }
         final usdMatch = RegExp(r'^usd(\d*)$').firstMatch(formatter);
         if (usdMatch != null) {
-          return _formatUsd(valueAsString,
-              usdMatch.group(1)!.isEmpty ? 2 : int.parse(usdMatch.group(1)!));
+          return _formatUsd(
+            valueAsString,
+            usdMatch.group(1)!.isEmpty ? 2 : int.parse(usdMatch.group(1)!),
+          );
         }
       }
       return valueAsString;
@@ -502,9 +591,9 @@ class TemplatePrinter {
     final Map<String, String> attributes = {};
     // This regex captures key-value pairs. It supports values enclosed in single quotes,
     // double quotes, or no quotes at all, making the template syntax more flexible.
-    final matches =
-        RegExp('(\\w+)\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\'|([^\\s/>]+))')
-            .allMatches(attributeString);
+    final matches = RegExp(
+      '(\\w+)\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\'|([^\\s/>]+))',
+    ).allMatches(attributeString);
     for (final match in matches) {
       final key = match.group(1)!;
       // The value is in one of the capture groups, depending on the quoting used.

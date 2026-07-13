@@ -1278,6 +1278,16 @@ Widget buildDisplayComponent(
           rPad: rPad,
           bPad: bPad,
         );
+      } else if (tlVariant == 'ledger') {
+        result = TimelineLedger(
+          key: txfKey,
+          component: component,
+          scrName: scrName,
+          lPad: lPad,
+          tPad: tPad,
+          rPad: rPad,
+          bPad: bPad,
+        );
       } else {
         result = Timeline(
           key: txfKey,
@@ -1875,6 +1885,20 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }
+  } else if (tip == 'nota_create_submit') {
+    try {
+      result = NotaCreateSubmit(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
   } else if (tip == 'task_create_success') {
     try {
       result = TaskCreateSuccess(
@@ -1937,6 +1961,48 @@ Widget buildDisplayComponent(
   } else if (tip == 'outstanding_panel') {
     try {
       result = AdminOutstandingList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'customer_outstanding_list') {
+    try {
+      result = CustomerOutstandingList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'asset_stock_list') {
+    try {
+      result = AssetStockList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'receipt_doc') {
+    try {
+      result = ReceiptDoc(
         key: txfKey,
         component: component,
         scrName: scrName,

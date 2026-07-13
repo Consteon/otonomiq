@@ -78,7 +78,8 @@ class _CustodyStepHeaderState extends State<CustodyStepHeader> {
     if (rawVehicleTable.isNotEmpty) {
       final TablePath vtp = parseTablePath(rawVehicleTable);
       if (vtp.tableDocId.isNotEmpty) {
-        _slCode = '${vtp.tableDocId}/${vtp.subColl}';
+        // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
+        _slCode = '$appVid/${vtp.tableDocId}/${vtp.subColl}';
         subscribeToMapCollection(appVid, vtp.tableDocId, vtp.subColl, _slCode);
       }
     }
@@ -93,7 +94,7 @@ class _CustodyStepHeaderState extends State<CustodyStepHeader> {
     if (rawWorkforceTable.isNotEmpty) {
       final TablePath wtp = parseTablePath(rawWorkforceTable);
       if (wtp.tableDocId.isNotEmpty) {
-        _wfCode = '${wtp.tableDocId}/${wtp.subColl}';
+        _wfCode = '$appVid/${wtp.tableDocId}/${wtp.subColl}';
         subscribeToMapCollection(appVid, wtp.tableDocId, wtp.subColl, _wfCode);
       }
     }
