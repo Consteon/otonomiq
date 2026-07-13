@@ -526,7 +526,11 @@ class MainPageState extends State<MainPage> {
                         onPressed: () async {
                           if (!(transactionStore.state.screenTx['#CAMERA'] ??
                               false)) {
-                            await ConnectionData().getConnection(true, true);
+                            await ConnectionData().getConnection(
+                              false,
+                              false,
+                              awaitImages: false,
+                            );
                             if (internetConnected()) {
                               setTransactionNotOK('refresh icon');
                               transactionStore.dispatch(

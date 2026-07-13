@@ -43,6 +43,15 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
   String _siteSv = '';
   String _searchQuery = '';
   String _mergeTyped = '';
+  // Child-collection config (point-list source swap)
+  String _childTable = ''; // empty = embedded array (default behavior)
+  String _childArrayField = 'll'; // embedded array field name
+  String _parentKey = 'sv'; // field on parent doc for filtering children
+  String _childKey = 'sv'; // field on child doc matched to parentKey
+  String _childCode = ''; // subscription code (empty = no subscribe)
+
+  // Build-scoped child index (rebuilt each Obx pass).
+  Map<String, List<Map<String, dynamic>>> _childByKey = const {};
   final TextEditingController _searchController = TextEditingController();
 
   // Build-scoped indexes (rebuilt each Obx pass).
@@ -89,6 +98,17 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
         ? def
         : (_periods.isNotEmpty ? _periods.first.ms : 86400000);
     _mergeTyped = (widget.component['mergeTyped'] ?? '').toString().trim();
+    // Child-collection point-list source (backward compat: all defaults = embedded ll)
+    // These are plain config values (collection paths, field names) -- no autheniumDecode needed.
+    _childTable = (widget.component['childTable'] ?? '').toString().trim();
+    _childArrayField = (widget.component['childArrayField'] ?? '')
+        .toString()
+        .trim();
+    if (_childArrayField.isEmpty) _childArrayField = 'll';
+    _parentKey = (widget.component['parentKey'] ?? '').toString().trim();
+    if (_parentKey.isEmpty) _parentKey = 'sv';
+    _childKey = (widget.component['childKey'] ?? '').toString().trim();
+    if (_childKey.isEmpty) _childKey = 'sv';
   }
 
   void _subscribe() {
@@ -104,6 +124,19 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
     _eventCode = '$appVid/${tp.tableDocId}/event';
     subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _siteCode);
     subscribeToMapCollection(appVid, tp.tableDocId, 'event', _eventCode);
+    // Child collection subscribe (only when childTable is configured)
+    if (_childTable.isNotEmpty) {
+      final TablePath childTp = parseTablePath(_childTable);
+      if (childTp.tableDocId.isNotEmpty) {
+        _childCode = '$appVid/${childTp.tableDocId}/${childTp.subColl}';
+        subscribeToMapCollection(
+          appVid,
+          childTp.tableDocId,
+          childTp.subColl,
+          _childCode,
+        );
+      }
+    }
   }
 
   Map<String, dynamic> get _screenTx => transactionStore.state.screenTx;
@@ -144,12 +177,17 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
     );
     _siteSv = matched.isNotEmpty ? (matched.first['sv'] ?? '').toString() : '';
     if (matched.isEmpty) return const [];
-    final dynamic ll = matched.first['ll'];
-    if (ll is! List) return const [];
-    return ll
-        .whereType<Map>()
-        .map((m) => Map<String, dynamic>.from(m))
-        .toList();
+    if (_childTable.isEmpty) {
+      final dynamic ll = matched.first[_childArrayField];
+      if (ll is! List) return const [];
+      return ll
+          .whereType<Map>()
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList();
+    }
+    // child-collection: location docs grouped by _childKey, filtered by parent[_parentKey]
+    final String key = (matched.first[_parentKey] ?? '').toString();
+    return _childByKey[key] ?? const [];
   }
 
   List<Map<String, dynamic>> _search(List<Map<String, dynamic>> points) {
@@ -191,6 +229,18 @@ class _ListStatisticCardState extends State<ListStatisticCard> {
       );
       _nowMs = DateTime.now().millisecondsSinceEpoch;
       _windowStartMs = _nowMs - _selectedMs;
+
+      // Index child docs by childKey (only when child collection is active)
+      if (_childCode.isNotEmpty) {
+        _childByKey = groupByField(
+          List<Map<String, dynamic>>.from(
+            mapTableContent[_childCode] ?? const [],
+          ),
+          _childKey,
+        );
+      } else {
+        _childByKey = const {};
+      }
 
       final List<Map<String, dynamic>> points = _points(siteDocs);
 

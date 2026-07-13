@@ -48,6 +48,7 @@ export 'list_item_card.dart';
 export 'list_multiple_panel_card.dart';
 export 'list_statistic_card.dart';
 export 'nav_action_card.dart';
+export 'nfc_reader.dart';
 export 'nota_create_submit.dart';
 export 'notice_bar.dart';
 export 'otq_switch.dart';

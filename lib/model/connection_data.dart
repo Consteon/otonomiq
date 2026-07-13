@@ -20,7 +20,11 @@ class ConnectionData {
   int trueTime =
       0; // -1 = false; 0 = unknown; 1 = true time because automatic time = true
 
-  Future<ConnectionData> getConnection(bool ntp, bool loc) async {
+  Future<ConnectionData> getConnection(
+    bool ntp,
+    bool loc, {
+    bool awaitImages = true,
+  }) async {
     // dynamic state = transactionStore.state.screenTx;
     // bool lastConnectionStatus = await internetConnectedCheck();
     bool lastConnectionStatus = internetConnectionFlag.value ? true : false;
@@ -80,7 +84,15 @@ class ConnectionData {
     // if (!lastConnectionStatus && internetConnectionFlag.value) {
     getAppGps();
     debugPrint('run historySync.');
-    await sendImagesInImageMap(); // send unsent images in imageMap to firebase storage
+    if (awaitImages) {
+      await sendImagesInImageMap(); // send unsent images in imageMap to firebase storage
+    } else {
+      // non-blocking on refresh: images still upload (mutex-locked + retry), just
+      // don't block. .catchError so an un-awaited rejection can't become fatal.
+      sendImagesInImageMap().catchError((e) {
+        reportNonTimeout(e);
+      });
+    }
     historySync('Connection Data', false);
     // }
     // } else {
