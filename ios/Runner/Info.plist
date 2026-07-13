@@ -48,6 +48,8 @@
 		<string>Access to your photo library is needed to allow you to easily attach images to your reports and attendance records. This simplifies the process of documenting your work and ensures accurate record-keeping.</string>
 		<key>NSCameraUsageDescription</key>
 		<string>To streamline the reporting and attendance process, we need camera access so you can capture photos directly within the app and attach them to your reports. This eliminates the need to switch between apps, saving you time and effort.</string>
+		<key>NFCReaderUsageDescription</key>
+		<string>NFC is used to read data from cards you tap, so you can log records without typing them by hand.</string>
 		<key>NSMicrophoneUsageDescription</key>
 		<string>Microphone access is required to enable seamless communication and video recording within the app. This feature simplifies the reporting process by allowing you to include audio recordings and video messages directly in your reports.</string>
 		<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

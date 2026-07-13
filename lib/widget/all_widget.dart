@@ -64,6 +64,7 @@ export 'route_feed_header.dart';
 export 'route_progress_header.dart';
 export 'return_header.dart';
 export 'scanner.dart';
+export 'nfc_reader.dart';
 export 'selectable_btn.dart';
 export 'signature_pad.dart';
 export 'stepper_widget.dart';

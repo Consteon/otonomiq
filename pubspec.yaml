@@ -93,6 +93,8 @@ dependencies:
   flutter_reactive_ble: ^5.5.0
   flutter_map: ^8.3.0
   latlong2: ^0.9.1 # 0.10 blocked: flutter_map 8.3.0 pins ^0.9.1
+  flutter_nfc_kit: ^3.6.2
+  ndef: ^0.4.0
 
 #  flutter_blue_plus: ^1.35.5
 #  cryptography: ^2.7.0
