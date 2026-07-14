@@ -46,6 +46,8 @@ class MainPageState extends State<MainPage> {
     linkElement[home]!.map((widget) => widget),
   );
   bool wait = false; // if true, display wait screen (circular or other)
+  bool _refreshing =
+      false; // ponytail: amber dot while background refresh in-flight (also double-tap guard)
   // Scoped logout spinner flag. Set true by signOut()'s cold/corrupt-snapshot
   // path (no warm guest UI cached → it must re-fetch the login page over the
   // network) and cleared inside showSignInPage() on BOTH success and failure.
@@ -513,9 +515,11 @@ class MainPageState extends State<MainPage> {
                       Obx(
                         () => Icon(
                           Icons.fiber_manual_record,
-                          color: transactionOKFlag.value
-                              ? readyColor
-                              : notReadyColor,
+                          color: _refreshing
+                              ? Colors.red
+                              : (transactionOKFlag.value
+                                    ? readyColor
+                                    : notReadyColor),
                         ),
                       ),
                       IconButton(
@@ -524,6 +528,8 @@ class MainPageState extends State<MainPage> {
                           color: Colors.white,
                         ), //= refresh icon
                         onPressed: () async {
+                          if (_refreshing)
+                            return; // ponytail: ignore tap while refresh in-flight
                           if (!(transactionStore.state.screenTx['#CAMERA'] ??
                               false)) {
                             await ConnectionData().getConnection(
@@ -532,54 +538,70 @@ class MainPageState extends State<MainPage> {
                               awaitImages: false,
                             );
                             if (internetConnected()) {
-                              setTransactionNotOK('refresh icon');
-                              transactionStore.dispatch(
-                                UpdateScreenTxAction(
-                                  ScreenTransaction({'#DATA_OK': false}),
-                                ),
-                              );
-                              // transactionStore.dispatch(UpdateScreenTxAction(
-                              //     ScreenTransaction({'#DATA_OK': true})));
+                              // ponytail: non-blocking refresh — amber dot, page stays usable
                               setState(() {
-                                wait = true;
+                                _refreshing = true;
                                 touch = !touch;
                                 if (scrollController.hasClients) {
                                   scrollController.jumpTo(0.0);
                                 }
-                                dataColor = notReadyColor;
-                                // dataColor = readyColor;
                               });
-                              // refresh current page
+                              // refresh current page — background, not awaited
                               try {
                                 oldSettingUpShouldBeDeleted().then((aRes) {
                                   var state = transactionStore.state;
                                   var lifKey = state.screenTx['#INTERFACE_KEY'];
-                                  // readSettings(lifKey, 1).then((_) {
-                                  readSettingsContext(context, lifKey, 1).then((
-                                    _,
-                                  ) {
-                                    transactionStore.dispatch(
-                                      UpdateScreenTxAction(
-                                        ScreenTransaction({'#REFRESH': false}),
-                                      ),
-                                    );
-                                    List<Widget> newElementList = reloadPage(
-                                      pageName,
-                                    );
-                                    setTransactionOK('refresh icon');
-                                    transactionStore.dispatch(
-                                      UpdateScreenTxAction(
-                                        ScreenTransaction({'#DATA_OK': true}),
-                                      ),
-                                    );
-                                    setState(() {
-                                      pageElements = newElementList;
-                                      wait = false;
-                                      touch = !touch;
-                                      dataColor = readyColor;
-                                      // dataColor = Colors.lightGreenAccent;
-                                    });
-                                  });
+                                  readSettingsContext(context, lifKey, 1)
+                                      .then((_) {
+                                        transactionStore.dispatch(
+                                          UpdateScreenTxAction(
+                                            ScreenTransaction({
+                                              '#REFRESH': false,
+                                            }),
+                                          ),
+                                        );
+                                        List<Widget> newElementList =
+                                            reloadPage(pageName);
+                                        setTransactionOK('refresh icon');
+                                        transactionStore.dispatch(
+                                          UpdateScreenTxAction(
+                                            ScreenTransaction({
+                                              '#DATA_OK': true,
+                                            }),
+                                          ),
+                                        );
+                                        if (mounted) {
+                                          setState(() {
+                                            pageElements = newElementList;
+                                            _refreshing = false;
+                                            wait = false;
+                                            touch = !touch;
+                                            dataColor = readyColor;
+                                          });
+                                        }
+                                      })
+                                      .catchError((e) {
+                                        setTransactionOK('refresh icon catch');
+                                        transactionStore.dispatch(
+                                          UpdateScreenTxAction(
+                                            ScreenTransaction({
+                                              '#DATA_OK': true,
+                                            }),
+                                          ),
+                                        );
+                                        if (mounted) {
+                                          setState(() {
+                                            _refreshing = false;
+                                            wait = false;
+                                            touch = !touch;
+                                            dataColor = readyColor;
+                                          });
+                                          showAlert(
+                                            context,
+                                            textList["ErrorLoading"],
+                                          );
+                                        }
+                                      });
                                 });
                               } catch (e) {
                                 setTransactionOK('refresh icon catch');
@@ -588,12 +610,14 @@ class MainPageState extends State<MainPage> {
                                     ScreenTransaction({'#DATA_OK': true}),
                                   ),
                                 );
-                                setState(() {
-                                  wait = false;
-                                  touch = !touch;
-                                  dataColor = readyColor;
-                                  // dataColor = Colors.lightGreenAccent;
-                                });
+                                if (mounted) {
+                                  setState(() {
+                                    _refreshing = false;
+                                    wait = false;
+                                    touch = !touch;
+                                    dataColor = readyColor;
+                                  });
+                                }
                                 showAlert(context, textList["ErrorLoading"]);
                               }
                             } else {
@@ -619,7 +643,7 @@ class MainPageState extends State<MainPage> {
                                   );
                                 },
                               );
-                            } // end if transactionOK
+                            } // end if internetConnected
                           } // end if #CAMERA
                         }, // end of onPressed
                       ),
@@ -1263,6 +1287,21 @@ class MainPageState extends State<MainPage> {
         dynamic docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
         bool docExist = (await docRef.get()).exists;
         if (docExist) {
+          // Restore the last-seen proxy checksum for THIS ssid before the
+          // listener can fire. #PROXY_LISTENER_CS lives only in transactionStore
+          // (in-memory), so without this it is null on every cold start and the
+          // first snapshot ALWAYS passes the change-gate below — re-applying an
+          // UNCHANGED (proxy lags the sheet) snapshot over the fresh /readSS
+          // refresh the user just pulled, reverting it. Keyed by ssid so a
+          // restored checksum can't leak across tenants.
+          final int? savedProxyCs = prefs.getInt('@proxyCS_$ssid');
+          if (savedProxyCs != null) {
+            transactionStore.dispatch(
+              UpdateScreenTxAction(
+                ScreenTransaction({'#PROXY_LISTENER_CS': savedProxyCs}),
+              ),
+            );
+          }
           final proxyListener = docRef.snapshots().listen((event) {
             if (event.data() != null) {
               // process event data
@@ -1287,6 +1326,17 @@ class MainPageState extends State<MainPage> {
                     }),
                   ),
                 );
+                // Persist the checksum so the next cold start can tell an
+                // unchanged proxy from a real change (see restore above). Epoch
+                // 't' is integral; if it ever isn't an int, fall back to the old
+                // (non-persisted) behavior rather than crash.
+                if (rec['t'] is int) {
+                  try {
+                    prefs.setInt('@proxyCS_$ssid', rec['t']);
+                  } catch (e) {
+                    devPrint('persist @proxyCS failed: $e');
+                  }
+                }
                 // check and update system
                 // actionUnLock();
                 Map<String, dynamic> newItem = {};

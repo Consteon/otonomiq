@@ -8,6 +8,7 @@ export 'admin_upcoming_task_list.dart';
 export 'admin_vehicle_picker_sheet.dart';
 export 'asset_stock_list.dart';
 export 'attendance_qr_selfie_gps_verify.dart';
+export 'biometric_gate.dart';
 // action widget
 
 // widget components
@@ -68,6 +69,7 @@ export 'scanner.dart';
 export 'selectable_btn.dart';
 export 'signature_pad.dart';
 export 'stepper_widget.dart';
+export 'table_picker.dart';
 export 'task_create_submit.dart';
 export 'task_create_success.dart';
 export 'task_draft_info.dart';

@@ -53,6 +53,7 @@ import 'widget/ftz_webview.dart';
 import 'widget/item_execution_list.dart';
 import 'widget/item_execution_submit.dart';
 import 'widget/logout_transition_support.dart';
+import 'widget/nfc_reader.dart';
 import 'widget/photo_camera.dart';
 import 'widget/ui_component.dart';
 
@@ -4082,6 +4083,7 @@ void clearData(String scrName) {
   ExecutorDesignateCard.clearO1State(scrName);
   ItemExecutionList.clearExecutionStore(scrName);
   ItemExecutionSubmit.clearState(scrName);
+  NfcReader.clearCollectorState(scrName);
 
   if (txfController[scrName] == null) return;
 

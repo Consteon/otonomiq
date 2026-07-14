@@ -15,6 +15,7 @@ import '../firestore_repository/firestore_generic_repository.dart';
 import '../global.dart';
 import '../model/otq_state.dart';
 import '../redux/screen_transaction.dart';
+import 'biometric_gate.dart';
 import 'ftz_scanner_screen.dart';
 import 'photo_camera.dart';
 
@@ -1566,6 +1567,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                     ],
                   ),
                   onTap: () async {
+                    if (!await bioGate(widget.component, context)) return;
+                    if (!mounted) return;
                     if (!tapped) {
                       setState(() {
                         tapped = true;
@@ -2097,6 +2100,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
               ],
             ),
             onTap: () async {
+              if (!await bioGate(widget.component, context)) return;
+              if (!mounted) return;
               if (!tapped) {
                 setState(() {
                   tapped = true;

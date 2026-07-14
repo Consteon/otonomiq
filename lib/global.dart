@@ -197,7 +197,8 @@ import 'widget/driver_home_support.dart';
   0.9.82.02 (260703) HH : update plugins
   0.9.83.01 (260703) OO : bug fix
   0.9.83.02 (260713) OO : fix splash screen, fix photo camera, login phone match, add flutter_native_icons, offline, trip sequence driver,
-                          print thermal bluetooth, nfc reader
+                          print thermal bluetooth, nfc reader,
+  0.9.84.02 (260714) OO : fix layout nfc reader, fix get cache data after close app, default value pickup and drop in admin runtime, implement local auth in attendance qr 
 */
 
 // ========= Constants ==========================
@@ -208,7 +209,7 @@ const clearHistory =
 int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
-const String version = '0.9.83';
+const String version = '0.9.84';
 const String subVersion = '.02';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
