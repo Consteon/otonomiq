@@ -148,13 +148,20 @@ List<Widget> buildPage(var componentList, String scrName,
     CustodyEventSubmit.clearState(scrName);
     ItemExecutionList.clearExecutionStore(scrName);
     ItemExecutionSubmit.clearState(scrName);
-    AdminCreateTaskSupport.clearAllDrafts();
+    // ponytail: do NOT clearAllDrafts() here. buildPage(clear:true) runs once
+    // per screen on every readSettings refresh (constructPageElements), so a
+    // background refresh mid-wizard wiped the in-flight customer/vehicle and P4
+    // rendered null. The real resets are per-wizardKey and already covered:
+    // P1 customer-pick clearDraft (task_feed_list) + submit-success clearDraft
+    // (task_create_submit). Re-add a scoped clear only if a tenant switch must
+    // drop a half-done draft.
     TaskItemBuilder.resetClientPublished(scrName);
     TaskCreateSubmit.resetWriting(scrName);
     NotaCreateSubmit.resetWriting(scrName);
     TaskFeedList.clearFlatSearch(scrName);
     CustomerOutstandingList.clearState(scrName);
     AssetStockList.clearState(scrName);
+    TablePicker.clearState(scrName);
   }
 
   dynamic userRepository = myState['#USER_REPOSITORY'];

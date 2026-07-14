@@ -433,9 +433,10 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
     final List<DraftItem> draft = AdminCreateTaskSupport.getDraft(_wizardKey);
     // Default cdo/cdi based on tx
     final String defaultCdo = (tx == 'deliver' || tx == 'sale') ? 'full' : '';
-    final String defaultCdi = (tx == 'deliver' || tx == 'purchase')
-        ? 'full'
-        : '';
+    // Deliver pickup = empty gallons returned (Kosong); purchase pickup = full.
+    final String defaultCdi = tx == 'deliver'
+        ? 'empty'
+        : (tx == 'purchase' ? 'full' : '');
     // Default wt for refill so stored state matches the displayed toggle
     // (_waterToggle renders "Isi Ulang" active when wt != 'ro').
     final String defaultWt = tx == 'refill' ? 'refill' : '';

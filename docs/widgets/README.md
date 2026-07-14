@@ -41,6 +41,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | CustomerOutstandingList | [customer_outstanding_list.md](customer_outstanding_list.md) | draft | Full-page customer outstanding lookup with search, category-colored chips, aging tiers, and detail sheet |
 | AdminUpcomingTaskList | [admin_upcoming_task_list.md](admin_upcoming_task_list.md) | draft | Upcoming task cards with item roll-up and inline vehiclePicker for Admin H1 AKAN DATANG |
 | PickerList | [picker_list.md](picker_list.md) | draft | Generic single-select picker (any collection); capture id→token, optional per-row count badge + ad-hoc row; capture/navigate modes. SDUI `picker_list` (alias `vehicle_picker`) |
+| TablePicker | [table_picker.md](table_picker.md) | draft | Generic single/multi-select picker (any keyed table) writing value(s)+label(s) into form positions (not screenTx); modal sheet, search-DSL filter, multi-mode JSON-array + CF un-escape contract. SDUI `table_picker` |
 | VehiclePickerSheet | [admin_vehicle_picker_sheet.md](admin_vehicle_picker_sheet.md) | draft | Reusable vehicle assign/reassign bottom-sheet (extracted from CoordinationSignalList) |
 | CoordinationSignalList | [coordination_signal_list.md](coordination_signal_list.md) | draft | Admin signal list (cross-collection derive + assign/cross-nav actions) for H1 AdminHome |
 | CirculationSummary | [circulation_summary.md](circulation_summary.md) | draft | Per-item cross-route circulation totals (Muat/Drop/Pickup) for P5 CustodyNotification |

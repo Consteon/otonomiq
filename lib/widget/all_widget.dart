@@ -8,6 +8,7 @@ export 'admin_upcoming_task_list.dart';
 export 'admin_vehicle_picker_sheet.dart';
 export 'asset_stock_list.dart';
 export 'attendance_qr_selfie_gps_verify.dart';
+export 'biometric_gate.dart';
 // action widget
 
 // widget components
@@ -75,6 +76,7 @@ export 'task_draft_info.dart';
 export 'task_feed_list.dart';
 export 'task_item_builder.dart';
 export 'task_manifest_list.dart';
+export 'table_picker.dart';
 export 'timeline.dart';
 export 'timeline_ledger.dart';
 export 'timeline_ledger_support.dart';

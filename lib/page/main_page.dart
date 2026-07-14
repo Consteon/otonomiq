@@ -1,30 +1,31 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'dart:async';
-import 'package:flutter_redux/flutter_redux.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_redux/flutter_redux.dart';
+import 'package:get/get.dart';
 import 'package:get/get_state_manager/src/rx_flutter/rx_obx_widget.dart';
-import '../global.dart';
+
 import '../api.dart';
-import '../login/bloc_login/bloc.dart';
-import '../redux/screen_transaction.dart';
-import '../login/bloc_authentication/bloc.dart';
 import '../bloc_timer/bloc.dart';
-import '../page/wait_screen.dart';
-import '../main_bloc/bloc.dart';
-import '../notification/bloc.dart';
-import '../widget/link_widget.dart';
-import '../model/connection_data.dart';
 import '../different_code/different_code.dart';
+import '../global.dart';
+import '../login/bloc_authentication/bloc.dart';
+import '../login/bloc_login/bloc.dart';
+import '../main_bloc/bloc.dart';
+import '../model/connection_data.dart';
+import '../notification/bloc.dart';
 import '../otq_icons.dart';
+import '../page/wait_screen.dart';
+import '../redux/screen_transaction.dart';
 import '../widget/approver_sticky_bar.dart';
-import '../widget/logout_transition_support.dart';
 import '../widget/build_theme.dart';
+import '../widget/link_widget.dart';
+import '../widget/logout_transition_support.dart';
 import '../widget/offline_banner.dart';
 import '../widget/otq_bottom_nav_bar.dart';
-import 'package:get/get.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({required Key key}) : super(key: key);
@@ -41,9 +42,12 @@ class MainPageState extends State<MainPage> {
   String pageName = home;
   // List<Widget> pageElements = linkElement[
   //     home]!; // page elements to display. Got this from Link Interface load home for start
-  List<Widget> pageElements =
-      List<Widget>.of(linkElement[home]!.map((widget) => widget));
+  List<Widget> pageElements = List<Widget>.of(
+    linkElement[home]!.map((widget) => widget),
+  );
   bool wait = false; // if true, display wait screen (circular or other)
+  bool _refreshing =
+      false; // ponytail: amber dot while background refresh in-flight (also double-tap guard)
   // Scoped logout spinner flag. Set true by signOut()'s cold/corrupt-snapshot
   // path (no warm guest UI cached → it must re-fetch the login page over the
   // network) and cleared inside showSignInPage() on BOTH success and failure.
@@ -105,8 +109,9 @@ class MainPageState extends State<MainPage> {
     //   });
     // });
     // devPrint('Location stream listened and displayed.');
-    subscribeToProxy(transactionStore
-        .state.screenTx['#INTERFACE_KEY']); // subscribe to firebase proxy
+    subscribeToProxy(
+      transactionStore.state.screenTx['#INTERFACE_KEY'],
+    ); // subscribe to firebase proxy
   } // end of initState
 
   // Platform messages are asynchronous, so we initialize in an async method.
@@ -219,9 +224,14 @@ class MainPageState extends State<MainPage> {
               var state = transactionStore.state;
               var lifKey = state.screenTx['#INTERFACE_KEY'];
               readSettings(lifKey, 1).then((_) {
-                transactionStore.dispatch(UpdateScreenTxAction(
-                    ScreenTransaction(
-                        {'#REFRESH': false, '#CURRENT_ROUTE': pgName})));
+                transactionStore.dispatch(
+                  UpdateScreenTxAction(
+                    ScreenTransaction({
+                      '#REFRESH': false,
+                      '#CURRENT_ROUTE': pgName,
+                    }),
+                  ),
+                );
                 List<Widget> newElementList = reloadPage(pgName);
                 setState(() {
                   _selectedNavIndex = i;
@@ -264,9 +274,14 @@ class MainPageState extends State<MainPage> {
                 var state = transactionStore.state;
                 var lifKey = state.screenTx['#INTERFACE_KEY'];
                 readSettings(lifKey, 1).then((_) {
-                  transactionStore.dispatch(UpdateScreenTxAction(
-                      ScreenTransaction(
-                          {'#REFRESH': false, '#CURRENT_ROUTE': pgName})));
+                  transactionStore.dispatch(
+                    UpdateScreenTxAction(
+                      ScreenTransaction({
+                        '#REFRESH': false,
+                        '#CURRENT_ROUTE': pgName,
+                      }),
+                    ),
+                  );
                   List<Widget> newElementList = reloadPage(pgName);
                   setState(() {
                     _selectedNavIndex = i;
@@ -300,8 +315,9 @@ class MainPageState extends State<MainPage> {
             case 1: // in Notification List before
               {
                 var pgName = routeStack.get(); // get current page
-                List<Widget> newElementList =
-                    reloadPage(pgName); // reload current page
+                List<Widget> newElementList = reloadPage(
+                  pgName,
+                ); // reload current page
                 setState(() {
                   byPass = 0;
                   pageName = pgName;
@@ -355,333 +371,367 @@ class MainPageState extends State<MainPage> {
     } // end of onWillPop
 
     return StoreConnector<ScreenTransaction, int>(
-        distinct: true,
-        // The builder reads no Redux key at render time; every visible update
-        // flows via rootThis.setState + nested Bloc/Obx/ValueListenable
-        // builders. Constant converter + distinct:true => the shell renders
-        // once and is NOT rebuilt on each of the ~200+ dispatches. If a future
-        // edit needs a # key at render time, switch this converter to a
-        // value-comparable record of exactly those keys and keep distinct:true.
-        converter: (store) => 0,
-        builder: (context, _) {
-          PopScope v;
+      distinct: true,
+      // The builder reads no Redux key at render time; every visible update
+      // flows via rootThis.setState + nested Bloc/Obx/ValueListenable
+      // builders. Constant converter + distinct:true => the shell renders
+      // once and is NOT rebuilt on each of the ~200+ dispatches. If a future
+      // edit needs a # key at render time, switch this converter to a
+      // value-comparable record of exactly those keys and keep distinct:true.
+      converter: (store) => 0,
+      builder: (context, _) {
+        PopScope v;
 
-          v = PopScope(
-            canPop: _canPop,
-            onPopInvoked: (canPop) => onWillPop(canPop),
-            child: byPass > 0
-                ? byPassWidget
-                : Scaffold(
-//                  endDrawer: ReduxDevTools<ScreenTransaction>(transactionStore),
-//                  key: key,
-                    key: mainScaffoldKey,
-//            floatingActionButton: FloatingActionButton(
-//              onPressed: () {
-//                if (this.toggle) {
-//                  this.toggle = !this.toggle;
-//                  BlocProvider.of<MainBloc>(context)
-//                      .add(ContinuousScan());
-//                } else {
-//                  this.toggle = !this.toggle;
-//                  BlocProvider.of<MainBloc>(context)
-//                      .add(ResetAll());
-//                }
-//
-//              },
-//              tooltip: 'Scan',
-//              child: Icon(Icons.add),
-//            ),
-//            floatingActionButton: FloatingActionButton(
-//              onPressed: () {
-//                var state = transactionStore.state.screenTx;
-//                resetVidUid(state['#FIREBASE_USER'].uid);
-//              },
-//              tooltip: 'Reset',
-//              child: Icon(Icons.cancel),
-//            ), // This trailing comma makes auto-formatting nicer for build methods.
-                    appBar: AppBar(
-                      backgroundColor: Theme.of(context).primaryColor,
-                      leading: pageName == home
-                          ? null
-                          : IconButton(
-                              icon: const Icon(
-                                Icons.arrow_back,
-                                color: Colors.white,
-                              ), //= back icon
-                              onPressed: () {
-                                // BlocProvider.of<MainBloc>(context)
-                                //     .add(ResetAll());
-                                var dotColor = dataColor;
-                                if (routeStack.get() == '_OtqQR1') {
-                                  dotColor = readyColor;
-                                  setDataOK('2');
+        v = PopScope(
+          canPop: _canPop,
+          onPopInvoked: (canPop) => onWillPop(canPop),
+          child: byPass > 0
+              ? byPassWidget
+              : Scaffold(
+                  //                  endDrawer: ReduxDevTools<ScreenTransaction>(transactionStore),
+                  //                  key: key,
+                  key: mainScaffoldKey,
+                  //            floatingActionButton: FloatingActionButton(
+                  //              onPressed: () {
+                  //                if (this.toggle) {
+                  //                  this.toggle = !this.toggle;
+                  //                  BlocProvider.of<MainBloc>(context)
+                  //                      .add(ContinuousScan());
+                  //                } else {
+                  //                  this.toggle = !this.toggle;
+                  //                  BlocProvider.of<MainBloc>(context)
+                  //                      .add(ResetAll());
+                  //                }
+                  //
+                  //              },
+                  //              tooltip: 'Scan',
+                  //              child: Icon(Icons.add),
+                  //            ),
+                  //            floatingActionButton: FloatingActionButton(
+                  //              onPressed: () {
+                  //                var state = transactionStore.state.screenTx;
+                  //                resetVidUid(state['#FIREBASE_USER'].uid);
+                  //              },
+                  //              tooltip: 'Reset',
+                  //              child: Icon(Icons.cancel),
+                  //            ), // This trailing comma makes auto-formatting nicer for build methods.
+                  appBar: AppBar(
+                    backgroundColor: Theme.of(context).primaryColor,
+                    leading: pageName == home
+                        ? null
+                        : IconButton(
+                            icon: const Icon(
+                              Icons.arrow_back,
+                              color: Colors.white,
+                            ), //= back icon
+                            onPressed: () {
+                              // BlocProvider.of<MainBloc>(context)
+                              //     .add(ResetAll());
+                              var dotColor = dataColor;
+                              if (routeStack.get() == '_OtqQR1') {
+                                dotColor = readyColor;
+                                setDataOK('2');
+                              }
+                              var pgName = routeStack.pop();
+                              List<Widget> newElementList = reloadPage(pgName);
+                              setState(() {
+                                byPass = 0;
+                                wait = false;
+                                pageName = pgName;
+                                pageElements = newElementList;
+                                dataColor = dotColor;
+                              });
+                            },
+                          ),
+                    title: pageName == home
+                        ? Text(
+                            '$title $versionShown',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            // Android (Roboto) renders titleLarge wider than
+                            // iOS (SF); pin 18sp on Android, keep iOS default.
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: andrew ? 18 : null,
+                            ),
+                          )
+                        : Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: andrew ? 18 : null,
+                            ),
+                          ),
+                    actions: <Widget>[
+                      // IconButton( // archive history for debugging
+                      //     onPressed: (() async {
+                      //       archiveHistory(); // // archive history to firestore proxy h2
+                      //       Get.defaultDialog(
+                      //         title: "History",
+                      //         content: const Text("History archived."),
+                      //       );
+                      //     }),
+                      //     icon: const Icon(
+                      //       Icons.send,
+                      //       color: Colors.redAccent,
+                      //     )),
+                      // IconButton( // sync history for debugging
+                      //     onPressed: (() async {
+                      //       historySync('Connection Data',true);
+                      //       Get.defaultDialog(
+                      //         title: "History",
+                      //         content: const Text("History synced."),
+                      //       );
+                      //       // historyClear();
+                      //     }),
+                      //     icon: const Icon(
+                      //       Icons.history_toggle_off,
+                      //       color: Colors.redAccent,
+                      //     )),
+                      // IconButton( // archive history for debugging
+                      //     onPressed: (() async {
+                      //       historyClear(); // clear history
+                      //       Get.defaultDialog(
+                      //         title: "History",
+                      //         content: const Text("History cleared."),
+                      //       );
+                      //     }),
+                      //     icon: const Icon(
+                      //       Icons.phonelink_erase,
+                      //       color: Colors.redAccent,
+                      //     )),
+                      // IconButton(
+                      //   icon: const Icon(
+                      //     Icons.info_outline,
+                      //     color: Colors.white,
+                      //   ), //= refresh icon
+                      //   onPressed: () async {
+                      //     // need to run  flutter pub run flutter_oss_licenses:generate.dart
+                      //     showLicensePage(context: context);
+                      //   }, // end of onPressed
+                      // ),
+                      Obx(
+                        () => Icon(
+                          Icons.fiber_manual_record,
+                          color: _refreshing
+                              ? Colors.red
+                              : (transactionOKFlag.value
+                                    ? readyColor
+                                    : notReadyColor),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.refresh,
+                          color: Colors.white,
+                        ), //= refresh icon
+                        onPressed: () async {
+                          if (_refreshing)
+                            return; // ponytail: ignore tap while refresh in-flight
+                          if (!(transactionStore.state.screenTx['#CAMERA'] ??
+                              false)) {
+                            await ConnectionData().getConnection(
+                              false,
+                              false,
+                              awaitImages: false,
+                            );
+                            if (internetConnected()) {
+                              // ponytail: non-blocking refresh — amber dot, page stays usable
+                              setState(() {
+                                _refreshing = true;
+                                touch = !touch;
+                                if (scrollController.hasClients) {
+                                  scrollController.jumpTo(0.0);
                                 }
-                                var pgName = routeStack.pop();
-                                List<Widget> newElementList =
-                                    reloadPage(pgName);
-                                setState(() {
-                                  byPass = 0;
-                                  wait = false;
-                                  pageName = pgName;
-                                  pageElements = newElementList;
-                                  dataColor = dotColor;
-                                });
-                              },
-                            ),
-                      title: pageName == home
-                          ? Text(
-                              '$title $versionShown',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              // Android (Roboto) renders titleLarge wider than
-                              // iOS (SF); pin 18sp on Android, keep iOS default.
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: andrew ? 18 : null,
-                              ),
-                            )
-                          : Text(
-                              title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: andrew ? 18 : null,
-                              ),
-                            ),
-                      actions: <Widget>[
-                        // IconButton( // archive history for debugging
-                        //     onPressed: (() async {
-                        //       archiveHistory(); // // archive history to firestore proxy h2
-                        //       Get.defaultDialog(
-                        //         title: "History",
-                        //         content: const Text("History archived."),
-                        //       );
-                        //     }),
-                        //     icon: const Icon(
-                        //       Icons.send,
-                        //       color: Colors.redAccent,
-                        //     )),
-                        // IconButton( // sync history for debugging
-                        //     onPressed: (() async {
-                        //       historySync('Connection Data',true);
-                        //       Get.defaultDialog(
-                        //         title: "History",
-                        //         content: const Text("History synced."),
-                        //       );
-                        //       // historyClear();
-                        //     }),
-                        //     icon: const Icon(
-                        //       Icons.history_toggle_off,
-                        //       color: Colors.redAccent,
-                        //     )),
-                        // IconButton( // archive history for debugging
-                        //     onPressed: (() async {
-                        //       historyClear(); // clear history
-                        //       Get.defaultDialog(
-                        //         title: "History",
-                        //         content: const Text("History cleared."),
-                        //       );
-                        //     }),
-                        //     icon: const Icon(
-                        //       Icons.phonelink_erase,
-                        //       color: Colors.redAccent,
-                        //     )),
-                        // IconButton(
-                        //   icon: const Icon(
-                        //     Icons.info_outline,
-                        //     color: Colors.white,
-                        //   ), //= refresh icon
-                        //   onPressed: () async {
-                        //     // need to run  flutter pub run flutter_oss_licenses:generate.dart
-                        //     showLicensePage(context: context);
-                        //   }, // end of onPressed
-                        // ),
-                        Obx(() => Icon(
-                              Icons.fiber_manual_record,
-                              color: transactionOKFlag.value
-                                  ? readyColor
-                                  : notReadyColor,
-                            )),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.refresh,
-                            color: Colors.white,
-                          ), //= refresh icon
-                          onPressed: () async {
-                            if (!(transactionStore.state.screenTx['#CAMERA'] ??
-                                false)) {
-                              await ConnectionData()
-                                  .getConnection(false, false, awaitImages: false);
-                              if (internetConnected()) {
-                                setTransactionNotOK('refresh icon');
-                                transactionStore.dispatch(UpdateScreenTxAction(
-                                    ScreenTransaction({'#DATA_OK': false})));
-                                // transactionStore.dispatch(UpdateScreenTxAction(
-                                //     ScreenTransaction({'#DATA_OK': true})));
-                                setState(() {
-                                  wait = true;
-                                  touch = !touch;
-                                  if (scrollController.hasClients) {
-                                    scrollController.jumpTo(0.0);
-                                  }
-                                  dataColor = notReadyColor;
-                                  // dataColor = readyColor;
-                                });
-                                // refresh current page
-                                try {
-                                  oldSettingUpShouldBeDeleted().then((aRes) {
-                                    var state = transactionStore.state;
-                                    var lifKey =
-                                        state.screenTx['#INTERFACE_KEY'];
-                                    // readSettings(lifKey, 1).then((_) {
-                                    readSettingsContext(context, lifKey, 1)
-                                        .then((_) {
-                                      transactionStore.dispatch(
+                              });
+                              // refresh current page — background, not awaited
+                              try {
+                                oldSettingUpShouldBeDeleted().then((aRes) {
+                                  var state = transactionStore.state;
+                                  var lifKey = state.screenTx['#INTERFACE_KEY'];
+                                  readSettingsContext(context, lifKey, 1)
+                                      .then((_) {
+                                        transactionStore.dispatch(
                                           UpdateScreenTxAction(
-                                              ScreenTransaction(
-                                                  {'#REFRESH': false})));
-                                      List<Widget> newElementList =
-                                          reloadPage(pageName);
-                                      setTransactionOK('refresh icon');
-                                      transactionStore.dispatch(
+                                            ScreenTransaction({
+                                              '#REFRESH': false,
+                                            }),
+                                          ),
+                                        );
+                                        List<Widget> newElementList =
+                                            reloadPage(pageName);
+                                        setTransactionOK('refresh icon');
+                                        transactionStore.dispatch(
                                           UpdateScreenTxAction(
-                                              ScreenTransaction(
-                                                  {'#DATA_OK': true})));
-                                      setState(() {
-                                        pageElements = newElementList;
-                                        wait = false;
-                                        touch = !touch;
-                                        dataColor = readyColor;
-                                        // dataColor = Colors.lightGreenAccent;
+                                            ScreenTransaction({
+                                              '#DATA_OK': true,
+                                            }),
+                                          ),
+                                        );
+                                        if (mounted) {
+                                          setState(() {
+                                            pageElements = newElementList;
+                                            _refreshing = false;
+                                            wait = false;
+                                            touch = !touch;
+                                            dataColor = readyColor;
+                                          });
+                                        }
+                                      })
+                                      .catchError((e) {
+                                        setTransactionOK('refresh icon catch');
+                                        transactionStore.dispatch(
+                                          UpdateScreenTxAction(
+                                            ScreenTransaction({
+                                              '#DATA_OK': true,
+                                            }),
+                                          ),
+                                        );
+                                        if (mounted) {
+                                          setState(() {
+                                            _refreshing = false;
+                                            wait = false;
+                                            touch = !touch;
+                                            dataColor = readyColor;
+                                          });
+                                          showAlert(
+                                            context,
+                                            textList["ErrorLoading"],
+                                          );
+                                        }
                                       });
-                                    });
-                                  });
-                                } catch (e) {
-                                  setTransactionOK('refresh icon catch');
-                                  transactionStore.dispatch(
-                                      UpdateScreenTxAction(ScreenTransaction(
-                                          {'#DATA_OK': true})));
+                                });
+                              } catch (e) {
+                                setTransactionOK('refresh icon catch');
+                                transactionStore.dispatch(
+                                  UpdateScreenTxAction(
+                                    ScreenTransaction({'#DATA_OK': true}),
+                                  ),
+                                );
+                                if (mounted) {
                                   setState(() {
+                                    _refreshing = false;
                                     wait = false;
                                     touch = !touch;
                                     dataColor = readyColor;
-                                    // dataColor = Colors.lightGreenAccent;
                                   });
-                                  showAlert(context, textList["ErrorLoading"]);
                                 }
-                              } else {
-                                await showDialog(
-                                    context: context,
-                                    builder: (BuildContext context) {
-                                      return AlertDialog(
-                                        // display dialog that data is not ready
-                                        title:
-                                            Text(textList["NoInternetTitle"]),
-                                        content: Container(
-                                          alignment: const Alignment(0.0, 0.0),
-                                          height: 100,
-                                          child: Text(textList["NoInternet"]),
-                                        ),
-                                        actions: <Widget>[
-                                          TextButton(
-                                            child: Text(textList["OK"]),
-                                            onPressed: () {
-                                              Navigator.of(context).pop();
-                                            },
-                                          ),
-                                        ],
-                                      );
-                                    });
-                              } // end if transactionOK
-                            } // end if #CAMERA
-                          }, // end of onPressed
-                        ),
-                      ],
-                    ),
-                    bottomNavigationBar:
-                        BlocBuilder<AuthenticationBloc, AuthenticationState>(
-                      builder: (context, authState) {
-                        if (authState is Unauthenticated) {
-                          return const SizedBox.shrink();
-                        }
-                        // --- cache-first navbar restore (one-shot) ---
-                        // On the first authenticated frame the in-memory
-                        // systemUIComponent may still hold the guest snapshot
-                        // (signOut replaced it + removed @systemUI). Restore the
-                        // last authed snapshot from @authedSystemUI synchronously
-                        // (prefs reads are sync after init) so the full bottomBar
-                        // paints immediately instead of staggering in after the
-                        // live readSettings round-trip.
-                        // Re-evaluated EVERY build (NOT one-shot): the live
-                        // in-memory bottomBar can be reverted to the guest
-                        // (home-only) bar by a guest-scoped proxy refresh or a
-                        // guest-key readSettings that fires AFTER login, and a
-                        // one-shot restore could never recover from that late
-                        // clobber (the reported "home navbar shows only a single
-                        // home icon" bug). Decoding @authedSystemUI every frame
-                        // would be wasteful, so the authed bar length is memoized
-                        // and re-parsed only when the raw prefs string changes.
-                        try {
-                          final cachedAuthed =
-                              prefs.getString('@authedSystemUI');
-                          if (cachedAuthed != _authedRawMemo) {
-                            _authedRawMemo = cachedAuthed;
-                            _authedBarLenMemo =
-                                shouldRestoreAuthedSystemUI(cachedAuthed)
-                                    ? (json.decode(cachedAuthed!)[mobile]
-                                            ['bottomBar'] as List)
-                                        .length
-                                    : -1;
-                          }
-                          final currentBar =
-                              systemUIComponent[mobile]?['bottomBar'];
-                          // Restore only when the cached authed bar has MORE
-                          // items than the live bar (live is stale/guest). A
-                          // legit authed update keeps the full bar, so the gate
-                          // fails and never clobbers it.
-                          //
-                          // ASSUMPTION (QA note): the guest bottomBar is strictly
-                          // SHORTER than the authed one (guest = home-only,
-                          // authed = full). A tenant whose guest bar equals the
-                          // authed item count would NOT trigger the restore.
-                          if (_authedBarLenMemo > 0 &&
-                              (currentBar is! List ||
-                                  _authedBarLenMemo > currentBar.length)) {
-                            // Fresh decode (not aliasing the memo) so a later
-                            // in-place proxy write to systemUIComponent can't
-                            // corrupt the comparison baseline. Mutating the
-                            // global (vs a read-only pick) keeps handleNavTap's
-                            // bottomBar[i] route lookup in range with the bar the
-                            // navbar just rendered.
-                            systemUIComponent = json.decode(_authedRawMemo!);
-                          }
-                        } catch (e) {
-                          devPrint('navbar authed-bar restore failed: $e');
-                        }
-                        // --- end cache-first restore ---
-                        if (screenUIComponent[pageName]?['hideBottomBar'] ==
-                            true) {
-                          return const SizedBox.shrink();
-                        }
-                        return BlocBuilder<NotificationBloc, NotificationState>(
-                          builder: (context, notifState) {
-                            int unread = 0;
-                            if (notifState is NotificationLoaded) {
-                              unread = notifState.unReadNumber;
-                              if (unread > lastNum) {
-                                lastNum = unread;
+                                showAlert(context, textList["ErrorLoading"]);
                               }
+                            } else {
+                              await showDialog(
+                                context: context,
+                                builder: (BuildContext context) {
+                                  return AlertDialog(
+                                    // display dialog that data is not ready
+                                    title: Text(textList["NoInternetTitle"]),
+                                    content: Container(
+                                      alignment: const Alignment(0.0, 0.0),
+                                      height: 100,
+                                      child: Text(textList["NoInternet"]),
+                                    ),
+                                    actions: <Widget>[
+                                      TextButton(
+                                        child: Text(textList["OK"]),
+                                        onPressed: () {
+                                          Navigator.of(context).pop();
+                                        },
+                                      ),
+                                    ],
+                                  );
+                                },
+                              );
+                            } // end if internetConnected
+                          } // end if #CAMERA
+                        }, // end of onPressed
+                      ),
+                    ],
+                  ),
+                  bottomNavigationBar: BlocBuilder<AuthenticationBloc, AuthenticationState>(
+                    builder: (context, authState) {
+                      if (authState is Unauthenticated) {
+                        return const SizedBox.shrink();
+                      }
+                      // --- cache-first navbar restore (one-shot) ---
+                      // On the first authenticated frame the in-memory
+                      // systemUIComponent may still hold the guest snapshot
+                      // (signOut replaced it + removed @systemUI). Restore the
+                      // last authed snapshot from @authedSystemUI synchronously
+                      // (prefs reads are sync after init) so the full bottomBar
+                      // paints immediately instead of staggering in after the
+                      // live readSettings round-trip.
+                      // Re-evaluated EVERY build (NOT one-shot): the live
+                      // in-memory bottomBar can be reverted to the guest
+                      // (home-only) bar by a guest-scoped proxy refresh or a
+                      // guest-key readSettings that fires AFTER login, and a
+                      // one-shot restore could never recover from that late
+                      // clobber (the reported "home navbar shows only a single
+                      // home icon" bug). Decoding @authedSystemUI every frame
+                      // would be wasteful, so the authed bar length is memoized
+                      // and re-parsed only when the raw prefs string changes.
+                      try {
+                        final cachedAuthed = prefs.getString('@authedSystemUI');
+                        if (cachedAuthed != _authedRawMemo) {
+                          _authedRawMemo = cachedAuthed;
+                          _authedBarLenMemo =
+                              shouldRestoreAuthedSystemUI(cachedAuthed)
+                              ? (json.decode(cachedAuthed!)[mobile]['bottomBar']
+                                        as List)
+                                    .length
+                              : -1;
+                        }
+                        final currentBar =
+                            systemUIComponent[mobile]?['bottomBar'];
+                        // Restore only when the cached authed bar has MORE
+                        // items than the live bar (live is stale/guest). A
+                        // legit authed update keeps the full bar, so the gate
+                        // fails and never clobbers it.
+                        //
+                        // ASSUMPTION (QA note): the guest bottomBar is strictly
+                        // SHORTER than the authed one (guest = home-only,
+                        // authed = full). A tenant whose guest bar equals the
+                        // authed item count would NOT trigger the restore.
+                        if (_authedBarLenMemo > 0 &&
+                            (currentBar is! List ||
+                                _authedBarLenMemo > currentBar.length)) {
+                          // Fresh decode (not aliasing the memo) so a later
+                          // in-place proxy write to systemUIComponent can't
+                          // corrupt the comparison baseline. Mutating the
+                          // global (vs a read-only pick) keeps handleNavTap's
+                          // bottomBar[i] route lookup in range with the bar the
+                          // navbar just rendered.
+                          systemUIComponent = json.decode(_authedRawMemo!);
+                        }
+                      } catch (e) {
+                        devPrint('navbar authed-bar restore failed: $e');
+                      }
+                      // --- end cache-first restore ---
+                      if (screenUIComponent[pageName]?['hideBottomBar'] ==
+                          true) {
+                        return const SizedBox.shrink();
+                      }
+                      return BlocBuilder<NotificationBloc, NotificationState>(
+                        builder: (context, notifState) {
+                          int unread = 0;
+                          if (notifState is NotificationLoaded) {
+                            unread = notifState.unReadNumber;
+                            if (unread > lastNum) {
                               lastNum = unread;
                             }
-                            final barItems =
-                                systemUIComponent[mobile]['bottomBar'] as List;
-                            final navItems =
-                                List<OtqNavItem>.generate(barItems.length, (i) {
+                            lastNum = unread;
+                          }
+                          final barItems =
+                              systemUIComponent[mobile]['bottomBar'] as List;
+                          final navItems = List<OtqNavItem>.generate(
+                            barItems.length,
+                            (i) {
                               final iconKey = barItems[i]['icon'].toString();
                               final route =
                                   barItems[i]['route']?.toString() ?? '';
-                              final label = barItems[i]['label']?.toString() ??
+                              final label =
+                                  barItems[i]['label']?.toString() ??
                                   route.replaceAll('_', ' ');
                               return OtqNavItem(
                                 icon:
@@ -689,30 +739,37 @@ class MainPageState extends State<MainPage> {
                                 label: label,
                                 badgeCount: i == 1 ? unread : null,
                               );
-                            });
-                            return OtqBottomNavBar(
-                              selectedIndex: _selectedNavIndex,
-                              items: navItems,
-                              onTap: handleNavTap,
-                            );
-                          },
-                        );
-                      },
-                    ),
-                    body: OfflineBannerHost(
-                      child: byPass == 1
+                            },
+                          );
+                          return OtqBottomNavBar(
+                            selectedIndex: _selectedNavIndex,
+                            items: navItems,
+                            onTap: handleNavTap,
+                          );
+                        },
+                      );
+                    },
+                  ),
+                  body: OfflineBannerHost(
+                    child: byPass == 1
                         ? const NotificationList()
                         : Stack(
                             children: <Widget>[
                               // Text(gpsTime),
                               // Text(displayRefresher.toString()),
-                              BlocBuilder<AuthenticationBloc,
-                                  AuthenticationState>(
+                              BlocBuilder<
+                                AuthenticationBloc,
+                                AuthenticationState
+                              >(
                                 builder: (context, authState) {
                                   if (authState is Unauthenticated) {
                                     return Container(
                                       padding: EdgeInsets.fromLTRB(
-                                          lPad, tPad, rPad, bPad),
+                                        lPad,
+                                        tPad,
+                                        rPad,
+                                        bPad,
+                                      ),
                                       child: Center(
                                         child: SingleChildScrollView(
                                           controller: scrollController,
@@ -735,7 +792,11 @@ class MainPageState extends State<MainPage> {
                                     builder: (context) => ListView.builder(
                                       controller: scrollController,
                                       padding: EdgeInsets.fromLTRB(
-                                          lPad, tPad, rPad, bPad),
+                                        lPad,
+                                        tPad,
+                                        rPad,
+                                        bPad,
+                                      ),
                                       itemCount: pageElements.length,
                                       itemBuilder: (context, position) {
                                         return pageElements[position];
@@ -748,23 +809,21 @@ class MainPageState extends State<MainPage> {
                               ValueListenableBuilder<String>(
                                 valueListenable:
                                     ApproverStickyBar.activeBarScreen,
-                                builder: (_, route, __) =>
-                                    ValueListenableBuilder<int>(
+                                builder: (_, route, _) => ValueListenableBuilder<int>(
                                   valueListenable: ApproverStickyBar.version,
-                                  builder: (_, __, ___) =>
-                                      ValueListenableBuilder<bool>(
+                                  builder: (_, _, _) => ValueListenableBuilder<bool>(
                                     valueListenable:
                                         ApproverStickyBar.overlaysHidden,
-                                    builder: (ctx, hidden, _) =>
-                                        ValueListenableBuilder<WidgetBuilder?>(
+                                    builder: (ctx, hidden, _) => ValueListenableBuilder<WidgetBuilder?>(
                                       valueListenable: ApproverStickyBar.slot,
-                                      builder: (ctx, slotBuilder, __) {
+                                      builder: (ctx, slotBuilder, _) {
                                         final configs =
                                             ApproverStickyBar.getConfigs(route);
                                         debugPrint(
-                                            '[StickyBar] activeBarScreen='
-                                            '"$route" configs=${configs?.length} '
-                                            'hidden=$hidden');
+                                          '[StickyBar] activeBarScreen='
+                                          '"$route" configs=${configs?.length} '
+                                          'hidden=$hidden',
+                                        );
                                         // Slot mode (commentbox screens): the
                                         // timeline's bottom comment-box overlay
                                         // already hosts the approve/reject bar via
@@ -779,9 +838,9 @@ class MainPageState extends State<MainPage> {
                                             configs.isEmpty) {
                                           return const SizedBox.shrink();
                                         }
-                                        final bottomInset = MediaQuery.of(ctx)
-                                            .viewInsets
-                                            .bottom;
+                                        final bottomInset = MediaQuery.of(
+                                          ctx,
+                                        ).viewInsets.bottom;
                                         if (bottomInset > 0) {
                                           return const SizedBox.shrink();
                                         }
@@ -794,9 +853,11 @@ class MainPageState extends State<MainPage> {
                                               top: false,
                                               child: Padding(
                                                 padding: const EdgeInsets.only(
-                                                    bottom: 12),
+                                                  bottom: 12,
+                                                ),
                                                 child: StickyBarRenderer(
-                                                    configs: configs),
+                                                  configs: configs,
+                                                ),
                                               ),
                                             ),
                                           ),
@@ -809,8 +870,7 @@ class MainPageState extends State<MainPage> {
                               //------ Login bloc listener---------
                               BlocListener(
                                 bloc: _loginBloc,
-                                listener: (BuildContext contextLogin,
-                                    LoginState loginState) {
+                                listener: (BuildContext contextLogin, LoginState loginState) {
                                   if (loginState.isFailure) {
                                     if (loginState.loginStatus == 2) {
                                       showDialog(
@@ -818,9 +878,11 @@ class MainPageState extends State<MainPage> {
                                         builder: (BuildContext context) {
                                           return AlertDialog(
                                             title: const Text(
-                                                "Other user logged in"),
+                                              "Other user logged in",
+                                            ),
                                             content: const Text(
-                                                "Ada pemakai lain yang sedang memakai invitasi ini. Silahkan pergunakan nomor invitasi lain"), // show dialog
+                                              "Ada pemakai lain yang sedang memakai invitasi ini. Silahkan pergunakan nomor invitasi lain",
+                                            ), // show dialog
                                             actions: <Widget>[
                                               TextButton(
                                                 child: const Text("OK"),
@@ -830,7 +892,7 @@ class MainPageState extends State<MainPage> {
                                                   });
                                                   Navigator.of(context).pop();
                                                 },
-                                              )
+                                              ),
                                             ],
                                           );
                                         },
@@ -841,18 +903,21 @@ class MainPageState extends State<MainPage> {
                                         builder: (BuildContext context) {
                                           return AlertDialog(
                                             title: const Text(
-                                                "Invitation Code Not Match"),
+                                              "Invitation Code Not Match",
+                                            ),
                                             content: const Text(
-                                                "Kode Undangan tidak ada."),
+                                              "Kode Undangan tidak ada.",
+                                            ),
                                             actions: <Widget>[
                                               TextButton(
                                                 child: const Text("OK"),
                                                 onPressed: () {
                                                   BlocProvider.of<LoginBloc>(
-                                                          context)
-                                                      .add(
+                                                    context,
+                                                  ).add(
                                                     const TosOKTabbed(
-                                                        tosOk: true),
+                                                      tosOk: true,
+                                                    ),
                                                   );
                                                   setState(() {
                                                     wait = false;
@@ -860,7 +925,7 @@ class MainPageState extends State<MainPage> {
                                                   });
                                                   Navigator.of(context).pop();
                                                 },
-                                              )
+                                              ),
                                             ],
                                           );
                                         },
@@ -871,9 +936,11 @@ class MainPageState extends State<MainPage> {
                                         builder: (BuildContext context) {
                                           return AlertDialog(
                                             title: const Text(
-                                                "Invitation Code has been used before"),
+                                              "Invitation Code has been used before",
+                                            ),
                                             content: const Text(
-                                                "Kode undangan telah dipakai oleh pengguna lain. Silahkan hubungi bagian administrasi."),
+                                              "Kode undangan telah dipakai oleh pengguna lain. Silahkan hubungi bagian administrasi.",
+                                            ),
                                             actions: <Widget>[
                                               TextButton(
                                                 child: const Text("OK"),
@@ -883,7 +950,7 @@ class MainPageState extends State<MainPage> {
                                                   });
                                                   Navigator.of(context).pop();
                                                 },
-                                              )
+                                              ),
                                             ],
                                           );
                                         },
@@ -895,7 +962,8 @@ class MainPageState extends State<MainPage> {
                                           return AlertDialog(
                                             title: const Text("Full !"),
                                             content: const Text(
-                                                "Wah!, banyak sekali yang mendaftar. Sementara ini tidak dapat menambah pemakai baru. Kami sedang terus menambah kapasitas, silahkan coba beberapa jam lagi"), // show dialog
+                                              "Wah!, banyak sekali yang mendaftar. Sementara ini tidak dapat menambah pemakai baru. Kami sedang terus menambah kapasitas, silahkan coba beberapa jam lagi",
+                                            ), // show dialog
                                             actions: <Widget>[
                                               TextButton(
                                                 child: const Text("OK"),
@@ -905,7 +973,7 @@ class MainPageState extends State<MainPage> {
                                                   });
                                                   Navigator.of(context).pop();
                                                 },
-                                              )
+                                              ),
                                             ],
                                           );
                                         },
@@ -917,7 +985,8 @@ class MainPageState extends State<MainPage> {
                                           return AlertDialog(
                                             title: const Text("Sign in error"),
                                             content: const Text(
-                                                "Terjadi kesalahan pada saat sign in, silahkan coba beberapa jam lagi"), // show dialog
+                                              "Terjadi kesalahan pada saat sign in, silahkan coba beberapa jam lagi",
+                                            ), // show dialog
                                             actions: <Widget>[
                                               TextButton(
                                                 child: const Text("OK"),
@@ -927,7 +996,7 @@ class MainPageState extends State<MainPage> {
                                                   });
                                                   Navigator.of(context).pop();
                                                 },
-                                              )
+                                              ),
                                             ],
                                           );
                                         },
@@ -939,7 +1008,8 @@ class MainPageState extends State<MainPage> {
                                           return AlertDialog(
                                             title: const Text("Sign in error"),
                                             content: const Text(
-                                                "Terjadi kesalahan pada saat autorisasi akun Google, silahkan coba lagi"),
+                                              "Terjadi kesalahan pada saat autorisasi akun Google, silahkan coba lagi",
+                                            ),
                                             actions: <Widget>[
                                               TextButton(
                                                 child: const Text("OK"),
@@ -949,7 +1019,7 @@ class MainPageState extends State<MainPage> {
                                                   });
                                                   Navigator.of(context).pop();
                                                 },
-                                              )
+                                              ),
                                             ],
                                           );
                                         },
@@ -961,7 +1031,8 @@ class MainPageState extends State<MainPage> {
                                           return AlertDialog(
                                             title: const Text("Login failed"),
                                             content: const Text(
-                                                "Login anda gagal. Kemungkinan karena koneksi internet anda terganggu. Silahkan coba beberapa saat lagi"), // show dialog
+                                              "Login anda gagal. Kemungkinan karena koneksi internet anda terganggu. Silahkan coba beberapa saat lagi",
+                                            ), // show dialog
                                             actions: <Widget>[
                                               TextButton(
                                                 child: const Text("OK"),
@@ -971,17 +1042,19 @@ class MainPageState extends State<MainPage> {
                                                   });
                                                   Navigator.of(context).pop();
                                                 },
-                                              )
+                                              ),
                                             ],
                                           );
                                         },
                                       );
                                     }
                                   } else if (loginState.isSuccess) {
-                                    BlocProvider.of<AuthenticationBloc>(context)
-                                        .add(LoggedIn());
-                                    BlocProvider.of<NotificationBloc>(context)
-                                        .add(LoadNotification());
+                                    BlocProvider.of<AuthenticationBloc>(
+                                      context,
+                                    ).add(LoggedIn());
+                                    BlocProvider.of<NotificationBloc>(
+                                      context,
+                                    ).add(LoadNotification());
                                     // } else if (loginState.inLoginProcess) {
                                     //   return LoginWaitScreen();
                                   } // end if loginState.isFailure
@@ -1001,8 +1074,9 @@ class MainPageState extends State<MainPage> {
                                       ret = const WaitScreen();
                                     } else {
                                       if (state is Finished) {
-                                        oldSettingUpShouldBeDeleted()
-                                            .then((aRes) {
+                                        oldSettingUpShouldBeDeleted().then((
+                                          aRes,
+                                        ) {
                                           var state =
                                               transactionStore.state.screenTx;
                                           var lifKey = state['#INTERFACE_KEY'];
@@ -1010,9 +1084,12 @@ class MainPageState extends State<MainPage> {
                                             var nxPage = state['#NEXTROUTE'];
                                             routeStack.push(nxPage); //?
                                             transactionStore.add(
-                                                UpdateScreenTxAction(
-                                                    ScreenTransaction(
-                                                        {'#REFRESH': false})));
+                                              UpdateScreenTxAction(
+                                                ScreenTransaction({
+                                                  '#REFRESH': false,
+                                                }),
+                                              ),
+                                            );
                                             List<Widget> newElementList =
                                                 reloadPage(nxPage);
                                             setState(() {
@@ -1022,15 +1099,18 @@ class MainPageState extends State<MainPage> {
                                             });
 
                                             transactionStore.dispatch(
-                                                UpdateScreenTxAction(
-                                                    ScreenTransaction({
-                                              '#CURRENT_ROUTE': nxPage
-                                            }))); // set state #CURRENT_ROUTE
+                                              UpdateScreenTxAction(
+                                                ScreenTransaction({
+                                                  '#CURRENT_ROUTE': nxPage,
+                                                }),
+                                              ),
+                                            ); // set state #CURRENT_ROUTE
                                             if (scrollController.hasClients) {
                                               scrollController.jumpTo(0.0);
                                             }
                                             state['#TIMER_BLOC'].dispatch(
-                                                Reset()); // reset timer state to Ready
+                                              Reset(),
+                                            ); // reset timer state to Ready
                                           });
                                         });
                                       }
@@ -1056,14 +1136,15 @@ class MainPageState extends State<MainPage> {
                                             return AlertDialog(
                                               title: Text(mState.str1),
                                               content: Text(
-                                                  mState.str2), // show dialog
+                                                mState.str2,
+                                              ), // show dialog
                                               actions: <Widget>[
                                                 TextButton(
                                                   child: const Text("OK"),
                                                   onPressed: () {
                                                     Navigator.of(context).pop();
                                                   },
-                                                )
+                                                ),
                                               ],
                                             );
                                           },
@@ -1078,11 +1159,11 @@ class MainPageState extends State<MainPage> {
                                     switch (mState.mainState) {
                                       case 900: // need pin hash
                                         {
-//                                        displayScreen = Container(
-//                                          height: 200,
-//                                          width: 200,
-//                                          color: Colors.green,
-//                                        );
+                                          //                                        displayScreen = Container(
+                                          //                                          height: 200,
+                                          //                                          width: 200,
+                                          //                                          color: Colors.green,
+                                          //                                        );
                                           var np = linkElement['_NewPin'];
                                           var len = np!.length;
                                           displayScreen = Container(
@@ -1091,8 +1172,7 @@ class MainPageState extends State<MainPage> {
                                               controller: scrollController,
                                               itemCount: len,
                                               itemBuilder: (context, position) {
-                                                return linkElement['_NewPin']![
-                                                    position];
+                                                return linkElement['_NewPin']![position];
                                               },
                                             ),
                                           );
@@ -1131,12 +1211,12 @@ class MainPageState extends State<MainPage> {
                                 const WaitScreen(),
                             ],
                           ), // Stack closure=========
-                    ), // end OfflineBannerHost
-                  ),
-          );
-          return v;
-        } // end of builder,
+                  ), // end OfflineBannerHost
+                ),
         );
+        return v;
+      }, // end of builder,
+    );
   } // end of build
 
   Future subscribeToProxy(String? ssid) async {
@@ -1207,6 +1287,21 @@ class MainPageState extends State<MainPage> {
         dynamic docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
         bool docExist = (await docRef.get()).exists;
         if (docExist) {
+          // Restore the last-seen proxy checksum for THIS ssid before the
+          // listener can fire. #PROXY_LISTENER_CS lives only in transactionStore
+          // (in-memory), so without this it is null on every cold start and the
+          // first snapshot ALWAYS passes the change-gate below — re-applying an
+          // UNCHANGED (proxy lags the sheet) snapshot over the fresh /readSS
+          // refresh the user just pulled, reverting it. Keyed by ssid so a
+          // restored checksum can't leak across tenants.
+          final int? savedProxyCs = prefs.getInt('@proxyCS_$ssid');
+          if (savedProxyCs != null) {
+            transactionStore.dispatch(
+              UpdateScreenTxAction(
+                ScreenTransaction({'#PROXY_LISTENER_CS': savedProxyCs}),
+              ),
+            );
+          }
           final proxyListener = docRef.snapshots().listen((event) {
             if (event.data() != null) {
               // process event data
@@ -1217,21 +1312,37 @@ class MainPageState extends State<MainPage> {
                   transactionStore.state.screenTx['#PROXY_LISTENER_CS']) {
                 // proxy change detected
                 // update profile
-                asHomeArray =
-                    jsonDecode(rec['u'] ?? '[]'); // set singleton asHomeArray
+                asHomeArray = jsonDecode(
+                  rec['u'] ?? '[]',
+                ); // set singleton asHomeArray
                 devPrint("Proxy change detected in : Proxy/$ssid");
-                transactionStore
-                    .dispatch(UpdateScreenTxAction(ScreenTransaction({
-                  '#NAME': rec['n'],
-                  '#EMAIL': rec['e'],
-                  '#PHONE': rec['p'],
-                  '#PROXY_LISTENER_CS': rec['t'],
-                })));
+                transactionStore.dispatch(
+                  UpdateScreenTxAction(
+                    ScreenTransaction({
+                      '#NAME': rec['n'],
+                      '#EMAIL': rec['e'],
+                      '#PHONE': rec['p'],
+                      '#PROXY_LISTENER_CS': rec['t'],
+                    }),
+                  ),
+                );
+                // Persist the checksum so the next cold start can tell an
+                // unchanged proxy from a real change (see restore above). Epoch
+                // 't' is integral; if it ever isn't an int, fall back to the old
+                // (non-persisted) behavior rather than crash.
+                if (rec['t'] is int) {
+                  try {
+                    prefs.setInt('@proxyCS_$ssid', rec['t']);
+                  } catch (e) {
+                    devPrint('persist @proxyCS failed: $e');
+                  }
+                }
                 // check and update system
                 // actionUnLock();
                 Map<String, dynamic> newItem = {};
-                dynamic collectionRef = FirebaseFirestore.instance
-                    .collection('$proxyCollectionName/$ssid/System');
+                dynamic collectionRef = FirebaseFirestore.instance.collection(
+                  '$proxyCollectionName/$ssid/System',
+                );
                 collectionRef.get().then((value) {
                   systemUIComponent = {};
                   for (final doc in value.docs) {
@@ -1241,13 +1352,14 @@ class MainPageState extends State<MainPage> {
                       't': systemData['t'],
                       'v': systemData['v'],
                     };
-                    systemUIComponent[systemData['p']] =
-                        json.decode(systemData['c']);
+                    systemUIComponent[systemData['p']] = json.decode(
+                      systemData['c'],
+                    );
                   } // end for (final doc in value.docs)
                   storage.write(
-                      key: 'ui_systems',
-                      value: jsonEncode(
-                          newItem)); // store systems in secure storage
+                    key: 'ui_systems',
+                    value: jsonEncode(newItem),
+                  ); // store systems in secure storage
                   buildTheme(systemUIComponent[theme]);
                   // Persist authed system snapshot for cache-first navbar
                   // restore. Gated on the guest signup ssid (mirrors the
@@ -1258,7 +1370,9 @@ class MainPageState extends State<MainPage> {
                   if (ssid != state['#SIGNUP_KEY']) {
                     try {
                       prefs.setString(
-                          '@authedSystemUI', json.encode(systemUIComponent));
+                        '@authedSystemUI',
+                        json.encode(systemUIComponent),
+                      );
                     } catch (e) {
                       devPrint('proxy persist @authedSystemUI failed: $e');
                     }
@@ -1267,8 +1381,9 @@ class MainPageState extends State<MainPage> {
 
                 // check and update pages
                 newItem = {};
-                collectionRef = FirebaseFirestore.instance
-                    .collection('$proxyCollectionName/$ssid/Page');
+                collectionRef = FirebaseFirestore.instance.collection(
+                  '$proxyCollectionName/$ssid/Page',
+                );
                 collectionRef.get().then((value) {
                   screenUIComponent = {};
                   for (final doc in value.docs) {
@@ -1279,8 +1394,9 @@ class MainPageState extends State<MainPage> {
                       'v': pageData['v'],
                     };
                     try {
-                      screenUIComponent[pageData['p']] =
-                          json.decode(pageData['c']);
+                      screenUIComponent[pageData['p']] = json.decode(
+                        pageData['c'],
+                      );
                       // devPrint("Page ${pageData['p']} => updated");
                     } catch (e) {
                       // devPrint("Error in page ${pageData['p']} => $e");
@@ -1288,9 +1404,9 @@ class MainPageState extends State<MainPage> {
                     }
                   } // end for (final doc in value.docs)
                   storage.write(
-                      key: 'ui_pages',
-                      value:
-                          jsonEncode(newItem)); // store pages in secure storage
+                    key: 'ui_pages',
+                    value: jsonEncode(newItem),
+                  ); // store pages in secure storage
                   devPrint("Proxy listener call constructAllPageElements");
                   constructAllPageElements();
                   if (ssid == state['#SIGNUP_KEY']) {
@@ -1307,10 +1423,14 @@ class MainPageState extends State<MainPage> {
             } // end if (event.data() == null)
           }); // end of listener
           // devPrint("Subscribed to  : Proxy/$ssid");
-          transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-            '#PROXY_LISTENER': proxyListener,
-            '#PROXY_LISTENER_SSID': ssid,
-          })));
+          transactionStore.dispatch(
+            UpdateScreenTxAction(
+              ScreenTransaction({
+                '#PROXY_LISTENER': proxyListener,
+                '#PROXY_LISTENER_SSID': ssid,
+              }),
+            ),
+          );
         } // end if (docExist)
       } // end if (ssid == state['#PROXY_LISTENER_SSID'])
     } else {
@@ -1320,8 +1440,14 @@ class MainPageState extends State<MainPage> {
             transactionStore.state.screenTx['#PROXY_LISTENER'];
         tableListener?.cancel();
         tableListener = null;
-        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-            {'#PROXY_LISTENER': null, '#PROXY_LISTENER_SSID': null})));
+        transactionStore.dispatch(
+          UpdateScreenTxAction(
+            ScreenTransaction({
+              '#PROXY_LISTENER': null,
+              '#PROXY_LISTENER_SSID': null,
+            }),
+          ),
+        );
         // devPrint("Unsubscribe from Proxy/${state['#PROXY_LISTENER_SSID']}");
       } // end if ((state['#PROXY_LISTENER_SSID']??'') != '')
     }

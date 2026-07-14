@@ -1945,6 +1945,33 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }
+  } else if (tip == 'table_picker') {
+    try {
+      // Both form positions are required. Guard here (not in the widget):
+      // getPosition(null) throws inside TablePicker.initState, which runs AFTER
+      // this dispatch returns, so this try/catch would NOT contain it and the
+      // whole page would white-screen. Degrade to an inline marker instead.
+      if (component['position'] == null || component['labelPosition'] == null) {
+        result = Text('--${component['type']}-- missing position');
+      } else {
+        // Seed txfController slots for both positions so saveSend finds them.
+        final int pos = getPosition(component['position']);
+        txfControllerCheck(scrName, pos);
+        final int lPos = getPosition(component['labelPosition']);
+        txfControllerCheck(scrName, lPos);
+        result = TablePicker(
+          key: txfKey,
+          component: component,
+          scrName: scrName,
+          lPad: lPad,
+          tPad: tPad,
+          rPad: rPad,
+          bPad: bPad,
+        );
+      }
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
   } else if (tip == 'running_task_list') {
     try {
       result = AdminActiveTripList(
