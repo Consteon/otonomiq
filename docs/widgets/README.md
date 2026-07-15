@@ -62,6 +62,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | InventoryBucketCard | [inventory_bucket_card.md](inventory_bucket_card.md) | draft | Vehicle stock per condition bucket for DriverHome P4 |
 | ItemExecutionList | [item_execution_list.md](item_execution_list.md) | draft | Per-item drop/pickup stepper list with status state-machine for P11 DeliveryWorkspace |
 | ItemExecutionSubmit | [item_execution_submit.md](item_execution_submit.md) | draft | Atomic P11 submit: persists stepper actuals to task it[] + tst/tce via writeNativeFields |
+| ListCard | [list_card.md](list_card.md) | done | Universal config-driven keyed list (header/stats/search/group/badge/trailing + multi-pair routeParams); consolidates the ~7 legacy list types |
 | ListMultiplePanelCard | [list_multiple_panel_card.md](list_multiple_panel_card.md) | draft | Reusable card-list with N nav panels, config-driven layout/labels |
 | ListStatisticCard | [list_statistic_card.md](list_statistic_card.md) | draft | Per-point patrol/cleaning statistic list with optional typed-location merge |
 | NavActionCard | [nav_action_card.md](nav_action_card.md) | draft | Return-vehicle CTA card (muted/active by allClosed) for DriverHome P4 |
