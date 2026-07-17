@@ -76,6 +76,34 @@ class TaskItemBuilder extends StatefulWidget {
     return parsed.isEmpty ? defaultTypes : parsed;
   }
 
+  /// Parse the txOptions config field: ★-separated pairs of value◼Label.
+  ///
+  /// Input: raw string from component['txOptions'], e.g.
+  ///   'buy◼Beli★refill◼Tukar★sale◼Jual'
+  /// (may be server-encoded: _u25FC_ for ◼, _u2605_ for ★).
+  ///
+  /// Returns list of entries: key = tx value ('buy'), value = display label ('Beli').
+  /// Empty or null input -> empty list.
+  /// Length-guarded: each pair is split on ◼; missing label -> uses value.
+  ///
+  /// Convention #2: autheniumDecode before splitting on ◼/★.
+  static List<MapEntry<String, String>> parseTxOptions(dynamic raw) {
+    final String decoded = (autheniumDecode((raw ?? '').toString()) ?? '')
+        .trim();
+    if (decoded.isEmpty) return [];
+    final List<String> pairs = decoded.split('\u{2605}'); // ★
+    final List<MapEntry<String, String>> result = [];
+    for (final String pair in pairs) {
+      final List<String> parts = pair.split('\u{25FC}'); // ◼
+      final String value = parts.isNotEmpty ? parts[0].trim() : '';
+      final String label = parts.length > 1 ? parts[1].trim() : value;
+      if (value.isNotEmpty) {
+        result.add(MapEntry(value, label));
+      }
+    }
+    return result;
+  }
+
   /// Compute the "exchange" component of a pickup breakdown.
   /// Exchange = empties returned in exchange for drops = min(pd, pp).
   static int pickupExchange(int pd, int pp) => pd < pp ? pd : pp;
@@ -144,8 +172,8 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
   String get _itemPriceField =>
       (widget.component['itemPriceField'] ?? 'harga').toString().trim();
 
-  /// Component mode: 'order' (default, admin create-task) or 'walkin' (POS).
-  /// Walkin mode: sale-only, qty >= 1, price seeded from priceSourceField.
+  /// Component mode: 'order' (default, admin create-task), 'walkin' (POS),
+  /// 'supplier' (supplier transaction), or 'seed' (seed saldo awal).
   String get _mode =>
       (widget.component['mode'] ?? 'order').toString().trim().toLowerCase();
 
@@ -317,10 +345,6 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
         .toString()
         .trim();
 
-    // Config-driven picker search (spec section 1.5b):
-    // searchField = which item field the query filters against (default = nameField)
-    // searchHint  = placeholder text in the search box (default = current hardcoded)
-    // emptyText   = text shown when filtered list is empty
     final String searchField;
     {
       final String raw = (widget.component['searchField'] ?? '')
@@ -343,21 +367,26 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
       emptyText = raw.isNotEmpty ? raw : 'Semua item sudah ditambahkan';
     }
 
-    // Filter by category based on tx type
+    // Filter by category based on tx type.
+    // Supplier/seed mode: no category filter (all items available).
     final String targetCat;
-    switch (txType) {
-      case 'deliver':
-      case 'purchase':
-        targetCat = 'returnable';
-        break;
-      case 'sale':
-        targetCat = ''; // all categories
-        break;
-      case 'refill':
-        targetCat = 'returnable'; // refill = water galon (returnable)
-        break;
-      default:
-        targetCat = '';
+    if (_mode == 'supplier' || _mode == 'seed') {
+      targetCat = '';
+    } else {
+      switch (txType) {
+        case 'deliver':
+        case 'purchase':
+          targetCat = 'returnable';
+          break;
+        case 'sale':
+          targetCat = ''; // all categories
+          break;
+        case 'refill':
+          targetCat = 'returnable'; // refill = water galon (returnable)
+          break;
+        default:
+          targetCat = '';
+      }
     }
 
     // Exclude items already in draft
@@ -401,12 +430,12 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
         emptyText: emptyText,
         onPick: (Map<String, dynamic> item) {
           Navigator.of(context).pop(); // close sheet
-          // Seed price from item catalog for sale rows (Convention #7:
-          // dynamic guard via coerceNum -- field may be int, String, or absent)
+          // Seed price: supplier/walkin from priceSourceField, order-sale from
+          // itemPriceField. Convention #7: coerceNum guards dynamic field.
           final int seedPrice;
-          if (txType == 'sale') {
-            // ponytail: walkin seeds from priceSourceField (hrg), order from
-            // itemPriceField (harga). Same coerceNum guard for dynamic field.
+          if (_mode == 'supplier') {
+            seedPrice = coerceNum(item[_priceSourceField]).toInt();
+          } else if (txType == 'sale') {
             final String priceField = _mode == 'walkin'
                 ? _priceSourceField
                 : _itemPriceField;
@@ -414,10 +443,21 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
           } else {
             seedPrice = 0;
           }
+
+          // Supplier: default tx = first txOption value.
+          final String addTx;
+          if (_mode == 'supplier') {
+            final List<MapEntry<String, String>> opts =
+                TaskItemBuilder.parseTxOptions(widget.component['txOptions']);
+            addTx = opts.isNotEmpty ? opts[0].key : 'buy';
+          } else {
+            addTx = txType;
+          }
+
           _addItem(
             ii: (item[idField] ?? '').toString().trim(),
             itemName: (item[nameField] ?? '').toString().trim(),
-            tx: txType,
+            tx: addTx,
             hg: seedPrice,
           );
         },
@@ -432,29 +472,35 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
     int hg = 0,
   }) {
     final List<DraftItem> draft = AdminCreateTaskSupport.getDraft(_wizardKey);
-    // Default cdo/cdi based on tx
-    final String defaultCdo = (tx == 'deliver' || tx == 'sale') ? 'full' : '';
-    // Deliver pickup = empty gallons returned (Kosong); purchase pickup = full.
-    final String defaultCdi = tx == 'deliver'
-        ? 'empty'
-        : (tx == 'purchase' ? 'full' : '');
-    // Default wt for refill so stored state matches the displayed toggle
-    // (_waterToggle renders "Isi Ulang" active when wt != 'ro').
-    final String defaultWt = tx == 'refill' ? 'refill' : '';
-    // ponytail: walkin seeds ps=1 (qty >= 1); order seeds ps=0.
-    final int seedPs = (_mode == 'walkin' && tx == 'sale') ? 1 : 0;
-    draft.add(
-      DraftItem(
-        ii: ii,
-        itemName: itemName,
-        tx: tx,
-        ps: seedPs,
-        cdo: defaultCdo,
-        cdi: defaultCdi,
-        wt: defaultWt,
-        hg: tx == 'sale' ? hg : 0,
-      ),
-    );
+    if (_mode == 'seed') {
+      // Seed: single qty (ps), fixed cd='full', no price, no conditions.
+      // tx='seed' is an internal marker (not serialized to li[] output).
+      draft.add(DraftItem(ii: ii, itemName: itemName, tx: 'seed', ps: 1));
+    } else if (_mode == 'supplier') {
+      // Supplier: all tx types carry price. qo/qi default 0 (user sets via
+      // steppers). No condition/water concepts.
+      draft.add(DraftItem(ii: ii, itemName: itemName, tx: tx, hg: hg));
+    } else {
+      // Order / walkin: existing logic unchanged.
+      final String defaultCdo = (tx == 'deliver' || tx == 'sale') ? 'full' : '';
+      final String defaultCdi = tx == 'deliver'
+          ? 'empty'
+          : (tx == 'purchase' ? 'full' : '');
+      final String defaultWt = tx == 'refill' ? 'refill' : '';
+      final int seedPs = (_mode == 'walkin' && tx == 'sale') ? 1 : 0;
+      draft.add(
+        DraftItem(
+          ii: ii,
+          itemName: itemName,
+          tx: tx,
+          ps: seedPs,
+          cdo: defaultCdo,
+          cdi: defaultCdi,
+          wt: defaultWt,
+          hg: tx == 'sale' ? hg : 0,
+        ),
+      );
+    }
     TaskItemBuilder.draftRev.value++;
     setState(() {});
   }
@@ -532,6 +578,60 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
   /// Centered empty-state card: icon + text + CTA buttons.
   /// CTA set gated by the same txTypes config as _buildCtaRow.
   Widget _buildEmptyState(BuildContext context) {
+    // Supplier/seed: single CTA, no per-tx buttons.
+    if (_mode == 'supplier' || _mode == 'seed') {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 30),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: const Color(0xFFD4D7DC)),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('\u{1F4E6}', style: TextStyle(fontSize: 32)), // box
+            const SizedBox(height: 8),
+            Text(
+              _t(0, 'Barang'),
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF0F172A),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 48,
+              child: ElevatedButton.icon(
+                onPressed: () => _showProductPicker(context, ''),
+                icon: const Icon(Icons.add, size: 16),
+                label: Text(
+                  _t(1, '+ Barang'),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AdminTierColors.okAction,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 10,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     // ponytail: walkin mode forces sale-only regardless of txTypes config.
     final List<String> types = _mode == 'walkin'
         ? const ['sale']
@@ -693,6 +793,12 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
     List<Map<String, dynamic>> cacheDocs,
     String kl,
   ) {
+    if (_mode == 'seed') {
+      return _buildSeedBody(item, index);
+    }
+    if (_mode == 'supplier') {
+      return _buildSupplierBody(item, index);
+    }
     switch (item.tx) {
       case 'deliver':
         return _buildDeliverBody(item, index, cacheDocs, kl);
@@ -1061,8 +1167,196 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
     );
   }
 
-  // ── Inline price input (sale rows only) ─────────────────────────────
-  Widget _priceInput(DraftItem item) {
+  // ── Supplier body (per-line tx selector + qty steppers + price) ─────
+  Widget _buildSupplierBody(DraftItem item, int index) {
+    final List<MapEntry<String, String>> txOpts =
+        TaskItemBuilder.parseTxOptions(widget.component['txOptions']);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // TX selector (segmented chips) -- only when >1 option
+        if (txOpts.length > 1) ...[
+          _txOptionSelector(item, txOpts),
+          const SizedBox(height: 8),
+        ],
+        // Qty steppers based on selected tx
+        if (item.tx == 'buy') ...[
+          // Buy: qi (masuk) only
+          _labeledStepper(
+            label: _t(3, 'Masuk'),
+            value: item.qi,
+            onDecrement: item.qi > 0
+                ? () {
+                    setState(() {
+                      item.qi--;
+                    });
+                    TaskItemBuilder.draftRev.value++;
+                  }
+                : null,
+            onIncrement: () {
+              setState(() {
+                item.qi++;
+              });
+              TaskItemBuilder.draftRev.value++;
+            },
+          ),
+        ] else if (item.tx == 'refill') ...[
+          // Refill: qo (keluar) + qi (masuk)
+          _labeledStepper(
+            label: _t(2, 'Keluar'),
+            value: item.qo,
+            onDecrement: item.qo > 0
+                ? () {
+                    setState(() {
+                      item.qo--;
+                    });
+                    TaskItemBuilder.draftRev.value++;
+                  }
+                : null,
+            onIncrement: () {
+              setState(() {
+                item.qo++;
+              });
+              TaskItemBuilder.draftRev.value++;
+            },
+          ),
+          const SizedBox(height: 8),
+          _labeledStepper(
+            label: _t(3, 'Masuk'),
+            value: item.qi,
+            onDecrement: item.qi > 0
+                ? () {
+                    setState(() {
+                      item.qi--;
+                    });
+                    TaskItemBuilder.draftRev.value++;
+                  }
+                : null,
+            onIncrement: () {
+              setState(() {
+                item.qi++;
+              });
+              TaskItemBuilder.draftRev.value++;
+            },
+          ),
+        ] else if (item.tx == 'sale') ...[
+          // Sale: qo (keluar) only
+          _labeledStepper(
+            label: _t(2, 'Keluar'),
+            value: item.qo,
+            onDecrement: item.qo > 0
+                ? () {
+                    setState(() {
+                      item.qo--;
+                    });
+                    TaskItemBuilder.draftRev.value++;
+                  }
+                : null,
+            onIncrement: () {
+              setState(() {
+                item.qo++;
+              });
+              TaskItemBuilder.draftRev.value++;
+            },
+          ),
+        ],
+        const SizedBox(height: 8),
+        // Price input (all tx types in supplier mode).
+        // labelIndex 4 = supplier text slot for "Harga".
+        _priceInput(item, labelIndex: 4),
+        // Per-line subtotal
+        if (_supplierSubtotal(item) > 0) ...[
+          const SizedBox(height: 4),
+          Text(
+            '${_t(5, 'Subtotal')}: ${AdminCreateTaskSupport.formatRupiah(_supplierSubtotal(item))}',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: Color(0xFF64748B), // slate-500
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ── Seed body (single qty stepper, no price, no tx selector) ──────
+  Widget _buildSeedBody(DraftItem item, int index) {
+    return _labeledStepper(
+      label: _t(2, 'Qty'),
+      value: item.ps,
+      onDecrement: item.ps > 0
+          ? () {
+              setState(() {
+                item.ps--;
+              });
+              TaskItemBuilder.draftRev.value++;
+            }
+          : null,
+      onIncrement: () {
+        setState(() {
+          item.ps++;
+        });
+        TaskItemBuilder.draftRev.value++;
+      },
+    );
+  }
+
+  /// Supplier per-line subtotal: hrg * max(qo, qi).
+  int _supplierSubtotal(DraftItem item) {
+    final int qty = item.qo > item.qi ? item.qo : item.qi;
+    return item.hg * qty;
+  }
+
+  /// TX option selector: segmented chips parsed from txOptions config.
+  /// Convention #2: autheniumDecode applied inside parseTxOptions.
+  Widget _txOptionSelector(
+    DraftItem item,
+    List<MapEntry<String, String>> txOpts,
+  ) {
+    return Row(
+      children: [
+        for (int i = 0; i < txOpts.length; i++) ...[
+          if (i > 0) const SizedBox(width: 6),
+          _toggleChip(
+            txOpts[i].value, // display label: 'Beli', 'Tukar', 'Jual'
+            item.tx ==
+                txOpts[i].key, // active: compare with 'buy', 'refill', 'sale'
+            () {
+              final String newTx = txOpts[i].key;
+              setState(() {
+                // Seed qo=qi ONCE on switching to refill (interview decision).
+                if (newTx == 'refill' && item.tx != 'refill') {
+                  item.qo = item.qi;
+                }
+                item.tx = newTx;
+              });
+              TaskItemBuilder.draftRev.value++;
+            },
+            activeColor: _supplierTxColor(txOpts[i].key),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Per-tx accent color for supplier segmented chips.
+  Color _supplierTxColor(String tx) {
+    switch (tx) {
+      case 'buy':
+        return const Color(0xFF8B5CF6); // violet-500
+      case 'refill':
+        return const Color(0xFF047857); // emerald-700
+      case 'sale':
+        return const Color(0xFF0D9488); // teal-600
+      default:
+        return const Color(0xFF6B7280); // gray-500
+    }
+  }
+
+  // ── Inline price input ──────────────────────────────────────────────
+  Widget _priceInput(DraftItem item, {int labelIndex = 14}) {
     // Get-or-create controller for this item. Keyed by ii (unique in draft).
     // Created once, reused across Obx rebuilds, disposed on item removal.
     final TextEditingController controller = _priceControllers.putIfAbsent(
@@ -1073,7 +1367,7 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
     return Row(
       children: [
         Text(
-          '${_t(14, 'Harga')}: ',
+          '${_t(labelIndex, 'Harga')}: ',
           style: const TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w500,
@@ -1260,21 +1554,26 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
   Widget _txChip(String tx) {
     final String label;
     final Color bg;
+    final bool isSupplier = _mode == 'supplier';
     switch (tx) {
       case 'deliver':
         label = 'ANTAR';
         bg = const Color(0xFF4F46E5); // indigo-600
         break;
+      case 'buy':
+        label = 'BELI';
+        bg = const Color(0xFF8B5CF6); // violet-500
+        break;
       case 'sale':
-        label = _t(3, 'JUAL').toUpperCase();
+        label = isSupplier ? 'JUAL' : _t(3, 'Jual').toUpperCase();
         bg = const Color(0xFF0D9488); // teal-600 (sale)
         break;
       case 'purchase':
-        label = _t(4, 'BELI').toUpperCase();
+        label = _t(4, 'Beli').toUpperCase();
         bg = const Color(0xFF8B5CF6); // violet-500
         break;
       case 'refill':
-        label = _t(2, 'REFILL').toUpperCase();
+        label = isSupplier ? 'TUKAR' : _t(2, 'Refill').toUpperCase();
         bg = const Color(0xFF047857); // emerald-700
         break;
       default:
@@ -1304,6 +1603,33 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
   // in the order they appear. Absent/empty txTypes -> all 4 (backward-compat).
   // Unknown types silently skipped (only known types have picker/card support).
   Widget _buildCtaRow(BuildContext context) {
+    // Supplier/seed: single "+ Barang" button (tx is per-line, not per-picker).
+    if (_mode == 'supplier' || _mode == 'seed') {
+      final Color color = AdminTierColors.okAction;
+      return Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
+            onPressed: () => _showProductPicker(context, ''),
+            icon: Icon(Icons.add, size: 16, color: color),
+            label: Text(
+              _t(1, '+ Barang'),
+              style: TextStyle(fontSize: 13, color: color),
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: color,
+              side: BorderSide(color: color),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              minimumSize: const Size(0, 44),
+            ),
+          ),
+        ],
+      );
+    }
     // ponytail: walkin mode forces sale-only regardless of txTypes config.
     final List<String> types = _mode == 'walkin'
         ? const ['sale']
@@ -1368,6 +1694,35 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
 
   // ── Footer summary ───────────────────────────────────────────────────
   Widget _buildFooterSummary(TaskTotals totals) {
+    // Seed: show total qty count (not Rp).
+    if (_mode == 'seed') {
+      final List<DraftItem> draft = AdminCreateTaskSupport.getDraft(_wizardKey);
+      final int totalQty = AdminCreateTaskSupport.computeSeedTotalQty(draft);
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC), // slate-50
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: _summaryPill('TOTAL $totalQty', AdminTierColors.okAction),
+      );
+    }
+    // Supplier: show running total only (per-line subtotals are in each card).
+    if (_mode == 'supplier') {
+      final List<DraftItem> draft = AdminCreateTaskSupport.getDraft(_wizardKey);
+      final int total = AdminCreateTaskSupport.computeSupplierTotal(draft);
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC), // slate-50
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: _summaryPill(
+          '${_t(5, 'Subtotal')} ${AdminCreateTaskSupport.formatRupiah(total)}',
+          AdminTierColors.okAction,
+        ),
+      );
+    }
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(

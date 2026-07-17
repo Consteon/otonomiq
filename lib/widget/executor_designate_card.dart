@@ -97,12 +97,37 @@ class ExecutorDesignateCard extends StatefulWidget {
         .toList();
   }
 
+  /// Build a busy-set from a collection of docs (e.g. stock_location).
+  ///
+  /// For each row where [busyField] is non-empty (trimmed), map
+  /// `row[busyField] -> row[busyLabelField]`. The key is the bound entity's
+  /// vid (a driver's vid in the O1 case); the value is the display label
+  /// (vehicle plate).
+  ///
+  /// Pure function (no Flutter deps), directly testable. Mirrors the
+  /// [filterWorkforceDocs] pattern.
+  static Map<String, String> buildBusySet(
+    List<Map<String, dynamic>> docs,
+    String busyField,
+    String busyLabelField,
+  ) {
+    final Map<String, String> result = <String, String>{};
+    for (final Map<String, dynamic> doc in docs) {
+      final String key = (doc[busyField] ?? '').toString().trim();
+      if (key.isEmpty) continue;
+      final String label = (doc[busyLabelField] ?? '').toString().trim();
+      result[key] = label;
+    }
+    return result;
+  }
+
   @override
   State<ExecutorDesignateCard> createState() => _ExecutorDesignateCardState();
 }
 
 class _ExecutorDesignateCardState extends State<ExecutorDesignateCard> {
   String _workforceCode = '';
+  String _busyCode = '';
   List<String> _textArray = [];
 
   @override
@@ -133,21 +158,36 @@ class _ExecutorDesignateCardState extends State<ExecutorDesignateCard> {
       _textArray.length > i ? _textArray[i] : def;
 
   void _subscribe() {
+    final String appVid = resolveAppVid(widget.component);
+
+    // Workforce subscription (existing).
+    // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
     final String rawTable = (widget.component['workforceTable'] ?? '')
         .toString()
         .trim();
-    if (rawTable.isEmpty) return;
-    final String appVid = resolveAppVid(widget.component);
-    final TablePath tp = parseTablePath(rawTable);
-    if (tp.tableDocId.isNotEmpty) {
-      // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
-      _workforceCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
-      subscribeToMapCollection(
-        appVid,
-        tp.tableDocId,
-        tp.subColl,
-        _workforceCode,
-      );
+    if (rawTable.isNotEmpty) {
+      final TablePath tp = parseTablePath(rawTable);
+      if (tp.tableDocId.isNotEmpty) {
+        _workforceCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
+        subscribeToMapCollection(
+          appVid,
+          tp.tableDocId,
+          tp.subColl,
+          _workforceCode,
+        );
+      }
+    }
+
+    // Busy-table subscription (cross-table busy guard).
+    final String rawBusyTable = (widget.component['busyTable'] ?? '')
+        .toString()
+        .trim();
+    if (rawBusyTable.isNotEmpty) {
+      final TablePath bp = parseTablePath(rawBusyTable);
+      if (bp.tableDocId.isNotEmpty) {
+        _busyCode = '$appVid/${bp.tableDocId}/${bp.subColl}';
+        subscribeToMapCollection(appVid, bp.tableDocId, bp.subColl, _busyCode);
+      }
     }
   }
 
@@ -186,6 +226,28 @@ class _ExecutorDesignateCardState extends State<ExecutorDesignateCard> {
     final String vidField = (widget.component['vidField'] ?? 'VID').toString();
     final String siteField = (widget.component['siteField'] ?? '').toString();
 
+    // Build busy-set from cross-table subscription (S1 busy guard).
+    final String busyField = (widget.component['busyField'] ?? '')
+        .toString()
+        .trim();
+    final String busyLabelField = (widget.component['busyLabelField'] ?? '')
+        .toString()
+        .trim();
+    final Map<String, String> busySet;
+    if (_busyCode.isNotEmpty && busyField.isNotEmpty) {
+      final List<Map<String, dynamic>> busyDocs =
+          List<Map<String, dynamic>>.from(
+            mapTableContent[_busyCode] ?? const [],
+          );
+      busySet = ExecutorDesignateCard.buildBusySet(
+        busyDocs,
+        busyField,
+        busyLabelField,
+      );
+    } else {
+      busySet = const <String, String>{};
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -199,6 +261,8 @@ class _ExecutorDesignateCardState extends State<ExecutorDesignateCard> {
         subtitle: _t(5, 'Siapa yang ngantar?'),
         helper: _t(6, 'Pilih dari daftar pegawai'),
         emptyMessage: _t(7, 'Tidak ada pegawai tersedia'),
+        busySet: busySet,
+        busyPrefix: _t(8),
         onSelect: (String vid, String name) {
           _onPick(vid, name);
           Navigator.of(ctx).pop();
@@ -451,6 +515,8 @@ class _ExecutorPickerSheet extends StatelessWidget {
     required this.helper,
     required this.emptyMessage,
     required this.onSelect,
+    this.busySet = const <String, String>{},
+    this.busyPrefix = '',
   });
 
   final List<Map<String, dynamic>> docs;
@@ -462,6 +528,12 @@ class _ExecutorPickerSheet extends StatelessWidget {
   final String helper;
   final String emptyMessage;
   final void Function(String vid, String name) onSelect;
+
+  /// Map of driver-vid -> vehicle label for busy drivers. Empty = no guard.
+  final Map<String, String> busySet;
+
+  /// Prefix for the busy subtitle (from text segment, e.g. "Sedang jalan · ").
+  final String busyPrefix;
 
   @override
   Widget build(BuildContext context) {
@@ -578,62 +650,93 @@ class _ExecutorPickerSheet extends StatelessWidget {
         : '';
     final String initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
 
+    // Busy guard: driver vid is in the busy-set AND vid is non-empty.
+    final bool isBusy = vid.isNotEmpty && busySet.containsKey(vid);
+    final String busyLabel = isBusy ? '$busyPrefix${busySet[vid] ?? ''}' : '';
+
     return InkWell(
-      onTap: vid.isEmpty ? null : () => onSelect(vid, name),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              alignment: Alignment.center,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                color: Color(0xFFE0F2F1),
-              ),
-              child: Text(
-                initial,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF0F766E),
+      // Combine existing vid-empty guard with busy guard.
+      onTap: (vid.isEmpty || isBusy) ? null : () => onSelect(vid, name),
+      child: Opacity(
+        opacity: isBusy ? 0.45 : 1.0,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isBusy
+                      ? const Color(0xFFF3F4F6) // gray-100
+                      : const Color(0xFFE0F2F1),
+                ),
+                child: Text(
+                  initial,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: isBusy
+                        ? const Color(0xFF9CA3AF) // gray-400
+                        : const Color(0xFF0F766E),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    name.isNotEmpty ? name : vid,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF111827),
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (site.isNotEmpty) ...[
-                    const SizedBox(height: 2),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                     Text(
-                      site,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: Color(0xFF9CA3AF),
+                      name.isNotEmpty ? name : vid,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: isBusy
+                            ? const Color(0xFF9CA3AF) // gray-400
+                            : const Color(0xFF111827),
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    // Busy subtitle takes priority over site subtitle.
+                    if (isBusy && busyLabel.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        busyLabel,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFFEF4444), // red-500
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ] else if (site.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        site,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF9CA3AF),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-            const Icon(Icons.chevron_right, size: 20, color: Color(0xFFD1D5DB)),
-          ],
+              if (!isBusy)
+                const Icon(
+                  Icons.chevron_right,
+                  size: 20,
+                  color: Color(0xFFD1D5DB),
+                ),
+            ],
+          ),
         ),
       ),
     );

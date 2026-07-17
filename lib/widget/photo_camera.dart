@@ -118,7 +118,15 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    controller?.dispose();
+    // camera plugin's dispose() rejects with IllegalStateException
+    // (releaseFlutterSurfaceTexture ... not yet initialized) when the screen is
+    // closed while initialize() is still in flight — the preview surface
+    // producer was never built. Unawaited in a sync dispose(), the rejected
+    // Future is otherwise unhandled → platformDispatcher → fatal. Swallow it;
+    // there is nothing to recover here.
+    controller?.dispose().catchError((e) {
+      devPrint('camera dispose (uninitialized?): $e');
+    });
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -434,6 +442,15 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                                 .readAsBytes();
                             Uint8List watermarkedImage;
                             try {
+                              // A stalled / OOM-killed isolate on low-RAM
+                              // devices decoding the full-res capture never
+                              // settles — the await would hang with _finalizing
+                              // stuck true, permanently disabling Accept ("foto
+                              // tidak berhasil, tanpa hasil"). Cap it and fall
+                              // back to the raw (un-watermarked) bytes so the
+                              // capture always completes.
+                              // ponytail: 12s cap; move to a scaled-decode if
+                              // watermarking full-res is measurably too slow.
                               watermarkedImage = await compute(
                                 processCapturedImage,
                                 ImageProcessArgs(
@@ -442,9 +459,9 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                                   quality: widget.quality ?? 80,
                                   dateTime: formattedDateTime,
                                 ),
-                              );
+                              ).timeout(const Duration(seconds: 12));
                             } catch (e) {
-                              errorReport('image processing error: $e');
+                              errorReport('image processing error/timeout: $e');
                               watermarkedImage = rawBytes;
                             }
                             bool wrote = false;

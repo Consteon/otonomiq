@@ -516,7 +516,7 @@ class MainPageState extends State<MainPage> {
                         () => Icon(
                           Icons.fiber_manual_record,
                           color: _refreshing
-                              ? Colors.red
+                              ? Colors.amber
                               : (transactionOKFlag.value
                                     ? readyColor
                                     : notReadyColor),
@@ -546,63 +546,126 @@ class MainPageState extends State<MainPage> {
                                   scrollController.jumpTo(0.0);
                                 }
                               });
-                              // refresh current page — background, not awaited
+                              // ponytail: fire CF mobileRefresh, fall back to readSettingsContext on failure
                               try {
-                                oldSettingUpShouldBeDeleted().then((aRes) {
-                                  var state = transactionStore.state;
-                                  var lifKey = state.screenTx['#INTERFACE_KEY'];
-                                  readSettingsContext(context, lifKey, 1)
-                                      .then((_) {
-                                        transactionStore.dispatch(
-                                          UpdateScreenTxAction(
-                                            ScreenTransaction({
-                                              '#REFRESH': false,
-                                            }),
-                                          ),
+                                var lifKey = transactionStore
+                                    .state
+                                    .screenTx['#INTERFACE_KEY'];
+                                mobileRefreshFire(lifKey)
+                                    .then((ok) {
+                                      if (!ok) {
+                                        // CF unavailable (not deployed yet, or network error)
+                                        // — fall back to the current slow readSettingsContext path
+                                        readSettingsContext(context, lifKey, 1)
+                                            .then((_) {
+                                              transactionStore.dispatch(
+                                                UpdateScreenTxAction(
+                                                  ScreenTransaction({
+                                                    '#REFRESH': false,
+                                                  }),
+                                                ),
+                                              );
+                                              List<Widget> newElementList =
+                                                  reloadPage(pageName);
+                                              setTransactionOK('refresh icon');
+                                              transactionStore.dispatch(
+                                                UpdateScreenTxAction(
+                                                  ScreenTransaction({
+                                                    '#DATA_OK': true,
+                                                  }),
+                                                ),
+                                              );
+                                              if (mounted) {
+                                                setState(() {
+                                                  pageElements = newElementList;
+                                                  _refreshing = false;
+                                                  wait = false;
+                                                  touch = !touch;
+                                                  dataColor = readyColor;
+                                                });
+                                              }
+                                            })
+                                            .catchError((e) {
+                                              setTransactionOK(
+                                                'refresh icon catch',
+                                              );
+                                              transactionStore.dispatch(
+                                                UpdateScreenTxAction(
+                                                  ScreenTransaction({
+                                                    '#DATA_OK': true,
+                                                  }),
+                                                ),
+                                              );
+                                              if (mounted) {
+                                                setState(() {
+                                                  _refreshing = false;
+                                                  wait = false;
+                                                  touch = !touch;
+                                                  dataColor = readyColor;
+                                                });
+                                                showAlert(
+                                                  context,
+                                                  textList["ErrorLoading"],
+                                                );
+                                              }
+                                            });
+                                        return;
+                                      }
+                                      // CF success — proxy listener will repaint home pages;
+                                      // also manually repaint here for non-home-gate coverage
+                                      transactionStore.dispatch(
+                                        UpdateScreenTxAction(
+                                          ScreenTransaction({
+                                            '#REFRESH': false,
+                                          }),
+                                        ),
+                                      );
+                                      List<Widget> newElementList = reloadPage(
+                                        pageName,
+                                      );
+                                      setTransactionOK('refresh mobileRefresh');
+                                      transactionStore.dispatch(
+                                        UpdateScreenTxAction(
+                                          ScreenTransaction({'#DATA_OK': true}),
+                                        ),
+                                      );
+                                      if (mounted) {
+                                        setState(() {
+                                          pageElements = newElementList;
+                                          _refreshing = false;
+                                          wait = false;
+                                          touch = !touch;
+                                          dataColor = readyColor;
+                                        });
+                                      }
+                                    })
+                                    .catchError((e) {
+                                      // W1: the ok==true branch calls reloadPage(), which can
+                                      // throw (linkElement[home]! force-unwrap). Inside an
+                                      // un-catchError'd .then that becomes a FATAL async error
+                                      // (project_callhttppost_clientexception_fatal). Mirror the
+                                      // fallback's error callback: clear amber, green dot, alert.
+                                      setTransactionOK(
+                                        'refresh mobileRefresh catch',
+                                      );
+                                      transactionStore.dispatch(
+                                        UpdateScreenTxAction(
+                                          ScreenTransaction({'#DATA_OK': true}),
+                                        ),
+                                      );
+                                      if (mounted) {
+                                        setState(() {
+                                          _refreshing = false;
+                                          wait = false;
+                                          touch = !touch;
+                                          dataColor = readyColor;
+                                        });
+                                        showAlert(
+                                          context,
+                                          textList["ErrorLoading"],
                                         );
-                                        List<Widget> newElementList =
-                                            reloadPage(pageName);
-                                        setTransactionOK('refresh icon');
-                                        transactionStore.dispatch(
-                                          UpdateScreenTxAction(
-                                            ScreenTransaction({
-                                              '#DATA_OK': true,
-                                            }),
-                                          ),
-                                        );
-                                        if (mounted) {
-                                          setState(() {
-                                            pageElements = newElementList;
-                                            _refreshing = false;
-                                            wait = false;
-                                            touch = !touch;
-                                            dataColor = readyColor;
-                                          });
-                                        }
-                                      })
-                                      .catchError((e) {
-                                        setTransactionOK('refresh icon catch');
-                                        transactionStore.dispatch(
-                                          UpdateScreenTxAction(
-                                            ScreenTransaction({
-                                              '#DATA_OK': true,
-                                            }),
-                                          ),
-                                        );
-                                        if (mounted) {
-                                          setState(() {
-                                            _refreshing = false;
-                                            wait = false;
-                                            touch = !touch;
-                                            dataColor = readyColor;
-                                          });
-                                          showAlert(
-                                            context,
-                                            textList["ErrorLoading"],
-                                          );
-                                        }
-                                      });
-                                });
+                                      }
+                                    });
                               } catch (e) {
                                 setTransactionOK('refresh icon catch');
                                 transactionStore.dispatch(
@@ -734,8 +797,13 @@ class MainPageState extends State<MainPage> {
                                   barItems[i]['label']?.toString() ??
                                   route.replaceAll('_', ' ');
                               return OtqNavItem(
-                                icon:
-                                    otqIcons[iconKey] ?? Icons.circle_outlined,
+                                // Slot 1 is the notification inbox (badge is
+                                // hardwired to i==1 below) — always a bell,
+                                // regardless of the server JSON icon key.
+                                icon: i == 1
+                                    ? Icons.notifications_outlined
+                                    : (otqIcons[iconKey] ??
+                                          Icons.circle_outlined),
                                 label: label,
                                 badgeCount: i == 1 ? unread : null,
                               );
@@ -1285,7 +1353,17 @@ class MainPageState extends State<MainPage> {
         return;
       } else {
         dynamic docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
-        bool docExist = (await docRef.get()).exists;
+        bool docExist;
+        try {
+          docExist = (await docRef.get()).exists;
+        } catch (e) {
+          // Firestore [unavailable]/transient network on cold start: one-shot
+          // .get() rejects → uncaught (caller is fire-and-forget) → fatal. Skip
+          // this attempt; subscribeToProxy re-runs on the next readSettings/
+          // refresh. Retryable blip — don't crash, don't spam Crashlytics.
+          devPrint('subscribeToProxy get failed (skipped): $e');
+          return;
+        }
         if (docExist) {
           // Restore the last-seen proxy checksum for THIS ssid before the
           // listener can fire. #PROXY_LISTENER_CS lives only in transactionStore
@@ -1343,81 +1421,97 @@ class MainPageState extends State<MainPage> {
                 dynamic collectionRef = FirebaseFirestore.instance.collection(
                   '$proxyCollectionName/$ssid/System',
                 );
-                collectionRef.get().then((value) {
-                  systemUIComponent = {};
-                  for (final doc in value.docs) {
-                    dynamic systemData = doc.data();
-                    newItem[systemData['p']] = {
-                      'c': systemData['c'],
-                      't': systemData['t'],
-                      'v': systemData['v'],
-                    };
-                    systemUIComponent[systemData['p']] = json.decode(
-                      systemData['c'],
-                    );
-                  } // end for (final doc in value.docs)
-                  storage.write(
-                    key: 'ui_systems',
-                    value: jsonEncode(newItem),
-                  ); // store systems in secure storage
-                  buildTheme(systemUIComponent[theme]);
-                  // Persist authed system snapshot for cache-first navbar
-                  // restore. Gated on the guest signup ssid (mirrors the
-                  // readSettings/readSettingsContext non-guest gate) so a guest
-                  // proxy refresh — the same case the Page block handles at
-                  // `ssid == state['#SIGNUP_KEY']` below — never overwrites the
-                  // last authenticated session's bottomBar in @authedSystemUI.
-                  if (ssid != state['#SIGNUP_KEY']) {
-                    try {
-                      prefs.setString(
-                        '@authedSystemUI',
-                        json.encode(systemUIComponent),
-                      );
-                    } catch (e) {
-                      devPrint('proxy persist @authedSystemUI failed: $e');
-                    }
-                  }
-                }); // end of system then
+                collectionRef
+                    .get()
+                    .then((value) {
+                      systemUIComponent = {};
+                      for (final doc in value.docs) {
+                        dynamic systemData = doc.data();
+                        newItem[systemData['p']] = {
+                          'c': systemData['c'],
+                          't': systemData['t'],
+                          'v': systemData['v'],
+                        };
+                        systemUIComponent[systemData['p']] = json.decode(
+                          systemData['c'],
+                        );
+                      } // end for (final doc in value.docs)
+                      storage.write(
+                        key: 'ui_systems',
+                        value: jsonEncode(newItem),
+                      ); // store systems in secure storage
+                      buildTheme(systemUIComponent[theme]);
+                      // Persist authed system snapshot for cache-first navbar
+                      // restore. Gated on the guest signup ssid (mirrors the
+                      // readSettings/readSettingsContext non-guest gate) so a guest
+                      // proxy refresh — the same case the Page block handles at
+                      // `ssid == state['#SIGNUP_KEY']` below — never overwrites the
+                      // last authenticated session's bottomBar in @authedSystemUI.
+                      if (ssid != state['#SIGNUP_KEY']) {
+                        try {
+                          prefs.setString(
+                            '@authedSystemUI',
+                            json.encode(systemUIComponent),
+                          );
+                        } catch (e) {
+                          devPrint('proxy persist @authedSystemUI failed: $e');
+                        }
+                      }
+                    })
+                    .catchError((e) {
+                      // transient [unavailable]/network — proxy re-fires on next
+                      // change; uncaught .then() reject would be fatal.
+                      devPrint('proxy System reload failed (skipped): $e');
+                    }); // end of system then
 
                 // check and update pages
                 newItem = {};
                 collectionRef = FirebaseFirestore.instance.collection(
                   '$proxyCollectionName/$ssid/Page',
                 );
-                collectionRef.get().then((value) {
-                  screenUIComponent = {};
-                  for (final doc in value.docs) {
-                    dynamic pageData = doc.data();
-                    newItem[pageData['p']] = {
-                      'c': pageData['c'],
-                      't': pageData['t'],
-                      'v': pageData['v'],
-                    };
-                    try {
-                      screenUIComponent[pageData['p']] = json.decode(
-                        pageData['c'],
-                      );
-                      // devPrint("Page ${pageData['p']} => updated");
-                    } catch (e) {
-                      // devPrint("Error in page ${pageData['p']} => $e");
-                      screenUIComponent[pageData['p']] = json.decode(errorPage);
-                    }
-                  } // end for (final doc in value.docs)
-                  storage.write(
-                    key: 'ui_pages',
-                    value: jsonEncode(newItem),
-                  ); // store pages in secure storage
-                  devPrint("Proxy listener call constructAllPageElements");
-                  constructAllPageElements();
-                  if (ssid == state['#SIGNUP_KEY']) {
-                    screenUIComponent[home] =
-                        screenUIComponent[defaultGuestHome];
-                    pageName = defaultGuestHome;
-                  }
-                  rePaintScreen('Page Listener, all pages');
-                  // actionUnLock();
-                  // setDataOK('4'); // reload and set green light
-                }); // end of then
+                collectionRef
+                    .get()
+                    .then((value) {
+                      screenUIComponent = {};
+                      for (final doc in value.docs) {
+                        dynamic pageData = doc.data();
+                        newItem[pageData['p']] = {
+                          'c': pageData['c'],
+                          't': pageData['t'],
+                          'v': pageData['v'],
+                        };
+                        try {
+                          screenUIComponent[pageData['p']] = json.decode(
+                            pageData['c'],
+                          );
+                          // devPrint("Page ${pageData['p']} => updated");
+                        } catch (e) {
+                          // devPrint("Error in page ${pageData['p']} => $e");
+                          screenUIComponent[pageData['p']] = json.decode(
+                            errorPage,
+                          );
+                        }
+                      } // end for (final doc in value.docs)
+                      storage.write(
+                        key: 'ui_pages',
+                        value: jsonEncode(newItem),
+                      ); // store pages in secure storage
+                      devPrint("Proxy listener call constructAllPageElements");
+                      constructAllPageElements();
+                      if (ssid == state['#SIGNUP_KEY']) {
+                        screenUIComponent[home] =
+                            screenUIComponent[defaultGuestHome];
+                        pageName = defaultGuestHome;
+                      }
+                      rePaintScreen('Page Listener, all pages');
+                      // actionUnLock();
+                      // setDataOK('4'); // reload and set green light
+                    })
+                    .catchError((e) {
+                      // transient [unavailable]/network — proxy re-fires on next
+                      // change; uncaught .then() reject would be fatal.
+                      devPrint('proxy Page reload failed (skipped): $e');
+                    }); // end of then
               } // end if (rec['t'] != state['#PROXY_LISTENER_CS'])
               // actionUnLock();
             } // end if (event.data() == null)

@@ -2599,10 +2599,10 @@ Future saveHistory() async {
     )).toString();
     try {
       dynamic docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
-      docRef.update({
+      safeFsUpdate(docRef, {
         'h': historyStr,
         'i': jsonEncode(imageMap),
-      }); // saving to proxy field 'h' in firestore
+      }, 'saveHistory-proxy'); // saving to proxy field 'h' in firestore
     } catch (e) {
       devPrint('Cannot save history to firestore $e');
     } // end try (e)
@@ -2626,10 +2626,10 @@ Future archiveHistory() async {
     )).toString();
     try {
       dynamic docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
-      docRef.update({
+      safeFsUpdate(docRef, {
         'h2': historyStr,
         'i2': jsonEncode(imageMap),
-      }); // saving to proxy field 'h' in firestore
+      }, 'archiveHistory-proxy'); // saving to proxy field 'h' in firestore
     } catch (e) {
       devPrint('!!! Cannot archive history to firestore $e');
     } // end try (e)

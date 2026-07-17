@@ -185,6 +185,10 @@ class _PickerListState extends State<PickerList> {
       (widget.component['statusOnLabel'] ?? '').toString().trim();
   String get _statusOffLabel =>
       (widget.component['statusOffLabel'] ?? '').toString().trim();
+  String get _busySelfField =>
+      (widget.component['busySelfField'] ?? '').toString().trim();
+  String get _busySelfLabelField =>
+      (widget.component['busySelfLabelField'] ?? '').toString().trim();
   String get _rowIcon => (widget.component['rowIcon'] ?? '').toString().trim();
   bool get _titleMono {
     final String raw = (widget.component['titleMono'] ?? '')
@@ -384,17 +388,29 @@ class _PickerListState extends State<PickerList> {
       statusLabel = label.isNotEmpty ? label : null;
     }
 
+    // Busy-self guard (S2.1): row's own field signals busy.
+    final String busySelfField = _busySelfField;
+    final String busyVal = busySelfField.isEmpty
+        ? ''
+        : (r[busySelfField] ?? '').toString().trim();
+    final bool isBusy = busyVal.isNotEmpty;
+    final String busyLabel = isBusy
+        ? '${_t(3)}${(r[_busySelfLabelField] ?? '').toString().trim()}'
+        : '';
+
     return _selectableRow(
       title: title.isNotEmpty ? title : id,
       sub: sub,
       meta: meta,
       badge: badge,
       selected: _selected == id && id.isNotEmpty,
-      onTap: id.isEmpty ? null : () => _select(id, r),
+      onTap: (id.isEmpty || isBusy) ? null : () => _select(id, r),
       statusLabel: statusLabel,
       statusIsOn: statusIsOn,
       iconName: _rowIcon,
       mono: _titleMono,
+      isBusy: isBusy,
+      busyLabel: busyLabel,
     );
   }
 
@@ -423,6 +439,8 @@ class _PickerListState extends State<PickerList> {
     bool statusIsOn = false,
     String iconName = '',
     bool mono = false,
+    bool isBusy = false,
+    String busyLabel = '',
   }) {
     final Color primary =
         PickerList.parseHexColor(
@@ -445,6 +463,8 @@ class _PickerListState extends State<PickerList> {
         iconName: iconName,
         mono: mono,
         primary: primary,
+        isBusy: isBusy,
+        busyLabel: busyLabel,
       );
     }
 
@@ -492,7 +512,9 @@ class _PickerListState extends State<PickerList> {
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      color: const Color(0xFF1E293B), // slate-800
+                      color: isBusy
+                          ? const Color(0xFF9CA3AF) // gray-400
+                          : const Color(0xFF1E293B), // slate-800
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -501,9 +523,11 @@ class _PickerListState extends State<PickerList> {
                     const SizedBox(height: 2),
                     Text(
                       sub,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: Color(0xFF64748B), // slate-500
+                        color: isBusy
+                            ? const Color(0xFFD1D5DB) // gray-300
+                            : const Color(0xFF64748B), // slate-500
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -513,15 +537,32 @@ class _PickerListState extends State<PickerList> {
                     const SizedBox(height: 2),
                     Text(
                       meta,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
-                        color: Color(0xFF94A3B8), // slate-400
+                        color: isBusy
+                            ? const Color(0xFFD1D5DB)
+                            : const Color(0xFF94A3B8), // slate-400
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],
-                  if (statusLabel != null && statusLabel.isNotEmpty) ...[
+                  if (isBusy && busyLabel.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      busyLabel,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFFEF4444), // red-500
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  if (!isBusy &&
+                      statusLabel != null &&
+                      statusLabel.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -550,11 +591,14 @@ class _PickerListState extends State<PickerList> {
               ),
             ),
             const SizedBox(width: 8),
+            // Busy rows present no trailing affordance (mirror of entity layout
+            // Task 7d): hide the count badge AND the "Pilih" label / check icon
+            // so an inert (onTap:null) row never shows a "Pilih" cue.
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (badge != null)
+                if (!isBusy && badge != null)
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
@@ -573,17 +617,18 @@ class _PickerListState extends State<PickerList> {
                       ),
                     ),
                   ),
-                if (badge != null) const SizedBox(height: 4),
-                selected
-                    ? Icon(Icons.check_circle, size: 18, color: primary)
-                    : Text(
-                        rowBtnLabel,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF94A3B8), // slate-400
+                if (!isBusy && badge != null) const SizedBox(height: 4),
+                if (!isBusy)
+                  selected
+                      ? Icon(Icons.check_circle, size: 18, color: primary)
+                      : Text(
+                          rowBtnLabel,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF94A3B8), // slate-400
+                          ),
                         ),
-                      ),
               ],
             ),
           ],
@@ -607,129 +652,159 @@ class _PickerListState extends State<PickerList> {
     required String iconName,
     required bool mono,
     required Color primary,
+    bool isBusy = false,
+    String busyLabel = '',
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: selected
-              ? const Color(0xFFEFF6FF) // adminAccentBg
-              : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected ? primary : const Color(0xFFE2E8F0), // slate-200
-            width: selected ? 1.5 : 1,
-          ),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            // Icon avatar: 40x40, radius 10.
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: selected
-                    ? primary
-                    : const Color(0xFFF1F5F9), // slate-100
-                borderRadius: BorderRadius.circular(10),
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                leadingAdd ? Icons.add : panelIcon(iconName),
-                size: 20,
-                color: selected
-                    ? Colors.white
-                    : const Color(0xFF64748B), // slate-500
-              ),
+      child: Opacity(
+        opacity: isBusy ? 0.5 : 1.0,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: isBusy
+                ? const Color(0xFFF9FAFB) // gray-50
+                : (selected
+                      ? const Color(0xFFEFF6FF) // adminAccentBg
+                      : Colors.white),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isBusy
+                  ? const Color(0xFFE5E7EB) // gray-200
+                  : (selected ? primary : const Color(0xFFE2E8F0)),
+              width: selected && !isBusy ? 1.5 : 1,
             ),
-            const SizedBox(width: 12),
-            // Middle column: title, sub, [pill + count].
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: const Color(0xFF1E293B), // slate-800
-                      fontFamily: mono ? 'monospace' : null,
-                      // iOS has no 'monospace' family -> fall back to Menlo/Courier
-                      // (system mono) so plate titles render monospaced on both.
-                      fontFamilyFallback: mono
-                          ? const ['Menlo', 'Courier']
-                          : null,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (sub.isNotEmpty) ...[
-                    const SizedBox(height: 2),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // Icon avatar: 40x40, radius 10.
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isBusy
+                      ? const Color(0xFFF3F4F6) // gray-100
+                      : (selected
+                            ? primary
+                            : const Color(0xFFF1F5F9)), // slate-100
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  leadingAdd ? Icons.add : panelIcon(iconName),
+                  size: 20,
+                  color: isBusy
+                      ? const Color(0xFF9CA3AF) // gray-400
+                      : (selected
+                            ? Colors.white
+                            : const Color(0xFF64748B)), // slate-500
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Middle column: title, sub, [busy label OR pill + count].
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                     Text(
-                      sub,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF64748B), // slate-500
+                      title,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: isBusy
+                            ? const Color(0xFF9CA3AF)
+                            : const Color(0xFF1E293B), // slate-800
+                        fontFamily: mono ? 'monospace' : null,
+                        fontFamilyFallback: mono
+                            ? const ['Menlo', 'Courier']
+                            : null,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                  ],
-                  if (hasStatusOrBadge(statusLabel, badge)) ...[
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        if (statusLabel != null && statusLabel.isNotEmpty)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: statusIsOn
-                                  ? const Color(0xFFFEF3C7) // amber-100
-                                  : const Color(0xFFD1FAE5), // emerald-100
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              statusLabel,
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
+                    if (sub.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        sub,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isBusy
+                              ? const Color(0xFFD1D5DB)
+                              : const Color(0xFF64748B), // slate-500
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    // Busy label (distinct from status pill; takes priority).
+                    if (isBusy && busyLabel.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        busyLabel,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFFEF4444), // red-500
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                    // Status pill + count (only when NOT busy).
+                    if (!isBusy && hasStatusOrBadge(statusLabel, badge)) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          if (statusLabel != null && statusLabel.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
                                 color: statusIsOn
-                                    ? const Color(0xFFB45309) // amber-700
-                                    : const Color(0xFF047857), // emerald-700
+                                    ? const Color(0xFFFEF3C7)
+                                    : const Color(0xFFD1FAE5),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                statusLabel,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: statusIsOn
+                                      ? const Color(0xFFB45309)
+                                      : const Color(0xFF047857),
+                                ),
                               ),
                             ),
-                          ),
-                        if (statusLabel != null &&
-                            statusLabel.isNotEmpty &&
-                            badge != null)
-                          const SizedBox(width: 8),
-                        if (badge != null)
-                          Text(
-                            badge,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF94A3B8), // slate-400
+                          if (statusLabel != null &&
+                              statusLabel.isNotEmpty &&
+                              badge != null)
+                            const SizedBox(width: 8),
+                          if (badge != null)
+                            Text(
+                              badge,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF94A3B8),
+                              ),
                             ),
-                          ),
-                      ],
-                    ),
+                        ],
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-            // Trailing: check icon only when selected.
-            if (selected) ...[
-              const SizedBox(width: 8),
-              Icon(Icons.check_circle, size: 20, color: primary),
+              // Trailing: check icon only when selected AND not busy.
+              if (selected && !isBusy) ...[
+                const SizedBox(width: 8),
+                Icon(Icons.check_circle, size: 20, color: primary),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

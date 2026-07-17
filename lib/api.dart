@@ -41,6 +41,7 @@ import 'login/api/user_repository.dart';
 import 'model/function_body.dart';
 import 'model/general_get_controller.dart';
 import 'model/otq_state.dart';
+import 'notification/bloc.dart';
 import 'page/main_page.dart';
 import 'part/build_part/channel.dart';
 import 'redux/screen_transaction.dart';
@@ -192,23 +193,33 @@ Future<void> startGettingGpsData() async {
     positionStream = Geolocator.getPositionStream(
       locationSettings: locationSettings,
     );
-    positionStreamSubs = positionStream.listen((Position position) {
-      // update app gps
-      int currentEpoch = DateTime.now().millisecondsSinceEpoch;
-      if (position.timestamp.millisecondsSinceEpoch > 0 &&
-          gpsTime.value <
-              (position.timestamp.millisecondsSinceEpoch + time2GpsOffset)) {
-        gpsData = positionCopy(position);
-        gpsTime.value = gpsData.timestamp.millisecondsSinceEpoch;
-        time2GpsOffset =
-            position.timestamp.millisecondsSinceEpoch - currentEpoch;
-      } // end if (position.timestamp.millisecondsSinceEpoch > 0)
-      // devPrint("gpsTime:${gpsTime.value} , time2GpsOffset:$time2GpsOffset");
-      gpsSaveTimer ??= Timer.periodic(const Duration(minutes: 3), (_) {
-        getAppGps();
-        devPrint('=======-======---= saved by 3 minute ${DateTime.now()}');
-      });
-    });
+    positionStreamSubs = positionStream.listen(
+      (Position position) {
+        // update app gps
+        int currentEpoch = DateTime.now().millisecondsSinceEpoch;
+        if (position.timestamp.millisecondsSinceEpoch > 0 &&
+            gpsTime.value <
+                (position.timestamp.millisecondsSinceEpoch + time2GpsOffset)) {
+          gpsData = positionCopy(position);
+          gpsTime.value = gpsData.timestamp.millisecondsSinceEpoch;
+          time2GpsOffset =
+              position.timestamp.millisecondsSinceEpoch - currentEpoch;
+        } // end if (position.timestamp.millisecondsSinceEpoch > 0)
+        // devPrint("gpsTime:${gpsTime.value} , time2GpsOffset:$time2GpsOffset");
+        gpsSaveTimer ??= Timer.periodic(const Duration(minutes: 3), (_) {
+          getAppGps();
+          devPrint('=======-======---= saved by 3 minute ${DateTime.now()}');
+        });
+      },
+      onError: (e) {
+        // Location service disabled mid-stream → geolocator emits
+        // LocationServiceDisabledException on the stream. With no onError the
+        // stream error is unhandled → fatal. Log + cancel the now-dead sub;
+        // startGettingGpsData re-subscribes when GPS is re-enabled.
+        devPrint('positionStream error (location disabled?): $e');
+        positionStreamSubs.cancel();
+      },
+    );
   } // end if (gpsEnabled & (gpsPermission == LocationPermission.always))
 } // end of startGettingGpsData
 
@@ -752,7 +763,20 @@ Widget displayImage({
           ),
         ); // default image
       } else {
-        result = Image.file(localFile, fit: BoxFit.contain);
+        result = Image.file(
+          localFile,
+          fit: BoxFit.contain,
+          // existsSync() above is a build-time check; Image.file loads async, so
+          // the file can be deleted between check and load (history-sync uploads
+          // then removes the local copy) → FileImage.length() PathNotFoundException
+          // fires OUTSIDE the sync try/catch → fatal. errorBuilder catches the
+          // deferred load error and falls back to the same transparent placeholder.
+          errorBuilder: (context, error, stackTrace) => Container(
+            color: Colors.transparent,
+            width: double.infinity,
+            height: double.infinity,
+          ),
+        );
       } // end if (!localFile.existsSync())
     } else {
       if (cached) {
@@ -2063,6 +2087,11 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
           String myMsgId = (await secureRead(key: "myMsgId"))!;
           firestoreIO = '$msgPrefix$myCluster/$myMsgId/io';
           firestoreMsg = firestoreIO;
+          // Inbox stream was bound to the boot-time default path at launch;
+          // now that the real path is set, re-subscribe so the badge + inbox
+          // populate immediately (no need to wait for an incoming push to
+          // trigger a reload).
+          NotificationBloc.instance?.add(LoadNotification());
           firestoreEventCollection = '$eventPrefix$myCluster';
           debugCount = 5222;
         }
@@ -2441,6 +2470,9 @@ Future<void> readSettingsContext(
       Uri.parse(functionBody.url),
       body: functionBody.body,
     );
+    print('data response: $response');
+    print('data response: ${functionBody.body}');
+    print('data response: ${functionBody.url}');
   } catch (e) {
     errorReport(e);
     showAlert(
@@ -3120,13 +3152,14 @@ Future<int> userIntegrityCheck() async {
           if (cUser.email != null) updateData['email'] = cUser.email;
         } else {
           if (cUser.email != null && vidData['email'] != cUser.email) {
-            updateData['email'] = state['#FCM_TOKEN'];
+            updateData['email'] = cUser.email;
           }
         }
-        FirebaseFirestore.instance
-            .collection(fsCollection)
-            .doc(myVid)
-            .update(updateData); // write updated data to firestore
+        safeFsUpdate(
+          FirebaseFirestore.instance.collection(fsCollection).doc(myVid),
+          updateData,
+          'userIntegrityCheck',
+        ); // write updated data to firestore
 
         transactionStore.dispatch(
           UpdateScreenTxAction(ScreenTransaction({'#EMAIL': cUser.email})),
@@ -4805,6 +4838,26 @@ FunctionBody getFunctionBody(String ssid, var range) {
   //  return http.post(url, body: qParams);
 }
 
+/// Fire CF mobileRefresh: push proxy-sheet -> Firestore /Proxy.
+/// Returns true on HTTP 200, false on any error (network / CF not deployed).
+/// Uses the hardened [callHttpPost] -- never surfaces an unhandled async error.
+Future<bool> mobileRefreshFire(String? lifKey) async {
+  if (lifKey == null) return false;
+  final vid = transactionStore.state.screenTx['#VID']?.toString() ?? '';
+  final url = Uri.parse(
+    "https://$autsorzFunctionDomain${functionName['mobileRefresh']}",
+  );
+  // vid and page are JSON-array strings: the GAS wrapper does
+  // JSON.parse(decodeURIComponent(param.vid)), so ["<vid>"] not bare <vid>.
+  final body = <String, String>{
+    'ssid': lifKey,
+    'vid': jsonEncode([vid]),
+    'page': jsonEncode(['all']),
+  };
+  final result = await callHttpPost(url, body);
+  return result is http.Response && result.statusCode == 200;
+}
+
 FunctionBody appendSSA1(String ssid, var rowData, String clt) {
   // range is an array
   // Return url and body for gcf call
@@ -5095,6 +5148,11 @@ Future asyncAppStartup2() async {
   } else {
     debugPrint('#INTERFACE_KEY = NULL  in asyncAppStartup2');
   }
+  // Ensure FCM is set up on EVERY app start — including warm / auto-
+  // authenticated starts where launchCheck / launchCheckDemo (the login-only
+  // paths) never run, so setUpFirebase was previously skipped and no push
+  // arrived until a fresh run. setUpFirebase is idempotent (guarded).
+  await FirebaseNotifications().setUpFirebase();
   // debugPrint('end asyncAppStartup2');
 }
 

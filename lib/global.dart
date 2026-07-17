@@ -198,7 +198,10 @@ import 'widget/driver_home_support.dart';
   0.9.83.01 (260703) OO : bug fix
   0.9.83.02 (260713) OO : fix splash screen, fix photo camera, login phone match, add flutter_native_icons, offline, trip sequence driver,
                           print thermal bluetooth, nfc reader,
-  0.9.84.02 (260714) OO : fix layout nfc reader, fix get cache data after close app, default value pickup and drop in admin runtime, implement local auth in attendance qr 
+  0.9.84.02 (260714) OO : fix layout nfc reader, fix get cache data after close app, default value pickup and drop in admin runtime, 
+                          implement local auth in attendance qr
+  0.9.84.03 (260717) OO : fcm notification single and broadcast, notif ui, message list, asset stock, task feed list, 
+                          fix stuck capture camera, crashlytics fix
 */
 
 // ========= Constants ==========================
@@ -210,7 +213,7 @@ int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
 const String version = '0.9.84';
-const String subVersion = '.02';
+const String subVersion = '.03';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing
@@ -784,6 +787,7 @@ Future<int> globalInit() async {
   functionName['runInstruction'] = '/runInstruction'; //= run instruction in gcf
   functionName['InvLogin'] = '/s1InvLogin';
   functionName['deviceOperation'] = '/deviceReset';
+  functionName['mobileRefresh'] = '/mobileRefresh';
   autsorzFunctionDomain = functionDomain['default'];
   appSettingFunctionName = functionName['appSettings'];
   sheetSystemLength = 15;

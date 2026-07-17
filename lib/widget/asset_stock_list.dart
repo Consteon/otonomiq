@@ -44,8 +44,32 @@ class PivotCell {
 
   /// Keyed by condValue string (e.g. 'full', 'empty').
   final Map<String, int> condTotals;
+
+  /// Per-detail breakdown (e.g. per vehicle/customer). Empty when detailField
+  /// is unset. Sorted total desc, id asc.
+  final List<DetailRow> details;
   const PivotCell({
     required this.value,
+    required this.total,
+    required this.condTotals,
+    this.details = const <DetailRow>[],
+  });
+}
+
+/// One detail row within a pivot cell (e.g. a specific vehicle or customer).
+/// Public for test assertions.
+class DetailRow {
+  final String id;
+  final String name;
+  final String sub;
+  final int total;
+
+  /// Keyed by condValue string (e.g. 'full', 'empty').
+  final Map<String, int> condTotals;
+  const DetailRow({
+    required this.id,
+    required this.name,
+    this.sub = '',
     required this.total,
     required this.condTotals,
   });
@@ -74,6 +98,9 @@ AssetStockResult groupAssetStock({
   String catField = 'ic',
   required List<String> pivotOrder,
   required List<String> condOrder,
+  String detailField = '',
+  String detailNameField = '',
+  String detailSubField = '',
 }) {
   // -- Build item join maps -------------------------------------------------
 
@@ -95,6 +122,12 @@ AssetStockResult groupAssetStock({
   // Summary scopes: 'all', '<pivot>', '<pivot>.<cond>'
   final Map<String, int> summary = <String, int>{};
   summary['all'] = 0;
+
+  // Detail grouping: [entityId][pivotVal][detailVal][condVal] = sumQty
+  final Map<String, Map<String, Map<String, Map<String, int>>>> detailGrouped =
+      <String, Map<String, Map<String, Map<String, int>>>>{};
+  final Map<String, String> detailNames = <String, String>{};
+  final Map<String, String> detailSubs = <String, String>{};
 
   for (final Map<String, dynamic> doc in cacheDocs) {
     final String entityId = (doc[groupField] ?? '').toString().trim();
@@ -122,6 +155,41 @@ AssetStockResult groupAssetStock({
       if (condVal.isNotEmpty) {
         final String scopeKey = '$pivotVal.$condVal';
         summary[scopeKey] = (summary[scopeKey] ?? 0) + qty;
+      }
+    }
+
+    // Detail accumulation (per detailField value)
+    if (detailField.isNotEmpty) {
+      final String detailVal = (doc[detailField] ?? '').toString().trim();
+      if (detailVal.isNotEmpty) {
+        final Map<String, Map<String, Map<String, int>>> entityDetail =
+            detailGrouped.putIfAbsent(
+              entityId,
+              () => <String, Map<String, Map<String, int>>>{},
+            );
+        final Map<String, Map<String, int>> pivotDetail = entityDetail
+            .putIfAbsent(pivotVal, () => <String, Map<String, int>>{});
+        final Map<String, int> detailBucket = pivotDetail.putIfAbsent(
+          detailVal,
+          () => <String, int>{},
+        );
+        detailBucket[condVal] = (detailBucket[condVal] ?? 0) + qty;
+
+        // Name resolution: first non-empty wins
+        if (detailNameField.isNotEmpty && !detailNames.containsKey(detailVal)) {
+          final String dName = (doc[detailNameField] ?? '').toString().trim();
+          if (dName.isNotEmpty) {
+            detailNames[detailVal] = dName;
+          }
+        }
+
+        // Sub resolution: first non-empty wins (same pattern as name)
+        if (detailSubField.isNotEmpty && !detailSubs.containsKey(detailVal)) {
+          final String dSub = (doc[detailSubField] ?? '').toString().trim();
+          if (dSub.isNotEmpty) {
+            detailSubs[detailVal] = dSub;
+          }
+        }
       }
     }
   }
@@ -158,10 +226,57 @@ AssetStockResult groupAssetStock({
 
       if (hideZero && pivotTotal == 0) continue;
 
+      // Build detail rows (per detailField) when set
+      List<DetailRow> details = const <DetailRow>[];
+      if (detailField.isNotEmpty) {
+        final Map<String, Map<String, int>>? pivotDetailMap =
+            detailGrouped[entityId]?[pv];
+        if (pivotDetailMap != null && pivotDetailMap.isNotEmpty) {
+          final List<DetailRow> detailList = <DetailRow>[];
+          for (final MapEntry<String, Map<String, int>> de
+              in pivotDetailMap.entries) {
+            final String detailId = de.key;
+            final Map<String, int> dCondMap = de.value;
+            final Map<String, int> dCondTotals = <String, int>{};
+            int dTotal = 0;
+            for (final String cv in condOrder) {
+              final int val = dCondMap[cv] ?? 0;
+              dCondTotals[cv] = val;
+              dTotal += val;
+            }
+            // Sum cond values not in condOrder (e.g. empty condField '')
+            for (final MapEntry<String, int> ce in dCondMap.entries) {
+              if (!condOrder.contains(ce.key)) dTotal += ce.value;
+            }
+            if (hideZero && dTotal == 0) continue;
+            final String resolvedName =
+                detailNames[detailId]?.isNotEmpty == true
+                ? detailNames[detailId]!
+                : detailId;
+            detailList.add(
+              DetailRow(
+                id: detailId,
+                name: resolvedName,
+                sub: detailSubs[detailId] ?? '',
+                total: dTotal,
+                condTotals: dCondTotals,
+              ),
+            );
+          }
+          // Sort: total desc, tie-break id asc (match entity sort)
+          detailList.sort((DetailRow a, DetailRow b) {
+            final int cmp = b.total.compareTo(a.total);
+            return cmp != 0 ? cmp : a.id.compareTo(b.id);
+          });
+          details = detailList;
+        }
+      }
+
       pivotCells[pv] = PivotCell(
         value: pv,
         total: pivotTotal,
         condTotals: condTotals,
+        details: details,
       );
       entityTotal += pivotTotal;
     }
@@ -269,6 +384,9 @@ class _AssetStockListState extends State<AssetStockList> {
   String _subtitle = '';
   String _emptyText = '';
   String _condNote = '';
+  String _detailField = '';
+  String _detailNameField = '';
+  String _detailSubField = '';
 
   /// Parsed pivotValues: list of (value, label, icon).
   List<_PivotDef> _pivotDefs = const [];
@@ -331,6 +449,9 @@ class _AssetStockListState extends State<AssetStockList> {
     _subtitle = cfg('subtitle', '');
     _emptyText = cfg('emptyText', '');
     _condNote = cfg('condNote', '');
+    _detailField = cfg('detailField', '');
+    _detailNameField = cfg('detailNameField', '');
+    _detailSubField = cfg('detailSubField', '');
 
     // pivotValues: value◼label◼icon★... (autheniumDecode first)
     final String rawPivot = (widget.component['pivotValues'] ?? '')
@@ -553,6 +674,9 @@ class _AssetStockListState extends State<AssetStockList> {
         catField: _catField,
         pivotOrder: pivotOrder,
         condOrder: condOrder,
+        detailField: _detailField,
+        detailNameField: _detailNameField,
+        detailSubField: _detailSubField,
       );
 
       final int activeTab = AssetStockList._activeTab[widget.scrName] ?? 0;
@@ -664,6 +788,19 @@ class _AssetStockListState extends State<AssetStockList> {
     });
   }
 
+  /// Map a summary scope to its filter-tab index.
+  /// Returns null if the scope does not match any pivot (tap is a no-op).
+  int? _summaryTabIndex(String scope) {
+    if (scope == 'all') return 0;
+    final String prefix = scope.contains('.')
+        ? scope.substring(0, scope.indexOf('.'))
+        : scope;
+    for (int i = 0; i < _pivotDefs.length; i++) {
+      if (_pivotDefs[i].value == prefix) return i + 1;
+    }
+    return null;
+  }
+
   Widget _buildSummaryStrip(Map<String, int> summaryValues) {
     return IntrinsicHeight(
       child: Row(
@@ -692,35 +829,45 @@ class _AssetStockListState extends State<AssetStockList> {
                     ? AdminTierColors.dangerBadgeText
                     : AdminTierColors.subText;
 
-                return Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: bg,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '$value',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          fontFamily: 'monospace',
-                          color: numColor,
+                final int? tabIdx = _summaryTabIndex(def.scope);
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: tabIdx != null
+                      ? () {
+                          AssetStockList._activeTab[widget.scrName] = tabIdx;
+                          setState(() {});
+                        }
+                      : null,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: bg,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '$value',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            fontFamily: 'monospace',
+                            color: numColor,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        def.label,
-                        style: TextStyle(fontSize: 10, color: labelColor),
-                      ),
-                    ],
+                        const SizedBox(height: 2),
+                        Text(
+                          def.label,
+                          style: TextStyle(fontSize: 10, color: labelColor),
+                        ),
+                      ],
+                    ),
                   ),
                 );
               }(),
@@ -954,7 +1101,7 @@ class _AssetStockListState extends State<AssetStockList> {
                 final ChipAccent accent = _pivotAccent(i);
                 final bool isOutstanding = _isOutstandingPivot(i);
 
-                return Container(
+                final Widget box = Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
                     vertical: 8,
@@ -1044,6 +1191,17 @@ class _AssetStockListState extends State<AssetStockList> {
                     ],
                   ),
                 );
+
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    AssetStockList._activeTab[widget.scrName] = i + 1;
+                    setState(() {});
+                  },
+                  child: pivotTotal == 0
+                      ? Opacity(opacity: 0.5, child: box)
+                      : box,
+                );
               }(),
             ],
           ],
@@ -1119,8 +1277,97 @@ class _AssetStockListState extends State<AssetStockList> {
             ],
           ),
 
-          // Non-outstanding + showCondition: large ISI | KOSONG split
-          if (!isOutstanding && _showCondition && _condDefs.isNotEmpty) ...[
+          // Detail rows (per detailField) when set and details available
+          if (_detailField.isNotEmpty &&
+              cell != null &&
+              cell.details.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(height: 1, color: accent.fg.withValues(alpha: 0.15)),
+            const SizedBox(height: 8),
+            for (final DetailRow dr in cell.details)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    if (pDef.icon.isNotEmpty) ...[
+                      Text(pDef.icon, style: const TextStyle(fontSize: 13)),
+                      const SizedBox(width: 6),
+                    ],
+                    Expanded(
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: dr.name,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: accent.fg,
+                              ),
+                            ),
+                            if (dr.sub.isNotEmpty)
+                              TextSpan(
+                                text: ' \u{00B7} ${dr.sub}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w400,
+                                  color: accent.fg.withValues(alpha: 0.6),
+                                ),
+                              ),
+                          ],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (!isOutstanding &&
+                        _showCondition &&
+                        _condDefs.isNotEmpty)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (int ci = 0; ci < _condDefs.length; ci++) ...[
+                            if (ci > 0)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                ),
+                                child: Text(
+                                  '\u{00B7}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: accent.fg,
+                                  ),
+                                ),
+                              ),
+                            Text(
+                              '${_condDefs[ci].label} ${dr.condTotals[_condDefs[ci].value] ?? 0}',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: accent.fg.withValues(alpha: 0.7),
+                              ),
+                            ),
+                          ],
+                        ],
+                      )
+                    else
+                      Text(
+                        '${dr.total}',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          fontFamily: 'monospace',
+                          color: accent.fg,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ]
+          // Non-outstanding + showCondition: large ISI | KOSONG split (aggregate fallback)
+          else if (!isOutstanding &&
+              _showCondition &&
+              _condDefs.isNotEmpty) ...[
             const SizedBox(height: 10),
             Row(
               children: [

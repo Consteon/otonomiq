@@ -30,7 +30,7 @@ class _OtqBottomNavBarState extends State<OtqBottomNavBar>
   void _initAnimations() {
     _scaleControllers = List.generate(
       widget.items.length,
-          (i) => AnimationController(
+      (i) => AnimationController(
         vsync: this,
         duration: const Duration(milliseconds: 250),
         value: widget.selectedIndex == i ? 1.0 : 0.0,
@@ -84,10 +84,9 @@ class _OtqBottomNavBarState extends State<OtqBottomNavBar>
         .withLightness(isDark ? 0.25 : 0.92)
         .withSaturation(isDark ? 0.5 : 0.35)
         .toColor();
-    final activeColor = HSLColor.fromColor(primaryColor)
-        .withLightness(isDark ? 0.7 : 0.35)
-        .withSaturation(0.8)
-        .toColor();
+    final activeColor = HSLColor.fromColor(
+      primaryColor,
+    ).withLightness(isDark ? 0.7 : 0.35).withSaturation(0.8).toColor();
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -125,18 +124,30 @@ class _OtqBottomNavBarState extends State<OtqBottomNavBar>
                     animation: _scaleAnimations[i],
                     builder: (context, child) {
                       final t = _scaleAnimations[i].value;
-                      final iconColor =
-                      Color.lerp(inactiveColor, activeColor, t)!;
+                      final iconColor = Color.lerp(
+                        inactiveColor,
+                        activeColor,
+                        t,
+                      )!;
                       final iconSize = 24.0 + (2.0 * t);
 
                       return Container(
                         padding: EdgeInsets.symmetric(
-                            horizontal: 8.0 + (4.0 * t), vertical: 8),
+                          horizontal: 8.0 + (4.0 * t),
+                          vertical: 8,
+                        ),
                         decoration: BoxDecoration(
                           color: pillColor.withValues(alpha: 0.0 + (1.0 * t)),
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: _buildIcon(item, iconColor, iconSize),
+                        // heightFactor:1 shrink-wraps vertically (no blowup);
+                        // Center fills the slot width and centers the icon+badge
+                        // Stack, which then sizes to the icon so the badge hugs
+                        // its corner instead of the far pill edge.
+                        child: Center(
+                          heightFactor: 1.0,
+                          child: _buildIcon(item, iconColor, iconSize),
+                        ),
                       );
                     },
                   ),
@@ -158,7 +169,7 @@ class _OtqBottomNavBarState extends State<OtqBottomNavBar>
         children: [
           iconWidget,
           Positioned(
-            right: -6,
+            right: -4,
             top: -4,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
