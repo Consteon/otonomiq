@@ -64,4 +64,7 @@ app.*.map.json
 .claude/
 .idea/
 
+# graphify knowledge-graph output (regenerated locally via /graphify)
+/graphify-out/
+
 lib/start.sct

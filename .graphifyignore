@@ -1,0 +1,31 @@
+# Dart and Flutter generated files
+**/*.g.dart
+**/*.freezed.dart
+**/*.mocks.dart
+**/*.gr.dart
+
+# Flutter outputs
+.dart_tool/
+build/
+coverage/
+
+# Android generated and cache
+android/.gradle/
+android/app/build/
+android/build/
+
+# iOS and macOS dependencies
+ios/Pods/
+ios/.symlinks/
+macos/Pods/
+macos/.symlinks/
+
+# Generated plugin registrants
+**/GeneratedPluginRegistrant.*
+
+# IDE and temporary files
+.idea/
+.vscode/
+*.iml
+*.log
+.DS_Store
