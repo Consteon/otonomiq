@@ -41,6 +41,7 @@ import 'login/api/user_repository.dart';
 import 'model/function_body.dart';
 import 'model/general_get_controller.dart';
 import 'model/otq_state.dart';
+import 'notification/bloc.dart';
 import 'page/main_page.dart';
 import 'part/build_part/channel.dart';
 import 'redux/screen_transaction.dart';
@@ -208,6 +209,13 @@ Future<void> startGettingGpsData() async {
         getAppGps();
         devPrint('=======-======---= saved by 3 minute ${DateTime.now()}');
       });
+    }, onError: (e) {
+      // Location service disabled mid-stream → geolocator emits
+      // LocationServiceDisabledException on the stream. With no onError the
+      // stream error is unhandled → fatal. Log + cancel the now-dead sub;
+      // startGettingGpsData re-subscribes when GPS is re-enabled.
+      devPrint('positionStream error (location disabled?): $e');
+      positionStreamSubs.cancel();
     });
   } // end if (gpsEnabled & (gpsPermission == LocationPermission.always))
 } // end of startGettingGpsData
@@ -724,8 +732,11 @@ Future<String> renamePath({
   return finalImagePath;
 } // end of renamePath
 
-Widget displayImage(
-    {String imageUrl = defaultImage, bool cached = true, BoxFit? fit}) {
+Widget displayImage({
+  String imageUrl = defaultImage,
+  bool cached = true,
+  BoxFit? fit,
+}) {
   const int duration = 100;
   String finalUrl = defaultImage;
   late Widget result;
@@ -749,7 +760,20 @@ Widget displayImage(
           ),
         ); // default image
       } else {
-        result = Image.file(localFile, fit: BoxFit.contain);
+        result = Image.file(
+          localFile,
+          fit: BoxFit.contain,
+          // existsSync() above is a build-time check; Image.file loads async, so
+          // the file can be deleted between check and load (history-sync uploads
+          // then removes the local copy) → FileImage.length() PathNotFoundException
+          // fires OUTSIDE the sync try/catch → fatal. errorBuilder catches the
+          // deferred load error and falls back to the same transparent placeholder.
+          errorBuilder: (context, error, stackTrace) => Container(
+            color: Colors.transparent,
+            width: double.infinity,
+            height: double.infinity,
+          ),
+        );
       } // end if (!localFile.existsSync())
     } else {
       if (cached) {
@@ -1418,9 +1442,10 @@ Future setStatus(msgId, status) async {
     "st": 101, // set to no need action
   };
   safeFsUpdate(
-      FirebaseFirestore.instance.collection(firestoreNotif + "/msg").doc(msgId),
-      statusUpdate,
-      'setStatus');
+    FirebaseFirestore.instance.collection(firestoreNotif + "/msg").doc(msgId),
+    statusUpdate,
+    'setStatus',
+  );
 
   final notifRef = FirebaseFirestore.instance.doc(firestoreNotif);
   await FirebaseFirestore.instance.runTransaction((Transaction tx) async {
@@ -1459,11 +1484,10 @@ Future sendMessage(mTo, mFrom, mDisplay, mData, mIn, mStatus) async {
       msgId = doc.id;
       var updateData = {"id": msgId};
       safeFsUpdate(
-          FirebaseFirestore.instance
-              .collection("$sendCollection/msg")
-              .doc(msgId),
-          updateData,
-          'sendMessage');
+        FirebaseFirestore.instance.collection("$sendCollection/msg").doc(msgId),
+        updateData,
+        'sendMessage',
+      );
     });
 
     try {
@@ -1518,10 +1542,16 @@ Future<int> resetVid(List<dynamic> targets) async {
               dynamic dvcRef = dvc.reference;
               proxy = dvc.data()['lif'];
               safeFsUpdate(
-                  dvcRef, dvcData, 'resetVid-dvc'); //= write updated data to user dvc
+                dvcRef,
+                dvcData,
+                'resetVid-dvc',
+              ); //= write updated data to user dvc
               if (!parentUpdated) {
-                safeFsUpdate(dvcRef.parent.parent, userData,
-                    'resetVid-user'); //= write updated data to user
+                safeFsUpdate(
+                  dvcRef.parent.parent,
+                  userData,
+                  'resetVid-user',
+                ); //= write updated data to user
                 parentUpdated = true;
               } // if (!parentUpdated)
             } // end for (dynamic dvc in dvcDocs)
@@ -2054,6 +2084,11 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
           String myMsgId = (await secureRead(key: "myMsgId"))!;
           firestoreIO = '$msgPrefix$myCluster/$myMsgId/io';
           firestoreMsg = firestoreIO;
+          // Inbox stream was bound to the boot-time default path at launch;
+          // now that the real path is set, re-subscribe so the badge + inbox
+          // populate immediately (no need to wait for an incoming push to
+          // trigger a reload).
+          NotificationBloc.instance?.add(LoadNotification());
           firestoreEventCollection = '$eventPrefix$myCluster';
           debugCount = 5222;
         }
@@ -2432,6 +2467,9 @@ Future<void> readSettingsContext(
       Uri.parse(functionBody.url),
       body: functionBody.body,
     );
+    print('data response: $response');
+    print('data response: ${functionBody.body}');
+    print('data response: ${functionBody.url}');
   } catch (e) {
     errorReport(e);
     showAlert(
@@ -2448,7 +2486,9 @@ Future<void> readSettingsContext(
     // chain (.then in main_page) still completes cleanly on cache.
     final String rsBody = response.body.trimLeft();
     if (rsBody.isEmpty || (rsBody[0] != '[' && rsBody[0] != '{')) {
-      devPrint('readSettingsContext: non-JSON body, keep cache: ${response.body}');
+      devPrint(
+        'readSettingsContext: non-JSON body, keep cache: ${response.body}',
+      );
       return;
     }
     var getResult = [];
@@ -3109,13 +3149,14 @@ Future<int> userIntegrityCheck() async {
           if (cUser.email != null) updateData['email'] = cUser.email;
         } else {
           if (cUser.email != null && vidData['email'] != cUser.email) {
-            updateData['email'] = state['#FCM_TOKEN'];
+            updateData['email'] = cUser.email;
           }
         }
-        FirebaseFirestore.instance
-            .collection(fsCollection)
-            .doc(myVid)
-            .update(updateData); // write updated data to firestore
+        safeFsUpdate(
+          FirebaseFirestore.instance.collection(fsCollection).doc(myVid),
+          updateData,
+          'userIntegrityCheck',
+        ); // write updated data to firestore
 
         transactionStore.dispatch(
           UpdateScreenTxAction(ScreenTransaction({'#EMAIL': cUser.email})),
@@ -3456,7 +3497,11 @@ Future<int> launchCheck() async {
     updateData["pk1"] = state['publicKey'];
     var docRef = state['#FS_REF']; //= get user doc reference for firestore
     result = 9927;
-    safeFsUpdate(docRef, updateData, 'loginUpdate'); //= write updated data to user dpc
+    safeFsUpdate(
+      docRef,
+      updateData,
+      'loginUpdate',
+    ); //= write updated data to user dpc
     result = 9928;
     docRef = state['#MSG_REF']; //= get message doc reference for firestore
     FirebaseFirestore.instance.runTransaction((Transaction tx) async {
@@ -3619,10 +3664,7 @@ Future getFirestoreUserData(
       if (forms.isEmpty) {
         uidUser = await FirebaseFirestore.instance
             .collection(topCollection)
-            .where(
-              'i',
-              isEqualTo: 'OtonomiqInvitationNotExist...',
-            )
+            .where('i', isEqualTo: 'OtonomiqInvitationNotExist...')
             .get();
       } else {
         uidUser = await FirebaseFirestore.instance
@@ -4382,8 +4424,10 @@ void saveSend(
     }
 
     if (updateEventString.isNotEmpty) {
-      devPrint('[saveSend] updateEventRow composed, '
-          'length=${updateEventString.length}');
+      devPrint(
+        '[saveSend] updateEventRow composed, '
+        'length=${updateEventString.length}',
+      );
       tableString =
           '${tableString ?? ''}${separator[0]}$updateString${separator[0]}$deleteString${separator[0]}$eventString${separator[0]}$updateEventString';
     } else if (eventString.isNotEmpty) {
@@ -4791,6 +4835,26 @@ FunctionBody getFunctionBody(String ssid, var range) {
   //  return http.post(url, body: qParams);
 }
 
+/// Fire CF mobileRefresh: push proxy-sheet -> Firestore /Proxy.
+/// Returns true on HTTP 200, false on any error (network / CF not deployed).
+/// Uses the hardened [callHttpPost] -- never surfaces an unhandled async error.
+Future<bool> mobileRefreshFire(String? lifKey) async {
+  if (lifKey == null) return false;
+  final vid = transactionStore.state.screenTx['#VID']?.toString() ?? '';
+  final url = Uri.parse(
+    "https://$autsorzFunctionDomain${functionName['mobileRefresh']}",
+  );
+  // vid and page are JSON-array strings: the GAS wrapper does
+  // JSON.parse(decodeURIComponent(param.vid)), so ["<vid>"] not bare <vid>.
+  final body = <String, String>{
+    'ssid': lifKey,
+    'vid': jsonEncode([vid]),
+    'page': jsonEncode(['all']),
+  };
+  final result = await callHttpPost(url, body);
+  return result is http.Response && result.statusCode == 200;
+}
+
 FunctionBody appendSSA1(String ssid, var rowData, String clt) {
   // range is an array
   // Return url and body for gcf call
@@ -5081,6 +5145,11 @@ Future asyncAppStartup2() async {
   } else {
     debugPrint('#INTERFACE_KEY = NULL  in asyncAppStartup2');
   }
+  // Ensure FCM is set up on EVERY app start — including warm / auto-
+  // authenticated starts where launchCheck / launchCheckDemo (the login-only
+  // paths) never run, so setUpFirebase was previously skipped and no push
+  // arrived until a fresh run. setUpFirebase is idempotent (guarded).
+  await FirebaseNotifications().setUpFirebase();
   // debugPrint('end asyncAppStartup2');
 }
 

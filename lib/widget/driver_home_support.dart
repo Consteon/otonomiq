@@ -2294,6 +2294,42 @@ String lookupWarehouseLv(
   return firstLv;
 }
 
+/// Return ALL active warehouse entries from a stock_location doc list.
+///
+/// Each result map has keys `lv` (id) and `ln` (display name), both sanitized
+/// via `.toString().trim()`. Skips docs where `lt != warehouse`, `lst != active`,
+/// or `lv` is empty.
+///
+/// Unlike [lookupWarehouseLv] (which returns only the FIRST lv and ignores
+/// `lst`), this helper exposes the full list so callers can branch on count:
+/// 0 -> error, 1 -> auto-use, >1 -> picker.
+///
+/// Convention #7: [stockDocs] originate from a `dynamic` Firestore store;
+/// every field read is `.toString().trim()` (no unguarded cast). Pure -- no
+/// Flutter/Obx/Firestore deps, directly testable.
+List<Map<String, String>> listActiveWarehouses(
+  List<Map<String, dynamic>> stockDocs, {
+  String typeField = 'lt',
+  String typeValue = 'warehouse',
+  String statusField = 'lst',
+  String statusValue = 'active',
+  String idField = 'lv',
+  String nameField = 'ln',
+}) {
+  final List<Map<String, String>> result = [];
+  for (final Map<String, dynamic> doc in stockDocs) {
+    final String lt = (doc[typeField] ?? '').toString().trim();
+    if (lt != typeValue) continue;
+    final String lst = (doc[statusField] ?? '').toString().trim();
+    if (lst != statusValue) continue;
+    final String lv = (doc[idField] ?? '').toString().trim();
+    if (lv.isEmpty) continue;
+    final String ln = (doc[nameField] ?? '').toString().trim();
+    result.add({'lv': lv, 'ln': ln});
+  }
+  return result;
+}
+
 /// Resolve the warehouse id (`gl`) for the O1 opening doc, applying precedence:
 ///
 ///   1. [configResolved] — the token-resolved `component['warehouseId']` value

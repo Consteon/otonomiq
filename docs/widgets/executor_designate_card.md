@@ -63,6 +63,9 @@ ExecutorDesignateCard({
 | `vidField` | `String` | Workforce doc field for the driver VID (default `VID`) |
 | `siteField` | `String` | Optional workforce doc field for a site/subtitle line (default empty = hidden) |
 | `workforceSearch` | `String` | Optional. Server-encoded AND filter (`key_25FC_val` pairs separated by `_2B58_`). Applied to subscribed workforce docs via `filterDriverHomeDocs` before the VID guard. Empty/absent = no server filter. Example: `role_25FC_staff` filters to docs where `role == 'staff'`. |
+| `busyTable` | `String` | Optional. Collection to scan for busy drivers (e.g. `<docId>//stock_location`). A 2nd `subscribeToMapCollection` is set up for this table. Empty/absent = no busy guard (all rows enabled). |
+| `busyField` | `String` | Optional. Field in `busyTable` rows that binds the driver (e.g. `dv`). Rows with non-empty `busyField` value -> that driver is busy. |
+| `busyLabelField` | `String` | Optional. Field in `busyTable` rows for the label shown in the busy subtitle (e.g. `ln` = vehicle plate). |
 | `text` | `String` | Diamond-separated label slots (see below) |
 
 ### `text` slots (diamond-separated `◆`)
@@ -77,6 +80,7 @@ ExecutorDesignateCard({
 | 5 | `Siapa yang ngantar?` | Picker subtitle |
 | 6 | `Pilih dari daftar pegawai` | Picker helper |
 | 7 | `Tidak ada pegawai tersedia` | Picker empty state |
+| 8 | *(empty)* | Busy prefix (e.g. `Sedang jalan \u{00B7} `). Prepended to `busyLabelField` value. |
 
 All slots are length-guarded via `_t(i, def)` (`diamondTextToList` indexes are
 read with `length > i`, never `[i]` directly).
@@ -128,6 +132,22 @@ to it.
 > `workforce` collection (Firestore). The demo seeder does NOT seed workforce
 > docs. When the collection is empty the picker correctly shows the empty-state
 > message ("Tidak ada pegawai tersedia") — expected behavior, not a bug.
+
+## Busy guard (optional, config-driven)
+
+When `busyTable` + `busyField` are configured, the picker builds a cross-table
+busy-set on open: for each row in the busy collection where `busyField` is
+non-empty, map `row[busyField]` (driver vid) -> `row[busyLabelField]` (vehicle
+plate). Workforce rows whose vid appears in the busy-set render DISABLED (grayed,
+un-tappable) with a subtitle = `text[8]` + the label value (e.g. "Sedang jalan
+· B 1234 XY").
+
+Fail-open: if `busyTable` is empty, fails to load, or returns zero rows, the
+busy-set is empty and all rows are enabled (current behavior). The guard is a
+UX convenience, not a security boundary.
+
+`static buildBusySet(docs, busyField, busyLabelField)` is the pure-function
+extraction (testable, mirrors `filterWorkforceDocs`).
 
 ## Important Behavior
 

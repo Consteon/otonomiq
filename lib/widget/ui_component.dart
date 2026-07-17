@@ -395,6 +395,12 @@ List<Widget> buildBannerList(var bannerList, double aspectRatio) {
 }
 
 List<Widget> buildGridList(var gridList, double fontSize) {
+  // gridList is server JSON (component['children']); empty/null/non-List →
+  // the deferred Builder/onTap closures below index gridList[0] at LAYOUT time,
+  // outside the try/catch, throwing RangeError → fatal. Guard at the source.
+  if (gridList is! List || gridList.isEmpty) {
+    return <Widget>[];
+  }
   const double defaultAspectRatio = 18 / 12;
   var topPad = 6.0;
   dynamic gridComponent;

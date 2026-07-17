@@ -25,6 +25,7 @@ export 'custody_event_submit.dart';
 export 'custody_reveal.dart';
 export 'custody_step_header.dart';
 export 'customer_outstanding_list.dart';
+export 'detail_card.dart';
 export 'display_card.dart';
 export 'display_list.dart';
 export 'do_chain.dart';

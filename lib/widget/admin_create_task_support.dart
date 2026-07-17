@@ -25,7 +25,7 @@ class DraftItem {
   /// Item display name (denorm from item `in` field). Immutable once added.
   final String itemName;
 
-  /// Transaction kind: 'deliver' | 'sale' | 'purchase' | 'refill'.
+  /// Transaction kind: 'deliver' | 'sale' | 'purchase' | 'refill' | 'buy'.
   String tx;
 
   /// Planned drop qty (deliver only).
@@ -34,13 +34,13 @@ class DraftItem {
   /// Planned pickup qty (deliver only).
   int pp;
 
-  /// Sale qty (sale only).
+  /// Sale qty (sale only -- walkin/order modes).
   int ps;
 
   /// Purchase qty (purchase only).
   int pb;
 
-  /// Refill qty (refill only).
+  /// Refill qty (refill only -- order mode).
   int pr;
 
   /// Condition out: 'full' | 'empty' | '' (deliver + sale).
@@ -52,9 +52,15 @@ class DraftItem {
   /// Water type: 'ro' | 'refill' | '' (refill only).
   String wt;
 
-  /// Unit price (integer rupiah, e.g. 45000). Sale rows only.
-  /// Non-sale rows always 0 (not serialized by toItMap for non-sale tx).
+  /// Unit price (integer rupiah, e.g. 45000). Sale rows (walkin/order) and
+  /// ALL supplier rows carry this field.
   int hg;
+
+  /// Qty out (supplier: sale out, refill empty-out). Default 0.
+  int qo;
+
+  /// Qty in (supplier: buy in, refill full-in). Default 0.
+  int qi;
 
   DraftItem({
     required this.ii,
@@ -69,9 +75,11 @@ class DraftItem {
     this.cdi = '',
     this.wt = '',
     this.hg = 0,
+    this.qo = 0,
+    this.qi = 0,
   });
 
-  /// Serialize to the Firestore it[] element shape.
+  /// Serialize to the Firestore it[] element shape (order mode).
   ///
   /// Sets zero-fields per tx type so the consumer (item_execution_list)
   /// sees a complete shape regardless of tx kind. Adds `hg` for sale rows
@@ -99,7 +107,7 @@ class DraftItem {
     return m;
   }
 
-  /// Serialize to the nota li[] element shape.
+  /// Serialize to the nota li[] element shape (walkin POS mode).
   ///
   /// Walkin POS lines: {ii, in, qt, hg, sub} -- all fields present, none
   /// omitted. qt/hg/sub are int (Firestore Number). in is the item display
@@ -111,6 +119,35 @@ class DraftItem {
       'qt': ps, // walkin qty = sale qty (ps)
       'hg': hg,
       'sub': ps * hg,
+    };
+  }
+
+  /// Serialize to the supplier nota li[] element shape.
+  ///
+  /// Supplier lines: {ii, in, tx, qo, qi, hrg} -- qo/qi/hrg are int
+  /// (Firestore Number). Irrelevant qo/qi carry 0.
+  Map<String, dynamic> toSupplierLiMap() {
+    return <String, dynamic>{
+      'ii': ii,
+      'in': itemName,
+      'tx': tx,
+      'qo': qo,
+      'qi': qi,
+      'hrg': hg,
+    };
+  }
+
+  /// Serialize to the seed nota li[] element shape.
+  ///
+  /// Seed lines: {ii, in, qt, cd} -- qt is int (Firestore Number),
+  /// cd is always 'full' (galon at customer = full/unreturned).
+  /// Uses ps as the internal qty holder (same mapping as walkin toLiMap).
+  Map<String, dynamic> toSeedLiMap() {
+    return <String, dynamic>{
+      'ii': ii,
+      'in': itemName,
+      'qt': ps,
+      'cd': 'full',
     };
   }
 
@@ -309,6 +346,86 @@ class AdminCreateTaskSupport {
     return out;
   }
 
+  /// Convert draft items to the supplier nota li[] array shape for Firestore.
+  ///
+  /// Each element: {ii:String, in:String, tx:String, qo:int, qi:int, hrg:int}.
+  /// Empty draft -> empty list.
+  static List<Map<String, dynamic>> draftToSupplierLiArray(
+      List<DraftItem> items) {
+    final List<Map<String, dynamic>> out = <Map<String, dynamic>>[];
+    for (final DraftItem item in items) {
+      out.add(item.toSupplierLiMap());
+    }
+    return out;
+  }
+
+  /// Compute supplier total: sum of hrg * max(qo, qi) across all items.
+  ///
+  /// Subtotal per line = hrg * max(qo, qi). Total = sum of all subtotals.
+  /// Pure function.
+  static int computeSupplierTotal(List<DraftItem> items) {
+    int total = 0;
+    for (final DraftItem item in items) {
+      final int qty = item.qo > item.qi ? item.qo : item.qi;
+      total += item.hg * qty;
+    }
+    return total;
+  }
+
+  /// Check if all supplier draft lines are valid for submission.
+  ///
+  /// buy: qi >= 1 AND hg > 0
+  /// sale: qo >= 1 AND hg > 0
+  /// refill: qo >= 1 AND qi >= 1 (hg >= 0 always true for int)
+  ///
+  /// Unknown tx -> false (fail-safe).
+  static bool allSupplierLinesValid(List<DraftItem> items) {
+    return items.every((DraftItem item) {
+      switch (item.tx) {
+        case 'buy':
+          return item.qi >= 1 && item.hg > 0;
+        case 'sale':
+          return item.qo >= 1 && item.hg > 0;
+        case 'refill':
+          return item.qo >= 1 && item.qi >= 1;
+        default:
+          return false;
+      }
+    });
+  }
+
+  /// Convert draft items to the seed nota li[] array shape for Firestore.
+  ///
+  /// Each element: {ii:String, in:String, qt:int, cd:String}.
+  /// Empty draft -> empty list.
+  static List<Map<String, dynamic>> draftToSeedLiArray(
+      List<DraftItem> items) {
+    final List<Map<String, dynamic>> out = <Map<String, dynamic>>[];
+    for (final DraftItem item in items) {
+      out.add(item.toSeedLiMap());
+    }
+    return out;
+  }
+
+  /// Compute seed total qty: sum of ps (the qt holder) across all items.
+  ///
+  /// Pure function. Returns 0 for empty list.
+  static int computeSeedTotalQty(List<DraftItem> items) {
+    int total = 0;
+    for (final DraftItem item in items) {
+      total += item.ps;
+    }
+    return total;
+  }
+
+  /// Check if all seed draft lines are valid for submission.
+  ///
+  /// Every line must have ps >= 1 (at least 1 unit of this item at customer).
+  /// Empty list -> true (vacuously; submit guards empty liArray separately).
+  static bool allSeedLinesValid(List<DraftItem> items) {
+    return items.every((DraftItem item) => item.ps >= 1);
+  }
+
   /// Compute aggregate totals across all draft items.
   static TaskTotals computeTotals(List<DraftItem> items) {
     int drop = 0, pickup = 0, sale = 0, purchase = 0, refill = 0;
@@ -489,7 +606,18 @@ class AdminCreateTaskSupport {
   ///
   /// Pure -- all inputs are explicit parameters.
   /// Canon: tot/qt/hg/sub/t = int (Number); everything else = String.
-  /// li[] elements carry ALL fields (ii, in, qt, hg, sub) -- none omitted.
+  /// li[] elements carry ALL fields (shape depends on src/mode).
+  ///
+  /// Optional supplier params:
+  ///   sv -- supplier id (omitted when empty -> walkin doc unchanged).
+  ///   sn -- supplier name (omitted when empty).
+  ///   d  -- note text (omitted when empty).
+  ///
+  /// Optional seed params:
+  ///   kl -- customer id (replaces hardcoded ''; empty default preserves
+  ///         walkin/supplier doc shape).
+  ///   kn -- customer name (omitted when empty).
+  ///   days -- age in days (omitted when null).
   static Map<String, dynamic> assembleNotaDoc({
     required String nno,
     required String src,
@@ -503,12 +631,18 @@ class AdminCreateTaskSupport {
     required int t,
     required String ts,
     required String tableVid,
+    String sv = '',
+    String sn = '',
+    String d = '',
+    String kl = '',
+    String kn = '',
+    int? days,
   }) {
-    return <String, dynamic>{
+    final Map<String, dynamic> doc = <String, dynamic>{
       'nno': nno,
       'src': src,
       'ref': '',
-      'kl': '',
+      'kl': kl,
       'by': by,
       'bym': bym,
       'st': 'LUNAS',
@@ -522,6 +656,12 @@ class AdminCreateTaskSupport {
       'tablevid': tableVid,
       'search': 'nno\u{2605}$nno',
     };
+    if (sv.isNotEmpty) doc['sv'] = sv;
+    if (sn.isNotEmpty) doc['sn'] = sn;
+    if (d.isNotEmpty) doc['d'] = d;
+    if (kn.isNotEmpty) doc['kn'] = kn;
+    if (days != null) doc['days'] = days;
+    return doc;
   }
 
   /// Format an epoch-ms timestamp as a WIB (UTC+7) human-readable string.

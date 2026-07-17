@@ -224,7 +224,6 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
       {bool? dialog}) {
     List<Widget> bannerComponent = [];
     var state = transactionStore.state.screenTx;
-    bool hasChain = false;
 
     void saveData(
         int timeStamp, String scrName, dynamic component, String locString,
@@ -521,7 +520,10 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
       // This function builds the actual button widget. It's separated so it can be called
       // either directly (for static buttons) or inside a GetBuilder (for dynamic buttons).
       Widget buildActualButton(bool isEnabled) {
-        hasChain = buttonData['chain'] != null &&
+        // per-button (was a shared buildButtonList-scope var → last button's
+        // value leaked to every button's onTap, firing doChain on chainless
+        // buttons → null-chain crash / real chains silently not firing).
+        final bool hasChain = buttonData['chain'] != null &&
             buttonData['chain'].toString().trim().isNotEmpty;
         try {
           final buttonColorStr = buttonData['buttonColor'] as String?;

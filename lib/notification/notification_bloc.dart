@@ -7,8 +7,17 @@ class NotificationBloc extends Bloc<NotificationEvent, NotificationState> {
   final NotificationRepository _notificationRepository;
   StreamSubscription? _notificationSubscription;
 
+  /// Global handle so non-widget code (api.dart, right after firestoreIO is
+  /// set) can re-subscribe the inbox stream to the correct path — the stream
+  /// otherwise stays bound to the boot-time default path until something else
+  /// re-dispatches LoadNotification.
+  static NotificationBloc? instance;
+
   NotificationBloc({required NotificationRepository notificationRepository})
-      : _notificationRepository = notificationRepository, super(NotificationLoading());
+      : _notificationRepository = notificationRepository,
+        super(NotificationLoading()) {
+    instance = this;
+  }
 
   NotificationState get initialState => NotificationLoading();
 

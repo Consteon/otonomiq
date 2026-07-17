@@ -136,7 +136,14 @@ class _OtqBottomNavBarState extends State<OtqBottomNavBar>
                           color: pillColor.withValues(alpha: 0.0 + (1.0 * t)),
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: _buildIcon(item, iconColor, iconSize),
+                        // heightFactor:1 shrink-wraps vertically (no blowup);
+                        // Center fills the slot width and centers the icon+badge
+                        // Stack, which then sizes to the icon so the badge hugs
+                        // its corner instead of the far pill edge.
+                        child: Center(
+                          heightFactor: 1.0,
+                          child: _buildIcon(item, iconColor, iconSize),
+                        ),
                       );
                     },
                   ),
@@ -158,7 +165,7 @@ class _OtqBottomNavBarState extends State<OtqBottomNavBar>
         children: [
           iconWidget,
           Positioned(
-            right: -6,
+            right: -4,
             top: -4,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),

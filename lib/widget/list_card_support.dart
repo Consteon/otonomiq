@@ -134,3 +134,39 @@ BadgeEntry? lookupBadge(List<BadgeEntry> entries, String value) {
   }
   return null;
 }
+
+/// Parsed row definition from the `rows` config field.
+class RowDef {
+  final String label;
+  final String template; // <field> template string
+  const RowDef(this.label, this.template);
+}
+
+/// Parse `rows`: `Label◼template★Label2◼template2★…`.
+///
+/// **Split each row at the FIRST ◼ only** — the template itself may contain ◼
+/// (e.g. `Jam kerja◼<st>–<et>` → label `"Jam kerja"`, template `"<st>–<et>"`).
+///
+/// No ◼ at all (e.g. `Label`) = label only, empty template.
+///
+/// Caller MUST `autheniumDecode` the raw string BEFORE calling.
+List<RowDef> parseRowDefs(String raw) {
+  if (raw.trim().isEmpty) return const [];
+  final List<RowDef> out = [];
+  for (final part in raw.split('\u{2605}')) {
+    // ★ separates rows
+    final String trimmed = part.trim();
+    if (trimmed.isEmpty) continue;
+    final int sep = trimmed.indexOf('\u{25FC}'); // FIRST ◼ only
+    if (sep < 0) {
+      // no ◼ — label only, empty template
+      out.add(RowDef(trimmed, ''));
+      continue;
+    }
+    final String label = trimmed.substring(0, sep).trim();
+    final String template = trimmed.substring(sep + 1).trim();
+    if (label.isEmpty) continue;
+    out.add(RowDef(label, template));
+  }
+  return out;
+}

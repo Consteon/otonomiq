@@ -46,6 +46,10 @@ of `tb` (`add⬤update⬤delete⬤event`). At `historySync` (online), `tbParts[3
   …) stay String — they are IDs/hashes that must not lose precision.
 - Offline-first: rides the same history queue as addToTable; the write happens at the
   next `historySync` (immediately if online).
+- Field `ntf` (values `single` / `broadcast`) gates the `onEventCreated` push
+  Cloud Function. It is a plain pass-through DSL field — do NOT add it (or any
+  event field) to a whitelist/strip step; that silently disables push. Covered
+  by `test/event_push_config_test.dart`.
 
 ## Not yet implemented
 - Approval-chain `addToEvent` (FtzRowOfButton2 `_updateApprovalChain` /

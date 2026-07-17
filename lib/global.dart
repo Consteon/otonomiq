@@ -804,6 +804,7 @@ Future<int> globalInit() async {
   functionName['runInstruction'] = '/runInstruction'; //= run instruction in gcf
   functionName['InvLogin'] = '/s1InvLogin';
   functionName['deviceOperation'] = '/deviceReset';
+  functionName['mobileRefresh'] = '/mobileRefresh';
   autsorzFunctionDomain = functionDomain['default'];
   appSettingFunctionName = functionName['appSettings'];
   sheetSystemLength = 15;

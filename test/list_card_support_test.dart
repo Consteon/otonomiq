@@ -356,4 +356,103 @@ void main() {
           'priority\u{25FC}high\u{2B58}status\u{25FC}open');
     });
   });
+
+  // ── parseRowDefs ────────────────────────────────────────────────────
+
+  group('parseRowDefs', () {
+    test('splits at first separator only (template contains separator)', () {
+      // "Jam kerja◼<st>◼<et>" -> label="Jam kerja", template="<st>◼<et>"
+      final defs = parseRowDefs('Jam kerja\u{25FC}<st>\u{25FC}<et>');
+      expect(defs.length, 1);
+      expect(defs[0].label, 'Jam kerja');
+      expect(defs[0].template, '<st>\u{25FC}<et>');
+    });
+
+    test('simple label-template pair', () {
+      final defs = parseRowDefs('Venue\u{25FC}<vn>');
+      expect(defs.length, 1);
+      expect(defs[0].label, 'Venue');
+      expect(defs[0].template, '<vn>');
+    });
+
+    test('empty template after separator', () {
+      final defs = parseRowDefs('Label\u{25FC}');
+      expect(defs.length, 1);
+      expect(defs[0].label, 'Label');
+      expect(defs[0].template, '');
+    });
+
+    test('no separator = label only, empty template', () {
+      final defs = parseRowDefs('Label');
+      expect(defs.length, 1);
+      expect(defs[0].label, 'Label');
+      expect(defs[0].template, '');
+    });
+
+    test('multiple rows separated by star', () {
+      final defs = parseRowDefs(
+          'Venue\u{25FC}<vn>'
+          '\u{2605}Tanggal\u{25FC}<dt>'
+          '\u{2605}Jam kerja\u{25FC}<st>\u{2013}<et>');
+      expect(defs.length, 3);
+      expect(defs[0].label, 'Venue');
+      expect(defs[0].template, '<vn>');
+      expect(defs[1].label, 'Tanggal');
+      expect(defs[1].template, '<dt>');
+      expect(defs[2].label, 'Jam kerja');
+      expect(defs[2].template, '<st>\u{2013}<et>');
+    });
+
+    test('empty string returns empty list', () {
+      expect(parseRowDefs(''), isEmpty);
+      expect(parseRowDefs('  '), isEmpty);
+    });
+
+    test('empty label is skipped', () {
+      final defs = parseRowDefs('\u{25FC}<vn>');
+      expect(defs, isEmpty);
+    });
+
+    test('whitespace-only entries between stars are skipped', () {
+      final defs = parseRowDefs(
+          'A\u{25FC}<a>\u{2605}  \u{2605}B\u{25FC}<b>');
+      expect(defs.length, 2);
+      expect(defs[0].label, 'A');
+      expect(defs[1].label, 'B');
+    });
+  });
+
+  // ── parseRowDefs spec acceptance fixture ──────────────────────────
+
+  group('parseRowDefs spec acceptance (DETAIL_CARD section 4)', () {
+    test('fate assign detail rows: 8 rows parsed correctly', () {
+      // rows from spec section 4:
+      // Venue◼<vn>★Tanggal◼<dt>★Jam kerja◼<st>–<et>★Lapor hadir◼<arr>★
+      // Lapor selesai◼<cmp>★Selisih◼<ovm> menit★Status selisih◼<ss>★
+      // Catatan brand◼<scn>
+      final raw = 'Venue\u{25FC}<vn>'
+          '\u{2605}Tanggal\u{25FC}<dt>'
+          '\u{2605}Jam kerja\u{25FC}<st>\u{2013}<et>'
+          '\u{2605}Lapor hadir\u{25FC}<arr>'
+          '\u{2605}Lapor selesai\u{25FC}<cmp>'
+          '\u{2605}Selisih\u{25FC}<ovm> menit'
+          '\u{2605}Status selisih\u{25FC}<ss>'
+          '\u{2605}Catatan brand\u{25FC}<scn>';
+      final defs = parseRowDefs(raw);
+      expect(defs.length, 8);
+      expect(defs[0].label, 'Venue');
+      expect(defs[0].template, '<vn>');
+      expect(defs[2].label, 'Jam kerja');
+      // template contains an en-dash literal between <st> and <et>
+      expect(defs[2].template, '<st>\u{2013}<et>');
+      expect(defs[5].label, 'Selisih');
+      expect(defs[5].template, '<ovm> menit');
+      expect(defs[7].label, 'Catatan brand');
+      expect(defs[7].template, '<scn>');
+    });
+
+    test('all optional rows empty -> renders no rows (empty list)', () {
+      expect(parseRowDefs(''), isEmpty);
+    });
+  });
 }

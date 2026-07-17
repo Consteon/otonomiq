@@ -447,4 +447,305 @@ void main() {
       expect(result.summaryValues['all'], 0);
     });
   });
+
+  // -- DetailRow aggregation (detailField / detailNameField) -----------------
+
+  group('detailField empty -> no details (zero regression)', () {
+    test('detailField empty -> all PivotCell.details empty', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'warehouse', 'cd': 'full', 'qt': 10, 'lv': 'WH1', 'ln': 'Gudang Utama'},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        detailField: '',
+      );
+      expect(result.entities.length, 1);
+      expect(result.entities.first.pivots['warehouse']!.details, isEmpty);
+    });
+
+    test('detailField omitted (default empty) -> no details', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'warehouse', 'cd': 'full', 'qt': 10, 'lv': 'WH1'},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+      );
+      expect(result.entities.first.pivots['warehouse']!.details, isEmpty);
+    });
+  });
+
+  group('detailField per-lv grouping', () {
+    test('groups by detailField within pivot', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 10, 'lv': 'V1', 'ln': 'B 1234 XY'},
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'empty', 'qt': 5, 'lv': 'V1', 'ln': 'B 1234 XY'},
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 3, 'lv': 'V2', 'ln': 'B 5678 CD'},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        detailField: 'lv',
+        detailNameField: 'ln',
+      );
+      final pivot = result.entities.first.pivots['vehicle']!;
+      expect(pivot.details.length, 2);
+      // Sorted by total desc: V1=15, V2=3
+      expect(pivot.details[0].id, 'V1');
+      expect(pivot.details[0].name, 'B 1234 XY');
+      expect(pivot.details[0].total, 15);
+      expect(pivot.details[0].condTotals['full'], 10);
+      expect(pivot.details[0].condTotals['empty'], 5);
+      expect(pivot.details[1].id, 'V2');
+      expect(pivot.details[1].name, 'B 5678 CD');
+      expect(pivot.details[1].total, 3);
+    });
+
+    test('detail does not affect entity-level pivot totals', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 10, 'lv': 'V1'},
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 3, 'lv': 'V2'},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        detailField: 'lv',
+      );
+      // Entity-level pivot total unchanged
+      expect(result.entities.first.pivots['vehicle']!.total, 13);
+      expect(result.entities.first.total, 13);
+    });
+
+    test('empty lv value on doc -> excluded from detail rows', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 10, 'lv': 'V1'},
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 5, 'lv': ''},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        detailField: 'lv',
+      );
+      final pivot = result.entities.first.pivots['vehicle']!;
+      // Only V1 in detail; empty-lv doc still counts in pivot total
+      expect(pivot.details.length, 1);
+      expect(pivot.details.first.id, 'V1');
+      expect(pivot.total, 15);
+    });
+  });
+
+  group('detailNameField name resolution', () {
+    test('first non-empty ln wins for a given lv', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 5, 'lv': 'V1', 'ln': 'First Name'},
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'empty', 'qt': 3, 'lv': 'V1', 'ln': 'Second Name'},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        detailField: 'lv',
+        detailNameField: 'ln',
+      );
+      expect(result.entities.first.pivots['vehicle']!.details.first.name, 'First Name');
+    });
+
+    test('all ln empty -> falls back to lv id', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 5, 'lv': 'V1', 'ln': ''},
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 3, 'lv': 'V1'},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        detailField: 'lv',
+        detailNameField: 'ln',
+      );
+      expect(result.entities.first.pivots['vehicle']!.details.first.name, 'V1');
+    });
+
+    test('detailNameField empty -> name falls back to id', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 5, 'lv': 'V1', 'ln': 'Some Name'},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        detailField: 'lv',
+        detailNameField: '',
+      );
+      expect(result.entities.first.pivots['vehicle']!.details.first.name, 'V1');
+    });
+  });
+
+  group('hideZero per detail row', () {
+    test('zero-total detail row pruned when hideZero true', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 10, 'lv': 'V1'},
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 0, 'lv': 'V2'},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        hideZero: true,
+        detailField: 'lv',
+      );
+      final pivot = result.entities.first.pivots['vehicle']!;
+      expect(pivot.details.length, 1);
+      expect(pivot.details.first.id, 'V1');
+    });
+
+    test('zero-total detail row kept when hideZero false', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 10, 'lv': 'V1'},
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 0, 'lv': 'V2'},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        hideZero: false,
+        detailField: 'lv',
+      );
+      final pivot = result.entities.first.pivots['vehicle']!;
+      expect(pivot.details.length, 2);
+    });
+  });
+
+  group('detail row sort order', () {
+    test('sorted total desc, tie-break id asc', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 5, 'lv': 'ZZZ'},
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 5, 'lv': 'AAA'},
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 20, 'lv': 'MID'},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        detailField: 'lv',
+      );
+      final details = result.entities.first.pivots['vehicle']!.details;
+      expect(details.length, 3);
+      expect(details[0].id, 'MID'); // 20
+      expect(details[1].id, 'AAA'); // 5, tie-break asc
+      expect(details[2].id, 'ZZZ'); // 5, tie-break asc
+    });
+  });
+
+  group('detail row condTotals', () {
+    test('condTotals populated per detail row', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 10, 'lv': 'V1'},
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'empty', 'qt': 3, 'lv': 'V1'},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        detailField: 'lv',
+      );
+      final dr = result.entities.first.pivots['vehicle']!.details.first;
+      expect(dr.condTotals['full'], 10);
+      expect(dr.condTotals['empty'], 3);
+      expect(dr.total, 13);
+    });
+
+    test('missing cd on detail doc -> counted in total not condTotals', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'vehicle', 'qt': 7, 'lv': 'V1'}, // no cd
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        detailField: 'lv',
+      );
+      final dr = result.entities.first.pivots['vehicle']!.details.first;
+      expect(dr.total, 7);
+      expect(dr.condTotals['full'], 0);
+      expect(dr.condTotals['empty'], 0);
+    });
+  });
+
+  group('detail across multiple entities', () {
+    test('detail rows scoped per entity', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 10, 'lv': 'V1'},
+          {'ii': 'TAB', 'lt': 'vehicle', 'cd': 'full', 'qt': 5, 'lv': 'V2'},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        detailField: 'lv',
+      );
+      // GAS has V1, TAB has V2 -- details are per-entity
+      final gas = result.entities.firstWhere((e) => e.id == 'GAS');
+      final tab = result.entities.firstWhere((e) => e.id == 'TAB');
+      expect(gas.pivots['vehicle']!.details.length, 1);
+      expect(gas.pivots['vehicle']!.details.first.id, 'V1');
+      expect(tab.pivots['vehicle']!.details.length, 1);
+      expect(tab.pivots['vehicle']!.details.first.id, 'V2');
+    });
+  });
+
+  // -- detailSubField (R4) ----------------------------------------------------
+
+  group('detailSubField captures sub into DetailRow.sub', () {
+    test('sub captured from detailSubField (first non-empty wins)', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 10, 'lv': 'V1', 'ln': 'B 1234 XY', 'ty': 'Pickup'},
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'empty', 'qt': 5, 'lv': 'V1', 'ln': 'B 1234 XY', 'ty': 'Truck'},
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 3, 'lv': 'V2', 'ln': 'B 5678 CD', 'ty': 'Motor'},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        detailField: 'lv',
+        detailNameField: 'ln',
+        detailSubField: 'ty',
+      );
+      final details = result.entities.first.pivots['vehicle']!.details;
+      expect(details.length, 2);
+      // V1 total=15, V2 total=3 -> sorted desc
+      expect(details[0].id, 'V1');
+      expect(details[0].name, 'B 1234 XY');
+      expect(details[0].sub, 'Pickup'); // first non-empty wins
+      expect(details[1].id, 'V2');
+      expect(details[1].sub, 'Motor');
+    });
+
+    test('detailSubField empty (omitted) -> DetailRow.sub is empty string (zero regression)', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 10, 'lv': 'V1', 'ln': 'B 1234 XY', 'ty': 'Pickup'},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        detailField: 'lv',
+        detailNameField: 'ln',
+        // detailSubField omitted -> default ''
+      );
+      final dr = result.entities.first.pivots['vehicle']!.details.first;
+      expect(dr.name, 'B 1234 XY');
+      expect(dr.sub, '');
+    });
+
+    test('doc missing ty field -> sub is empty string, no error', () {
+      final result = groupAssetStock(
+        cacheDocs: [
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 10, 'lv': 'V1', 'ln': 'B 1234 XY'},
+          {'ii': 'GAS', 'lt': 'vehicle', 'cd': 'full', 'qt': 5, 'lv': 'V2', 'ln': 'B 5678 CD', 'ty': ''},
+        ],
+        pivotOrder: pivots,
+        condOrder: conds,
+        detailField: 'lv',
+        detailNameField: 'ln',
+        detailSubField: 'ty',
+      );
+      final details = result.entities.first.pivots['vehicle']!.details;
+      // Both docs have empty/missing ty -> sub stays ''
+      expect(details[0].sub, '');
+      expect(details[1].sub, '');
+      // Names still resolve correctly
+      expect(details[0].name, 'B 1234 XY');
+      expect(details[1].name, 'B 5678 CD');
+    });
+  });
 }

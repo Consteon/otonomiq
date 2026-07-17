@@ -257,4 +257,67 @@ void main() {
       expect(result[0]['vid'], 'c-1');
     });
   });
+
+  // ── buildBusySet (busy-guard S1) ────────────────────────────────────────
+
+  group('buildBusySet', () {
+    test('maps rows with non-empty busyField to busyLabelField', () {
+      final docs = <Map<String, dynamic>>[
+        {'dv': 'wf-1', 'ln': 'B 1234 XY'},
+        {'dv': 'wf-2', 'ln': 'B 5678 ZZ'},
+        {'dv': '', 'ln': 'D 9999 AA'},       // empty dv -> not busy
+      ];
+      final result =
+          ExecutorDesignateCard.buildBusySet(docs, 'dv', 'ln');
+      expect(result, {'wf-1': 'B 1234 XY', 'wf-2': 'B 5678 ZZ'});
+    });
+
+    test('empty busyField rows are excluded', () {
+      final docs = <Map<String, dynamic>>[
+        {'dv': '', 'ln': 'B 1234 XY'},
+        {'dv': '   ', 'ln': 'B 5678 ZZ'},   // whitespace-only -> excluded
+      ];
+      final result =
+          ExecutorDesignateCard.buildBusySet(docs, 'dv', 'ln');
+      expect(result, isEmpty);
+    });
+
+    test('empty docs list returns empty map', () {
+      final result = ExecutorDesignateCard.buildBusySet(
+          const <Map<String, dynamic>>[], 'dv', 'ln');
+      expect(result, isEmpty);
+    });
+
+    test('missing field keys degrade to empty (no crash)', () {
+      final docs = <Map<String, dynamic>>[
+        <String, dynamic>{},                   // no dv key
+        {'dv': null, 'ln': null},              // null values
+        {'dv': 'wf-3'},                        // missing ln key
+      ];
+      final result =
+          ExecutorDesignateCard.buildBusySet(docs, 'dv', 'ln');
+      // Only wf-3 has non-empty dv; its ln is '' (missing key -> '').
+      expect(result, {'wf-3': ''});
+    });
+
+    test('non-string dynamic values are toString-safe', () {
+      final docs = <Map<String, dynamic>>[
+        {'dv': 42, 'ln': 123},  // int values
+      ];
+      final result =
+          ExecutorDesignateCard.buildBusySet(docs, 'dv', 'ln');
+      expect(result, {'42': '123'});
+    });
+
+    test('busy-vid membership check', () {
+      final docs = <Map<String, dynamic>>[
+        {'dv': 'wf-1', 'ln': 'B 1234 XY'},
+      ];
+      final busySet =
+          ExecutorDesignateCard.buildBusySet(docs, 'dv', 'ln');
+      expect(busySet.containsKey('wf-1'), isTrue);
+      expect(busySet.containsKey('wf-999'), isFalse);
+      expect(busySet.containsKey(''), isFalse);
+    });
+  });
 }

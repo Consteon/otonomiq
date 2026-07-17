@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../global.dart';
 import '../notification/bloc.dart';
 import '../widget/link_widget.dart';
+import '../widget/notif_ui.dart';
 
 import '../api.dart';
 
@@ -10,8 +11,7 @@ class MessageList extends StatefulWidget {
   final String? title;
   final String? profilePic;
 
-  const MessageList(
-      {required Key key, this.title, this.profilePic})
+  const MessageList({required Key key, this.title, this.profilePic})
       : super(key: key);
 
   @override
@@ -19,8 +19,6 @@ class MessageList extends StatefulWidget {
 }
 
 class _MessageListState extends State<MessageList> {
-  late MessageBloc _messageBloc;
-
   @override
   void initState() {
     super.initState();
@@ -29,11 +27,19 @@ class _MessageListState extends State<MessageList> {
 
   @override
   Widget build(BuildContext context) {
-    const dotDiameter = 24.0;
+    final primary = Theme.of(context).primaryColor;
+    final title = (widget.title != null && widget.title!.trim().isNotEmpty)
+        ? widget.title!.trim()
+        : 'Message';
     return BlocBuilder<MessageBloc, MessageState>(
       builder: (context, state) {
         return Scaffold(
+          backgroundColor: notifBg,
           appBar: AppBar(
+            backgroundColor: primary,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            titleSpacing: 0,
             leading: IconButton(
               icon: const Icon(Icons.arrow_back),
               onPressed: () {
@@ -43,133 +49,158 @@ class _MessageListState extends State<MessageList> {
                 });
               },
             ),
-
-//            actions: <Widget>[
-//              (state is NotificationLoaded && state.unReadNumber > 0)
-//                  ? TxtDot(
-//                txt: '${state.unReadNumber}',
-//                color: Colors.redAccent,
-//                diameter: dotDiameter,
-//              )
-//                  : Container(),
-//              Container(
-//                width: 20,
-//              ),
-//            ],
-//            title: Text(widget.title ?? 'Message'),
             title: Row(
-//              mainAxisAlignment: MainAxisAlignment.start,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: <Widget>[
-                CircleAvatar(
-                  backgroundImage: NetworkImage(widget.profilePic
-                      ?? 'https://firebasestorage.googleapis.com/v0/b/collanium1-4babc.appspot.com/o/link_app%2Fdefaultpp.PNG?alt=media&token=a5c20f19-a914-4d62-bcaf-585cd92be94d'
-                      ),
-                ),
-                Container(
-                  width: 8,
-                ),
-                Text(
-                  widget.title ?? 'Message',
+                notifAvatar(title, widget.profilePic, 18),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ],
             ),
           ),
-          body: Container(
-            child: Builder(
-              builder: (context) {
-                Widget nListResult;
-                if (state is MessageLoading) {
-                  nListResult = const Center(
-                    child: CircularProgressIndicator(),
-                  );
-                } else if (state is MessageLoaded) {
-                  final theList = state.messages;
-                  nListResult = ListView.builder(
-                    itemCount: theList.length,
-                    itemBuilder: (context, index) {
-                      final msg = theList[index];
-                      bool needAction = false;
-                      if (msg.inbox == true &&
-                          msg.dataPayload != null &&
-                          msg.status != 101) {
-                        needAction = true;
-                      }
-                      return SizedBox(
-                        width: 250,
-                        child: Column(
-                          crossAxisAlignment: msg.inbox == true
-                              ? CrossAxisAlignment.start
-                              : CrossAxisAlignment.end,
-                          children: <Widget>[
-                            SizedBox(
-                              width: 350,
-                              child: Card(
-                                color: msg.inbox == true
-                                    ? Colors.white
-                                    : Colors.amberAccent,
-                                child: ListTile(
-                                  onTap: () {
-                                    setStatus(msg.messageId, 101);
-                                    // if msg.route is not null then display
-                                    if (msg.route != null && msg.route != '') {
-                                      if (linkElement[msg.route] == null) {
-                                        // TODO put page not found error in message_list if route is not present
-                                      } else {
-                                        var myRoute = msg.route;
-                                        //myRoute = home; // delete this line when page is available
-                                        routeStack
-                                            .push(myRoute!); // push new page
-                                        List<Widget> newElementList =
-                                            reloadPage(
-                                                myRoute); // reload current page
-                                        rootThis.setState(() {
-                                          rootThis.byPass = 0;
-                                          rootThis.pageName = myRoute;
-                                          rootThis.pageElements =
-                                              newElementList;
-                                        });
-                                      }
-                                    }
+          body: Builder(
+            builder: (context) {
+              if (state is MessageLoading) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (state is! MessageLoaded) {
+                return const SizedBox.shrink();
+              }
+              final theList = state.messages;
+              if (theList.isEmpty) {
+                return notifEmptyState(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  title: 'Belum ada pesan',
+                  subtitle: 'Pesan pada percakapan ini akan muncul di sini',
+                );
+              }
+              return ListView.builder(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                itemCount: theList.length,
+                itemBuilder: (context, index) {
+                  final msg = theList[index];
+                  final incoming = msg.inbox == true;
+                  final needAction = msg.inbox == true &&
+                      msg.dataPayload != null &&
+                      msg.status != 101;
+                  final time = notifRelTime(
+                      msg.receivedTime == null ? null : msg.receivedTime! * 1000);
 
-                                    var a = index;
-                                    var c = msg;
-                                    var b = a;
-                                  }, // end onTap()
-//                          leading: CircleAvatar(
-//                            radius: 32,
-//                            backgroundImage: NetworkImage(note.profilePicture ??
-//                                'https://firebasestorage.googleapis.com/v0/b/collanium1-4babc.appspot.com/o/link_app%2Fdefaultpp.PNG?alt=media&token=a5c20f19-a914-4d62-bcaf-585cd92be94d'),
-//                          ),
-                                  title: Text(msg.displayMessage ?? '-'),
-                                  // subtitle: Text(
-                                  //     '${displayDateTime(msg.receivedTime)}' ??
-                                  //         '-'),
-                                  trailing: needAction
-                                      ? Icon(
-                                          Icons.fiber_manual_record,
-                                          color: msg.status! > 0
-                                              ? Colors.green
-                                              : Colors.red,
-                                        )
-                                      : const SizedBox(
-                                          width: 0,
-                                          height: 0,
-                                        ),
-                                ),
-                              ),
-                            ),
-                          ],
+                  final bubble = InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () {
+                      setStatus(msg.messageId, 101);
+                      // if msg.route is not null then display
+                      if (msg.route != null && msg.route != '') {
+                        if (linkElement[msg.route] == null) {
+                          // TODO put page not found error in message_list if route is not present
+                        } else {
+                          var myRoute = msg.route;
+                          //myRoute = home; // delete this line when page is available
+                          routeStack.push(myRoute!); // push new page
+                          List<Widget> newElementList =
+                              reloadPage(myRoute); // reload current page
+                          rootThis.setState(() {
+                            rootThis.byPass = 0;
+                            rootThis.pageName = myRoute;
+                            rootThis.pageElements = newElementList;
+                          });
+                        }
+                      }
+                    }, // end onTap()
+                    child: Container(
+                      constraints: BoxConstraints(
+                        maxWidth: MediaQuery.of(context).size.width * 0.76,
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: incoming ? Colors.white : primary,
+                        borderRadius: BorderRadius.only(
+                          topLeft: const Radius.circular(16),
+                          topRight: const Radius.circular(16),
+                          bottomLeft: Radius.circular(incoming ? 4 : 16),
+                          bottomRight: Radius.circular(incoming ? 16 : 4),
                         ),
-                      );
-                    },
+                        border: incoming
+                            ? Border.all(color: notifBorder)
+                            : null,
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x0F000000),
+                            blurRadius: 6,
+                            offset: Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Text(
+                            msg.displayMessage ?? '-',
+                            style: TextStyle(
+                              fontSize: 15,
+                              height: 1.3,
+                              color:
+                                  incoming ? notifTextStrong : Colors.white,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              if (time.isNotEmpty)
+                                Text(
+                                  time,
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    color: incoming
+                                        ? notifTextMuted
+                                        : Colors.white70,
+                                  ),
+                                ),
+                              if (needAction) ...[
+                                const SizedBox(width: 6),
+                                Icon(
+                                  Icons.fiber_manual_record,
+                                  size: 10,
+                                  color: msg.status! > 0
+                                      ? Colors.green
+                                      : Colors.redAccent,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                   );
-                } else {
-                  nListResult = Container();
-                }
-                return nListResult;
-              },
-            ),
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      mainAxisAlignment: incoming
+                          ? MainAxisAlignment.start
+                          : MainAxisAlignment.end,
+                      children: <Widget>[Flexible(child: bubble)],
+                    ),
+                  );
+                },
+              );
+            },
           ),
         );
       },

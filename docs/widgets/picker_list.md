@@ -46,6 +46,8 @@ One renderer for every single-select picker. The picker **never writes Firestore
 | `countTable` + `countSearch` | — | per-row badge "{N} {countSuffix}". Counts `countTable` docs where `countSearch` matches, with `{idField}` (e.g. `{lv}`) → this row's id |
 | `statusSearch` | — | per-row status pill (reuses `countForRow` over `countTable`; gated on `countTable` set). `{idField}` substituted (e.g. `vv◼{lv}⭘tst◼on_delivery`). >0 matches → `statusOnLabel` (amber); else `statusOffLabel` (emerald). Empty → no pill |
 | `statusOnLabel` / `statusOffLabel` | — | pill text for the on/off state (e.g. `On Route` / `Available`) |
+| `busySelfField` | *(empty)* | Optional. Row field; non-empty value = row is busy (disabled, un-tappable). Self-field case: the picker's own table carries the busy signal (e.g. `dv` on a `stock_location` vehicle row). Empty/absent = no busy guard. |
+| `busySelfLabelField` | *(empty)* | Optional. Row field for the busy subtitle label (e.g. `dn` = driver name). Rendered as `text[3]` + field value. |
 | `rowIcon` | — | **entity-card mode gate.** Non-empty icon name (resolved via `panelIcon`, e.g. `truck`/`vehicle`) → renders the ENTITY card: 40×40 icon-avatar + title + sub + inline `[status pill + count]` + selected-only check. Empty → legacy radio card (byte-identical). NOTE: entity mode **drops `metaField`** (no 3rd line) and moves the count badge inline. |
 | `titleMono` | `false` | entity-mode only — monospace title (vehicle plates). Accepts bool or `"true"`/`"1"`. iOS falls back to Menlo/Courier. |
 | `accentColor` | (theme primary) | hex (`0xFF2563EB`/`#2563EB`/bare) for selected border/avatar/check; entity selected-bg is fixed admin-blue tint `#EFF6FF`. |
@@ -63,6 +65,7 @@ One renderer for every single-select picker. The picker **never writes Firestore
 | 0 | list title (reserved; the page usually has its own header) |
 | 1 | per-row select label ("Pilih") |
 | 2 | count badge suffix ("task aktif") |
+| 3 | Busy prefix (e.g. `Sedang jalan \u{00B7} `). Prepended to `busySelfLabelField` value. |
 
 `adhocLabel` / `emptyText` are dedicated fields, **not** `text` segments.
 
@@ -76,6 +79,21 @@ navigate: tap row → screenTx[captureToken] = row[idField] → routeStack.push(
 - **Create-task P3 (capture):** `captureToken:"vv"` → P4 `TASK_CREATE_SUBMIT` reads `screenTx[vvKey]` (default `vv`). **captureToken MUST equal the submit's `vvKey`** or P4 stays disabled.
 - **H1 assign sheet (capture):** `captureToken:"vehicleId"`; caller's `updateEventRow:"…vv◼{vehicleId}…"` consumes it.
 - Selection is re-derived from `screenTx[captureToken]` on **every** build (back-nav re-highlights; external token clear un-highlights). Ad-hoc row with empty `adhocValue` (the default `''`) is **not** visually highlighted after tap -- the empty token maps to `null` selection. Configure a non-empty `adhocValue` if ad-hoc highlight is needed.
+
+## Busy guard (optional, self-field)
+
+When `busySelfField` is configured, each row's own field is checked: non-empty
+(trimmed) = the row is busy. The row renders DISABLED (grayed, un-tappable) with
+a distinct subtitle = `text[3]` + `row[busySelfLabelField]` (e.g. "Sedang jalan
+· Agenia Demo-3"). This is separate from the `statusSearch` pill (label-only,
+never blocks selection) -- both can coexist on the same row config. When a row
+is busy its trailing affordance (count badge + "Pilih" label / check icon) is
+hidden in BOTH the radio and entity layouts, so an inert row never shows a
+selectable cue.
+
+Fail-open: empty `busySelfField` config -> `isBusy` is always false -> byte-
+identical current behavior. Missing field key on a row -> empty string -> not
+busy (no crash).
 
 ## Static methods (tested directly)
 

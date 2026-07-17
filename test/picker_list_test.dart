@@ -366,4 +366,97 @@ void main() {
       expect(PickerList.selectionFromToken(42), '42');
     });
   });
+
+  // ── busy-self derivation (busy-guard S2.1) ──────────────────────────────
+
+  group('busy-self field derivation', () {
+    // Mirrors the _rowTile logic: read busySelfField from the row itself.
+    // Pure extraction -- no widget pump needed.
+
+    /// Replicates the busy derivation in _rowTile.
+    ({bool isBusy, String busyLabel}) deriveBusy(
+      Map<String, dynamic> row,
+      String busySelfField,
+      String busySelfLabelField,
+      String busyPrefix,
+    ) {
+      final String busyVal = busySelfField.isEmpty
+          ? ''
+          : (row[busySelfField] ?? '').toString().trim();
+      final bool isBusy = busyVal.isNotEmpty;
+      final String busyLabel = isBusy
+          ? '$busyPrefix${(row[busySelfLabelField] ?? '').toString().trim()}'
+          : '';
+      return (isBusy: isBusy, busyLabel: busyLabel);
+    }
+
+    test('non-empty busySelfField value -> busy with label', () {
+      final r = deriveBusy(
+        {'dv': 'wf-1', 'dn': 'Agenia Demo-3'},
+        'dv', 'dn', 'Sedang jalan \u{00B7} ',
+      );
+      expect(r.isBusy, isTrue);
+      expect(r.busyLabel, 'Sedang jalan \u{00B7} Agenia Demo-3');
+    });
+
+    test('empty busySelfField value -> not busy', () {
+      final r = deriveBusy(
+        {'dv': '', 'dn': 'Agenia Demo-3'},
+        'dv', 'dn', 'Sedang jalan \u{00B7} ',
+      );
+      expect(r.isBusy, isFalse);
+      expect(r.busyLabel, '');
+    });
+
+    test('busySelfField not configured (empty string) -> never busy', () {
+      final r = deriveBusy(
+        {'dv': 'wf-1', 'dn': 'Agenia Demo-3'},
+        '', 'dn', 'Sedang jalan \u{00B7} ',
+      );
+      expect(r.isBusy, isFalse);
+    });
+
+    test('missing busySelfField key in row -> not busy (no crash)', () {
+      final r = deriveBusy(
+        <String, dynamic>{}, // sparse row
+        'dv', 'dn', 'Sedang jalan \u{00B7} ',
+      );
+      expect(r.isBusy, isFalse);
+    });
+
+    test('null field value -> not busy (no crash)', () {
+      final r = deriveBusy(
+        {'dv': null, 'dn': null},
+        'dv', 'dn', 'Sedang jalan \u{00B7} ',
+      );
+      expect(r.isBusy, isFalse);
+    });
+
+    test('whitespace-only busySelfField value -> not busy', () {
+      final r = deriveBusy(
+        {'dv': '   ', 'dn': 'Driver X'},
+        'dv', 'dn', 'Prefix ',
+      );
+      expect(r.isBusy, isFalse);
+    });
+
+    test('missing busySelfLabelField key -> label is prefix only', () {
+      final r = deriveBusy(
+        {'dv': 'wf-5'},  // no 'dn' key
+        'dv', 'dn', 'Sedang jalan \u{00B7} ',
+      );
+      expect(r.isBusy, isTrue);
+      expect(r.busyLabel, 'Sedang jalan \u{00B7} ');
+    });
+
+    test('empty text array -> busyPrefix defaults to empty via _t(3)', () {
+      // Simulates _t(3) on an empty/short text array returning ''.
+      final r = deriveBusy(
+        {'dv': 'wf-1', 'dn': 'Driver Y'},
+        'dv', 'dn', '', // empty prefix (what _t(3) returns when text[3] absent)
+      );
+      expect(r.isBusy, isTrue);
+      expect(r.busyLabel, 'Driver Y'); // just the label field, no prefix
+    });
+  });
 }

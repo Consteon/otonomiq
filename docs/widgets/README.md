@@ -39,6 +39,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | AssetStockList | [asset_stock_list.md](asset_stock_list.md) | draft | Generic pivot-cube stock distribution (entity x pivot x condition) with summary strip, filter tabs, and proportion bar |
 | AdminOutstandingList | [admin_outstanding_list.md](admin_outstanding_list.md) | draft | Collapsible outstanding client list with aging-tier badges for Admin H1 PRIORITAS |
 | CustomerOutstandingList | [customer_outstanding_list.md](customer_outstanding_list.md) | draft | Full-page customer outstanding lookup with search, category-colored chips, aging tiers, and detail sheet |
+| DetailCard | [detail_card.md](detail_card.md) | draft | Universal config-driven single keyed-doc detail (title/badge/KV rows/gallery); sibling of LIST_CARD |
 | AdminUpcomingTaskList | [admin_upcoming_task_list.md](admin_upcoming_task_list.md) | draft | Upcoming task cards with item roll-up and inline vehiclePicker for Admin H1 AKAN DATANG |
 | PickerList | [picker_list.md](picker_list.md) | draft | Generic single-select picker (any collection); capture id→token, optional per-row count badge + ad-hoc row; capture/navigate modes. SDUI `picker_list` (alias `vehicle_picker`) |
 | TablePicker | [table_picker.md](table_picker.md) | draft | Generic single/multi-select picker (any keyed table) writing value(s)+label(s) into form positions (not screenTx); modal sheet, search-DSL filter, multi-mode JSON-array + CF un-escape contract. SDUI `table_picker` |
@@ -67,6 +68,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | ListStatisticCard | [list_statistic_card.md](list_statistic_card.md) | draft | Per-point patrol/cleaning statistic list with optional typed-location merge |
 | NavActionCard | [nav_action_card.md](nav_action_card.md) | draft | Return-vehicle CTA card (muted/active by allClosed) for DriverHome P4 |
 | NoticeBar | [notice_bar.md](notice_bar.md) | draft | Notification strip/callout with variant-driven colors, optional icon, up to 3 text tiers |
+| NotaCreateSubmit | [nota_create_submit.md](nota_create_submit.md) | draft | Submit button for nota wizard (Walk-in POS / Supplier) |
 | OfflineBannerHost | [offline_banner.md](offline_banner.md) | draft | Global offline strip above the MainPage body (Obx on internetConnectionFlag); structural shell widget, not a dispatch branch |
 | ReturnHeader | [return_header.md](return_header.md) | draft | Back arrow + label + title header for P12 ReturnVehicle |
 | PreconditionGateCard | [precondition_gate_card.md](precondition_gate_card.md) | draft | Custody gate card (pending/confirmed) for DriverHome P4 |

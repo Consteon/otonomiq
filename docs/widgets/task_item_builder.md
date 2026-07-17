@@ -109,3 +109,48 @@ unit-testable without widget pump.
 - [task_draft_summary.md](task_draft_summary.md) -- P4 read-only preview
 - [task_create_submit.md](task_create_submit.md) -- P4 submit button
 - [custody_count_list.md](custody_count_list.md) -- structural mirror
+
+## Supplier mode (`mode:"supplier"`)
+
+When `component['mode']` is `'supplier'`, the widget renders a supplier
+transaction builder instead of the order/walkin item builder.
+
+### Supplier component shape
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `mode` | String | | Must be `'supplier'` |
+| `wizardKey` | String | `admin_create_task` | Draft holder key |
+| `vidtable` | String | | appVid override |
+| `itemTable` | String | | Firestore table path for item catalog |
+| `itemIdField` | String | `ii` | Item id field on item catalog doc |
+| `itemNameField` | String | `in` | Item name field on item catalog doc |
+| `priceSourceField` | String | `hrg` | Field for default price seed |
+| `txOptions` | String | | ★-separated pairs of `value◼Label` (e.g. `buy◼Beli★refill◼Tukar★sale◼Jual`). autheniumDecode before parsing. |
+| `searchHint` | String | `Cari...` | Picker search placeholder |
+| `text` | String | | Diamond-separated 7 slots (see below) |
+
+### Supplier text slots
+
+| Index | Default | Used for |
+|-------|---------|----------|
+| 0 | Barang | Empty state title |
+| 1 | + Barang | Add CTA label |
+| 2 | Keluar | qo stepper label |
+| 3 | Masuk | qi stepper label |
+| 4 | Harga | Price input label |
+| 5 | Subtotal | Per-line subtotal label / footer |
+| 6 | Hapus | Delete tooltip |
+
+### Behavior differences from order/walkin
+
+- **Single CTA**: one "+ Barang" button opens the picker for all items. No per-tx CTAs.
+- **No category filter**: all items shown in picker regardless of tx type.
+- **Per-line tx selector**: segmented chips parsed from `txOptions` config.
+  User selects buy/refill/sale per line.
+- **Qty fields**: uses `DraftItem.qo` / `DraftItem.qi` (not pd/pp/ps/pb/pr).
+- **Price**: seeded from `priceSourceField` for ALL tx types (not just sale).
+- **Subtotal**: `hrg * max(qo, qi)` per line.
+- **Refill seeding**: selecting "Tukar" seeds `qo = qi` once; both independent after.
+- **Validation**: buy requires qi>=1+hrg>0; sale requires qo>=1+hrg>0;
+  refill requires qo>=1+qi>=1 (hrg may be 0).

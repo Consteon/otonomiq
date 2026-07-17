@@ -370,6 +370,11 @@ void main() async {
               create: (context) => LoginBloc(userRepository: userRepository),
             ),
             BlocProvider<NotificationBloc>(
+              // eager (not lazy): the bloc must exist at app start so
+              // NotificationBloc.instance is set before api.dart re-dispatches
+              // LoadNotification when firestoreIO is resolved — otherwise the
+              // inbox intermittently stays bound to the boot-time default path.
+              lazy: false,
               create: (BuildContext contextN) {
                 return NotificationBloc(
                   notificationRepository: FirebaseNotificationRepository(),

@@ -51,6 +51,9 @@ AssetStockList({
 | `text` | `String` | Diamond-separated label segments |
 | `condNote` | `String` | Caveat text (shown when showCondition) |
 | `emptyText` | `String` | Empty state text |
+| `detailField` | `String` | Detail group field for per-location breakdown in pivot tabs (default empty = no breakdown) |
+| `detailNameField` | `String` | Display name field for detail rows (default empty = id used) |
+| `detailSubField` | `String` | Inline subtitle field for detail rows, rendered after name with ` · ` separator (default empty = name only, zero regression) |
 
 ## State / Dependencies
 
@@ -66,6 +69,10 @@ AssetStockList({
 - `text` seg-2 (unit, e.g. "pcs") renders next to the big entity/pivot totals when present; absent config = no unit.
 - No detail sheet, no navigation. Display-only.
 - `autheniumDecode` applied to pivotValues/condValues/summary/itemIconMap before splitting.
+- Semua-tab pivot boxes and summary strip chips are tappable -- tap switches to the corresponding filter tab.
+- Pivot boxes with total 0 render at 50% opacity (dimmed, still tappable).
+- When `detailField` is set, specific-pivot tabs (not Semua) show per-detail rows instead of the aggregate ISI/KOSONG box. Each row shows condition split when `showCondition:TRUE` and the pivot is non-outstanding; otherwise shows single total.
+- When `detailSubField` is set, detail rows in pivot tabs show `name · sub` inline (e.g. `B 1234 XY · Pickup`). Absent config or absent/empty field on doc = name only, no layout shift.
 
 ## See Also
 

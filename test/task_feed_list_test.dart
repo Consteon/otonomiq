@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otonomiq/global.dart';
 import 'package:otonomiq/widget/driver_home_support.dart';
+import 'package:otonomiq/widget/receipt_doc.dart';
 import 'package:otonomiq/widget/task_feed_list.dart';
 
 void main() {
@@ -765,6 +766,165 @@ void main() {
           'qt');
       expect(agg.rows, 2);
       expect(agg.sum, 10);
+    });
+  });
+
+  // ── FLAT mode sort (sortField / sortDir) ─────────────────────────────
+
+  group('FLAT sort by sortField', () {
+    /// Pure sort logic mirroring _getFilteredTasks.
+    List<Map<String, dynamic>> sortDocs(
+      List<Map<String, dynamic>> docs,
+      String sortField,
+      String sortDir,
+    ) {
+      final List<Map<String, dynamic>> result =
+          List<Map<String, dynamic>>.from(docs);
+      if (sortField.isNotEmpty) {
+        final bool desc = sortDir.trim().toLowerCase() == 'desc';
+        result.sort((a, b) {
+          final num va = coerceNum(a[sortField]);
+          final num vb = coerceNum(b[sortField]);
+          return desc ? vb.compareTo(va) : va.compareTo(vb);
+        });
+      }
+      return result;
+    }
+
+    test('desc sorts newest (highest epoch) first', () {
+      final docs = [
+        {'nno': 'A', 't': 100},
+        {'nno': 'B', 't': 300},
+        {'nno': 'C', 't': 200},
+      ];
+      final sorted = sortDocs(docs, 't', 'desc');
+      expect(sorted.map((d) => d['nno']).toList(), ['B', 'C', 'A']);
+    });
+
+    test('asc sorts oldest (lowest epoch) first', () {
+      final docs = [
+        {'nno': 'A', 't': 300},
+        {'nno': 'B', 't': 100},
+        {'nno': 'C', 't': 200},
+      ];
+      final sorted = sortDocs(docs, 't', 'asc');
+      expect(sorted.map((d) => d['nno']).toList(), ['B', 'C', 'A']);
+    });
+
+    test('empty sortField = no sort (preserves input order)', () {
+      final docs = [
+        {'nno': 'A', 't': 300},
+        {'nno': 'B', 't': 100},
+      ];
+      final sorted = sortDocs(docs, '', '');
+      expect(sorted.map((d) => d['nno']).toList(), ['A', 'B']);
+    });
+
+    test('string epoch values coerced via coerceNum', () {
+      final docs = [
+        {'nno': 'A', 't': '100'},
+        {'nno': 'B', 't': '300'},
+        {'nno': 'C', 't': '200'},
+      ];
+      final sorted = sortDocs(docs, 't', 'desc');
+      expect(sorted.map((d) => d['nno']).toList(), ['B', 'C', 'A']);
+    });
+
+    test('missing sortField value coerces to 0', () {
+      final docs = [
+        {'nno': 'A', 't': 200},
+        {'nno': 'B'},
+        {'nno': 'C', 't': 100},
+      ];
+      final sorted = sortDocs(docs, 't', 'asc');
+      // B (0) < C (100) < A (200)
+      expect(sorted.map((d) => d['nno']).toList(), ['B', 'C', 'A']);
+    });
+  });
+
+  // ── FLAT mode amount formatting ────────────────────────────────────────
+
+  group('FLAT amount formatting', () {
+    /// Pure amount-render logic mirroring _buildFlatCard.
+    String formatAmount(dynamic rawVal) {
+      final int amt = coerceNum(rawVal).toInt();
+      return 'Rp ${formatThousands(amt)}';
+    }
+
+    test('integer amount', () {
+      expect(formatAmount(1250000), 'Rp 1.250.000');
+    });
+
+    test('string amount coerced', () {
+      expect(formatAmount('71000'), 'Rp 71.000');
+    });
+
+    test('null amount shows Rp 0', () {
+      expect(formatAmount(null), 'Rp 0');
+    });
+
+    test('zero amount', () {
+      expect(formatAmount(0), 'Rp 0');
+    });
+  });
+
+  // ── FLAT mode date rendering ───────────────────────────────────────────
+
+  group('FLAT date rendering', () {
+    /// Pure date-render logic mirroring _buildFlatCard.
+    String renderDate(dynamic rawDate) {
+      if (rawDate == null) return '';
+      final num numVal = coerceNum(rawDate);
+      if (numVal != 0) {
+        return formatReceiptDate(numVal.toInt());
+      }
+      return rawDate.toString().trim();
+    }
+
+    test('epoch-ms int formats as date', () {
+      final int epoch =
+          DateTime.utc(2026, 7, 8, 2, 39, 0).millisecondsSinceEpoch;
+      expect(renderDate(epoch), '08 Jul 2026 09:39');
+    });
+
+    test('epoch-ms string formats as date', () {
+      final int epoch =
+          DateTime.utc(2026, 7, 8, 2, 39, 0).millisecondsSinceEpoch;
+      expect(renderDate(epoch.toString()), '08 Jul 2026 09:39');
+    });
+
+    test('pre-formatted string passes through', () {
+      expect(renderDate('2026-07-08 09:39'), '2026-07-08 09:39');
+    });
+
+    test('null returns empty', () {
+      expect(renderDate(null), '');
+    });
+
+    test('zero numeric returns string "0" (non-epoch)', () {
+      // coerceNum('0') returns 0, so the else-branch fires
+      expect(renderDate('0'), '0');
+    });
+  });
+
+  // ── FLAT mode addressEmpty fallback ────────────────────────────────────
+
+  group('FLAT addressEmpty fallback', () {
+    /// Pure fallback logic mirroring _buildFlatCard.
+    String resolveAddress(String rawAddress, String addressEmpty) {
+      return rawAddress.isNotEmpty ? rawAddress : addressEmpty;
+    }
+
+    test('non-empty address used as-is', () {
+      expect(resolveAddress('Angga', 'Umum'), 'Angga');
+    });
+
+    test('empty address with configured fallback shows fallback', () {
+      expect(resolveAddress('', 'Umum'), 'Umum');
+    });
+
+    test('empty address with empty fallback stays empty (hidden)', () {
+      expect(resolveAddress('', ''), '');
     });
   });
 }

@@ -8,6 +8,7 @@ import 'admin_create_task_support.dart'; // AdminCreateTaskSupport.setCustomer
 import 'admin_home_support.dart'; // evaluateGate
 import 'driver_home_support.dart';
 import 'panel_card_support.dart';
+import 'receipt_doc.dart'; // formatThousands, formatReceiptDate
 import 'task_item_builder.dart'; // TaskItemBuilder.draftRev
 
 /// TASK_FEED_LIST — grouped task card list for P10 TaskFeed.
@@ -192,8 +193,26 @@ class _TaskFeedListState extends State<TaskFeedList> {
             mapTableContent[_taskCode] ?? const []);
     final String rawSearch =
         (widget.component['search'] ?? '').toString().trim();
-    if (rawSearch.isEmpty) return docs;
-    return filterDriverHomeDocs(docs, rawSearch, widget.scrName);
+    final List<Map<String, dynamic>> filtered = rawSearch.isEmpty
+        ? docs
+        : filterDriverHomeDocs(docs, rawSearch, widget.scrName);
+
+    // Sort by sortField when configured (FLAT walkin-history: t desc).
+    // Empty sortField (customer-list, driver P10) = no sort = current order.
+    final String sortField =
+        (widget.component['sortField'] ?? '').toString().trim();
+    if (sortField.isNotEmpty) {
+      final bool desc =
+          (widget.component['sortDir'] ?? '').toString().trim().toLowerCase() ==
+              'desc';
+      filtered.sort((a, b) {
+        final num va = coerceNum(a[sortField]);
+        final num vb = coerceNum(b[sortField]);
+        return desc ? vb.compareTo(va) : va.compareTo(vb);
+      });
+    }
+
+    return filtered;
   }
 
   void _onCardTap(Map<String, dynamic> task) {
@@ -339,6 +358,12 @@ class _TaskFeedListState extends State<TaskFeedList> {
             (widget.component['badgeLabel'] ?? '').toString().trim();
         final String seedLabel =
             (widget.component['seedLabel'] ?? '').toString().trim();
+        final String dateField =
+            (widget.component['dateField'] ?? '').toString().trim();
+        final String amountField =
+            (widget.component['amountField'] ?? '').toString().trim();
+        final String addressEmpty =
+            (widget.component['addressEmpty'] ?? '').toString().trim();
 
         return _buildFlatList(tasks,
             idField: idField,
@@ -352,7 +377,10 @@ class _TaskFeedListState extends State<TaskFeedList> {
             badgeSearch: badgeSearch,
             badgeField: badgeField,
             badgeLabel: badgeLabel,
-            seedLabel: seedLabel);
+            seedLabel: seedLabel,
+            dateField: dateField,
+            amountField: amountField,
+            addressEmpty: addressEmpty);
       }
 
       final String typeField =
@@ -1015,6 +1043,9 @@ class _TaskFeedListState extends State<TaskFeedList> {
     String badgeField = '',
     String badgeLabel = '',
     String seedLabel = '',
+    String dateField = '',
+    String amountField = '',
+    String addressEmpty = '',
   }) {
     // Lazy-init: handles edge case where State persisted from GROUPED to FLAT
     // (JSON changed without rebuilding State — initState skipped controller).
@@ -1122,6 +1153,9 @@ class _TaskFeedListState extends State<TaskFeedList> {
                 badgeField: badgeField,
                 badgeLabel: badgeLabel,
                 seedLabel: seedLabel,
+                dateField: dateField,
+                amountField: amountField,
+                addressEmpty: addressEmpty,
               ),
         ],
       ),
@@ -1139,9 +1173,14 @@ class _TaskFeedListState extends State<TaskFeedList> {
     String badgeField = '',
     String badgeLabel = '',
     String seedLabel = '',
+    String dateField = '',
+    String amountField = '',
+    String addressEmpty = '',
   }) {
     final String title = (task[titleField] ?? '').toString().trim();
-    final String address = (task[addressField] ?? '').toString().trim();
+    final String rawAddress = (task[addressField] ?? '').toString().trim();
+    final String address =
+        rawAddress.isNotEmpty ? rawAddress : addressEmpty;
 
     // Avatar content: iconField doc value -> first letter of title -> empty
     String avatarContent = '';
@@ -1191,6 +1230,57 @@ class _TaskFeedListState extends State<TaskFeedList> {
               color: Color(0xFF6D28D9), // violet-700
             ),
           ),
+        );
+      }
+    }
+
+    // ── Right column: amount + date (FLAT walkin-history) ──────────
+    Widget? rightCol;
+    if (amountField.isNotEmpty || dateField.isNotEmpty) {
+      final List<Widget> rightChildren = [];
+
+      if (amountField.isNotEmpty) {
+        final int amt = coerceNum(task[amountField]).toInt();
+        rightChildren.add(Text(
+          'Rp ${formatThousands(amt)}',
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF1F2937), // text
+          ),
+        ));
+      }
+
+      if (dateField.isNotEmpty) {
+        final dynamic rawDate = task[dateField];
+        String dateStr = '';
+        if (rawDate != null) {
+          final num numVal = coerceNum(rawDate);
+          if (numVal != 0) {
+            dateStr = formatReceiptDate(numVal.toInt());
+          } else {
+            dateStr = rawDate.toString().trim();
+          }
+        }
+        if (dateStr.isNotEmpty) {
+          if (rightChildren.isNotEmpty) {
+            rightChildren.add(const SizedBox(height: 2));
+          }
+          rightChildren.add(Text(
+            dateStr,
+            style: const TextStyle(
+              fontSize: 10,
+              color: Color(0xFF9CA3AF), // textDim
+            ),
+          ));
+        }
+      }
+
+      if (rightChildren.isNotEmpty) {
+        rightCol = Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: rightChildren,
         );
       }
     }
@@ -1259,6 +1349,11 @@ class _TaskFeedListState extends State<TaskFeedList> {
                   ],
                 ),
               ),
+              // Right column: amount + date (only when configured)
+              if (rightCol != null) ...[
+                const SizedBox(width: 8),
+                rightCol,
+              ],
               const SizedBox(width: 12),
               // Chevron
               const Text(
