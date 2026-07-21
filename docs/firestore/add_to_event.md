@@ -54,3 +54,65 @@ of `tb` (`add⬤update⬤delete⬤event`). At `historySync` (online), `tbParts[3
 ## Not yet implemented
 - Approval-chain `addToEvent` (FtzRowOfButton2 `_updateApprovalChain` /
   `createApprovalEvent`, parent ref-id for `rf`) — deferred to a separate plan.
+
+## Notification prop (`notification` on RBT child)
+
+When an RBT child component has a `notification` object, `saveSend` appends
+notification fields to the event doc:
+
+| JSON prop               | DSL field | When                          |
+|-------------------------|-----------|-------------------------------|
+| `notification.mode`     | `ntf`     | Always (gates CF push)        |
+| `notification.title`    | `nm`      | Non-empty (else CF fallback)  |
+| `notification.message`  | `dp`      | Non-empty (else CF fallback)  |
+| `notification.target`   | `bcc`     | `mode == "broadcast"` only    |
+
+No `notification` object means byte-identical current behavior.
+
+### Token handling
+
+- `◀…▶` / `◁…▷` in title/message/target -- resolved at **sync time** by
+  `resolveValueTokens` inside `buildEventDoc`. These tokens survive compose
+  time because neither `replacePlaceholders` (`{{POS(n)}}` only) nor
+  `_resolveScreenTxMarkers` (`<KEY>` only) match them.
+- `{field}` (e.g. `{nama}`) in title/message -- stays **literal**. The CF
+  personalizes per recipient at send time. Notification values intentionally
+  skip `resolveDriverCurlyTokens`.
+
+### Separator sanitization (compose-time literals only)
+
+The sync-time pipeline is **split -> parse -> resolve**: `writeToEvent` splits
+by `◆` (line 1464), then `parseAddToEvent` structurally parses each block
+(line 1393), then `resolveValueTokens` resolves tokens per-value (line 1403).
+
+Token-based values (e.g. `◁2▷` in `notification.target`) are opaque literals
+when the splitter runs -- their `◆` materializes only at `resolveValueTokens`,
+after splitting and parsing are complete. They reach Firestore intact in the
+`◆`-separated format the CF expects.
+
+The sanitize in `buildNotificationSuffix` guards against an author inlining a
+**literal** `◆`-separated list directly in the component JSON instead of using
+a cell-reference token. A literal `◆` would be present in the composed event
+string and hit the sync-time splitter. The sanitize replaces it with `,` (spec
+section 2: "koma juga diterima"). `⭘` and `◼` literals are likewise replaced
+with space to prevent field/key boundary corruption in `parseAddToEvent`.
+
+`⬤` (`separator[0]`) is also replaced with space, for a **different** reason:
+the other three guard the inner event DSL, but `⬤` guards the OUTER frame.
+`saveSend` joins `tableString⬤update⬤delete⬤event⬤updateEvent` into one
+`tb` string, so a `⬤` reaching the event segment shifts every later segment
+and the `updateEventRow` payload is silently discarded. `autheniumDecode`
+produces it from the escape `_u2B24_`.
+
+`⬤` is also the one glyph stripped from `notification.mode` (removed, not
+spaced — `mode` is identifier-like). The other three are values-only, so an
+unknown mode is still written through as-is.
+
+### Release ordering (spec section 8)
+
+1. Flutter ships `notification` prop support (this feature).
+2. Authoring: op1Screen widgets + grant/picker configuration.
+3. Deploy CF: `bash deploy.sh` (all functions -- shared code).
+4. End-to-end test.
+
+Reversed order = push dead / broadcast unreachable.

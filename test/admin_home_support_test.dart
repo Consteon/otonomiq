@@ -947,6 +947,34 @@ void main() {
       expect(fg, Colors.white);
       expect(isOutline, false);
     });
+
+    test('signalButton returns solid green for invoice tier', () {
+      final (bg, fg, isOutline) = AdminTierColors.signalButton(
+        isSoft: false, isDanger: false, isCross: false, isOk: true,
+      );
+      expect(bg, const Color(0xFF15803D));
+      expect(fg, Colors.white);
+      expect(isOutline, false);
+    });
+
+    test('signalButton keeps danger amber even when isOk', () {
+      final (bg, _, _) = AdminTierColors.signalButton(
+        isSoft: false, isDanger: true, isCross: false, isOk: true,
+      );
+      expect(bg, const Color(0xFFF59E0B));
+    });
+
+    test('signalAgePill returns green when green: true', () {
+      final (bg, fg) = AdminTierColors.signalAgePill('ok', green: true);
+      expect(bg, const Color(0xFFDCFCE7));
+      expect(fg, const Color(0xFF16A34A));
+    });
+
+    test('signalAgePill keeps danger amber even when green: true', () {
+      final (bg, fg) = AdminTierColors.signalAgePill('danger', green: true);
+      expect(bg, const Color(0xFFFEF3C7));
+      expect(fg, const Color(0xFFB45309));
+    });
   });
 
   // ── evaluateGate ────────────────────────────────────────────────────

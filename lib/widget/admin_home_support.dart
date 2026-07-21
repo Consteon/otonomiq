@@ -162,6 +162,7 @@ int countBerjalan(
 /// [returnedGate] -- gate for task_returned signals.
 /// [noExecutorGate] -- gate for no_executor signals.
 /// [blockedGate] -- gate for blocked_departure signals.
+/// [invoiceGate] -- gate for invoice_pending signals (task docs).
 List<Signal> deriveAdminSignals({
   required List<Map<String, dynamic>> tasks,
   required List<Map<String, dynamic>> stockLocations,
@@ -192,6 +193,7 @@ List<Signal> deriveAdminSignals({
   String returnedGate = '',
   String noExecutorGate = '',
   String blockedGate = '',
+  String invoiceGate = '',
 }) {
   final int now = nowMs ?? getNowMillisecondFromEpoch();
 
@@ -356,6 +358,28 @@ List<Signal> deriveAdminSignals({
     }
   }
 
+  // ── 5. invoice_pending: gate on task docs ───────────────────────────
+  if (invoiceGate.isNotEmpty) {
+    for (final t in tasks) {
+      if (!evaluateGate(t, invoiceGate)) continue;
+
+      final String tnm = (t['tnm'] ?? '').toString().trim();
+      final String kn = (t[customerNameField] ?? '').toString().trim();
+      final String al = (t[addressField] ?? '').toString().trim();
+      final int age = computeAge(t['t'], nowMs: now);
+
+      signals.add(Signal(
+        type: 'invoice_pending',
+        head: kn.isNotEmpty ? kn : tnm,
+        ageMs: age,
+        tier: 'ok', // always neutral -- no age-based coloring
+        summary: 'Selesai antar \u{00B7} perlu invoice',
+        address: al,
+        taskVid: tnm,
+      ));
+    }
+  }
+
   // ── Sort: cluster by type, clusters by maxAge desc, items by age desc ──
   return _sortSignals(signals);
 }
@@ -376,9 +400,22 @@ List<Signal> _sortSignals(List<Signal> signals) {
     list.sort((a, b) => b.ageMs.compareTo(a.ageMs));
   }
 
-  // Sort groups by maxAge desc (first item of each sorted group)
-  final List<MapEntry<String, List<Signal>>> sorted = groups.entries.toList()
-    ..sort((a, b) => b.value.first.ageMs.compareTo(a.value.first.ageMs));
+  // Separate invoice_pending cluster (forced last) from normal clusters
+  final List<MapEntry<String, List<Signal>>> normal = [];
+  final List<MapEntry<String, List<Signal>>> invoiceLast = [];
+  for (final entry in groups.entries) {
+    if (entry.key == 'invoice_pending') {
+      invoiceLast.add(entry);
+    } else {
+      normal.add(entry);
+    }
+  }
+  // Sort normal clusters by maxAge desc (most urgent first)
+  normal.sort((a, b) => b.value.first.ageMs.compareTo(a.value.first.ageMs));
+  final List<MapEntry<String, List<Signal>>> sorted = [
+    ...normal,
+    ...invoiceLast,
+  ];
 
   // Flatten
   final List<Signal> result = [];
@@ -973,6 +1010,11 @@ class AdminTierColors {
   /// "Berjalan" badge text (green).
   static const Color okBadgeText = Color(0xFF16A34A);
 
+  /// Solid action color for the invoice tier (darker green). Deliberately NOT
+  /// [okBadgeText] -- that green is only 3.3:1 against a white button label,
+  /// below AA for the 14px bold text; this one is 5.0:1. Badge use is fine.
+  static const Color okActionGreen = Color(0xFF15803D);
+
   /// "Gudang" cross-badge background (same green as berjalan).
   static const Color crossBadgeBg = Color(0xFFDCFCE7);
 
@@ -1028,9 +1070,13 @@ class AdminTierColors {
 
   /// Returns (pillBg, pillText) for a signal age pill.
   /// [tier] is one of: `'danger'`, `'warn'`, `'ok'`.
-  static (Color bg, Color fg) signalAgePill(String tier) {
+  /// [green] -- invoice tier: work is done, the pill reads "settled", not aging.
+  static (Color bg, Color fg) signalAgePill(String tier, {bool green = false}) {
     if (tier == 'danger') {
       return (dangerBadgeBg, dangerBadgeText);
+    }
+    if (green) {
+      return (okBadgeBg, okBadgeText);
     }
     return (neutralPillBg, neutralPillText);
   }
@@ -1048,16 +1094,21 @@ class AdminTierColors {
   /// [isSoft] -- true for blocked_departure (outline blue).
   /// [isDanger] -- true for danger-tier admin or no_executor.
   /// [isCross] -- true for cross-runtime signals.
+  /// [isOk] -- true for invoice_pending (delivery finished, just bill): green.
   static (Color bg, Color fg, bool isOutline) signalButton({
     required bool isSoft,
     required bool isDanger,
     required bool isCross,
+    bool isOk = false,
   }) {
     if (isSoft) {
       return (Colors.transparent, okAction, true);
     }
     if (isDanger || isCross) {
       return (dangerBorder, Colors.white, false);
+    }
+    if (isOk) {
+      return (okActionGreen, Colors.white, false);
     }
     return (okAction, Colors.white, false);
   }

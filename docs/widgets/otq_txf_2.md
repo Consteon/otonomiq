@@ -90,6 +90,24 @@ Inferred from the file's imports:
 - **Sibling widgets:** [`FtzArraySearch`](../../lib/widget/ftz_array_search.dart), [`FtzContactPicker`](../../lib/widget/ftz_contact_picker.dart), [`OtqTxf`](../../lib/widget/otq_txf.dart)
 - **Packages:** `flutter_multi_formatter`, `geolocator`, `group_radio_button`, `intl`, `get`, `flutter_bloc`
 
+## Speech-to-text (`stt`)
+
+Per-component opt-in dictation for free-text fields (e.g. "keterangan"), on-device via the platform recognizer (`speech_to_text` package — Android `SpeechRecognizer`, iOS `SFSpeechRecognizer`; no cloud key).
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `stt` | bool/string | `false` | `true` shows a mic button after the field (default variant only — not on contact/tablesearch/barcode/qrscan/date/time variants). |
+| `sttLocale` | string | `id_ID` | Locale passed to the recognizer. |
+
+Behavior:
+
+- Tap mic → listen (icon turns red); tap again or pause → stop. Auto-stops via plugin `done`/`notListening` status.
+- Speech is **appended** to the text present when the session started (`sttCompose`, live partial results); `maxLength` is enforced manually because input formatters don't apply to programmatic `controller.text` writes.
+- Result is written to both `myController.text` and `txfController[scrName][position].finalData` (mirrors the `onChanged` default branch, like the QR handlers).
+- One static recognizer shared app-wide; starting dictation on one field stops it on another. Stopped on `dispose`.
+- Mic button honors `isEnabled` and is hidden when the field is not `editable`.
+- Permissions: Android `RECORD_AUDIO` + `<queries>` RecognitionService (manifest); iOS `NSSpeechRecognitionUsageDescription` + existing mic string (Info.plist).
+
 ## Important Behavior
 
 - `with AutomaticKeepAliveClientMixin` → the widget's state survives when scrolled out of the viewport (e.g. inside a `ListView` / `PageView`).

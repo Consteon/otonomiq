@@ -12,6 +12,46 @@ import '../global.dart';
 */
 //const String countryCode = '62';
 
+/// True when [contact] matches [query] by display name or by phone number.
+///
+/// [contact] is one row of the picker's list: `[displayName, {label: number}]`.
+///
+/// Name match is case-insensitive substring. A query with no digits never
+/// falls through to the number branch.
+///
+/// Number match runs TWO comparisons, because neither alone is enough:
+///  - raw digits-only, which handles fixed-line and partial fragments
+///    (typed `5551234` vs stored `021-555-1234`);
+///  - both sides through [phoneCanonical62], which bridges local and
+///    international mobile formats (typed `0812-3456` vs stored
+///    `+62 812-3456-7890` — raw digits do NOT match there, since `6281…`
+///    never contains `0812…`).
+///
+/// Top-level and pure so it is testable without pumping a widget.
+bool contactMatchesQuery(List<dynamic> contact, String query) {
+  final String q = query.trim().toLowerCase();
+  if (q.isEmpty) return true;
+
+  if (contact.isNotEmpty && contact[0].toString().toLowerCase().contains(q)) {
+    return true;
+  }
+
+  final String qDigits = q.replaceAll(RegExp('[^0-9]'), '');
+  if (qDigits.isEmpty) return false;
+  if (contact.length < 2 || contact[1] is! Map) return false;
+
+  final String qCanon = phoneCanonical62(qDigits);
+  for (final dynamic number in (contact[1] as Map).values) {
+    final String stored =
+        number.toString().replaceAll(RegExp('[^0-9]'), '');
+    if (stored.contains(qDigits)) return true;
+    if (qCanon.isNotEmpty && phoneCanonical62(stored).contains(qCanon)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 class FtzContactPicker extends StatefulWidget {
   final String? label;
   const FtzContactPicker({super.key, this.label = 'Contact'});
@@ -23,6 +63,15 @@ class FtzContactPicker extends StatefulWidget {
 class _FtzContactPickerState extends State<FtzContactPicker> {
   dynamic contacts;
   final _ctrl = ScrollController();
+  String _query = '';
+
+  /// Contacts matching [_query] by display name OR by phone number.
+  List<dynamic> get _filtered {
+    final List<dynamic> all = List<dynamic>.from(contacts ?? const []);
+    final String q = _query.trim();
+    if (q.isEmpty) return all;
+    return all.where((dynamic c) => contactMatchesQuery(c, q)).toList();
+  }
 
   @override
   void initState() {
@@ -52,16 +101,44 @@ class _FtzContactPickerState extends State<FtzContactPicker> {
 
   @override
   Widget build(BuildContext context) {
-    return contacts == null
-        ? const Center(child: CircularProgressIndicator())
-        : SizedBox(
+    if (contacts == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final List<dynamic> shown = _filtered;
+    return SizedBox(
       width: double.maxFinite,
-      child: ListView.builder(
-        shrinkWrap: true,
-        controller: _ctrl,
-        itemCount: contacts.length,
-        itemExtent: _ContactItem.height,
-        itemBuilder: (_, index) => _ContactItem(contact: contacts[index]),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            autofocus: false,
+            decoration: const InputDecoration(
+              hintText: 'Cari nama atau nomor',
+              prefixIcon: Icon(Icons.search, size: 20),
+              isDense: true,
+              border: OutlineInputBorder(),
+              contentPadding:
+                  EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+            onChanged: (String v) => setState(() => _query = v),
+          ),
+          const SizedBox(height: 8),
+          if (shown.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Text('Kontak tidak ditemukan'),
+            )
+          else
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                controller: _ctrl,
+                itemCount: shown.length,
+                itemExtent: _ContactItem.height,
+                itemBuilder: (_, index) => _ContactItem(contact: shown[index]),
+              ),
+            ),
+        ],
       ),
     );
   } // End of build
@@ -177,7 +254,10 @@ Future<String?> chooseContactAndGetPhoneNumber(String? label) async {
     ),
   ));
 
-  if (result.isEmpty) {
+  // Get.dialog returns null when dismissed via barrier-tap or system-back;
+  // `null.isEmpty` threw NoSuchMethodError. Guard at the source so all
+  // callers (otq_txf, otq_txf_2, whatsapp_send) are fixed at once.
+  if (result == null || result.isEmpty) {
     return null;
   }
   return result; // No contact chosen
@@ -213,7 +293,8 @@ Future<String?> choosePhoneNumber(dynamic phoneMap) async {
     ),
   ));
 
-  if (result.isEmpty) {
+  // Same null-on-dismiss guard as chooseContactAndGetPhoneNumber above.
+  if (result == null || result.isEmpty) {
     return null;
   }
   return result; // No contact chosen

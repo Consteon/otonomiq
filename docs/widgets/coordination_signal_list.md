@@ -10,7 +10,7 @@ Admin "Perlu Tindakan" signal list (H1): derives actionable signals client-side 
 
 ## Purpose
 
-The triage command-center body of the Admin Koordinasi screen. It computes four signal types across `task`, `stock_location`, `vehicle_check`, and `evidence` (via `deriveAdminSignals` — the SINGLE source of truth shared with `AdminCoordinationHeader`'s sinyal-count chip), clusters them by type (most urgent cluster first), and gives each a one-tap remediation:
+The triage command-center body of the Admin Koordinasi screen. It computes five signal types across `task`, `stock_location`, `vehicle_check`, and `evidence` (via `deriveAdminSignals` — the SINGLE source of truth shared with `AdminCoordinationHeader`'s sinyal-count chip), clusters them by type (most urgent cluster first), and gives each a one-tap remediation:
 
 | Signal type | Trigger | Action |
 |---|---|---|
@@ -18,6 +18,7 @@ The triage command-center body of the Admin Koordinasi screen. It computes four 
 | `task_returned` | task `tst==load_rejected` | vehiclePicker (reassign) |
 | `no_executor` | vehicle (`lt==vehicle`) with `dv` empty AND ≥1 assigned task | cross-nav to Gudang |
 | `blocked_departure` | vehicle_check `cty==opening` AND `cst==awaiting_custody` AND vehicle has a task today | cross-nav to Gudang (soft/outline) |
+| `invoice_pending` | task `tst==completed` AND `iv` empty | navigate to invoiceRoute (DeliveryInvoice) |
 
 When zero signals are derived, the widget collapses to `SizedBox.shrink()`.
 
@@ -91,7 +92,7 @@ All optional; absent = the documented default (backward-compatible). Field-name 
 | `evidenceRefField` | `String` | `erf` | evidence reference field |
 | `reasonNoteField` | `String` | `d` | evidence reason note field (task_returned summary suffix) |
 
-**Gate DSL config** (`field◼value⭘field◼value…`, AND'd; empty value = "field must be empty"; `autheniumDecode`d before use). When a gate is empty/absent, that signal type produces ZERO signals — the signal-list is INERT until the gate JSON is deployed. A `devPrint` warning fires when ALL 4 gates are empty.
+**Gate DSL config** (`field◼value⭘field◼value…`, AND'd; empty value = "field must be empty"; `autheniumDecode`d before use). When a gate is empty/absent, that signal type produces ZERO signals — the signal-list is INERT until the gate JSON is deployed. A `devPrint` warning fires when ALL 5 gates are empty.
 
 | Key | Default | Spec(2) value | Meaning |
 |---|---|---|---|
@@ -99,6 +100,7 @@ All optional; absent = the documented default (backward-compatible). Field-name 
 | `returnedGate` | `''` | `tst◼load_rejected` | gate for `task_returned` (task docs) |
 | `noExecutorGate` | `''` | `lt◼vehicle⭘dv◼` | gate for `no_executor` (stock_location docs) |
 | `blockedGate` | `''` | `cty◼opening⭘cst◼awaiting_custody` | gate for `blocked_departure` (vehicle_check docs) |
+| `invoiceGate` | `''` | `tst◼completed⭘iv◼` | gate for `invoice_pending` (task docs); always tier `ok` (no age coloring) |
 
 **Write target:**
 
@@ -106,6 +108,28 @@ All optional; absent = the documented default (backward-compatible). Field-name 
 |---|---|---|
 | `updateEventRow` | `''` | updateEventRow DSL template passed to the vehiclePicker (`executeUpdateEventRow`, online-only). Spec(2): `84214220504259//task⭘tablevid◼20342033315492⭘search◼tnm★{taskVid}⭘vv◼{vehicleId}⭘tst◼assigned`. |
 | `assignSheet` | `''` | sheet identity (e.g. `vehiclePicker`); read but not yet branched in H1. |
+
+**Invoice tier navigation:**
+
+| Key | Default | Meaning |
+|---|---|---|
+| `invoiceRoute` | `''` | Route name for invoice page |
+| `invoiceRouteParams` | `''` | routeParams DSL with `{tnm}` token (e.g. `taskVid◼{tnm}`); resolved and dispatched before nav |
+
+**Invoice tier styling** (hardcoded, no config key). The card layout is the shared
+`_buildSignalCard` used by every tier — only the accent differs, because the invoice
+signal means "delivery done, just bill" rather than "action blocked":
+
+| Element | Other tiers | `invoice_pending` |
+|---|---|---|
+| Action button | blue `#2563EB` (admin) / amber `#F59E0B` (danger, cross) | green `#15803D` (`okActionGreen`) |
+| Button icon | `open_in_new` (cross) / none | `receipt_long_outlined` |
+| Age pill | slate `#F1F5F9` / `#64748B` | green `#DCFCE7` / `#16A34A` |
+| Icon tile | blue `#EAF1FF` + blue glyph | green `#DCFCE7` + `okActionGreen` glyph |
+
+`okActionGreen` is deliberately darker than the `okBadgeText` green used on the pill:
+as a solid button background behind a white 14px-bold label it needs AA contrast
+(5.0:1); `okBadgeText` is 3.3:1 and is badge-only.
 
 **RESERVED** (accepted in JSON, NOT consumed by `deriveAdminSignals`):
 
@@ -134,6 +158,8 @@ All optional; absent = the documented default (backward-compatible). Field-name 
 | 12 | "task aktif" suffix | `task aktif` |
 | 13 | offline error | `Perlu koneksi internet` |
 | 14 | write fail error | `Gagal menyimpan` |
+| 15 | cluster: invoice_pending template | `{n} selesai - perlu invoice` |
+| 16 | invoice action button label | `Cetak Invoice` |
 
 Each slot uses `_t(i, def)` = `arr.length > i ? arr[i] : def` (out-of-range safe). Cluster templates substitute `{n}` with the cluster count.
 
@@ -142,7 +168,7 @@ Each slot uses `_t(i, def)` = `arr.length > i ? arr[i] : def` (out-of-range safe
 Server op1Screen child (see [admin-home-op1screen.md](../admin_runtime/admin-home-op1screen.md)):
 
 ```json
-{"type":"COORDINATION_SIGNAL_LIST","vidtable":"20342033315492","table":"84214220504259//task","vehicleTable":"84214220504259//stock_location","checkTable":"84214220504259//vehicle_check","evidenceTable":"84214220504259//evidence","assetTable":"84214220504259//asset_cache","crossRoute":"vertikaTeknoLokaciptaGudangVehicle","crossRouteParams":"gudangVehicle◼{vehicleId}","text":"Perlu Tindakan◆Tugaskan◆Assign Ulang◆Tunjuk di Gudang◆Lihat di Gudang◆{n} order menunggu kendaraan◆{n} order dikembalikan driver◆{n} kendaraan tanpa pengantar◆{n} kendaraan menunggu opening◆Pilih Kendaraan◆Assign Ulang Kendaraan◆Konfirmasi◆task aktif◆Perlu koneksi internet◆Gagal menyimpan"}
+{"type":"COORDINATION_SIGNAL_LIST","vidtable":"20342033315492","table":"84214220504259//task","vehicleTable":"84214220504259//stock_location","checkTable":"84214220504259//vehicle_check","evidenceTable":"84214220504259//evidence","assetTable":"84214220504259//asset_cache","crossRoute":"vertikaTeknoLokaciptaGudangVehicle","crossRouteParams":"gudangVehicle◼{vehicleId}","text":"Perlu Tindakan◆Tugaskan◆Assign Ulang◆Tunjuk di Gudang◆Lihat di Gudang◆{n} order menunggu kendaraan◆{n} order dikembalikan driver◆{n} kendaraan tanpa pengantar◆{n} kendaraan menunggu opening◆Pilih Kendaraan◆Assign Ulang Kendaraan◆Konfirmasi◆task aktif◆Perlu koneksi internet◆Gagal menyimpan◆{n} selesai - perlu invoice◆Cetak Invoice","invoiceGate":"tst◼completed⭘iv◼","invoiceRoute":"vertikaTeknoLokaciptaDeliveryInvoice","invoiceRouteParams":"taskVid◼{tnm}"}
 ```
 
 ## State / Bloc / Dependencies

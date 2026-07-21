@@ -386,6 +386,22 @@ String qr1Decrypt(String cipherText) {
   return result;
 } // end of qr1Decrypt
 
+String makeLqrCode(String text) {
+  /// Build a version-0 (plaintext) location QR payload from any text.
+  /// Format: '0' encryption-version marker + 'l' location tag + sha1 hex,
+  /// e.g. 0l9d637068c9470c72407715b3dc03a110e818b75b (1 + 1 + 40 = 42 chars).
+  /// Deterministic — the same text always yields the same code.
+  /// The result is what lqrVerify returns minus the leading '0', so it must
+  /// match a key in #LQR_LIST (or #TABLE<code>) for a scan to resolve.
+  // ponytail: sha1 only supplies a stable 160-bit id. aecDecrypt version '0'
+  // does no verification, so this is an identifier, not a security boundary.
+  // Swap for the real sheet generator once its algorithm is known.
+  final Uint8List digest = SHA1Digest().process(
+    Uint8List.fromList(utf8.encode(text)),
+  );
+  return '0l${formatBytesAsHexString(digest)}';
+} // end of makeLqrCode
+
 Future<String> lqrVerify(String p, String q, var rawQrText) async {
   String qrValid = empty;
   String qrText = rawQrText;

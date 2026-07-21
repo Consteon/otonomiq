@@ -2084,6 +2084,34 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }
+  } else if (tip == 'whatsapp_send') {
+    try {
+      result = WhatsAppSend(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'map_point_picker') {
+    try {
+      result = MapPointPicker(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
   } else {
     result = Text("--${component['type']}-- Wrong widget name.");
   }

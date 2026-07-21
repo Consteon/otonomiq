@@ -54,6 +54,8 @@
 		<string>NFC is used to read data from cards you tap, so you can log records without typing them by hand.</string>
 		<key>NSMicrophoneUsageDescription</key>
 		<string>Microphone access is required to enable seamless communication and video recording within the app. This feature simplifies the reporting process by allowing you to include audio recordings and video messages directly in your reports.</string>
+		<key>NSSpeechRecognitionUsageDescription</key>
+		<string>Speech recognition converts your voice into text so you can fill in notes and reports without typing.</string>
 		<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 		<string>Allowing access to your location even when the app is in the background enables us to provide accurate tracking and simplify your reporting process.</string>
 		<key>NSLocationWhenInUseUsageDescription</key>

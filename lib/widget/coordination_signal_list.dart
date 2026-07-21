@@ -79,6 +79,10 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
   String _blockedGate = '';
   // updateEventRow DSL template (raw -- executeUpdateEventRow decodes at write-time)
   String _updateEventRowDsl = '';
+  // Invoice tier config
+  String _invoiceGate = '';
+  String _invoiceRoute = '';
+  String _invoiceRouteParams = '';
 
   @override
   void initState() {
@@ -141,17 +145,28 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
     final String rawBG = (widget.component['blockedGate'] ?? '').toString().trim();
     _blockedGate = rawBG.isNotEmpty ? (autheniumDecode(rawBG) ?? rawBG) : '';
 
-    // Misconfig visibility: if ALL 4 gates are empty, signals will never render
+    // Invoice tier gate + route
+    final String rawIG =
+        (widget.component['invoiceGate'] ?? '').toString().trim();
+    _invoiceGate = rawIG.isNotEmpty ? (autheniumDecode(rawIG) ?? rawIG) : '';
+
+    // Misconfig visibility: if ALL 5 gates are empty, signals will never render
     if (_unassignedGate.isEmpty &&
         _returnedGate.isEmpty &&
         _noExecutorGate.isEmpty &&
-        _blockedGate.isEmpty) {
-      devPrint('[coordinationSignalList] all 4 gates empty -- '
+        _blockedGate.isEmpty &&
+        _invoiceGate.isEmpty) {
+      devPrint('[coordinationSignalList] all 5 gates empty -- '
           'no signals will render; check component gate config');
     }
 
     _updateEventRowDsl =
         (widget.component['updateEventRow'] ?? '').toString().trim();
+
+    _invoiceRoute =
+        (widget.component['invoiceRoute'] ?? '').toString().trim();
+    _invoiceRouteParams =
+        (widget.component['invoiceRouteParams'] ?? '').toString().trim();
   }
 
   /// Text slot accessors:
@@ -170,6 +185,8 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
   ///  [12] "task aktif" suffix (default "task aktif")
   ///  [13] offline error (default "Perlu koneksi internet")
   ///  [14] write fail error (default "Gagal menyimpan")
+  ///  [15] cluster: invoice_pending template (default "{n} selesai - perlu invoice")
+  ///  [16] invoice action button label (default "Cetak Invoice")
   String _t(int i, [String def = '']) =>
       _textArray.length > i ? _textArray[i] : def;
 
@@ -251,6 +268,9 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
       case 'blocked_departure':
         _navigateCross(signal.vehicleId);
         break;
+      case 'invoice_pending':
+        _navigateInvoice(signal.taskVid);
+        break;
     }
   }
 
@@ -314,6 +334,22 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
     gotoRoute(crossRoute);
   }
 
+  void _navigateInvoice(String taskVid) {
+    if (_invoiceRoute.isEmpty) return;
+
+    // Resolve routeParams with {tnm} -> taskVid
+    if (_invoiceRouteParams.isNotEmpty) {
+      final String resolved =
+          _invoiceRouteParams.replaceAll('{tnm}', taskVid);
+      writeRouteParams(resolved, widget.scrName);
+    }
+
+    // Dead-route silent-skip
+    if (!routeExist(_invoiceRoute)) return;
+    routeStack.push(_invoiceRoute);
+    gotoRoute(_invoiceRoute);
+  }
+
   // ── Cluster header text ────────────────────────────────────────────────
 
   String _clusterLabel(String type, int count) {
@@ -330,6 +366,9 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
       case 'blocked_departure':
         return _t(8, '{n} kendaraan menunggu opening')
             .replaceAll('{n}', '$count');
+      case 'invoice_pending':
+        return _t(15, '{n} selesai - perlu invoice')
+            .replaceAll('{n}', '$count');
       default:
         return '$count sinyal';
     }
@@ -345,6 +384,8 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
         return _t(3, 'Tunjuk di Gudang');
       case 'blocked_departure':
         return _t(4, 'Lihat di Gudang');
+      case 'invoice_pending':
+        return _t(16, 'Cetak Invoice');
       default:
         return '';
     }
@@ -360,6 +401,8 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
         return Icons.person_off_outlined;
       case 'blocked_departure':
         return Icons.block_outlined;
+      case 'invoice_pending':
+        return Icons.receipt_long_outlined;
       default:
         return Icons.warning_amber_outlined;
     }
@@ -412,6 +455,7 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
         returnedGate: _returnedGate,
         noExecutorGate: _noExecutorGate,
         blockedGate: _blockedGate,
+        invoiceGate: _invoiceGate,
       );
 
       // 0 signals -> collapse
@@ -496,6 +540,9 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
         signal.type == 'no_executor' || signal.type == 'blocked_departure';
     final bool isSoft = signal.type == 'blocked_departure';
     final bool isDanger = signal.tier == 'danger' || (isCross && !isSoft);
+    // Invoice tier reads "done, just bill" -- green accent, not the blue
+    // used by the other to-do tiers.
+    final bool isInvoice = signal.type == 'invoice_pending';
 
     // Card colors via centralized palette
     final (Color cardBg, Color cardBorderColor, double borderWidth) =
@@ -507,11 +554,12 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
       isSoft: isSoft,
       isDanger: isDanger,
       isCross: isCross,
+      isOk: isInvoice,
     );
 
     // Age pill colors via centralized palette
     final (Color agePillBg, Color agePillFg) =
-        AdminTierColors.signalAgePill(signal.tier);
+        AdminTierColors.signalAgePill(signal.tier, green: isInvoice);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -535,14 +583,18 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: AdminTierColors.iconTileBg,
+                    color: isInvoice
+                        ? AdminTierColors.okBadgeBg
+                        : AdminTierColors.iconTileBg,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   alignment: Alignment.center,
                   child: Icon(
                     _clusterIcon(signal.type),
                     size: 20,
-                    color: AdminTierColors.okAction,
+                    color: isInvoice
+                        ? AdminTierColors.okActionGreen
+                        : AdminTierColors.okAction,
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -652,7 +704,10 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
                       icon: isCross
                           ? const Icon(Icons.open_in_new,
                               size: 14, color: Colors.white)
-                          : const SizedBox.shrink(),
+                          : isInvoice
+                              ? const Icon(Icons.receipt_long_outlined,
+                                  size: 16, color: Colors.white)
+                              : const SizedBox.shrink(),
                       label: Text(
                         _actionLabel(signal.type),
                         style: TextStyle(

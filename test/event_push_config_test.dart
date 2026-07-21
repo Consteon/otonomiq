@@ -132,4 +132,304 @@ void main() {
       expect(m['ty'], 'report-incident');
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // v3: notification prop → buildNotificationSuffix
+  // ─────────────────────────────────────────────────────────────────────
+  group('v3 buildNotificationSuffix — notification prop injection', () {
+    // Identity resolver for tests that don't need token substitution.
+    String identity(String s) => s;
+
+    test('single mode: emits ntf+nm+dp, no bcc', () {
+      final ntf = <String, dynamic>{
+        'mode': 'single',
+        'title': 'Patroli',
+        'message': 'Selesai patroli',
+      };
+      final result = buildNotificationSuffix(ntf, identity);
+      final parsed = parseAddToEvent('col$result');
+      expect(parsed['ntf'], 'single');
+      expect(parsed['nm'], 'Patroli');
+      expect(parsed['dp'], 'Selesai patroli');
+      expect(parsed.containsKey('bcc'), false);
+    });
+
+    test('broadcast with literal diamond target: sanitized to comma, '
+        'single DSL block', () {
+      final ntf = <String, dynamic>{
+        'mode': 'broadcast',
+        'target': '32639062303108${separator[1]}32639062303102',
+        'title': 'Pengumuman',
+        'message': 'Halo semua',
+      };
+      final suffix = buildNotificationSuffix(ntf, identity);
+      // Regression guard: prefix with collection header, split by ◆
+      final block = '84214220504259//event$suffix';
+      final blocks = block
+          .split(separator[1])
+          .where((b) => b.trim().isNotEmpty)
+          .toList();
+      expect(blocks.length, 1,
+          reason: 'literal diamond in bcc must not split block');
+      final parsed = parseAddToEvent(blocks[0]);
+      expect(parsed['ntf'], 'broadcast');
+      expect(parsed['bcc'], '32639062303108,32639062303102');
+      expect(parsed['nm'], 'Pengumuman');
+      expect(parsed['dp'], 'Halo semua');
+    });
+
+    test('token target survives compose-time; diamond from sync-time '
+        'resolveValueTokens stays intact in Firestore', () {
+      // This is the spec §3.1 path: target is a cell-reference token like
+      // ◁2▷, resolved at sync-time by resolveValueTokens AFTER the ◆-split.
+      final ntf = <String, dynamic>{
+        'mode': 'broadcast',
+        'target': '${ro}2$rc', // ◁2▷
+        'title': 'Pengumuman',
+        'message': 'Halo {nama}',
+      };
+      final suffix = buildNotificationSuffix(ntf, identity);
+      // Full DSL block: collection header + notification fields
+      final fullBlock = '84214220504259//event$suffix';
+      // Split by ◆ must yield 1 block — token is opaque at compose time
+      final blocks = fullBlock
+          .split(separator[1])
+          .where((b) => b.trim().isNotEmpty)
+          .toList();
+      expect(blocks.length, 1,
+          reason: 'token target has no diamond at compose time');
+      // Sync-time: buildEventDoc resolves ◁2▷ → ref[1][1]
+      final ref = <dynamic>[
+        <String>[],
+        <String>['', '32639062303108${separator[1]}32639062303102'],
+      ];
+      final built = buildEventDoc(blocks[0], ref,
+          tableVid: 1,
+          appVid: 2,
+          timeReceived: 0,
+          receivingPage: 'pg',
+          eventData: 'blob');
+      expect(built.doc['ntf'], 'broadcast');
+      expect(built.doc['bcc'],
+          '32639062303108${separator[1]}32639062303102',
+          reason: 'diamond in bcc must survive — CF native format');
+      expect(built.doc['dp'], 'Halo {nama}',
+          reason: '{nama} literal for CF per-recipient personalization');
+      expect(built.doc['nm'], 'Pengumuman');
+    });
+
+    test('encoded _u25C6_ in literal target: decoded then comma-sanitized',
+        () {
+      final ntf = <String, dynamic>{
+        'mode': 'broadcast',
+        'target': '32639062303108_u25C6_32639062303102',
+        'title': 'Test',
+        'message': 'Msg',
+      };
+      final suffix = buildNotificationSuffix(ntf, identity);
+      expect(suffix.contains(separator[1]), false,
+          reason: 'decoded diamond must be sanitized');
+      final parsed = parseAddToEvent('col$suffix');
+      expect(parsed['bcc'], '32639062303108,32639062303102');
+    });
+
+    test('null notification returns empty string', () {
+      expect(buildNotificationSuffix(null, identity), '');
+    });
+
+    test('malformed notification (String) returns empty string', () {
+      expect(buildNotificationSuffix('not a map', identity), '');
+    });
+
+    test('malformed notification (List) returns empty string', () {
+      expect(buildNotificationSuffix(['single'], identity), '');
+    });
+
+    test('empty title and message: fields omitted (CF fallback)', () {
+      final ntf = <String, dynamic>{
+        'mode': 'single',
+        'title': '',
+        'message': '',
+      };
+      final result = buildNotificationSuffix(ntf, identity);
+      final parsed = parseAddToEvent('col$result');
+      expect(parsed['ntf'], 'single');
+      expect(parsed.containsKey('nm'), false);
+      expect(parsed.containsKey('dp'), false);
+    });
+
+    test('resolver returning No-DATA: nm/dp omitted for CF fallback', () {
+      final ntf = <String, dynamic>{
+        'mode': 'single',
+        'title': 'MARKER',
+        'message': 'MARKER',
+      };
+      // Simulates replacePlaceholders on an out-of-bounds {{POS(99)}}
+      String noDataResolver(String s) => s == 'MARKER' ? 'No-DATA' : s;
+      final result = buildNotificationSuffix(ntf, noDataResolver);
+      final parsed = parseAddToEvent('col$result');
+      expect(parsed['ntf'], 'single');
+      expect(parsed.containsKey('nm'), false,
+          reason: 'No-DATA title must be omitted for CF fallback');
+      expect(parsed.containsKey('dp'), false,
+          reason: 'No-DATA message must be omitted for CF fallback');
+    });
+
+    test('resolver returning NO-DATA: nm/dp omitted for CF fallback', () {
+      final ntf = <String, dynamic>{
+        'mode': 'single',
+        'title': 'MARKER',
+        'message': 'MARKER',
+      };
+      // Simulates replacePlaceholders on an OUT-OF-BOUNDS index, which returns
+      // uppercase 'NO-DATA' (api.dart:4227) — distinct from the null-ref
+      // lowercase 'No-DATA' (api.dart:4217) covered above.
+      String noDataResolver(String s) => s == 'MARKER' ? 'NO-DATA' : s;
+      final result = buildNotificationSuffix(ntf, noDataResolver);
+      final parsed = parseAddToEvent('col$result');
+      expect(parsed['ntf'], 'single');
+      expect(parsed.containsKey('nm'), false,
+          reason: 'NO-DATA title must be omitted for CF fallback');
+      expect(parsed.containsKey('dp'), false,
+          reason: 'NO-DATA message must be omitted for CF fallback');
+    });
+
+    test('black circle in title sanitized — outer tb segment frame intact', () {
+      // saveSend joins tableString⬤update⬤delete⬤event⬤updateEvent with
+      // separator[0]. A ⬤ surviving into the event segment would shift every
+      // later segment and silently drop the updateEventRow payload.
+      final ntf = <String, dynamic>{
+        'mode': 'single',
+        'title': 'Patroli${separator[0]}Malam',
+        'message': 'OK',
+      };
+      final suffix = buildNotificationSuffix(ntf, identity);
+      expect(suffix.contains(separator[0]), false,
+          reason: 'black circle must not survive into the event segment');
+      // Frame round-trip: event segment stays at index 3, updateEvent at 4.
+      final tb = 'tbl${separator[0]}upd${separator[0]}del'
+          '${separator[0]}col$suffix${separator[0]}updEvent';
+      final segments = tb.split(separator[0]);
+      expect(segments.length, 5, reason: 'tb frame must stay 5 segments');
+      expect(segments[4], 'updEvent',
+          reason: 'updateEventRow payload must not be shifted out');
+      expect(parseAddToEvent(segments[3])['nm'], 'Patroli Malam');
+    });
+
+    test('black circle in mode stripped; ⬤-only mode returns empty', () {
+      // mode skips clean(), but ⬤ is U+2B24 (category So, not whitespace) so
+      // trim() cannot remove it — a raw typed ⬤ would still shift the tb frame.
+      final ntf = <String, dynamic>{
+        'mode': 'sing${separator[0]}le',
+        'title': 'Patroli',
+        'message': 'OK',
+      };
+      final suffix = buildNotificationSuffix(ntf, identity);
+      expect(suffix.contains(separator[0]), false,
+          reason: 'black circle must not reach the event segment via mode');
+      expect(parseAddToEvent('col$suffix')['ntf'], 'single',
+          reason: 'stripped, not spaced — mode is an identifier-like token');
+      // A mode consisting only of ⬤ collapses to empty and early-returns.
+      expect(
+          buildNotificationSuffix(
+              <String, dynamic>{'mode': separator[0], 'title': 'x'}, identity),
+          '');
+    });
+
+    test('whitespace-only title: nm omitted (CF falls back to cn)', () {
+      final ntf = <String, dynamic>{
+        'mode': 'single',
+        'title': '   ',
+        'message': 'OK',
+      };
+      final result = buildNotificationSuffix(ntf, identity);
+      final parsed = parseAddToEvent('col$result');
+      expect(parsed.containsKey('nm'), false);
+      expect(parsed['dp'], 'OK');
+    });
+
+    test('{nama} in message survives literally', () {
+      final ntf = <String, dynamic>{
+        'mode': 'broadcast',
+        'target': '32639062303108',
+        'title': 'Pengumuman',
+        'message': 'Halo {nama}, pesan penting',
+      };
+      final result = buildNotificationSuffix(ntf, identity);
+      final parsed = parseAddToEvent('col$result');
+      expect(parsed['dp'], 'Halo {nama}, pesan penting');
+    });
+
+    test('single mode ignores target — no bcc field', () {
+      final ntf = <String, dynamic>{
+        'mode': 'single',
+        'title': 'Laporan',
+        'message': 'Isi laporan',
+        'target': '12345',
+      };
+      final result = buildNotificationSuffix(ntf, identity);
+      expect(result.contains('bcc'), false);
+    });
+
+    test('separator glyphs in title replaced (no DSL corruption)', () {
+      final ntf = <String, dynamic>{
+        'mode': 'single',
+        'title': 'Patroli${separator[8]}Rutin${separator[2]}Malam',
+        'message': 'OK',
+      };
+      final result = buildNotificationSuffix(ntf, identity);
+      final parsed = parseAddToEvent('col$result');
+      expect(parsed['nm'], 'Patroli Rutin Malam');
+    });
+
+    test('empty mode: skip entirely', () {
+      final ntf = <String, dynamic>{
+        'mode': '',
+        'title': 'Test',
+        'message': 'Test',
+      };
+      expect(buildNotificationSuffix(ntf, identity), '');
+    });
+
+    test('unknown mode: written as-is (CF ignores)', () {
+      final ntf = <String, dynamic>{
+        'mode': 'priority',
+        'title': 'Urgent',
+        'message': 'Something',
+      };
+      final result = buildNotificationSuffix(ntf, identity);
+      final parsed = parseAddToEvent('col$result');
+      expect(parsed['ntf'], 'priority');
+      expect(parsed.containsKey('bcc'), false,
+          reason: 'bcc only for broadcast');
+    });
+
+    test('broadcast with empty target: bcc still written', () {
+      final ntf = <String, dynamic>{
+        'mode': 'broadcast',
+        'title': 'Pengumuman',
+        'message': 'Halo',
+        'target': '',
+      };
+      final result = buildNotificationSuffix(ntf, identity);
+      final parsed = parseAddToEvent('col$result');
+      expect(parsed.containsKey('bcc'), true);
+      expect(parsed['bcc'], '');
+    });
+
+    test('resolver callback is applied to values', () {
+      final ntf = <String, dynamic>{
+        'mode': 'single',
+        'title': 'MARKER_A',
+        'message': 'MARKER_B',
+      };
+      String testResolver(String s) =>
+          s.replaceAll('MARKER_A', 'Resolved Title')
+           .replaceAll('MARKER_B', 'Resolved Body');
+      final result = buildNotificationSuffix(ntf, testResolver);
+      final parsed = parseAddToEvent('col$result');
+      expect(parsed['nm'], 'Resolved Title');
+      expect(parsed['dp'], 'Resolved Body');
+    });
+  });
 }

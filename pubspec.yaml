@@ -87,6 +87,7 @@ dependencies:
   sign_in_with_apple: ^8.1.0
   #  barcode_scan2: ^4.3.3
   uuid: ^4.5.3
+  url_launcher: ^6.3.0
   #  argon2: ^1.0.1
   vibration: ^3.1.8
   collection: ^1.19.1
@@ -97,6 +98,7 @@ dependencies:
   latlong2: ^0.9.1 # 0.10 blocked: flutter_map 8.3.0 pins ^0.9.1
   flutter_nfc_kit: ^3.6.2
   ndef: ^0.4.0
+  speech_to_text: ^7.0.0
 
 #  flutter_blue_plus: ^1.35.5
 #  cryptography: ^2.7.0

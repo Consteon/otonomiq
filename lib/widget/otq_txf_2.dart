@@ -12,6 +12,7 @@ import 'package:get/get.dart';
 // import 'package:fluttercontactpicker/fluttercontactpicker.dart';
 import 'package:group_radio_button/group_radio_button.dart';
 import 'package:intl/intl.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 
 import '../api.dart';
 import '../bloc_timer/timer_bloc.dart';
@@ -41,6 +42,17 @@ import 'otq_txf.dart';
 // https://github.com/wilburt/Payment-Card-Validation/tree/master/assets/images
 // multi formatter :
 // https://pub.dev/packages/flutter_multi_formatter/example
+
+String sttCompose(String base, String words, int maxLength) {
+  // Compose one speech session onto the text present before it started.
+  // maxLength <= 0 means unlimited (LengthLimitingTextInputFormatter does not
+  // apply to programmatic controller.text writes, so truncate here).
+  String t = base.isEmpty ? words : '$base $words';
+  if (maxLength > 0 && t.length > maxLength) {
+    t = t.substring(0, maxLength);
+  }
+  return t;
+} // end of sttCompose
 
 class OtqTxf2 extends StatefulWidget {
   /*
@@ -110,6 +122,16 @@ class OtqTxf2State extends State<OtqTxf2>
   Position? gpsPosition; // current position
   String qrType = 'G'; // default qr type = Generic
   Map<String, String> errString = {};
+
+  // Speech-to-text (enabled per component via 'stt': true). One platform
+  // recognizer exists per app, so the instance is static; _sttOwner routes the
+  // static status/error callbacks to whichever field is listening now.
+  static final SpeechToText _stt = SpeechToText();
+  static bool _sttReady = false;
+  static OtqTxf2State? _sttOwner;
+  bool sttEnabled = false;
+  bool _sttListening = false;
+  String _sttBase = ''; // field text captured when the session started
 
   String formatNumber(dynamic format, num? value) {
     // format = [symbol, language, mantissa]
@@ -318,6 +340,8 @@ class OtqTxf2State extends State<OtqTxf2>
     if (maxLength <= 0) {
       maxLength = -1;
     }
+    sttEnabled =
+        widget.component['stt'].toString().trim().toLowerCase() == 'true';
     if (widget.component['format'] != null) {
       formatArray = getCurrencyFormat(widget.component['format']);
     } // end if (widget.component['format'] != null)
@@ -537,9 +561,72 @@ class OtqTxf2State extends State<OtqTxf2>
     searchContentBase = searchContent;
   } // end of initState
 
+  void _sttStopped() {
+    // Reached from the mic button, plugin status ('done'/'notListening') and
+    // error callbacks — the last two can fire after this state is disposed.
+    if (mounted && _sttListening) {
+      setState(() {
+        _sttListening = false;
+      });
+    } else {
+      _sttListening = false;
+    }
+  } // end of _sttStopped
+
+  Future<void> _sttToggle() async {
+    if (_sttListening) {
+      await _stt.stop();
+      _sttStopped();
+      return;
+    }
+    if (!_sttReady) {
+      // Also triggers the mic / speech-recognition permission prompts.
+      _sttReady = await _stt.initialize(
+        onStatus: (status) {
+          if (status == 'done' || status == 'notListening') {
+            _sttOwner?._sttStopped();
+          }
+        },
+        onError: (_) => _sttOwner?._sttStopped(),
+      );
+    }
+    if (!_sttReady) {
+      devPrint('stt initialize failed (permission or no speech service)');
+      return;
+    }
+    if (_sttOwner != null && _sttOwner != this && _sttOwner!._sttListening) {
+      await _stt.stop(); // steal the shared recognizer from another field
+      _sttOwner!._sttStopped();
+    }
+    _sttOwner = this;
+    _sttBase = myController.text.trim();
+    setState(() {
+      _sttListening = true;
+    });
+    await _stt.listen(
+      listenOptions: SpeechListenOptions(
+        localeId: (widget.component['sttLocale'] ?? 'id_ID').toString(),
+        partialResults: true,
+      ),
+      onResult: (result) {
+        String t = sttCompose(_sttBase, result.recognizedWords, maxLength);
+        // Programmatic .text writes do not fire onChanged — mirror its
+        // default branch by hand (same as the QR/scan handlers do).
+        myController.text = t;
+        txfControllerCheck(widget.scrName, widget.component['position']);
+        txfController[widget.scrName]![widget.component['position']]!
+            .finalData = numericCleanUp(formatArray, t);
+      },
+    );
+  } // end of _sttToggle
+
   @override
   Future<void> dispose() async {
     super.dispose();
+    if (_sttOwner == this) {
+      _stt.stop();
+      _sttOwner = null;
+    }
     GeneralGetXController.to
         .putController(widget.scrName, widget.component['position'], null);
     // myController.dispose();
@@ -1976,7 +2063,22 @@ class OtqTxf2State extends State<OtqTxf2>
                     break;
                   default:
                     {
-                      element = pillWrap(txf);
+                      element = pillWrap(!(sttEnabled && editable)
+                          ? txf
+                          : Row(
+                              children: <Widget>[
+                                Expanded(child: txf),
+                                IconButton(
+                                  icon: Icon(
+                                    _sttListening ? Icons.mic : Icons.mic_none,
+                                    size: 8.0 + (component['size'] ?? 16.0),
+                                    color: _sttListening ? Colors.red : null,
+                                  ),
+                                  tooltip: 'Suara',
+                                  onPressed: isEnabled ? _sttToggle : null,
+                                ),
+                              ],
+                            ));
                     }
                 } // end switch (component['variant'].toString().toLowerCase())
 

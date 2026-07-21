@@ -34,6 +34,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | Widget | File | Status | Description |
 |---|---|---|---|
 | BuildDisplayComponent | [build_display_component.md](build_display_component.md) | todo | Dynamic display builder |
+| OtqTxt | [otq_txt.md](otq_txt.md) | draft | Text display (`txt`); opt-in variants `section` (styled header) and `history` (timeline rail) |
 | AdminActiveTripList | [admin_active_trip_list.md](admin_active_trip_list.md) | draft | Active trip cards (plate, driver, stop progress) for Admin H1 BERJALAN |
 | AdminCoordinationHeader | [admin_coordination_header.md](admin_coordination_header.md) | draft | Admin identity header (role, name+plate, translucent count chips) for H1 AdminHome |
 | AssetStockList | [asset_stock_list.md](asset_stock_list.md) | draft | Generic pivot-cube stock distribution (entity x pivot x condition) with summary strip, filter tabs, and proportion bar |
@@ -113,6 +114,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | Widget | File | Status | Description |
 |---|---|---|---|
 | LocationDetector | [location_detector.md](location_detector.md) | done | GPS location status with inside/outside site detection via LQR reference points |
+| MapPointPicker | [map_point_picker.md](map_point_picker.md) | draft | Coordinate picker (GPS / map) |
 | QrGps | [qr_gps.md](qr_gps.md) | todo | QR + GPS |
 | GpsSend | [gps_send.md](gps_send.md) | todo | Send GPS coordinates |
 | AttendanceQrSelfieGpsVerify | [attendance_qr_selfie_gps_verify.md](attendance_qr_selfie_gps_verify.md) | draft | Attendance verification (QR + selfie + GPS) |
@@ -123,6 +125,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | FtzRowOfButton | [ftz_row_of_button.md](ftz_row_of_button.md) | todo | Button row |
 | FtzRowOfButton2 | [ftz_row_of_button_2.md](ftz_row_of_button_2.md) | draft | Button row v2 |
 | ChoiceButtonGroup | [choice_button_group.md](choice_button_group.md) | done | Selectable button grid with chain actions (navigation, dialog, API call) |
+| WhatsAppSend | [whatsapp_send.md](whatsapp_send.md) | draft | Generic WhatsApp message sender (phone + template + wa.me launch + marker write); SDUI `WHATSAPP_SEND` |
 
 ### Checklist / Progress
 | Widget | File | Status | Description |

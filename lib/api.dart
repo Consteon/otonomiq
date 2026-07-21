@@ -31,6 +31,7 @@ import 'bloc_timer/bloc.dart';
 import 'crypto/auth_crypto.dart';
 import 'different_code/different_code.dart';
 import 'firebase_notification_handler.dart';
+import 'firestore_repository/add_to_event.dart';
 import 'firestore_repository/firestore_generic_repository.dart';
 import 'firestore_repository/proxy_repository.dart';
 import 'firestore_repository/table_repository.dart';
@@ -57,6 +58,7 @@ import 'widget/logout_transition_support.dart';
 import 'widget/nfc_reader.dart';
 import 'widget/photo_camera.dart';
 import 'widget/ui_component.dart';
+import 'widget/whatsapp_send.dart';
 
 /// Login perf instrumentation. Mirrors UserRepository.loginPerfTrace.
 /// Set to false (or remove) after root-cause confirmation.
@@ -4114,6 +4116,11 @@ void clearData(String scrName) {
   ItemExecutionList.clearExecutionStore(scrName);
   ItemExecutionSubmit.clearState(scrName);
   NfcReader.clearCollectorState(scrName);
+  // WHATSAPP_SEND per-invoice sent badge. Must be here, not only in
+  // buildPage(clear:true): navigation goes gotoRoute -> reloadPage, which calls
+  // clearData and then returns the CACHED linkElement[page] -- buildPage never
+  // runs, so the badge would leak from invoice A onto invoice B.
+  WhatsAppSend.clearSentState(scrName);
 
   if (txfController[scrName] == null) return;
 
@@ -4402,6 +4409,16 @@ void saveSend(
         eventString = resolveDriverCurlyTokens(eventString, scrName);
         eventString = replacePlaceholders(eventString, ref);
         eventString = _resolveScreenTxMarkers(eventString);
+        // Notification fields are ADDITIVE — a failure here must never discard
+        // the base addToEvent payload (the outer catch resets eventString to '').
+        try {
+          eventString += buildNotificationSuffix(
+            component['notification'],
+            (s) => _resolveScreenTxMarkers(replacePlaceholders(s, ref)),
+          );
+        } catch (e) {
+          errorReport(e);
+        }
       }
     } catch (e) {
       eventString = '';
