@@ -21,6 +21,31 @@ import '../firestore_repository/firestore_generic_repository.dart';
 
 part '../part/build_part/attend_qr_gps_selfie_state_part.dart';
 
+/// Body text for the `fakeGpsAllowed:false` block dialog.
+///
+/// [OtqState.mock] defaults to `true` and is only overwritten inside the
+/// `pos.latitude != invalidLocation` branch of `setAllDataAsync`. So a GPS read
+/// that failed outright (service off, permission denied, no fix) arrives here
+/// looking exactly like a real mock provider, and the user gets told to turn
+/// off a fake-GPS app they are not running. [OtqState.gpsOn] is the one flag
+/// that separates them: it is only set true once a valid position was read.
+///
+/// Both cases still block attendance -- this only corrects the diagnosis.
+/// Sheet text slot 31 is optional; the Indonesian default stands in when the
+/// tenant sheet has not defined it (same guarded pattern as slot 30).
+String fakeGpsDialogText(OtqState data, List textArray) {
+  if (!data.gpsOn) {
+    return (textArray.length > 31 &&
+            textArray[31] != null &&
+            textArray[31].toString().isNotEmpty)
+        ? textArray[31].toString()
+        : 'GPS tidak aktif';
+  }
+  return (textArray.length > 23 && textArray[23] != null)
+      ? textArray[23].toString()
+      : 'Nonaktifkan Fake GPS';
+}
+
 /*
   Widget for employee attendance.
   component:
@@ -1469,8 +1494,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                         return AlertDialog(
                                           title: Text(textArray[22] ??
                                               'Lokasi tidak valid'),
-                                          content: Text(textArray[23] ??
-                                              'Nonaktifkan Fake GPS'),
+                                          content: Text(fakeGpsDialogText(
+                                              currentData, textArray)),
                                           actions: [
                                             TextButton(
                                               child: Text(textArray[8] ?? 'OK'),
@@ -1607,7 +1632,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                       builder: (BuildContext context) {
                                         return AlertDialog(
                                           title: Text(textArray[22]),
-                                          content: Text(textArray[23]),
+                                          content: Text(fakeGpsDialogText(
+                                              currentData, textArray)),
                                           actions: [
                                             TextButton(
                                               child: Text(textArray[8]),
@@ -1735,7 +1761,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                       builder: (BuildContext context) {
                                         return AlertDialog(
                                           title: Text(textArray[22]),
-                                          content: Text(textArray[23]),
+                                          content: Text(fakeGpsDialogText(
+                                              currentData, textArray)),
                                           actions: [
                                             TextButton(
                                               child: Text(textArray[8]),
@@ -1979,7 +2006,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                 builder: (BuildContext context) {
                                   return AlertDialog(
                                     title: Text(textArray[22]),
-                                    content: Text(textArray[23]),
+                                    content: Text(
+                                        fakeGpsDialogText(currentData, textArray)),
                                     actions: [
                                       TextButton(
                                         child: Text(textArray[8]),
@@ -2109,7 +2137,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                 builder: (BuildContext context) {
                                   return AlertDialog(
                                     title: Text(textArray[22]),
-                                    content: Text(textArray[23]),
+                                    content: Text(
+                                        fakeGpsDialogText(currentData, textArray)),
                                     actions: [
                                       TextButton(
                                         child: Text(textArray[8]),
@@ -2235,7 +2264,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                 builder: (BuildContext context) {
                                   return AlertDialog(
                                     title: Text(textArray[22]),
-                                    content: Text(textArray[23]),
+                                    content: Text(
+                                        fakeGpsDialogText(currentData, textArray)),
                                     actions: [
                                       TextButton(
                                         child: Text(textArray[8]),

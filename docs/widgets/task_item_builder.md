@@ -40,6 +40,8 @@ subtotal = `hg * ps`. Footer shows Total Rp = sum of all sale line subtotals.
 | `searchField` | String | value of `itemNameField` | Which item field the picker search query filters against (spec section 1.5b) |
 | `searchHint` | String | `Cari...` | Placeholder text in the picker search box |
 | `emptyText` | String | `Semua item sudah ditambahkan` | Text shown when the filtered picker list is empty (catalog exhausted or query no-match) |
+| `sortField` | String | `''` (empty = name-asc only) | Numeric field on item docs to sort the picker by (e.g. `freq` for popularity). Uses `coerceNum`; absent field on a doc = 0. When empty, picker sorts by name asc (backward-compat). |
+| `sortDir` | String | `desc` (when `sortField` present) | Sort direction for `sortField`: `desc` (popular first) or `asc`. Ignored when `sortField` is empty. |
 | `txTypes` | String | `deliver,sale,purchase,refill` | Comma-separated list of active transaction button types. Order = button order. Absent/empty = all 4 (backward-compat). Unknown types silently skipped. |
 | `text` | String | | Diamond-separated label slots (16 slots; see below) |
 

@@ -41,6 +41,7 @@ export 'ftz_autonumber.dart';
 export 'ftz_checker.dart';
 export 'ftz_display_images.dart';
 export 'ftz_multi_scan.dart';
+export 'group_picker.dart';
 export 'inventory_bucket_card.dart';
 export 'invitation.dart';
 export 'item_card_detail.dart';

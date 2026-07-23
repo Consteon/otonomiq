@@ -95,8 +95,21 @@ class _MessageListState extends State<MessageList> {
                   final needAction = msg.inbox == true &&
                       msg.dataPayload != null &&
                       msg.status != 101;
-                  final time = notifRelTime(
-                      msg.receivedTime == null ? null : msg.receivedTime! * 1000);
+                  final ms = notifNormalizeMs(msg.receivedTime);
+                  final time = notifClockTime(ms);
+
+                  // Day-separator chip above the first message of each calendar
+                  // day (label is absolute, so it's correct in either sort order).
+                  Widget? daySep;
+                  if (ms != null) {
+                    final label = notifDayLabel(ms);
+                    final prevMs = index > 0
+                        ? notifNormalizeMs(theList[index - 1].receivedTime)
+                        : null;
+                    if (prevMs == null || notifDayLabel(prevMs) != label) {
+                      daySep = notifDaySeparator(label);
+                    }
+                  }
 
                   final bubble = InkWell(
                     borderRadius: BorderRadius.circular(16),
@@ -189,7 +202,7 @@ class _MessageListState extends State<MessageList> {
                     ),
                   );
 
-                  return Padding(
+                  final row = Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Row(
                       mainAxisAlignment: incoming
@@ -197,6 +210,11 @@ class _MessageListState extends State<MessageList> {
                           : MainAxisAlignment.end,
                       children: <Widget>[Flexible(child: bubble)],
                     ),
+                  );
+                  if (daySep == null) return row;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[daySep, row],
                   );
                 },
               );

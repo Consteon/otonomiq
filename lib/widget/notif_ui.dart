@@ -40,16 +40,24 @@ String notifInitials(String s) {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
-// The legacy default picture renders as a blank grey circle — treat it (and
-// empty/null) as "no picture" and fall back to a coloured initial avatar.
-bool _hasRealPic(String? pp) =>
-    pp != null && pp.isNotEmpty && !pp.contains('defaultpp');
+// Returns a usable http(s) image URL, or null to fall back to a coloured
+// initial avatar. Rejects null/blank, the legacy grey "defaultpp", and
+// malformed values — e.g. a stray leading space (" https://…") that makes
+// NetworkImage's Uri.parse throw "Scheme not starting with alphabetic
+// character". Trims first so an otherwise-valid but padded URL still renders.
+String? _cleanPicUrl(String? pp) {
+  if (pp == null) return null;
+  final s = pp.trim();
+  if (s.isEmpty || s.contains('defaultpp')) return null;
+  final uri = Uri.tryParse(s);
+  if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) {
+    return null;
+  }
+  return s;
+}
 
 Widget notifAvatar(String name, String? pp, double radius) {
-  if (_hasRealPic(pp)) {
-    return CircleAvatar(radius: radius, backgroundImage: NetworkImage(pp!));
-  }
-  return CircleAvatar(
+  final fallback = CircleAvatar(
     radius: radius,
     backgroundColor: notifAvatarColor(name),
     child: Text(
@@ -59,6 +67,21 @@ Widget notifAvatar(String name, String? pp, double radius) {
         fontWeight: FontWeight.w600,
         fontSize: radius * 0.8,
       ),
+    ),
+  );
+  final url = _cleanPicUrl(pp);
+  if (url == null) return fallback;
+  // Image.network (not CircleAvatar.backgroundImage) so a failed fetch — dead
+  // host, dropped handshake, 404 — routes to errorBuilder instead of dumping
+  // to the console; falls back to the same coloured initial avatar.
+  final d = radius * 2;
+  return ClipOval(
+    child: Image.network(
+      url,
+      width: d,
+      height: d,
+      fit: BoxFit.cover,
+      errorBuilder: (_, _, _) => fallback,
     ),
   );
 }
@@ -74,6 +97,88 @@ String notifRelTime(int? ms) {
   if (diff.inDays == 1) return 'Kemarin';
   if (diff.inDays < 7) return '${diff.inDays}h';
   return DateFormat('d MMM').format(d);
+}
+
+// `tr` (receivedTime) is documented as unix SECONDS, but the broadcast bridge
+// actually writes millis — so the old `tr * 1000` overshot into the future and
+// every bubble read "baru". Normalize by magnitude so time is right whichever
+// unit the writer used. Returns null when unset.
+int? notifNormalizeMs(int? t) {
+  if (t == null || t <= 0) return null;
+  return t < 100000000000 ? t * 1000 : t; // < 1e11 ⇒ seconds, else already ms
+}
+
+// Absolute clock "HH:mm" for a message bubble. `ms` = unix millis.
+String notifClockTime(int? ms) {
+  if (ms == null || ms <= 0) return '';
+  return DateFormat('HH:mm').format(DateTime.fromMillisecondsSinceEpoch(ms));
+}
+
+// Absolute "9 Jul 2026 • 23:51" for a flat notification-feed row.
+String notifDateTime(int? ms) {
+  if (ms == null || ms <= 0) return '';
+  return DateFormat("d MMM yyyy '•' HH:mm")
+      .format(DateTime.fromMillisecondsSinceEpoch(ms));
+}
+
+// Channel avatar with a small unread dot in the top-right corner.
+Widget notifAvatarDot(String name, String? pp, double radius, bool unread) {
+  final av = notifAvatar(name, pp, radius);
+  if (!unread) return av;
+  return Stack(
+    clipBehavior: Clip.none,
+    children: <Widget>[
+      av,
+      Positioned(
+        right: -1,
+        top: -1,
+        child: Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: Colors.redAccent,
+            shape: BoxShape.circle,
+            border: Border.all(color: notifBg, width: 2),
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
+// Date-separator label grouping a thread by calendar day.
+String notifDayLabel(int ms) {
+  final d = DateTime.fromMillisecondsSinceEpoch(ms);
+  final now = DateTime.now();
+  final diff = DateTime(now.year, now.month, now.day)
+      .difference(DateTime(d.year, d.month, d.day))
+      .inDays;
+  if (diff == 0) return 'Hari ini';
+  if (diff == 1) return 'Kemarin';
+  return DateFormat('d MMM yyyy').format(d);
+}
+
+// Centered date-separator chip for the message thread.
+Widget notifDaySeparator(String label) {
+  return Center(
+    child: Container(
+      margin: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: notifBorder),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w600,
+          color: notifTextMuted,
+        ),
+      ),
+    ),
+  );
 }
 
 // Small red unread-count pill (replaces the old detached TxtDot).

@@ -150,6 +150,16 @@ void main() {
           reason: 'empty vv clause must fail-closed, not be dropped');
     });
 
+    test('fail-closed result is sortable (growable, not const [])', () {
+      // Regression: list_card._getServerFiltered .sort()s this result.
+      // const [] throws "Cannot modify an unmodifiable list" on .sort().
+      final result = filterByMultiClause(
+        docs,
+        'vv\u{25FC}\u{2B58}tdt\u{25FC}1751475600000',
+      );
+      expect(() => result.sort((a, b) => 0), returnsNormally);
+    });
+
     test('single clause with empty value -> zero matches', () {
       // lv◼<empty> from INVENTORY_BUCKET_CARD
       final inventoryDocs = <Map<String, dynamic>>[

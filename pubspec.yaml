@@ -99,6 +99,8 @@ dependencies:
   flutter_nfc_kit: ^3.6.2
   ndef: ^0.4.0
   speech_to_text: ^7.0.0
+  pdf: ^3.13.0
+  share_plus: ^12.0.2
 
 #  flutter_blue_plus: ^1.35.5
 #  cryptography: ^2.7.0
@@ -122,14 +124,14 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
-
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
 
   assets:
-    - assets/images/autsorz.png
+    - assets/images/initial_logo.png
+    - assets/images/autsorz_logo.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

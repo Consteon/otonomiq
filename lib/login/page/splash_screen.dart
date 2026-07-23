@@ -19,7 +19,7 @@ class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
 
   // ── White-label swap points ──────────────────────────────────────────────
-  static const String _logoAsset = 'assets/images/autsorz.png';
+  static const String _logoAsset = 'assets/images/initial_logo.png';
   static const Color _bgColor = Color(0xFFFFFFFF); // == native splash `color`
 
   @override

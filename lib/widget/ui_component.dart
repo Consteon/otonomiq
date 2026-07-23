@@ -162,6 +162,7 @@ List<Widget> buildPage(var componentList, String scrName,
     CustomerOutstandingList.clearState(scrName);
     AssetStockList.clearState(scrName);
     TablePicker.clearState(scrName);
+    GroupPicker.clearState(scrName);
     WhatsAppSend.clearSentState(scrName);
   }
 

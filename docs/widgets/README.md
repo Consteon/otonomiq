@@ -57,6 +57,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | CustodyEventSubmit | [custody_event_submit.md](custody_event_submit.md) | draft | P7/P8 pre-resolve submit (curly tokens) then updateEventRow/addToEvent |
 | EvidenceRow | [evidence_row.md](evidence_row.md) | draft | Two toggle buttons (note/photo) for P11 DeliveryWorkspace |
 | ExecutorDesignateCard | [executor_designate_card.md](executor_designate_card.md) | draft | O1 driver-picker card (amber unset / teal set + workforce bottom-sheet) for WarehouseOpeningCheck |
+| GroupPicker | [group_picker.md](group_picker.md) | draft | Multi-group single/multi-select picker with internal toggle; emits key+value(+label) to form positions. SDUI `group_picker` |
 | DisplayList | [display_list.md](display_list.md) | todo | List display |
 | DisplayList2 | [display_list_2.md](display_list_2.md) | todo | List display v2 (source file currently empty — doc is a placeholder) |
 | DisplayCard | [display_card.md](display_card.md) | todo | Card display |
@@ -140,5 +141,6 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | FtzChecker | [ftz_checker.md](ftz_checker.md) | todo | Generic checker |
 | FtzWebview | [ftz_webview.md](ftz_webview.md) | todo | Webview |
 | FtzBluetoothPrinter | [ftz_bluetooth_printer.md](ftz_bluetooth_printer.md) | todo | Bluetooth printer |
+| SharePdf (PRN share-pdf) | [share_pdf.md](share_pdf.md) | draft | PRN variant: template to PDF to native share sheet |
 
 > Status legend: `todo` = not yet documented, `draft` = in progress, `done` = complete, `example` = template/example doc.

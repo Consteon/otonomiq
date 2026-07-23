@@ -296,7 +296,6 @@ Future<dynamic> getAppGps() async {
       'gpsPlaceMark': placeMarkCopy(null),
     };
   } // end if (gpsTime.value > 0)
-  dynamic currentLat = returnValue['gpsData'].latitude;
   if (returnValue['gpsData'].latitude == invalidLocation ||
       returnValue['gpsData'].longitude == invalidLocation) {
     // Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high).then((Position position) {
@@ -362,6 +361,15 @@ Future<dynamic> getAppGps() async {
           returnValue['gpsPlaceMark'].name = 'Error $e';
         } // end try gpsPlaceMark
       } // end try
+    }).catchError((Object e) {
+      // getCurrentPosition itself rejects (location service off, permission
+      // denied, timeout) -> the .then callback never runs, so the try/catch
+      // INSIDE it is skipped and the error escapes getAppGps -> getLocation ->
+      // OtqState.setAllDataAsync, which swallows it and returns an OtqState
+      // still holding its defaults (mock=true, latitude=invalidLocation,
+      // gpsDone=false). Keep the invalid-location sentinel already in
+      // returnValue and report non-fatal instead.
+      errorReport('getAppGps getCurrentPosition: $e');
     });
   }
   return returnValue;
@@ -517,6 +525,22 @@ Future<List<dynamic>> sendHistoryImagesToCloud(position, content) async {
   //return [position, await uploadImageToCloud(content)];
 } // end of sendHistoryImagesToCloud
 
+// Strips the leading "<appSupportDir>/otq_images/FTZIMG/" from a decoded local
+// image path, leaving the Firebase Storage folder.
+//
+// `lastIndexOf` returns -1 when the FTZIMG marker is absent, and the old inline
+// arithmetic (-1 + 6 + 1) silently degraded to `substring(6)`: a RangeError on a
+// path shorter than 6 chars, and a wrongly-chopped Storage folder on a longer
+// one. The marker IS absent on two real paths — renamePath's else branch
+// (non-camera input returned unchanged) and its rename+copy double-failure
+// fallback to the raw camera path — so treat "no marker" as "no folder prefix
+// to strip" and hand the caller what it already has.
+String folderFromRawPath(String rawFolder) {
+  final int i = rawFolder.lastIndexOf('$localImageBeginningFolderDivider/');
+  if (i < 0) return rawFolder;
+  return rawFolder.substring(i + localImageBeginningFolderDivider.length + 1);
+}
+
 Future<String> replaceLocalImageToUrl(String input) async {
   // replace local image to cloud url
   // input the whole event string
@@ -534,11 +558,7 @@ Future<String> replaceLocalImageToUrl(String input) async {
       for (Match match in matches) {
         List<String> fileArray = match.group(1)!.split('___');
         String rawFolder = Uri.decodeComponent(fileArray[0]);
-        String folder = rawFolder.substring(
-          rawFolder.lastIndexOf('$localImageBeginningFolderDivider/') +
-              localImageBeginningFolderDivider.length +
-              1,
-        );
+        String folder = folderFromRawPath(rawFolder);
         futures.add(uploadImageToCloud(match.group(1)!));
         // futures.add(saveImageToCloud(
         //     imagePath: match.group(1)!,
@@ -606,15 +626,14 @@ Future saveImagePutInImageMap(String url) async {
       // try to upload the image to cloud
       List<String> fileArray = localPath.split('___');
       String rawFolder = Uri.decodeComponent(fileArray[0]);
-      String folder = rawFolder.substring(
-        rawFolder.lastIndexOf('$localImageBeginningFolderDivider/') +
-            localImageBeginningFolderDivider.length +
-            1,
-      );
+      String folder = folderFromRawPath(rawFolder);
       await saveImageToCloud(
         imagePath: localPath,
         folder: folder,
-        rawFileName: fileArray[1],
+        // A path with no '___' splits to a single element, so fileArray[1]
+        // would throw the next RangeError right after the substring one this
+        // guard removes. Same trigger (camera cancelled -> empty path).
+        rawFileName: fileArray.length > 1 ? fileArray[1] : emptyString,
       );
     }
   } // end if (await internetConnectedCheck())
@@ -1579,7 +1598,11 @@ void resetVidUid(String userUid) async {
   // this is used by QA team
   var qParams = {"uid": userUid};
   var uri = Uri.https(cloudFunctionDomain, resetVidName, qParams);
-  await http.post(uri);
+  // Caller (ftz_row_of_button_2) does NOT await this void-async fn, so a bare
+  // http.post throw (ClientException on mid-request connection reset) would
+  // escape as a FATAL via platformDispatcher.onError. Route through the
+  // hardened callHttpPost, which catches + reports non-fatal.
+  await callHttpPost(uri, null);
 }
 
 Future getNewVid(String userUid, String userName, String userEmail) {
@@ -4896,9 +4919,12 @@ Future<Position?> getLocation() async {
   // get gps location, until #LASTGPSTIME <> current readings>
   devPrint('getLocation');
   dynamic allGpsData = await getAppGps();
+  // Kept as a typed local (not `return allGpsData['gpsData']` directly) so the
+  // implicit cast off the dynamic map still asserts the shape here rather than
+  // at a caller. Behaviour is unchanged; only the dead `myLatitude` read that
+  // used to force this same cast is gone.
   Position myPosition = allGpsData['gpsData'];
-  dynamic myLatitude = myPosition.latitude;
-  return allGpsData['gpsData'];
+  return myPosition;
 } // end of getLocation
 
 int exp2Epoch(String? inp) {

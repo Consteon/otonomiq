@@ -112,6 +112,32 @@ class TaskItemBuilder extends StatefulWidget {
   /// Clearing = additional outstanding being cleared = max(0, pp - pd).
   static int pickupClearing(int pd, int pp) => pp > pd ? pp - pd : 0;
 
+  /// Sort picker items: primary by [sortField] (numeric, via [coerceNum]),
+  /// secondary by [nameField] (string, case-insensitive asc).
+  /// When [sortField] is empty, sorts by name only (current default).
+  /// Dart List.sort is unstable — the name tiebreak is mandatory.
+  static void sortPickerItems(
+    List<Map<String, dynamic>> items, {
+    required String sortField,
+    required String sortDir,
+    required String nameField,
+  }) {
+    items.sort((a, b) {
+      if (sortField.isNotEmpty) {
+        final num va = coerceNum(a[sortField]);
+        final num vb = coerceNum(b[sortField]);
+        final int primary = sortDir == 'asc'
+            ? va.compareTo(vb)
+            : vb.compareTo(va);
+        if (primary != 0) return primary;
+      }
+      // Tiebreak / default: name asc, case-insensitive.
+      final String na = (a[nameField] ?? '').toString().trim().toLowerCase();
+      final String nb = (b[nameField] ?? '').toString().trim().toLowerCase();
+      return na.compareTo(nb);
+    });
+  }
+
   @override
   State<TaskItemBuilder> createState() => _TaskItemBuilderState();
 }
@@ -366,6 +392,21 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
           .trim();
       emptyText = raw.isNotEmpty ? raw : 'Semua item sudah ditambahkan';
     }
+    final String sortField;
+    {
+      final String raw = (widget.component['sortField'] ?? '')
+          .toString()
+          .trim();
+      sortField = raw;
+    }
+    final String sortDir;
+    {
+      final String raw = (widget.component['sortDir'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      sortDir = raw.isNotEmpty ? raw : 'desc';
+    }
 
     // Filter by category based on tx type.
     // Supplier/seed mode: no category filter (all items available).
@@ -405,12 +446,13 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
       return true;
     }).toList();
 
-    // Sort by name
-    available.sort((a, b) {
-      final String na = (a[nameField] ?? '').toString().trim().toLowerCase();
-      final String nb = (b[nameField] ?? '').toString().trim().toLowerCase();
-      return na.compareTo(nb);
-    });
+    // Sort: primary by sortField (numeric) if present, tiebreak name asc.
+    TaskItemBuilder.sortPickerItems(
+      available,
+      sortField: sortField,
+      sortDir: sortDir,
+      nameField: nameField,
+    );
 
     showModalBottomSheet<void>(
       context: context,

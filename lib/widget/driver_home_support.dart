@@ -593,7 +593,8 @@ List<Map<String, dynamic>> filterByMultiClause(
     // "Empty" covers null, "", and whitespace-only (isTokenEmpty).
     // This is the primary defense against scope leaks from empty tokens.
     if (isTokenEmpty(value) || value.contains('{')) {
-      return const [];
+      // ponytail: growable (NOT const []) — callers .sort() this result
+      return <Map<String, dynamic>>[];
     }
     pairs.add(MapEntry(field, value));
   }

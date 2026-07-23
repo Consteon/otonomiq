@@ -2,19 +2,21 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geocoding/geocoding.dart';
-import '../redux/screen_transaction.dart';
-import '../global.dart';
-import '../global2.dart';
 import 'package:intl/intl.dart';
+
 import '../api.dart';
 import '../crypto/auth_crypto.dart';
-import '../states/mobile_table_controller.dart';
-import 'firestore_generic_repository.dart';
+import '../global.dart';
+import '../global2.dart';
 import '../model/ftz_scanned_code.dart';
+import '../redux/screen_transaction.dart';
+import '../states/mobile_table_controller.dart';
 import 'add_to_event.dart';
+import 'firestore_generic_repository.dart';
 import 'update_event_row.dart';
 
 /// Returns the number of seconds from the epoch time, modulo 86400.
@@ -36,13 +38,15 @@ Future<int> firestoreSequential(String documentName) async {
 Future<int> getNumber(String documentName) async {
   int currentTableVid = consteonVid;
   String collectionPath = 'MobileTable/$currentTableVid/counters';
-  final docRef =
-      FirebaseFirestore.instance.collection(collectionPath).doc(documentName);
+  final docRef = FirebaseFirestore.instance
+      .collection(collectionPath)
+      .doc(documentName);
 
   try {
     // Run a transaction to ensure atomic increment.
-    final newCounterValue =
-        await FirebaseFirestore.instance.runTransaction((transaction) async {
+    final newCounterValue = await FirebaseFirestore.instance.runTransaction((
+      transaction,
+    ) async {
       final snapshot = await transaction.get(docRef);
 
       if (!snapshot.exists) {
@@ -96,7 +100,10 @@ Future<int> getNumber(String documentName) async {
 (String, String) _splitKeyedRead(String tableName) {
   final int i = tableName.lastIndexOf('/');
   if (i < 0) return (tableName, mobileTableContent);
-  return (tableName.substring(0, i).replaceAll('/', '%'), tableName.substring(i + 1));
+  return (
+    tableName.substring(0, i).replaceAll('/', '%'),
+    tableName.substring(i + 1),
+  );
 }
 
 Future<List<dynamic>?> readFromFirestoreTable(
@@ -111,8 +118,9 @@ Future<List<dynamic>?> readFromFirestoreTable(
     // Keyed `//` tables: address the table-def doc by <tableDocId> only.
     final (tableDocId, tableSubColl) = _splitKeyedRead(tableCode);
     final bool isKeyed = tableSubColl != mobileTableContent;
-    DocumentReference tableDocRef =
-        FirebaseFirestore.instance.collection(collectionPath).doc(tableDocId);
+    DocumentReference tableDocRef = FirebaseFirestore.instance
+        .collection(collectionPath)
+        .doc(tableDocId);
 
     DocumentSnapshot documentSnapshot = await tableDocRef.get();
 
@@ -126,9 +134,12 @@ Future<List<dynamic>?> readFromFirestoreTable(
       if (data['tt'] == 'D' || isKeyed) {
         // If the table is a dynamic table, pass the filter string.
         await createInternalTableDynamic(
-            internalTableCode, documentSnapshot, headerString,
-            index: indexString,
-            indexTableString: indexTableString); // Pass the filter string
+          internalTableCode,
+          documentSnapshot,
+          headerString,
+          index: indexString,
+          indexTableString: indexTableString,
+        ); // Pass the filter string
       } else {
         // static array table data ['tt] == 'A'
         String arrayString = data['tc'] ?? '[]';
@@ -143,12 +154,14 @@ Future<List<dynamic>?> readFromFirestoreTable(
       return tableContent[internalTableCode];
     } else {
       devPrint(
-          'Error: Document with tableCode "$collectionPath/$tableCode" does not exist.');
+        'Error: Document with tableCode "$collectionPath/$tableCode" does not exist.',
+      );
       return null; // Document not found
     }
   } catch (e) {
     devPrint(
-        'An error occurred while reading from static table "$tableCode": $e');
+      'An error occurred while reading from static table "$tableCode": $e',
+    );
     return null; // Error occurred
   }
 } // end readFromFirestoreTable
@@ -205,7 +218,10 @@ Future<List<dynamic>?> readFromFirestoreTable(
 /// An asynchronous function to handle writing the scanned data to a single static table.
 /// This will now write an empty list if provided, which can be used to clear a table.
 Future<void> writeToStaticTable(
-    int tableVid, String tableCode, Map<String, dynamic> dataRows) async {
+  int tableVid,
+  String tableCode,
+  Map<String, dynamic> dataRows,
+) async {
   if (tableCode.isEmpty) {
     return;
   }
@@ -224,8 +240,9 @@ Future<void> writeToStaticTable(
       return;
     }
     String collectionPath = 'MobileTable/$tableVid/tables';
-    DocumentReference tableDocRef =
-        FirebaseFirestore.instance.collection(collectionPath).doc(tableCode);
+    DocumentReference tableDocRef = FirebaseFirestore.instance
+        .collection(collectionPath)
+        .doc(tableCode);
     // tableDocRef.set(data);
     _writeWithRetry(tableDocRef, data, maxRetries: 3);
   } catch (e) {
@@ -242,35 +259,44 @@ void _writeWithRetry(
   int attempt = 1,
   Duration delay = const Duration(seconds: 1),
 }) {
-  docRef.set(data).then((_) {
-    // SUCCESS CASE
-    devPrint('✅ Successfully wrote to ${docRef.path} on attempt #$attempt.');
-  }).catchError((error) {
-    // FAILURE CASE
-    devPrint('⚠️ Write failed on attempt #$attempt for ${docRef.path}: $error');
-
-    if (attempt < maxRetries) {
-      // --- RETRY LOGIC ---
-      final nextDelay =
-          Duration(seconds: delay.inSeconds * 2); // Exponential backoff
-      devPrint('Retrying in ${nextDelay.inSeconds} seconds...');
-
-      // Wait for the delay, then call this function again
-      Future.delayed(nextDelay, () {
-        _writeWithRetry(
-          docRef,
-          data,
-          maxRetries: maxRetries,
-          attempt: attempt + 1, // Increment the attempt counter
-          delay: nextDelay, // Pass the new, longer delay
+  docRef
+      .set(data)
+      .then((_) {
+        // SUCCESS CASE
+        devPrint(
+          '✅ Successfully wrote to ${docRef.path} on attempt #$attempt.',
         );
+      })
+      .catchError((error) {
+        // FAILURE CASE
+        devPrint(
+          '⚠️ Write failed on attempt #$attempt for ${docRef.path}: $error',
+        );
+
+        if (attempt < maxRetries) {
+          // --- RETRY LOGIC ---
+          final nextDelay = Duration(
+            seconds: delay.inSeconds * 2,
+          ); // Exponential backoff
+          devPrint('Retrying in ${nextDelay.inSeconds} seconds...');
+
+          // Wait for the delay, then call this function again
+          Future.delayed(nextDelay, () {
+            _writeWithRetry(
+              docRef,
+              data,
+              maxRetries: maxRetries,
+              attempt: attempt + 1, // Increment the attempt counter
+              delay: nextDelay, // Pass the new, longer delay
+            );
+          });
+        } else {
+          // --- FINAL FAILURE ---
+          devPrint(
+            '❌ All $maxRetries attempts to write to ${docRef.path} have failed.',
+          );
+        }
       });
-    } else {
-      // --- FINAL FAILURE ---
-      devPrint(
-          '❌ All $maxRetries attempts to write to ${docRef.path} have failed.');
-    }
-  });
 }
 
 /// Parses the targetTable string and returns a map of tables to be created,
@@ -281,7 +307,9 @@ void _writeWithRetry(
 ///
 /// Returns a map where keys are table names and values are the structured table content.
 Map<String, dynamic> writeMultipleTablesTemporary(
-    String targetTableConfig, Map<String, List<ScannedCode>> groupedCodes) {
+  String targetTableConfig,
+  Map<String, List<ScannedCode>> groupedCodes,
+) {
   final Map<String, dynamic> result = {};
 
   if (targetTableConfig.isEmpty || groupedCodes.isEmpty) {
@@ -323,15 +351,17 @@ Map<String, dynamic> writeMultipleTablesTemporary(
     // }
     final validDataRows = codes
         .where(
-            (c) => c.status == ValidationStatus.valid && c.refDataRow != null)
+          (c) => c.status == ValidationStatus.valid && c.refDataRow != null,
+        )
         .map((c) {
-      final row = c.refDataRow!;
-      // Use sublist(1) to create a new list containing all elements
-      // except the first. Handle the empty list case.
-      return row.isNotEmpty
-          ? row.sublist(1)
-          : <dynamic>[]; // Or a more specific type
-    }).toList();
+          final row = c.refDataRow!;
+          // Use sublist(1) to create a new list containing all elements
+          // except the first. Handle the empty list case.
+          return row.isNotEmpty
+              ? row.sublist(1)
+              : <dynamic>[]; // Or a more specific type
+        })
+        .toList();
 
     final targetTables = groupToTableMap[groupName];
     if (targetTables != null) {
@@ -357,8 +387,9 @@ Map<String, dynamic> writeMultipleTablesTemporary(
   if (allTableNames != null) {
     final allValidScannedCodes = groupedCodes.values
         .expand((codeList) => codeList)
-        .where((sc) =>
-            sc.status == ValidationStatus.valid && sc.refDataRow != null)
+        .where(
+          (sc) => sc.status == ValidationStatus.valid && sc.refDataRow != null,
+        )
         .toList();
 
     final uniqueCodes = <String>{};
@@ -395,8 +426,10 @@ Map<String, dynamic> writeMultipleTablesTemporary(
 ///   A group key can appear multiple times.
 ///   Example: 'all◇warehouse_inventory◆CNG12◇stock_12◆CNG16◇stock_16◆CNG16◇stock2_16'
 /// - `groupedCodes`: A map where keys are group names and values are lists of ScannedCode objects.
-Future<void> writeMultipleTables(String targetTableConfig,
-    Map<String, List<ScannedCode>> groupedCodes) async {
+Future<void> writeMultipleTables(
+  String targetTableConfig,
+  Map<String, List<ScannedCode>> groupedCodes,
+) async {
   if (targetTableConfig.isEmpty || groupedCodes.isEmpty) {
     return;
   }
@@ -427,7 +460,8 @@ Future<void> writeMultipleTables(String targetTableConfig,
     // MODIFIED: Filter for valid codes with data rows and extract the full row.
     final validDataRows = codes
         .where(
-            (c) => c.status == ValidationStatus.valid && c.refDataRow != null)
+          (c) => c.status == ValidationStatus.valid && c.refDataRow != null,
+        )
         .map((c) => c.refDataRow!)
         .toList();
 
@@ -448,8 +482,9 @@ Future<void> writeMultipleTables(String targetTableConfig,
     // MODIFIED: Get all valid codes with data rows.
     final allValidScannedCodes = groupedCodes.values
         .expand((codeList) => codeList) // Flatten the list of lists
-        .where((sc) =>
-            sc.status == ValidationStatus.valid && sc.refDataRow != null)
+        .where(
+          (sc) => sc.status == ValidationStatus.valid && sc.refDataRow != null,
+        )
         .toList();
 
     // MODIFIED: Deduplicate based on the code string to avoid saving the same item multiple times.
@@ -492,8 +527,9 @@ String stringFormat(String? stringInp, Map<String, dynamic>? fieldArray) {
               result = myTime.toString();
             } else {
               try {
-                result = DateFormat(format)
-                    .format(DateTime.fromMillisecondsSinceEpoch(myTime));
+                result = DateFormat(
+                  format,
+                ).format(DateTime.fromMillisecondsSinceEpoch(myTime));
               } catch (e) {
                 result = formatErrorString;
               } // end try
@@ -607,12 +643,14 @@ Future<String> _handleSummaryTableCreation(
         } else {
           switch (field[0]) {
             case 'master':
-              priceMapColumnIndex =
-                  int.parse((field.length > 2 ? field[2] : null) ?? '1');
+              priceMapColumnIndex = int.parse(
+                (field.length > 2 ? field[2] : null) ?? '1',
+              );
               break;
             case 'detail':
-              groupingColumnIndex =
-                  int.parse((field.length > 2 ? field[2] : null) ?? '1');
+              groupingColumnIndex = int.parse(
+                (field.length > 2 ? field[2] : null) ?? '1',
+              );
               break;
             case 'retention':
               retention = int.tryParse(field[1]) ?? 30160;
@@ -690,8 +728,9 @@ Future<String> _handleSummaryTableCreation(
     // }
 
     String collectionPath = 'MobileTable/$tableVid/tables';
-    DocumentReference tableDocRef =
-        FirebaseFirestore.instance.collection(collectionPath).doc(tableName);
+    DocumentReference tableDocRef = FirebaseFirestore.instance
+        .collection(collectionPath)
+        .doc(tableName);
     String contentString = jsonEncode(summaryRows);
     final checksum = createChecksumSha3(contentString).checksum;
     final headerString = '${checksum.toString().padLeft(14, '0')}☆☆☆';
@@ -769,7 +808,7 @@ Future<List<String>> writeToTable(String? inp, String eventRowString) async {
     List<dynamic> eventRow = jsonDecode(eventRowString);
     if (inp != null && inp.isNotEmpty) {
       List<dynamic> ref = parseEventString(eventRow);
-//   print ('ref=$ref');
+      //   print ('ref=$ref');
       String decodedInp = autheniumDecode(inp) ?? '';
       List<dynamic> splitInput = splitTableInput(decodedInp ?? '');
       List<Future> tableWriteList = [];
@@ -808,17 +847,19 @@ Future<List<String>> writeToTable(String? inp, String eventRowString) async {
             if (splitInput[i][0][1].trim() == 'A') {
               // write to static / array table\
               stringResult = await parseTableInput(
-                  splitInput[i],
-                  ref,
-                  tableVid,
-                  appCodeController.applicationTableVid,
-                  eventRow[0],
-                  eventRow[1]);
+                splitInput[i],
+                ref,
+                tableVid,
+                appCodeController.applicationTableVid,
+                eventRow[0],
+                eventRow[1],
+              );
               // modify stringResult[0] to determine the table type
               stringResult[0] = getDocumentName(stringResult[0]);
               tableName = stringResult[0];
               devPrint(
-                  "Writing 'A' table = MobileTable/$tableVid/tables/$tableName");
+                "Writing 'A' table = MobileTable/$tableVid/tables/$tableName",
+              );
               List<dynamic> dataRows = [];
               final checksum = createChecksumSha3(stringResult[4]).checksum;
               final headerString = '${checksum.toString().padLeft(14, '0')}☆☆☆';
@@ -834,18 +875,20 @@ Future<List<String>> writeToTable(String? inp, String eventRowString) async {
               // and wait until the master and detail table are written to firestore
               await Future.wait(tableWriteList);
               stringResult = await parseTableInput(
-                  splitInput[i],
-                  ref,
-                  tableVid,
-                  appCodeController.applicationTableVid,
-                  eventRow[0],
-                  eventRow[1]);
+                splitInput[i],
+                ref,
+                tableVid,
+                appCodeController.applicationTableVid,
+                eventRow[0],
+                eventRow[1],
+              );
               // modify stringResult[0] to determine the table type
               stringResult[0] = getDocumentName(stringResult[0]);
               tableName = stringResult[0];
               devPrint("Writing summary table = $consteonVid/$tableName");
-              final List<dynamic> definitionArray =
-                  List<dynamic>.from(splitInput[i]);
+              final List<dynamic> definitionArray = List<dynamic>.from(
+                splitInput[i],
+              );
               // for (final field in splitInput[i]) {
               //   if (field.length > 1) {
               //     final key = field[0].toString();
@@ -857,7 +900,10 @@ Future<List<String>> writeToTable(String? inp, String eventRowString) async {
               //   }
               // }
               final status = await _handleSummaryTableCreation(
-                  tableVid, tableName, definitionArray);
+                tableVid,
+                tableName,
+                definitionArray,
+              );
               result.add(status);
               continue; // Skip to the next table definition
             } // end if (splitInput[i][0][1] == 'A')
@@ -865,8 +911,14 @@ Future<List<String>> writeToTable(String? inp, String eventRowString) async {
           // stringResult = await parseTableInput(splitInput[i], ref, vid,
           //     appCodeController.applicationVid, eventRow[0], eventRow[1]);
 
-          stringResult = await parseTableInput(splitInput[i], ref, tableVid,
-              appCodeController.applicationTableVid, eventRow[0], eventRow[1]);
+          stringResult = await parseTableInput(
+            splitInput[i],
+            ref,
+            tableVid,
+            appCodeController.applicationTableVid,
+            eventRow[0],
+            eventRow[1],
+          );
           // modify stringResult[0] to determine the table type
           stringResult[0] = getDocumentName(stringResult[0]);
           tableName = stringResult[0];
@@ -883,8 +935,9 @@ Future<List<String>> writeToTable(String? inp, String eventRowString) async {
           mtc.setTableRetention(int.parse(stringResult[1]));
           mtc.setTableDescription(stringResult[2]);
           mtc.setTableFlag(stringResult[3]);
-          result.add(await mtc.addContent(
-              tableName, stringResult[4], stringResult[5]));
+          result.add(
+            await mtc.addContent(tableName, stringResult[4], stringResult[5]),
+          );
           mtc.dispose();
           // add parameter to mtc for retention, description, and flag
           // result.add('Ok');
@@ -916,8 +969,7 @@ dynamic _parseSearchValue(String raw) {
 /// Input format mirrors addToTable but with a `search` directive identifying
 /// the row to update. Only columns explicitly listed in input get patched;
 /// other columns retain their current value in Firestore.
-Future<List<String>> updateTableRow(
-    String? inp, String eventRowString) async {
+Future<List<String>> updateTableRow(String? inp, String eventRowString) async {
   debugPrint('updateTableRow inp = $inp');
   int vid = appCodeController.applicationTableVid;
   int tableVid = vid;
@@ -948,12 +1000,13 @@ Future<List<String>> updateTableRow(
 
         // Run full parseTableInput to get substituted values + indexContent.
         List<dynamic> stringResult = await parseTableInput(
-            splitInput[i],
-            ref,
-            tableVid,
-            appCodeController.applicationTableVid,
-            eventRow[0],
-            eventRow[1]);
+          splitInput[i],
+          ref,
+          tableVid,
+          appCodeController.applicationTableVid,
+          eventRow[0],
+          eventRow[1],
+        );
         stringResult[0] = getDocumentName(stringResult[0]);
         String tableName = stringResult[0];
         List<dynamic> contentArray = jsonDecode(stringResult[4]);
@@ -968,12 +1021,12 @@ Future<List<String>> updateTableRow(
           if (splitInput[i][j].length < 2) continue;
           String key = splitInput[i][j][0].toString().trim();
           if (key.toLowerCase() == 'search') {
-            List<String> parts =
-                splitInput[i][j][1].toString().split(separator[3]);
+            List<String> parts = splitInput[i][j][1].toString().split(
+              separator[3],
+            );
             if (parts.length >= 2) {
               searchField = parts[0].trim();
-              String rawValue =
-                  parts.sublist(1).join(separator[3]).trim();
+              String rawValue = parts.sublist(1).join(separator[3]).trim();
               searchValue = _parseSearchValue(rawValue);
             }
             continue;
@@ -982,8 +1035,7 @@ Future<List<String>> updateTableRow(
           int closeIdx = key.indexOf('>');
           if (openIdx >= 0 && closeIdx > openIdx) {
             try {
-              int colNum =
-                  int.parse(key.substring(openIdx + 1, closeIdx));
+              int colNum = int.parse(key.substring(openIdx + 1, closeIdx));
               explicitPositions.add(colNum - 1);
             } catch (_) {}
           }
@@ -1041,8 +1093,7 @@ Future<List<String>> updateTableRow(
 /// Delete row(s) in dynamic table by query.
 /// Input format mirrors addToTable header but only requires `tablevid` and
 /// a `search` directive identifying the row(s) to delete.
-Future<List<String>> deleteFromTable(
-    String? inp, String eventRowString) async {
+Future<List<String>> deleteFromTable(String? inp, String eventRowString) async {
   debugPrint('deleteFromTable inp = $inp');
   int vid = appCodeController.applicationTableVid;
   int tableVid = vid;
@@ -1059,7 +1110,8 @@ Future<List<String>> deleteFromTable(
     for (int i = 0; i < splitInput.length; i++) {
       try {
         String tableName = getDocumentName(
-            splitInput[i][0][0].toString().trim());
+          splitInput[i][0][0].toString().trim(),
+        );
         String? searchField;
         dynamic searchValue;
         for (int j = 1; j < splitInput[i].length; j++) {
@@ -1072,12 +1124,12 @@ Future<List<String>> deleteFromTable(
               tableVid = appCodeController.applicationTableVid;
             }
           } else if (key == 'search') {
-            List<String> parts =
-                splitInput[i][j][1].toString().split(separator[3]);
+            List<String> parts = splitInput[i][j][1].toString().split(
+              separator[3],
+            );
             if (parts.length >= 2) {
               searchField = parts[0].trim();
-              String rawValue =
-                  parts.sublist(1).join(separator[3]).trim();
+              String rawValue = parts.sublist(1).join(separator[3]).trim();
               searchValue = _parseSearchValue(rawValue);
             }
           }
@@ -1090,8 +1142,11 @@ Future<List<String>> deleteFromTable(
 
         MobileTableController mtc = MobileTableController();
         mtc.setApplicationTableVid(tableVid);
-        String opResult =
-            await mtc.deleteContent(tableName, searchField, searchValue);
+        String opResult = await mtc.deleteContent(
+          tableName,
+          searchField,
+          searchValue,
+        );
         mtc.dispose();
         result.add(opResult);
       } catch (e) {
@@ -1128,9 +1183,15 @@ List<dynamic> parseEventString(dynamic inp) {
   return result;
 } // end of parseEventString
 
-Future<List<dynamic>> parseTableInput(List<dynamic> inpArray, List<dynamic> ref,
-    int tableVid, int appVid, int timeReceived, String receivingPage,
-    {int sourceIndex = 0}) async {
+Future<List<dynamic>> parseTableInput(
+  List<dynamic> inpArray,
+  List<dynamic> ref,
+  int tableVid,
+  int appVid,
+  int timeReceived,
+  String receivingPage, {
+  int sourceIndex = 0,
+}) async {
   const openField = '<';
   const closeField = '>';
   List<dynamic> result = [
@@ -1177,14 +1238,14 @@ Future<List<dynamic>> parseTableInput(List<dynamic> inpArray, List<dynamic> ref,
           String tableName = normalizeTableName(inpArray[i][1]);
           masterArray =
               await readFromFirestoreTable(tableVid, tableName, tableName) ??
-                  [];
+              [];
           tableContent['masterArray'] = masterArray;
           break;
         case 'detail':
           String tableName = normalizeTableName(inpArray[i][1]);
           detailArray =
               await readFromFirestoreTable(tableVid, tableName, tableName) ??
-                  [];
+              [];
           tableContent['detailArray'] = detailArray;
           break;
         case 'tablevid':
@@ -1225,12 +1286,14 @@ Future<List<dynamic>> parseTableInput(List<dynamic> inpArray, List<dynamic> ref,
               tempResult[indexArray[i][0] - 1].toString();
           break;
         case 'B': // boolean
-          indexContent[indexArray[i][0].toString()] =
-              bool.tryParse(tempResult[indexArray[i][0] - 1].toString());
+          indexContent[indexArray[i][0].toString()] = bool.tryParse(
+            tempResult[indexArray[i][0] - 1].toString(),
+          );
           break;
         case 'N': // number
-          indexContent[indexArray[i][0].toString()] =
-              double.tryParse(tempResult[indexArray[i][0] - 1].toString());
+          indexContent[indexArray[i][0].toString()] = double.tryParse(
+            tempResult[indexArray[i][0] - 1].toString(),
+          );
           break;
       } // end switch
     }
@@ -1267,9 +1330,13 @@ String resolveValueTokens(
   final RegExp exp = RegExp(r'<<\|\|(.*?)\|\|>>');
 
   notation = notation.replaceAll(
-      '$openNotation$receivingPageNotation$closeNotation', receivingPage);
+    '$openNotation$receivingPageNotation$closeNotation',
+    receivingPage,
+  );
   notation = notation.replaceAll(
-      '$openNotation2$receivingPageNotation$closeNotation2', receivingPage);
+    '$openNotation2$receivingPageNotation$closeNotation2',
+    receivingPage,
+  );
   notation = notation
       .replaceAll(openNotation, openReplacement)
       .replaceAll(closeNotation, closeReplacement);
@@ -1295,19 +1362,22 @@ String resolveValueTokens(
             sourceValue = timeReceived.toString();
             break;
           default:
-            int dotPosition =
-                fieldMap['c'].toString().trim().indexOf(subSourceSeparator);
+            int dotPosition = fieldMap['c'].toString().trim().indexOf(
+              subSourceSeparator,
+            );
             if (dotPosition < 0) {
               sourceValue =
                   ref[0][int.parse(fieldMap['c'].toString().trim()) - 1];
             } else {
-              List<String> eventArray =
-                  fieldMap['c'].toString().trim().split(subSourceSeparator);
+              List<String> eventArray = fieldMap['c'].toString().trim().split(
+                subSourceSeparator,
+              );
               if (eventArray.length > 1) {
                 int index = int.parse(eventArray[0]) - 1;
                 int subIndex = int.parse(eventArray[1]) - 1;
-                List<String> dataArray =
-                    ref[0][index].toString().split(dataSeparator);
+                List<String> dataArray = ref[0][index].toString().split(
+                  dataSeparator,
+                );
                 sourceValue = dataArray[subIndex];
               }
             }
@@ -1344,19 +1414,22 @@ String resolveValueTokens(
         try {
           Map<String, dynamic> fieldMap = parseField(substring);
           String? sourceValue;
-          int dotPosition =
-              fieldMap['c'].toString().trim().indexOf(subSourceSeparator);
+          int dotPosition = fieldMap['c'].toString().trim().indexOf(
+            subSourceSeparator,
+          );
           if (dotPosition < 0) {
             sourceValue =
                 ref[1][int.parse(fieldMap['c'].toString().trim()) - 1];
           } else {
-            List<String> eventArray =
-                fieldMap['c'].toString().trim().split(subSourceSeparator);
+            List<String> eventArray = fieldMap['c'].toString().trim().split(
+              subSourceSeparator,
+            );
             if (eventArray.length > 1) {
               int index = int.parse(eventArray[0]) - 1;
               int subIndex = int.parse(eventArray[1]) - 1;
-              List<String> dataArray =
-                  ref[1][index].toString().split(dataSeparator);
+              List<String> dataArray = ref[1][index].toString().split(
+                dataSeparator,
+              );
               sourceValue = dataArray[subIndex];
             }
           }
@@ -1495,8 +1568,10 @@ Future<bool> writeToEvent(String? inp, String eventRowString) async {
         continue;
       }
       final docRef = firestoreDb.collection(path).doc();
-      debugPrint('[writeToEvent] queue $path/${docRef.id} '
-          'keys=${built.doc.keys.length} doc=${built.doc}');
+      debugPrint(
+        '[writeToEvent] queue $path/${docRef.id} '
+        'keys=${built.doc.keys.length} doc=${built.doc}',
+      );
       batch.set(docRef, built.doc);
       queued++;
     }
@@ -1520,7 +1595,9 @@ Future<bool> writeToEvent(String? inp, String eventRowString) async {
 /// historySync's `resultOk` can tally it. NEVER blank-prefills (would wipe the
 /// other clock field). 0 matches -> skip+log; >1 -> error+skip (no write).
 Future<List<String>> writeUpdateEventRow(
-    String? inp, String eventRowString) async {
+  String? inp,
+  String eventRowString,
+) async {
   final List<String> result = [];
   if (inp == null || inp.trim().isEmpty) return result;
   try {
@@ -1546,8 +1623,7 @@ Future<List<String>> writeUpdateEventRow(
           result.add('error: missing search');
           continue;
         }
-        final int eventTableVid =
-            int.tryParse(t.tablevid.trim()) ?? tableVid;
+        final int eventTableVid = int.tryParse(t.tablevid.trim()) ?? tableVid;
         final String path = eventCollectionPath(t.collection, eventTableVid);
         if (path.isEmpty) {
           result.add('error: bad collection "${t.collection}"');
@@ -1568,8 +1644,10 @@ Future<List<String>> writeUpdateEventRow(
             receivingPage: receivingPage,
           );
           final dynamic parsedValue = _parseSearchValue(resolved);
-          devPrint('[writeUpdateEventRow] clause: ${c.key}=$resolved -> '
-              'parsedType=${parsedValue.runtimeType}');
+          devPrint(
+            '[writeUpdateEventRow] clause: ${c.key}=$resolved -> '
+            'parsedType=${parsedValue.runtimeType}',
+          );
           clauseLog.add('${c.key}=$resolved(${parsedValue.runtimeType})');
           query = query.where(c.key, isEqualTo: parsedValue);
         }
@@ -1579,15 +1657,18 @@ Future<List<String>> writeUpdateEventRow(
         if (docs.isEmpty) {
           devPrint('[writeUpdateEventRow] 0 match at $path; skip (no create)');
           // ── C: loud 0-match (errorReport = always-on + Crashlytics) ────
-          errorReport('updateEventRow 0-match: '
-              '[${clauseLog.join(', ')}] at $path');
+          errorReport(
+            'updateEventRow 0-match: '
+            '[${clauseLog.join(', ')}] at $path',
+          );
           result.add('ok: no match (skipped)');
           continue;
         }
         if (docs.length > 1) {
           errorReport(
-              '[writeUpdateEventRow] ${docs.length} matches at $path for '
-              '${t.conditions}; refusing to write (corrupt uniqueness)');
+            '[writeUpdateEventRow] ${docs.length} matches at $path for '
+            '${t.conditions}; refusing to write (corrupt uniqueness)',
+          );
           result.add('error: ${docs.length} matches');
           continue;
         }
@@ -1605,8 +1686,10 @@ Future<List<String>> writeUpdateEventRow(
           );
         });
         await docs.first.reference.set(patch, SetOptions(merge: true));
-        debugPrint('[writeUpdateEventRow] merged $patch into '
-            '$path/${docs.first.id}');
+        debugPrint(
+          '[writeUpdateEventRow] merged $patch into '
+          '$path/${docs.first.id}',
+        );
         result.add('ok');
       } catch (e) {
         errorReport('[writeUpdateEventRow] block failed: $e');
@@ -1679,9 +1762,11 @@ void createInternalTable(
     }
 
     // b. Dispatch the update to the Redux/Bloc store.
-    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-      '#TABLE$currentCode': newTableForTx,
-    })));
+    transactionStore.dispatch(
+      UpdateScreenTxAction(
+        ScreenTransaction({'#TABLE$currentCode': newTableForTx}),
+      ),
+    );
 
     // c. Update local cache/content maps.
     tableContent[currentCode] = processedContent;
@@ -1812,7 +1897,8 @@ Future<void> createInternalTableDynamic(
   // A filter query can change the result even if the checksum is the same.
   // We need a more robust way to check if a rebuild is needed.
   // For now, let's rebuild if a filter is present.
-  bool needToRebuild = (table == null ||
+  bool needToRebuild =
+      (table == null ||
       lastChecksum != checksum ||
       indexTableString.isNotEmpty);
 
@@ -1875,12 +1961,14 @@ Future<void> createInternalTableDynamic(
 
     if (indexTableString.isNotEmpty) {
       // 1. Split the string by your specific delimiter '◆'
-      List<String> conditions =
-          indexTableString.split(separator[1]); // black diamond
+      List<String> conditions = indexTableString.split(
+        separator[1],
+      ); // black diamond
 
       // Regex to capture: Group 1 (Field), Group 2 (Operator), Group 3 (Value)
-      final RegExp regExp =
-          RegExp(r'([^=!<>\s]+)\s*(==|!=|<=|>=|<|>|=)\s*(.+)');
+      final RegExp regExp = RegExp(
+        r'([^=!<>\s]+)\s*(==|!=|<=|>=|<|>|=)\s*(.+)',
+      );
 
       // 2. Iterate through every condition found
       for (String rawCondition in conditions) {
@@ -1950,15 +2038,19 @@ Future<void> createInternalTableDynamic(
               newRow[0] != null &&
               newRow[0].toString().isNotEmpty) {
             table[newRow[0].toString()] = newRow;
-            newRow.insert(0,
-                rowData['t'].toString()); // add key in element #1 in the front
+            newRow.insert(
+              0,
+              rowData['t'].toString(),
+            ); // add key in element #1 in the front
             result.add(newRow);
           }
         } else {
           // indexTableType == 'T'
           table[rowData['t'].toString()] = newRow;
           newRow.insert(
-              0, rowData['t'].toString()); // add timestamp in the front
+            0,
+            rowData['t'].toString(),
+          ); // add timestamp in the front
           result.add(newRow);
         }
       } // end for (DocumentSnapshot documentSnapshot in querySnapshot.docs)
@@ -1976,9 +2068,9 @@ Future<void> createInternalTableDynamic(
       for (int i = 1; i <= numOfField; i++) {
         header += '$sep2$i${sep}text${sep}left';
       } // end for (int i=1 ; i<= table[0].length; i++)
-      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-        '#TABLE$tableCode': table,
-      })));
+      transactionStore.dispatch(
+        UpdateScreenTxAction(ScreenTransaction({'#TABLE$tableCode': table})),
+      );
       tableContent[tableCode] = result;
       // tableHeader[tableCode] = header;
       tableHeader[tableCode] = headerString;
@@ -2023,24 +2115,21 @@ Future<void> subscribeToMapCollection(
   final String path =
       '$mobileTable/$appVid/$mobileTableCollection/$tableDocId/$subColl';
   try {
-    firestoreDb.collection(path).snapshots().listen(
-      (snap) {
-        // firestoreDb is `dynamic`, so snap.docs.map(...).toList() infers
-        // List<dynamic> at runtime and fails to assign to the typed store.
-        // Build the typed list explicitly (mirrors subscribeToTable's loop).
-        final List<Map<String, dynamic>> docs = <Map<String, dynamic>>[];
-        for (final d in snap.docs) {
-          final dynamic data = d.data();
-          if (data is Map) {
-            final Map<String, dynamic> doc = Map<String, dynamic>.from(data);
-            doc['__docId'] = d.id;
-            docs.add(doc);
-          }
+    firestoreDb.collection(path).snapshots().listen((snap) {
+      // firestoreDb is `dynamic`, so snap.docs.map(...).toList() infers
+      // List<dynamic> at runtime and fails to assign to the typed store.
+      // Build the typed list explicitly (mirrors subscribeToTable's loop).
+      final List<Map<String, dynamic>> docs = <Map<String, dynamic>>[];
+      for (final d in snap.docs) {
+        final dynamic data = d.data();
+        if (data is Map) {
+          final Map<String, dynamic> doc = Map<String, dynamic>.from(data);
+          doc['__docId'] = d.id;
+          docs.add(doc);
         }
-        mapTableContent[code] = docs;
-      },
-      onError: (e) => devPrint('subscribeToMapCollection $path error: $e'),
-    );
+      }
+      mapTableContent[code] = docs;
+    }, onError: (e) => devPrint('subscribeToMapCollection $path error: $e'));
   } catch (e) {
     devPrint('subscribeToMapCollection $path failed: $e');
     _mapSubscribed.remove(code);
@@ -2053,8 +2142,8 @@ Future subscribeToTable(
   String indexString = '',
   String indexTableString = '',
   String indexTableType = 'T', // 'T' for timestamp, 'K' for key in element #1
-} //
-    ) async {
+  //
+}) async {
   if (rawTableCode == '\$vtl/request/request_master') {
     int d = 1;
   }
@@ -2090,10 +2179,11 @@ Future subscribeToTable(
           final dynamic tableListener = docRef.snapshots().listen(
             (event) async {
               if (event.data() == null) {
-                transactionStore
-                    .dispatch(UpdateScreenTxAction(ScreenTransaction({
-                  '#TABLE$tableCode': null,
-                })));
+                transactionStore.dispatch(
+                  UpdateScreenTxAction(
+                    ScreenTransaction({'#TABLE$tableCode': null}),
+                  ),
+                );
                 devPrint('subscribeTable => no record found in $tableCode.');
                 tableContent[tableCode] = [];
                 tableHeader[tableCode] = '';
@@ -2103,27 +2193,36 @@ Future subscribeToTable(
                   // Keyed tables are always dynamic subcollection tables.
                   // Pass the filter string down to the handler function
                   await createInternalTableDynamic(
-                      tableCode, event, event.data()['hd'],
-                      index: indexString,
-                      indexTableString: indexTableString,
-                      indexTableType: indexTableType);
+                    tableCode,
+                    event,
+                    event.data()['hd'],
+                    index: indexString,
+                    indexTableString: indexTableString,
+                    indexTableType: indexTableType,
+                  );
                 } else {
                   // Note: Filtering is not supported for 'A' type tables here
                   // as all content is in a single document field.
                   if (indexTableString.isNotEmpty) {
                     devPrint(
-                        'Warning: Filtering is only supported for dynamic (type D) tables. Filter "$indexTableString" will be ignored for table $tableCode.');
+                      'Warning: Filtering is only supported for dynamic (type D) tables. Filter "$indexTableString" will be ignored for table $tableCode.',
+                    );
                   }
                   createInternalTable(
-                      tableCode, event.data()['tc'], event.data()['hd'],
-                      index: indexString);
+                    tableCode,
+                    event.data()['tc'],
+                    event.data()['hd'],
+                    index: indexString,
+                  );
                   // tableContent[tableCode] = jsonDecode(event.data()['tc'])
                   // tableHeader[tableCode] = event.data()['hd'];
                   devPrint("subscribeTable => header: ${event.data()['hd']}");
                   devPrint(
-                      'subscribeTable => $tableCode loaded to #TABLE$tableCode');
+                    'subscribeTable => $tableCode loaded to #TABLE$tableCode',
+                  );
                   devPrint(
-                      'subscribeTable => ${(tableContent[tableCode] ?? []).length} record found in tableContent[$tableCode].');
+                    'subscribeTable => ${(tableContent[tableCode] ?? []).length} record found in tableContent[$tableCode].',
+                  );
                   debugPrint('data 2 = ${tableContent[tableCode][1]}');
                 } //end if (event.data()['tt'] == 'D')
               } // end if (event.data() == null)
@@ -2134,9 +2233,11 @@ Future subscribeToTable(
             },
             onError: (error) => devPrint("Listen failed: $error"),
           ); // end of listener
-          transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-            '#REFTABLE$tableCode': tableListener,
-          })));
+          transactionStore.dispatch(
+            UpdateScreenTxAction(
+              ScreenTransaction({'#REFTABLE$tableCode': tableListener}),
+            ),
+          );
         } catch (e1) {
           //print('error listening to $tableCode $e1');
         } // end try docRef
@@ -2154,9 +2255,11 @@ Future unsubscribeTable(String tableCode) async {
     var handle = transactionStore.state.screenTx['#REFTABLE$tableCode'];
     if (handle != null) {
       handle.close();
-      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-        '#REFTABLE$tableCode': handle,
-      })));
+      transactionStore.dispatch(
+        UpdateScreenTxAction(
+          ScreenTransaction({'#REFTABLE$tableCode': handle}),
+        ),
+      );
     } // end if (handle != null)
   } catch (e) {
     // do nothing
@@ -2168,7 +2271,8 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
   // await historyClear(); // delete this for production
   const functionName = 'historyLoadFromSecureStorage';
   devPrint(
-      '!!!! --- run load history from $parent clearHistory = $clearHistoryImageMap}');
+    '!!!! --- run load history from $parent clearHistory = $clearHistoryImageMap}',
+  );
   bool guestSsid = false;
   // load imageMap
   if (imageMap.isEmpty) {
@@ -2183,9 +2287,11 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
       devPrint('imageMapStr is null, load from firestore');
       String? ssid;
       try {
-        ssid =
-            (await waitUntilNotNullScreenTx(functionName, '#INTERFACE_KEY', 20))
-                .toString();
+        ssid = (await waitUntilNotNullScreenTx(
+          functionName,
+          '#INTERFACE_KEY',
+          20,
+        )).toString();
       } catch (eSsid) {
         devPrint('Cannot read ssid from #INTERFACE_KEY $eSsid');
         ssid = null;
@@ -2222,8 +2328,10 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
         if (internetConnected()) {
           try {
             String ssid = (await waitUntilNotNullScreenTx(
-                    functionName, '#INTERFACE_KEY', 20))
-                .toString();
+              functionName,
+              '#INTERFACE_KEY',
+              20,
+            )).toString();
             var docRef = firestoreDb
                 .collection(proxyCollectionName)
                 .doc(ssid ?? 'ErrorInLoadHistory');
@@ -2252,9 +2360,11 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
       devPrint('historyStr is null, load from firestore');
       String? ssid;
       try {
-        ssid =
-            (await waitUntilNotNullScreenTx(functionName, '#INTERFACE_KEY', 20))
-                .toString();
+        ssid = (await waitUntilNotNullScreenTx(
+          functionName,
+          '#INTERFACE_KEY',
+          20,
+        )).toString();
       } catch (eSsid) {
         devPrint('Cannot read ssid from #INTERFACE_KEY $eSsid');
         ssid = null;
@@ -2296,8 +2406,10 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
         if (internetConnected()) {
           try {
             String ssid = (await waitUntilNotNullScreenTx(
-                    functionName, '#INTERFACE_KEY', 20))
-                .toString();
+              functionName,
+              '#INTERFACE_KEY',
+              20,
+            )).toString();
             var docRef = firestoreDb
                 .collection(proxyCollectionName)
                 .doc(ssid ?? 'ErrorInLoadHistory');
@@ -2314,13 +2426,15 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
   } // if (tableContent[historyName] == null || tableContent[historyName].isEmpty)
   //updateHistoryImage(); // replace image in history async
   devPrint(
-      '!!!! --- ending of load history from $parent clearHistory = $clearHistoryImageMap}');
+    '!!!! --- ending of load history from $parent clearHistory = $clearHistoryImageMap}',
+  );
 } // end of loadHistory
 
 Future historyAdd(List<dynamic> inputEvent) async {
   List<dynamic> newEvent = List.from(inputEvent);
-  String dateTimeString = DateFormat(dateTimeFormat)
-      .format(DateTime.fromMillisecondsSinceEpoch(newEvent[0]));
+  String dateTimeString = DateFormat(
+    dateTimeFormat,
+  ).format(DateTime.fromMillisecondsSinceEpoch(newEvent[0]));
   if (newEvent[2] is List) {
     try {
       newEvent[2] = (newEvent[2].length > 1)
@@ -2334,14 +2448,17 @@ Future historyAdd(List<dynamic> inputEvent) async {
   // if (newEvent[5].isNotEmpty) {
   //   eventMap['addToTable'] = newEvent[5];
   // } // end if (newEvent[5].isNotEmpty)
-  List<dynamic> cnt = newEvent.sublist(0, 5) +
+  List<dynamic> cnt =
+      newEvent.sublist(0, 5) +
       [dateTimeString, "", "", "", 0, 0, 0, {}, [], newEvent[5]];
   await checkTable('historyAdd', historyName, 10);
   await historyLock('historyAdd');
   try {
     tableContent[historyName].insert(0, cnt);
-    tableContent[historyName].sort((a, b) => int.parse(b[0].toString())
-        .compareTo(int.parse(a[0].toString()))); // sort descending by timestamp
+    tableContent[historyName].sort(
+      (a, b) =>
+          int.parse(b[0].toString()).compareTo(int.parse(a[0].toString())),
+    ); // sort descending by timestamp
   } catch (e) {
     devPrint('error in tableContent[$historyName]: $e');
   }
@@ -2471,18 +2588,20 @@ Future saveHistory() async {
         tableContent[historyName][i];
   } // end for tableContent[historyName]
   historyUnLock(functionName);
-  transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-    '#TABLE$historyName': table,
-  })));
+  transactionStore.dispatch(
+    UpdateScreenTxAction(ScreenTransaction({'#TABLE$historyName': table})),
+  );
   if (internetConnected()) {
-    String ssid =
-        (await waitUntilNotNullScreenTx(functionName, '#INTERFACE_KEY', 20))
-            .toString();
+    String ssid = (await waitUntilNotNullScreenTx(
+      functionName,
+      '#INTERFACE_KEY',
+      20,
+    )).toString();
     try {
       dynamic docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
       safeFsUpdate(docRef, {
         'h': historyStr,
-        'i': jsonEncode(imageMap)
+        'i': jsonEncode(imageMap),
       }, 'saveHistory-proxy'); // saving to proxy field 'h' in firestore
     } catch (e) {
       devPrint('Cannot save history to firestore $e');
@@ -2500,14 +2619,16 @@ Future archiveHistory() async {
   String historyStr = jsonEncode(tableContent[historyName]);
   historyUnLock('$functionName 1');
   if (internetConnected()) {
-    String ssid =
-        (await waitUntilNotNullScreenTx(myFunctionName, '#INTERFACE_KEY', 20))
-            .toString();
+    String ssid = (await waitUntilNotNullScreenTx(
+      myFunctionName,
+      '#INTERFACE_KEY',
+      20,
+    )).toString();
     try {
       dynamic docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
       safeFsUpdate(docRef, {
         'h2': historyStr,
-        'i2': jsonEncode(imageMap)
+        'i2': jsonEncode(imageMap),
       }, 'archiveHistory-proxy'); // saving to proxy field 'h' in firestore
     } catch (e) {
       devPrint('!!! Cannot archive history to firestore $e');
@@ -2535,18 +2656,22 @@ Future historyCheckMark(int historyId, int checkIndex, int tsIndex) async {
   // set tableContent[historyName] [i][] = checkmark with [i][0] = historyId
   await checkTable('historyCheckMark', historyName, 10);
   await historyLock(
-      'historyCheckMark bSearch index $checkIndex for historyId $historyId');
+    'historyCheckMark bSearch index $checkIndex for historyId $historyId',
+  );
   int index = binarySearch2DDesc(tableContent[historyName], 0, historyId);
   historyUnLock(
-      'historyCheckMark bSearch index $checkIndex for historyId $historyId');
+    'historyCheckMark bSearch index $checkIndex for historyId $historyId',
+  );
   if (index >= 0 && tableContent[historyName][index][tsIndex] == 0) {
     await historyLock(
-        'historyCheckMark check index $checkIndex for historyId $historyId');
+      'historyCheckMark check index $checkIndex for historyId $historyId',
+    );
     tableContent[historyName][index][checkIndex] = checkMark;
     tableContent[historyName][index][tsIndex] =
         DateTime.now().millisecondsSinceEpoch;
     historyUnLock(
-        'historyCheckMark check index $checkIndex for historyId $historyId');
+      'historyCheckMark check index $checkIndex for historyId $historyId',
+    );
     await saveHistory();
   } // end if (index >= 0)
 } // end of historySent
@@ -2557,21 +2682,22 @@ void historyUnLock(String from) {
 }
 
 Future historyLock(String from) async {
-  Duration backoffDuration =
-      const Duration(milliseconds: 100); // Initial backoff time
+  Duration backoffDuration = const Duration(
+    milliseconds: 100,
+  ); // Initial backoff time
   while (historyTableIsLocked) {
     // debugPrint('*** waiting for history lock from $from');
     try {
       await Future.delayed(backoffDuration);
       backoffDuration = Duration(
-          milliseconds:
-              backoffDuration.inMilliseconds * 2); // Double backoff time
+        milliseconds: backoffDuration.inMilliseconds * 2,
+      ); // Double backoff time
     } on Exception catch (e) {
       // Handle potential exceptions during unlock or write
       devPrint("!!! Error waiting for historyLock from $from: $e");
       backoffDuration = Duration(
-          milliseconds:
-              backoffDuration.inMilliseconds * 2); // Increase backoff on errors
+        milliseconds: backoffDuration.inMilliseconds * 2,
+      ); // Increase backoff on errors
     } // end try Future.delayed
   } // end while (historyTableIsLocked)
   historyTableIsLocked = true;
@@ -2579,21 +2705,22 @@ Future historyLock(String from) async {
 } // end of waitForHistoryLock
 
 Future historySyncLockOld(String from) async {
-  Duration backoffDuration =
-      const Duration(milliseconds: 100); // Initial backoff time
+  Duration backoffDuration = const Duration(
+    milliseconds: 100,
+  ); // Initial backoff time
   while (historySyncIsLocked) {
     // debugPrint('***>>> waiting for historySync lock from $from');
     try {
       await Future.delayed(backoffDuration);
       backoffDuration = Duration(
-          milliseconds:
-              backoffDuration.inMilliseconds * 2); // Double backoff time
+        milliseconds: backoffDuration.inMilliseconds * 2,
+      ); // Double backoff time
     } on Exception catch (e) {
       // Handle potential exceptions during unlock or write
       devPrint("!!! Error waiting for historyLock from $from: $e");
       backoffDuration = Duration(
-          milliseconds:
-              backoffDuration.inMilliseconds * 2); // Increase backoff on errors
+        milliseconds: backoffDuration.inMilliseconds * 2,
+      ); // Increase backoff on errors
     } // end try Future.delayed
   } // end while (historyTableIsLocked)
   historySyncIsLocked = true;
@@ -2672,12 +2799,16 @@ Future historySync(String source, bool forceSend) async {
   if (!internetConnected()) {
     debugPrint('historySync skipped because no internet');
   } else {
-    String? ssid =
-        await waitUntilNotNullScreenTx(functionName, '#INTERFACE_KEY', 20);
+    String? ssid = await waitUntilNotNullScreenTx(
+      functionName,
+      '#INTERFACE_KEY',
+      20,
+    );
     if (ssid != loginSsid) {
       if (tableContent[historyName] == null) {
         debugPrint(
-            'historySync skipped because tableContent[historyName] is null');
+          'historySync skipped because tableContent[historyName] is null',
+        );
       } else {
         debugPrint('execute $functionName');
         if (historySyncLock.queueLock(functionName)) {
@@ -2691,25 +2822,34 @@ Future historySync(String source, bool forceSend) async {
               int historyIndex = -1;
               await historyLock('$functionName 1');
               try {
-                tableContent[historyName].sort((a, b) =>
-                    int.parse(b[0].toString()).compareTo(int.parse(
-                        a[0].toString()))); // sort descending by timestamp
+                tableContent[historyName].sort(
+                  (a, b) => int.parse(
+                    b[0].toString(),
+                  ).compareTo(int.parse(a[0].toString())),
+                ); // sort descending by timestamp
                 List<Future<List<dynamic>>> futureList = [];
-                for (int i = tableContent[historyName].length - 1;
-                    i >= 0;
-                    i--) {
+                for (
+                  int i = tableContent[historyName].length - 1;
+                  i >= 0;
+                  i--
+                ) {
                   // looping in all history records to identify aum__ image
                   if (tableContent[historyName][i][9] <= 0) {
                     if (tableContent[historyName][i][2].contains('aum__')) {
-                      futureList.add(sendHistoryImagesToCloud(
-                          i, tableContent[historyName][i][2]));
+                      futureList.add(
+                        sendHistoryImagesToCloud(
+                          i,
+                          tableContent[historyName][i][2],
+                        ),
+                      );
                     }
                   } // if (tableContent[historyName][i][9] <= 0)
                 } // end for (int i = 0; i < tableContent[historyName].length)
                 if (futureList.isNotEmpty) {
                   // if there is aum__ image to be sent
                   List<dynamic> historyRecords = await Future.wait(
-                      futureList); // try to replace all aum__ with url
+                    futureList,
+                  ); // try to replace all aum__ with url
 
                   for (int i = 0; i < historyRecords.length; i++) {
                     tableContent[historyName][historyRecords[i][0]][2] =
@@ -2718,9 +2858,11 @@ Future historySync(String source, bool forceSend) async {
                   } // end for (int i = 0; i < historyRecords.length)
                 } // end if (futureList.isNotEmpty)
                 // aum__ should be processed by now
-                for (int i = tableContent[historyName].length - 1;
-                    !unsentHistoryFound && i >= 0;
-                    i--) {
+                for (
+                  int i = tableContent[historyName].length - 1;
+                  !unsentHistoryFound && i >= 0;
+                  i--
+                ) {
                   if (tableContent[historyName][i][9] <= 0) {
                     unsentHistoryFound = true;
                     historyIndex = i;
@@ -2743,10 +2885,12 @@ Future historySync(String source, bool forceSend) async {
                 List<dynamic> eventHistory =
                     tableContent[historyName][historyIndex];
                 debugPrint(
-                    'historySync processing historyId ${eventHistory[0]}');
+                  'historySync processing historyId ${eventHistory[0]}',
+                );
                 final int historyId = eventHistory[0] as int;
                 String eventTemp = await replaceLocalImageToUrl(
-                    eventHistory[2]); // send image to cloud
+                  eventHistory[2],
+                ); // send image to cloud
                 // Image-poison backstop. replaceLocalImageToUrl above resolves a
                 // dead/exhausted image to defaultImage (aum__ gone -> sends
                 // normally); it only leaves aum__ when the upload keeps throwing
@@ -2765,20 +2909,29 @@ Future historySync(String source, bool forceSend) async {
                 }
                 bool deferForImage = false;
                 if (shouldDeferForImage(
-                    forceSend: forceSend, hasAum: hasAum, newTries: imgTries)) {
-                  devPrint('*** image not sent, defer historySync historyId '
-                      '$historyId ($imgTries/$historyImageRetryMax)');
+                  forceSend: forceSend,
+                  hasAum: hasAum,
+                  newTries: imgTries,
+                )) {
+                  devPrint(
+                    '*** image not sent, defer historySync historyId '
+                    '$historyId ($imgTries/$historyImageRetryMax)',
+                  );
                   deferForImage = true;
                 } else if (imagePending) {
                   // Cap reached: the image stayed unresolvable for
                   // historyImageRetryMax cycles. Drop it to defaultImage so this
                   // record (and everything queued behind it) can finally send.
-                  errorReport('historySync image lost for historyId $historyId '
-                      'after $imgTries cycles; replacing with defaultImage to '
-                      'unblock queue.');
+                  errorReport(
+                    'historySync image lost for historyId $historyId '
+                    'after $imgTries cycles; replacing with defaultImage to '
+                    'unblock queue.',
+                  );
                   _historyImageRetry.remove(historyId);
                   eventTemp = eventTemp.replaceAll(
-                      RegExp(r'aum__(.*?)__mua'), defaultImage);
+                    RegExp(r'aum__(.*?)__mua'),
+                    defaultImage,
+                  );
                   // Persist the cleaned content now so the doc "c" field and the
                   // table-CRUD eventRowString both carry defaultImage even if the
                   // location-parse try/catch below skips its own eventHistory[2]
@@ -2790,48 +2943,50 @@ Future historySync(String source, bool forceSend) async {
                 } else {
                   await historyLock('$functionName 2');
                   try {
-                  List<String> contentArray = eventTemp.split(separator[0]);
-                  List<String> locArray = contentArray[0].split(separator[1]);
-                  if (locArray.length > 14 &&
-                      double.tryParse(locArray[4]) != null &&
-                      double.parse(locArray[4]) != invalidLocation &&
-                      double.tryParse(locArray[5]) != null &&
-                      double.parse(locArray[5]) != invalidLocation) {
-                    List<Placemark> thePlace = [];
-                    try {
-                      thePlace = await placemarkFromCoordinates(
-                          double.parse(locArray[4]), double.parse(locArray[5]));
-                      locArray[7] = locArray[7] == '88'
-                          ? thePlace[0].isoCountryCode ?? emptyString
-                          : locArray[7];
-                      locArray[8] = locArray[8] == emptyString
-                          ? thePlace[0].postalCode ?? emptyString
-                          : locArray[8];
-                      locArray[9] = locArray[9] == emptyString
-                          ? thePlace[0].administrativeArea ?? emptyString
-                          : locArray[9];
-                      locArray[10] = locArray[10] == emptyString
-                          ? (thePlace[0].subAdministrativeArea ?? emptyString)
-                          : locArray[10];
-                      locArray[11] = locArray[11] == emptyString
-                          ? (thePlace[0].locality ?? emptyString)
-                          : locArray[11];
-                      locArray[12] = locArray[12] == emptyString
-                          ? (thePlace[0].subLocality ?? emptyString)
-                          : locArray[12];
-                      locArray[13] = locArray[13] == emptyString
-                          ? (thePlace[0].thoroughfare ?? emptyString)
-                          : locArray[13];
-                      locArray[14] = locArray[14] == emptyString
-                          ? (thePlace[0].subThoroughfare ?? emptyString)
-                          : locArray[14];
-                      contentArray[0] = locArray.join(separator[1]);
-                      eventTemp = contentArray.join(separator[0]);
-                    } catch (ePlace) {
-                      devPrint('error in placemarkFromCoordinates $ePlace');
-                    }
-                  } // end if (locArray valid coords)
-                  eventHistory[2] = eventTemp;
+                    List<String> contentArray = eventTemp.split(separator[0]);
+                    List<String> locArray = contentArray[0].split(separator[1]);
+                    if (locArray.length > 14 &&
+                        double.tryParse(locArray[4]) != null &&
+                        double.parse(locArray[4]) != invalidLocation &&
+                        double.tryParse(locArray[5]) != null &&
+                        double.parse(locArray[5]) != invalidLocation) {
+                      List<Placemark> thePlace = [];
+                      try {
+                        thePlace = await placemarkFromCoordinates(
+                          double.parse(locArray[4]),
+                          double.parse(locArray[5]),
+                        );
+                        locArray[7] = locArray[7] == '88'
+                            ? thePlace[0].isoCountryCode ?? emptyString
+                            : locArray[7];
+                        locArray[8] = locArray[8] == emptyString
+                            ? thePlace[0].postalCode ?? emptyString
+                            : locArray[8];
+                        locArray[9] = locArray[9] == emptyString
+                            ? thePlace[0].administrativeArea ?? emptyString
+                            : locArray[9];
+                        locArray[10] = locArray[10] == emptyString
+                            ? (thePlace[0].subAdministrativeArea ?? emptyString)
+                            : locArray[10];
+                        locArray[11] = locArray[11] == emptyString
+                            ? (thePlace[0].locality ?? emptyString)
+                            : locArray[11];
+                        locArray[12] = locArray[12] == emptyString
+                            ? (thePlace[0].subLocality ?? emptyString)
+                            : locArray[12];
+                        locArray[13] = locArray[13] == emptyString
+                            ? (thePlace[0].thoroughfare ?? emptyString)
+                            : locArray[13];
+                        locArray[14] = locArray[14] == emptyString
+                            ? (thePlace[0].subThoroughfare ?? emptyString)
+                            : locArray[14];
+                        contentArray[0] = locArray.join(separator[1]);
+                        eventTemp = contentArray.join(separator[0]);
+                      } catch (ePlace) {
+                        devPrint('error in placemarkFromCoordinates $ePlace');
+                      }
+                    } // end if (locArray valid coords)
+                    eventHistory[2] = eventTemp;
                   } catch (eLoc) {
                     // A bad/short locArray (lean history row) or unparseable
                     // coord used to throw past the unlock below, permanently
@@ -2845,8 +3000,9 @@ Future historySync(String source, bool forceSend) async {
                       '${state['#VID']}${(Random.secure().nextDouble() * 1000).toString()}';
                   final firestoreEventCollection2 =
                       '$proxyCollectionName/$ssid/$eventCollectionName';
-                  final docName =
-                      getEventDocName('${defaultVid()}${eventHistory[0]}');
+                  final docName = getEventDocName(
+                    '${defaultVid()}${eventHistory[0]}',
+                  );
                   final docReference = FirebaseFirestore.instance
                       .collection(firestoreEventCollection2)
                       .doc(docName);
@@ -2859,7 +3015,8 @@ Future historySync(String source, bool forceSend) async {
                   if (internetConnected()) {
                     //add writeToTable here with Future.wait
                     devPrint(
-                        '*** internet connected, send history and writeToTable.');
+                      '*** internet connected, send history and writeToTable.',
+                    );
                     // Track table-CRUD outcomes so the record is only marked
                     // "sent" when its table writes actually landed. The CRUD
                     // ops are NOT idempotent (each addContent creates a new
@@ -2901,68 +3058,96 @@ Future historySync(String source, bool forceSend) async {
                       }
                       if (sawNoMatch) {
                         errorReport(
-                            'historySync $op no match for historyId ${eventHistory[0]} (row already gone; skipped, non-retryable): $res');
+                          'historySync $op no match for historyId ${eventHistory[0]} (row already gone; skipped, non-retryable): $res',
+                        );
                       }
                       return true;
                     }
+
                     void tally(String op, bool ok, dynamic detail) {
                       opsAttempted++;
                       if (ok) {
                         opsSucceeded++;
                       } else {
                         errorReport(
-                            'historySync $op failed for historyId ${eventHistory[0]}: $detail');
+                          'historySync $op failed for historyId ${eventHistory[0]}: $detail',
+                        );
                       }
                     }
 
                     if (eventHistory.length > 14) {
-                      final String rawTb =
-                          (eventHistory[14] ?? '').toString();
+                      final String rawTb = (eventHistory[14] ?? '').toString();
                       final List<String> tbParts = rawTb.split(separator[0]);
                       final String addStr = tbParts[0];
-                      final String updateStr =
-                          tbParts.length > 1 ? tbParts[1] : '';
-                      final String deleteStr =
-                          tbParts.length > 2 ? tbParts[2] : '';
-                      final String eventStr =
-                          tbParts.length > 3 ? tbParts[3] : '';
-                      final String updateEventStr =
-                          tbParts.length > 4 ? tbParts[4] : '';
+                      final String updateStr = tbParts.length > 1
+                          ? tbParts[1]
+                          : '';
+                      final String deleteStr = tbParts.length > 2
+                          ? tbParts[2]
+                          : '';
+                      final String eventStr = tbParts.length > 3
+                          ? tbParts[3]
+                          : '';
+                      final String updateEventStr = tbParts.length > 4
+                          ? tbParts[4]
+                          : '';
                       final String eventRowString = jsonEncode([
                         eventHistory[0],
                         eventHistory[1],
-                        eventHistory[2]
+                        eventHistory[2],
                       ]);
                       try {
                         if (addStr.isNotEmpty) {
-                          final res = await writeToTable(addStr, eventRowString);
+                          final res = await writeToTable(
+                            addStr,
+                            eventRowString,
+                          );
                           tally('writeToTable', resultOk(res), res);
                         }
                         if (updateStr.isNotEmpty) {
-                          final res =
-                              await updateTableRow(updateStr, eventRowString);
-                          tally('updateTableRow',
-                              resultOkOrNoMatch('updateTableRow', res), res);
+                          final res = await updateTableRow(
+                            updateStr,
+                            eventRowString,
+                          );
+                          tally(
+                            'updateTableRow',
+                            resultOkOrNoMatch('updateTableRow', res),
+                            res,
+                          );
                         }
                         if (deleteStr.isNotEmpty) {
-                          final res =
-                              await deleteFromTable(deleteStr, eventRowString);
-                          tally('deleteFromTable',
-                              resultOkOrNoMatch('deleteFromTable', res), res);
+                          final res = await deleteFromTable(
+                            deleteStr,
+                            eventRowString,
+                          );
+                          tally(
+                            'deleteFromTable',
+                            resultOkOrNoMatch('deleteFromTable', res),
+                            res,
+                          );
                         }
                         if (eventStr.isNotEmpty) {
-                          final ok =
-                              await writeToEvent(eventStr, eventRowString);
-                          tally('writeToEvent', ok,
-                              'writeToEvent returned false');
+                          final ok = await writeToEvent(
+                            eventStr,
+                            eventRowString,
+                          );
+                          tally(
+                            'writeToEvent',
+                            ok,
+                            'writeToEvent returned false',
+                          );
                         }
                         if (updateEventStr.isNotEmpty) {
-                          devPrint('[historySync] dispatching '
-                              'writeUpdateEventRow for historyId '
-                              '${eventHistory[0]}, updateEventStr '
-                              'length=${updateEventStr.length}');
+                          devPrint(
+                            '[historySync] dispatching '
+                            'writeUpdateEventRow for historyId '
+                            '${eventHistory[0]}, updateEventStr '
+                            'length=${updateEventStr.length}',
+                          );
                           final res = await writeUpdateEventRow(
-                              updateEventStr, eventRowString);
+                            updateEventStr,
+                            eventRowString,
+                          );
                           tally('writeUpdateEventRow', resultOk(res), res);
                         }
                       } catch (eTable) {
@@ -2970,16 +3155,19 @@ Future historySync(String source, bool forceSend) async {
                         // failed attempt so the record is not marked sent.
                         opsAttempted++;
                         errorReport(
-                            'historySync table CRUD threw for historyId ${eventHistory[0]}: $eTable');
+                          'historySync table CRUD threw for historyId ${eventHistory[0]}: $eTable',
+                        );
                       }
                     } else {
                       devPrint(
-                          'writeToTable skipped, no table definition in history.');
+                        'writeToTable skipped, no table definition in history.',
+                      );
                     }
 
                     final bool allFailed =
                         opsAttempted > 0 && opsSucceeded == 0;
-                    final bool partial = opsAttempted > 0 &&
+                    final bool partial =
+                        opsAttempted > 0 &&
                         opsSucceeded > 0 &&
                         opsSucceeded < opsAttempted;
 
@@ -2992,7 +3180,8 @@ Future historySync(String source, bool forceSend) async {
                       _historySyncRetry[historyId] = tries;
                       if (tries >= historySyncRetryMax) {
                         errorReport(
-                            'historySync giving up on historyId $historyId after $tries failed attempts; marking sent to unblock queue (table data lost).');
+                          'historySync giving up on historyId $historyId after $tries failed attempts; marking sent to unblock queue (table data lost).',
+                        );
                         _historySyncRetry.remove(historyId);
                         await docReference.set(dataSent);
                         await historySent(eventHistory[0]);
@@ -3000,7 +3189,8 @@ Future historySync(String source, bool forceSend) async {
                         needToCallProcessEvent = true;
                       } else {
                         devPrint(
-                            'historySync deferring historyId $historyId for retry ($tries/$historySyncRetryMax).');
+                          'historySync deferring historyId $historyId for retry ($tries/$historySyncRetryMax).',
+                        );
                       }
                       moreHistory = false; // stop this cycle; retry later
                     } else {
@@ -3009,13 +3199,15 @@ Future historySync(String source, bool forceSend) async {
                       // rather than re-run non-idempotent writes.
                       if (partial) {
                         errorReport(
-                            'historySync PARTIAL table write for historyId $historyId ($opsSucceeded/$opsAttempted ok); marking sent to avoid duplicate rows on retry.');
+                          'historySync PARTIAL table write for historyId $historyId ($opsSucceeded/$opsAttempted ok); marking sent to avoid duplicate rows on retry.',
+                        );
                       }
                       _historySyncRetry.remove(historyId);
                       _historyImageRetry.remove(historyId);
                       await docReference.set(dataSent).then((value) async {
                         debugPrint(
-                            'historySync doc $docName sent dataSent $dataSent');
+                          'historySync doc $docName sent dataSent $dataSent',
+                        );
                         await historySent(eventHistory[0]);
                         // One-shot read instead of a snapshots().listen() that
                         // was never cancelled (it leaked one Firestore listener
@@ -3071,14 +3263,16 @@ Future updateHistoryImage() async {
     String pattern = r"aum__(.*?)__mua";
     RegExp regex = RegExp(pattern);
     for (int i = 0; i < tableContent[historyName].length; i++) {
-      Iterable<Match> matches =
-          regex.allMatches(tableContent[historyName][i][2]);
+      Iterable<Match> matches = regex.allMatches(
+        tableContent[historyName][i][2],
+      );
       for (Match match in matches) {
         // looping for all aum in the history entry
         dynamic imageMapEntry = imageMapGet(match.group(1) ?? emptyString);
         bool imageReady = (imageMapEntry != null);
         if (imageReady) {
-          imageReady = isValidImageUrl(imageMapEntry[1]) ||
+          imageReady =
+              isValidImageUrl(imageMapEntry[1]) ||
               imageMapEntry[3] >= maxImageUploadRetry;
         } else {
           // insert aum__ in imageMap
@@ -3115,15 +3309,16 @@ Future<void> imageMapUpdateUrl(String localPath, String url) async {
         url,
         false,
         0,
-        0
+        0,
       ];
     } else {
       int retry = imageMapEntry[3] + 1;
       if (isValidImageUrl(url) || (retry > maxImageUploadRetry)) {
         imageMapEntry[1] = url;
         imageMapEntry[4] = 0;
-        imageMapEntry[3] =
-            retry > maxImageUploadRetry ? maxImageUploadRetry : retry;
+        imageMapEntry[3] = retry > maxImageUploadRetry
+            ? maxImageUploadRetry
+            : retry;
       } else {
         // not valid and retry < maxImageUploadRetry, increase retry count
         imageMapEntry[4] = 0;
@@ -3265,7 +3460,10 @@ Future sendImagesInImageMap() async {
 } // end of sendImagesInImageMap
 
 Future<void> uploadUpdateImage(
-    String localPath, String originalPath, int retry) async {
+  String localPath,
+  String originalPath,
+  int retry,
+) async {
   // upload image to cloud and update imageMap
   // this is used for image that is not in imageMap
 
@@ -3285,16 +3483,22 @@ Future<String> uploadImageToCloud(String localPath) async {
     List<String> fileArray = localPath.split('___');
     String rawFolder = Uri.decodeComponent(fileArray[0]);
     String folder = rawFolder.substring(
-        rawFolder.lastIndexOf('$localImageBeginningFolderDivider/') +
-            localImageBeginningFolderDivider.length +
-            1);
+      rawFolder.lastIndexOf('$localImageBeginningFolderDivider/') +
+          localImageBeginningFolderDivider.length +
+          1,
+    );
     String fileName = (fileArray[1]).replaceAll('.jpg', '');
     String finalImagePath = await renamePath(
-        originalImagePath: localPath, folder: folder, fileName: fileName);
+      originalImagePath: localPath,
+      folder: folder,
+      fileName: fileName,
+    );
     try {
       if (await internetConnectedCheck()) {
-        String tempResult =
-            await uploadToCloudStorage(finalImagePath, "$folder/$fileName.jpg");
+        String tempResult = await uploadToCloudStorage(
+          finalImagePath,
+          "$folder/$fileName.jpg",
+        );
         if (isValidImageUrl(tempResult)) {
           returnUrl = tempResult;
 
