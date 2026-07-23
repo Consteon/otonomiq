@@ -32,7 +32,7 @@ if (keystorePropertiesFile.exists()) {
 android {
     namespace 'com.otonomiq.master1'
     compileSdkVersion 36
-    ndkVersion = "28.2.13676358"
+    ndkVersion "28.2.13676358"
 
     compileOptions {
         coreLibraryDesugaringEnabled true

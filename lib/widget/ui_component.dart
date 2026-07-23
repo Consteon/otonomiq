@@ -179,6 +179,8 @@ List<Widget> buildPage(
     CustomerOutstandingList.clearState(scrName);
     AssetStockList.clearState(scrName);
     TablePicker.clearState(scrName);
+    GroupPicker.clearState(scrName);
+    WhatsAppSend.clearSentState(scrName);
   }
 
   dynamic userRepository = myState['#USER_REPOSITORY'];

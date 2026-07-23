@@ -94,6 +94,43 @@ class FtzCheckerState extends State<FtzChecker> {
   int lastSave = 0;
   int saveDelay = 10000;
 
+  // Fire-and-forget refresh of `position` + `placeMark`.
+  //
+  // BOTH futures need their own .catchError. They are deliberately un-awaited,
+  // and an un-awaited rejection bypasses every enclosing synchronous try/catch
+  // -- including checkerAcquireData's bare catch -- to reach
+  // platformDispatcher.onError as a FATAL. iOS CLGeocoder throws a
+  // PlatformException on unresolvable coordinates, on no network, and on
+  // Apple's rate limit; getLocation() itself rejects when the GPS fix is
+  // missing (it casts a dynamic map value straight to Position). The null
+  // guard replaces a `position!` bang that was a third fatal path.
+  //
+  // This block was duplicated verbatim at 3 call sites. The two >10-minute
+  // refresh sites stamped lastPositionTime with the pre-call `nowTime`; this
+  // stamps completion time instead. That value only feeds the 10-minute
+  // staleness check, so the few-second difference does not matter.
+  void _refreshPlaceMark() {
+    getLocation()
+        .then((pos) {
+          if (pos == null) return;
+          position = pos;
+          lastPositionTime = DateTime.now().millisecondsSinceEpoch;
+          placemarkFromCoordinates(pos.latitude, pos.longitude)
+              .then((pm) {
+                placeMark = pm;
+              })
+              .catchError((Object e) {
+                // No return: .then() above yields Future<Null>, so the onError handler
+                // must be assignable to FutureOr<Null>. placeMark simply keeps its
+                // previous value (or the initial []) when the geocoder fails.
+                errorReport('ftz_checker placemarkFromCoordinates: $e');
+              });
+        })
+        .catchError((Object e) {
+          errorReport('ftz_checker getLocation: $e');
+        });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -108,15 +145,7 @@ class FtzCheckerState extends State<FtzChecker> {
     timeDiff =
         transactionStore.state.screenTx['#REF_TIME_START'] -
         transactionStore.state.screenTx['#DEVICE_TIME_START'];
-    getLocation().then((pos) {
-      lastPositionTime = DateTime.now().millisecondsSinceEpoch;
-      position = pos;
-      placemarkFromCoordinates(position!.latitude, position!.longitude).then((
-        pm,
-      ) {
-        placeMark = pm;
-      }); // end of placemarkFromCoordinates
-    });
+    _refreshPlaceMark();
     textArray = diamondTextToList(widget.component['text']);
   } // end of initState
 
@@ -524,16 +553,7 @@ class FtzCheckerState extends State<FtzChecker> {
       int nowTime = DateTime.now().millisecondsSinceEpoch;
       if ((nowTime - (lastPositionTime ?? 0)) > 600000) {
         // more than 10 minutes
-        getLocation().then((res) {
-          position = res;
-          lastPositionTime = nowTime;
-          placemarkFromCoordinates(
-            position!.latitude,
-            position!.longitude,
-          ).then((pm) {
-            placeMark = pm;
-          }); // end of placemarkFromCoordinates
-        }); // end of getLocation
+        _refreshPlaceMark();
       } // end if  > 600000
       return resultOk;
     } // end of qrDataProcess
@@ -712,16 +732,7 @@ class FtzCheckerState extends State<FtzChecker> {
             int nowTime = DateTime.now().millisecondsSinceEpoch;
             if ((nowTime - (lastPositionTime ?? 0)) > 600000) {
               // more than 10 minutes
-              getLocation().then((res) {
-                position = res;
-                lastPositionTime = nowTime;
-                placemarkFromCoordinates(
-                  position!.latitude,
-                  position!.longitude,
-                ).then((pm) {
-                  placeMark = pm;
-                }); // end of placemarkFromCoordinates
-              }); // end of getLocation
+              _refreshPlaceMark();
             } // end if  > 600000
 
             newArray = List<String>.from(tArray);

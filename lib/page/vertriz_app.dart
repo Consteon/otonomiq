@@ -10,6 +10,38 @@ import '../main_bloc/bloc.dart';
 import '../page/main_page.dart';
 import '../redux/screen_transaction.dart';
 
+// Canonical fallbacks, copied from the default map already sitting in
+// buildTheme (build_theme.dart:7-12). Duplicated rather than imported because
+// that copy is dead -- build_theme.dart:13 does `appTheme = null;` right after
+// building it, so its `??` never fires.
+const int _defaultPrimaryColor = 4278196850;
+const int _defaultBottomAppBarColor = 4293454582;
+
+// Reads a colour out of the server-driven theme map, degrading to `fallback`
+// instead of throwing.
+//
+// This is the ROOT MaterialApp: anything thrown from VertrizApp.build renders
+// NOTHING -- a blank app, not a degraded screen. Three real states reach here:
+//   - systemUIComponent is null      (global.dart:490 declares it bare `dynamic`)
+//   - systemUIComponent is {}        (the init/reset routine, global.dart:849)
+//   - the tenant sheet omits the key
+// All three produced `NoSuchMethodError` from
+// `systemUIComponent[theme]['primaryColor'].toInt()`.
+//
+// `v is num` also closes a second, separate class the old code had backwards:
+// the null-guarded reads passed the raw dynamic to `Color(x)` with no
+// `.toInt()`, so a sheet value decoded as double threw TypeError there while
+// the unguarded ones threw NoSuchMethodError here. One helper, both classes.
+Color themeColor(String key, Color fallback) {
+  try {
+    final dynamic v = systemUIComponent?[theme]?[key];
+    if (v is num) return Color(v.toInt());
+  } catch (_) {
+    // systemUIComponent is not a Map at all.
+  }
+  return fallback;
+}
+
 class VertrizApp extends StatelessWidget {
   // This widget is the root of your application.
   final UserRepository _userRepository;
@@ -26,7 +58,10 @@ class VertrizApp extends StatelessWidget {
         //primaryColor: Colors.red,
         // colorSchemeSeed: const Color(0xff6750a4), useMaterial3: true,
         // ColorSchemeSeed: const Color(0xff6750a4), useMaterial3: true,
-        primaryColor: Color(systemUIComponent[theme]['primaryColor'].toInt()),
+        primaryColor: themeColor(
+          'primaryColor',
+          const Color(_defaultPrimaryColor),
+        ),
         // buttonTheme: ButtonThemeData(
         // buttonColor: systemUIComponent[theme]['buttonColor'] == null
         //     ? Colors.yellow
@@ -39,14 +74,10 @@ class VertrizApp extends StatelessWidget {
             // side: MaterialStateProperty.resolveWith<BorderSide>(
             //         (states) => BorderSide(color: borderColor ?? Colors.black)),
             backgroundColor: WidgetStateProperty.resolveWith<Color>(
-              (states) => systemUIComponent[theme]['buttonColor'] == null
-                  ? Colors.grey[400]!
-                  : Color(systemUIComponent[theme]['buttonColor']),
+              (states) => themeColor('buttonColor', Colors.grey[400]!),
             ),
             foregroundColor: WidgetStateProperty.resolveWith<Color>(
-              (states) => systemUIComponent[theme]['buttonText'] == null
-                  ? Colors.black87
-                  : Color(systemUIComponent[theme]['buttonText']),
+              (states) => themeColor('buttonText', Colors.black87),
             ),
             // backgroundColor: MaterialStateProperty.resolveWith<Color>(
             //         (states) => systemUIComponent[theme]['buttonColor'] == null
@@ -71,13 +102,14 @@ class VertrizApp extends StatelessWidget {
         ),
         textButtonTheme: TextButtonThemeData(
           style: TextButton.styleFrom(
-            foregroundColor: systemUIComponent[theme]['buttonText'] == null
-                ? Colors.black
-                : Color(systemUIComponent[theme]['buttonText']),
+            foregroundColor: themeColor('buttonText', Colors.black),
           ),
         ),
         bottomAppBarTheme: BottomAppBarThemeData(
-          color: Color(systemUIComponent[theme]['bottomAppBarColor'].toInt()),
+          color: themeColor(
+            'bottomAppBarColor',
+            const Color(_defaultBottomAppBarColor),
+          ),
         ),
         // toggleableActiveColor: Color(systemUIComponent[theme]['toggleableActiveColor'].toInt()??4280391411), // blue
         // disabledColor: Color(systemUIComponent[theme]['disabledColor'].toInt()??4288585374), // grey

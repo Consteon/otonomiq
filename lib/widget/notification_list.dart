@@ -1,35 +1,170 @@
-import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' hide Notification;
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../api.dart';
 import '../global.dart';
 import '../notification/bloc.dart';
-import '../widget/link_widget.dart';
 import '../widget/notif_ui.dart';
+
+// One flattened notification row: a single message plus the channel it
+// belongs to. The old design forced a chat-style drill-down per channel;
+// this screen merges every channel's messages into one filterable feed.
+class _NotifRow {
+  final String vid; // owning channel id (filter key)
+  final String channel; // channel display name (eyebrow + chip label)
+  final String? pic; // channel avatar url
+  final String text; // message body (dp)
+  final int? ms; // normalized received time
+  final String? route; // rt — page to open on tap, if any
+  final String msgId; // firestore doc id, for mark-read
+  bool unread; // mutable: cleared optimistically on tap
+  bool expanded = false; // inline expand toggle for long text
+  _NotifRow(
+    this.vid,
+    this.channel,
+    this.pic,
+    this.text,
+    this.ms,
+    this.route,
+    this.msgId,
+    this.unread,
+  );
+}
 
 class NotificationList extends StatefulWidget {
   const NotificationList({super.key});
 
   @override
-  _NotificationListState createState() => _NotificationListState();
+  State<NotificationList> createState() => _NotificationListState();
 }
 
 class _NotificationListState extends State<NotificationList> {
+  String _filterVid = ''; // '' = "All"
+  bool _loading = false;
+  List<_NotifRow> _rows = <_NotifRow>[];
+  List<String> _loadedVids = <String>[]; // guards duplicate fan-out fetches
+
   @override
   void initState() {
     super.initState();
-    // Re-subscribe to the CURRENT firestoreIO path. The boot-time
-    // LoadNotification (main.dart) bound the pre-login default collection;
-    // on warm/auto start it is never re-dispatched (login-success re-fire
-    // only happens on a fresh login), so without this the stream watches the
-    // wrong path and the inbox shows empty even though the bridge wrote docs.
+    // Re-subscribe to the CURRENT firestoreIO path (see git history: warm/auto
+    // start never re-fires LoadNotification, so the inbox would show empty).
     BlocProvider.of<NotificationBloc>(context).add(LoadNotification());
+  }
+
+  static int? _asInt(dynamic v) => v is int ? v : (v is num ? v.toInt() : null);
+
+  // Fan out one bounded read per channel and merge into a single feed. Cheap
+  // for a handful of broadcast channels; ponytail: 50/channel cap — raise or
+  // paginate if a channel ever holds more history than that.
+  Future<void> _loadAll(List<Notification> channels) async {
+    setState(() => _loading = true);
+    final List<_NotifRow> rows = <_NotifRow>[];
+    for (final c in channels) {
+      final vid = c.vid ?? '';
+      if (vid.isEmpty) continue;
+      final name = (c.name != null && c.name!.trim().isNotEmpty)
+          ? c.name!.trim()
+          : vid;
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('$firestoreIO/$vid/msg')
+            .orderBy('tr', descending: true)
+            .limit(50)
+            .get();
+        for (final d in snap.docs) {
+          final m = d.data();
+          final incoming = m['im'] == true;
+          final st = _asInt(m['st']);
+          final rt = (m['rt'] ?? '').toString();
+          rows.add(
+            _NotifRow(
+              vid,
+              name,
+              c.profilePicture,
+              (m['dp'] ?? '').toString(),
+              notifNormalizeMs(_asInt(m['tr'])),
+              rt.isEmpty ? null : rt,
+              d.id,
+              incoming && st != 101,
+            ),
+          );
+        }
+      } catch (_) {
+        // Skip a channel we can't read rather than failing the whole feed.
+      }
+    }
+    rows.sort((a, b) => (b.ms ?? 0).compareTo(a.ms ?? 0));
+    if (!mounted) return;
+    setState(() {
+      _rows = rows;
+      _loading = false;
+      _loadedVids = channels.map((e) => e.vid ?? '').toList();
+    });
+  }
+
+  void _onTapRow(_NotifRow r) {
+    if (r.unread) {
+      // setStatus reads these globals synchronously at entry — aim them at
+      // this row's channel so st=101 + the urd decrement hit the right docs.
+      firestoreNotif = '$firestoreIO/${r.vid}';
+      firestoreMsg = '$firestoreNotif/msg';
+      setStatus(r.msgId, 101).catchError((_) {}); // offline tx may throw
+    }
+    if (r.route != null && r.route!.isNotEmpty) {
+      _openRoute(r.route); // leaves the page; mark-read already fired
+      return;
+    }
+    setState(() {
+      r.unread = false; // clear the red dot
+      r.expanded = !r.expanded; // toggle full text inline
+    });
+  }
+
+  // Keep the message→route action from the old detail view.
+  void _openRoute(String? route) {
+    if (route == null || route.isEmpty) return;
+    if (linkElement[route] == null) return; // page not built → no-op
+    routeStack.push(route);
+    final newElementList = reloadPage(route);
+    rootThis.setState(() {
+      rootThis.byPass = 0;
+      rootThis.pageName = route;
+      rootThis.pageElements = newElementList;
+    });
+  }
+
+  void _back() {
+    final pgName = routeStack.get();
+    final newElementList = reloadPage(pgName);
+    rootThis.setState(() {
+      rootThis.byPass = 0;
+      rootThis.pageName = pgName;
+      rootThis.pageElements = newElementList;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).primaryColor;
-    return BlocBuilder<NotificationBloc, NotificationState>(
+    return BlocConsumer<NotificationBloc, NotificationState>(
+      listener: (context, state) {
+        if (state is NotificationLoaded) {
+          final vids = state.notifications.map((e) => e.vid ?? '').toList();
+          if (!listEquals(vids, _loadedVids)) {
+            _loadAll(state.notifications);
+          }
+        }
+      },
       builder: (context, state) {
+        final channels = state is NotificationLoaded
+            ? state.notifications
+            : <Notification>[];
+        final filtered = _filterVid.isEmpty
+            ? _rows
+            : _rows.where((r) => r.vid == _filterVid).toList();
         return Scaffold(
           backgroundColor: notifBg,
           appBar: AppBar(
@@ -38,17 +173,7 @@ class _NotificationListState extends State<NotificationList> {
             elevation: 0,
             leading: IconButton(
               icon: const Icon(Icons.arrow_back),
-              onPressed: () {
-                var pgName = routeStack.get(); // get current page
-                List<Widget> newElementList = reloadPage(
-                  pgName,
-                ); // reload current page
-                rootThis.setState(() {
-                  rootThis.byPass = 0;
-                  rootThis.pageName = pgName;
-                  rootThis.pageElements = newElementList;
-                });
-              },
+              onPressed: _back,
             ),
             title: const Text(
               'Notification',
@@ -57,159 +182,189 @@ class _NotificationListState extends State<NotificationList> {
                 fontWeight: FontWeight.w600,
               ),
             ),
-            actions: <Widget>[
-              if (state is NotificationLoaded && state.unReadNumber > 0)
-                Padding(
-                  padding: const EdgeInsets.only(right: 16),
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.redAccent,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        '${state.unReadNumber} baru',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
           ),
-          body: Builder(
-            builder: (context) {
-              if (state is NotificationLoading) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (state is! NotificationLoaded) {
-                return const SizedBox.shrink();
-              }
-              final theList = state.notifications;
-              if (theList.isEmpty) {
-                return notifEmptyState(
-                  icon: Icons.notifications_none_rounded,
-                  title: 'Belum ada notifikasi',
-                  subtitle: 'Notifikasi yang masuk akan muncul di sini',
-                );
-              }
-              return ListView.separated(
-                itemCount: theList.length,
-                separatorBuilder: (_, _) => const Divider(
-                  height: 1,
-                  thickness: 1,
-                  indent: 82,
-                  color: notifBorder,
+          body: Column(
+            children: <Widget>[
+              _chipBar(channels, primary),
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: () => _loadAll(channels),
+                  child: _feed(filtered),
                 ),
-                itemBuilder: (context, index) {
-                  final note = theList[index];
-                  final unread = (note.unRead ?? 0) > 0;
-                  final name =
-                      (note.name != null && note.name!.trim().isNotEmpty)
-                      ? note.name!.trim()
-                      : (note.vid ?? 'Pesan');
-                  final preview = note.lastMessage ?? '';
-                  final time = notifRelTime(note.lastMessageTime);
-                  return InkWell(
-                    onTap: () {
-                      firestoreMsg = firestoreIO + "/" + note.vid + "/msg";
-                      firestoreNotif = firestoreIO + "/" + note.vid;
-                      BlocProvider.of<MessageBloc>(context).add(LoadMessage());
-                      rootThis.setState(() {
-                        rootThis.byPass = 2;
-                        rootThis.byPassWidget = MessageList(
-                          key: UniqueKey(),
-                          title: note.name!,
-                          profilePic: note.profilePicture!,
-                        );
-                        rootThis.touch = !rootThis.touch;
-                      });
-                    },
-                    child: Container(
-                      color: unread ? notifUnreadTint : Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: <Widget>[
-                          notifAvatar(name, note.profilePicture, 26),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: <Widget>[
-                                Text(
-                                  name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 15.5,
-                                    fontWeight: unread
-                                        ? FontWeight.w700
-                                        : FontWeight.w600,
-                                    color: notifTextStrong,
-                                  ),
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  preview,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 13.5,
-                                    height: 1.2,
-                                    color: unread
-                                        ? notifTextStrong
-                                        : notifTextMuted,
-                                    fontWeight: unread
-                                        ? FontWeight.w500
-                                        : FontWeight.w400,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: <Widget>[
-                              Text(
-                                time,
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  color: unread ? primary : notifTextMuted,
-                                  fontWeight: unread
-                                      ? FontWeight.w600
-                                      : FontWeight.w400,
-                                ),
-                              ),
-                              const SizedBox(height: 7),
-                              unread
-                                  ? notifCountPill('${note.unRead}')
-                                  : const SizedBox(height: 20),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              );
-            },
+              ),
+            ],
           ),
         );
       },
+    );
+  }
+
+  Widget _chipBar(List<Notification> channels, Color primary) {
+    if (channels.isEmpty) return const SizedBox.shrink();
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: SizedBox(
+        height: 36,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          children: <Widget>[
+            _chip(
+              'Semua',
+              _filterVid.isEmpty,
+              0,
+              primary,
+              () => setState(() => _filterVid = ''),
+            ),
+            for (final c in channels)
+              _chip(
+                (c.name != null && c.name!.trim().isNotEmpty)
+                    ? c.name!.trim()
+                    : (c.vid ?? 'Pesan'),
+                _filterVid == c.vid,
+                c.unRead ?? 0,
+                primary,
+                () => setState(() => _filterVid = c.vid ?? ''),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _chip(
+    String label,
+    bool active,
+    int unread,
+    Color primary,
+    VoidCallback onTap,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          decoration: BoxDecoration(
+            color: active ? primary.withValues(alpha: 0.10) : Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: active ? primary : notifBorder,
+              width: active ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                  color: active ? primary : notifTextStrong,
+                ),
+              ),
+              if (unread > 0) ...<Widget>[
+                const SizedBox(width: 6),
+                notifCountPill('$unread'),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _feed(List<_NotifRow> rows) {
+    if (_loading && rows.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (rows.isEmpty) {
+      return ListView(
+        // ListView (not Center) so pull-to-refresh still works when empty.
+        children: <Widget>[
+          SizedBox(height: MediaQuery.of(context).size.height * 0.18),
+          notifEmptyState(
+            icon: Icons.notifications_none_rounded,
+            title: 'Belum ada notifikasi',
+            subtitle: 'Notifikasi yang masuk akan muncul di sini',
+          ),
+        ],
+      );
+    }
+    return ListView.separated(
+      itemCount: rows.length,
+      separatorBuilder: (_, _) => const Divider(
+        height: 1,
+        thickness: 1,
+        indent: 78,
+        color: notifBorder,
+      ),
+      itemBuilder: (context, index) => _tile(rows[index]),
+    );
+  }
+
+  Widget _tile(_NotifRow r) {
+    return InkWell(
+      onTap: () => _onTapRow(r),
+      child: Container(
+        color: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            notifAvatarDot(r.channel, r.pic, 22, r.unread),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Flexible(
+                        child: Text(
+                          r.channel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: notifTextMuted,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        notifDateTime(r.ms),
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: notifTextMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    r.text.isEmpty ? '-' : r.text,
+                    maxLines: r.expanded ? null : 2,
+                    overflow: r.expanded
+                        ? TextOverflow.visible
+                        : TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14.5,
+                      height: 1.3,
+                      fontWeight: FontWeight.w600,
+                      color: notifTextStrong,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

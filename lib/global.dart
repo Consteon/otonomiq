@@ -200,8 +200,8 @@ import 'widget/driver_home_support.dart';
                           print thermal bluetooth, nfc reader,
   0.9.84.02 (260714) OO : fix layout nfc reader, fix get cache data after close app, default value pickup and drop in admin runtime, 
                           implement local auth in attendance qr
-  0.9.84.03 (260717) OO : fcm notification single and broadcast, notif ui, message list, asset stock, task feed list, 
-                          fix stuck capture camera, crashlytics fix
+  0.9.84.03 (260724) OO : fcm notification single and broadcast, notif ui, message list, asset stock, task feed list, 
+                          fix stuck capture camera, crashlytics fix, search in contact picker, map point picker, group picker, share pdf, whatsapp send
 */
 
 // ========= Constants ==========================

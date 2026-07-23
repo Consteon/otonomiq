@@ -1,20 +1,27 @@
 // ftz_bluetooth_printer.dart
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart'
     as fs; // GetOptions/Source for keyed cache-first read
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart' as pos_utils;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 // MODIFIED: Replaced flutter_blue_plus with flutter_reactive_ble
 import 'package:flutter_reactive_ble/flutter_reactive_ble.dart';
 import 'package:get/get.dart'; // MODIFIED: Added GetX for state management
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../api.dart';
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
 import '../global2.dart';
+import '../template_pdf.dart';
 import '../template_printer.dart';
 import 'driver_home_support.dart'; // resolveDriverCurlyTokens, resolveAppVid
 import 'panel_card_support.dart'; // parseTablePath/TablePath -- SAME parse the native write uses
@@ -73,6 +80,15 @@ class _FtzBluetoothPrinterState extends State<FtzBluetoothPrinter> {
   late final String _variant;
   late final String _searchConfig;
 
+  // Share-PDF variant config. Null for bluetooth variants.
+  late final PdfPageFormat? _pdfPageFormat;
+  late final String _fileName;
+  late final PdfColor? _borderColor;
+  late final double _borderWidthPt;
+  late final int _gridCols;
+  late final int _gridRows;
+  late final bool _isGridMode;
+
   @override
   void initState() {
     super.initState();
@@ -126,6 +142,64 @@ class _FtzBluetoothPrinterState extends State<FtzBluetoothPrinter> {
     _searchConfig = (autheniumDecode(widget.component['search']) ?? '')
         .toString()
         .trim();
+
+    // ── Share-PDF variant: parse PDF page format, file name, border ──
+    if (_variant == 'share-pdf') {
+      final String ps = (widget.component['paperSize'] as String? ?? 'a6')
+          .toLowerCase();
+      _pdfPageFormat = ps == 'a4' ? PdfPageFormat.a4 : PdfPageFormat.a6;
+      _fileName = (widget.component['fileName'] as String? ?? 'share.pdf')
+          .toString()
+          .trim();
+      final String? borderName = (widget.component['border'] as String?)
+          ?.trim();
+      _borderColor = (borderName != null && borderName.isNotEmpty)
+          ? _resolvePdfColor(borderName)
+          : null;
+
+      // borderWidth: only meaningful when border is present (spec §3).
+      // Parsed always; TemplatePdf ignores it when borderColor is null.
+      final String bwStr = (widget.component['borderWidth'] as String? ?? '8')
+          .toString()
+          .trim();
+      _borderWidthPt = double.tryParse(bwStr) ?? 8.0;
+
+      // Grid config: "KxB" (e.g. "4x4" = 4 cols x 4 rows).
+      // Malformed -> WARN + fall back to single mode.
+      final String? gridStr = (widget.component['grid'] as String?)
+          ?.trim()
+          .toLowerCase();
+      if (gridStr != null && gridStr.isNotEmpty) {
+        final List<String> gParts = gridStr.split('x');
+        final int? k = gParts.isNotEmpty ? int.tryParse(gParts[0]) : null;
+        final int? b = gParts.length > 1 ? int.tryParse(gParts[1]) : null;
+        if (k != null && k >= 1 && b != null && b >= 1) {
+          _gridCols = k;
+          _gridRows = b;
+          _isGridMode = true;
+        } else {
+          devPrint(
+            '[PRN share-pdf] WARN: malformed grid "$gridStr", '
+            'falling back to single mode',
+          );
+          _gridCols = 1;
+          _gridRows = 1;
+          _isGridMode = false;
+        }
+      } else {
+        _gridCols = 1;
+        _gridRows = 1;
+        _isGridMode = false;
+      }
+    } else {
+      _pdfPageFormat = null;
+      _fileName = '';
+      _borderColor = null;
+      _borderWidthPt = 8.0;
+      _gridCols = 1;
+      _gridRows = 1;
+      _isGridMode = false;
+    }
   }
 
   // MODIFIED: Added dispose to cancel streams
@@ -175,7 +249,7 @@ class _FtzBluetoothPrinterState extends State<FtzBluetoothPrinter> {
     _tableData.clear();
 
     try {
-      if (_variant == 'keyed') {
+      if (_variant == 'keyed' || _variant == 'share-pdf') {
         // ── Keyed variant: fetch ONE doc by search, populate _tableData ──
         await _loadKeyedData();
       } else {
@@ -230,16 +304,26 @@ class _FtzBluetoothPrinterState extends State<FtzBluetoothPrinter> {
   /// TemplatePrinter._interpolate resolves {{field}} via path-traversal.
   /// Array fields (like li[]) stay as List<Map> for LOOP source binding.
   Future<void> _loadKeyedData() async {
+    // W1: the share-pdf variant owns ALL its user-facing messaging in
+    // _startSharePdfProcess (text[4] on _tableData.isEmpty). Suppress the
+    // keyed-variant failure toasts here so share-pdf shows exactly ONE
+    // (translated) snackbar instead of two -- the first an untranslated
+    // 'PRN keyed: ...' string. Diagnostics (errorReport/devPrint) stay intact.
+    // Bluetooth ('keyed'/other) variants: unchanged -- toasts still show.
+    final bool silent = _variant == 'share-pdf';
     final String rawTable = (widget.component['table'] ?? '').toString().trim();
     if (_searchConfig.isEmpty || rawTable.isEmpty) {
-      _showSnackBar('PRN keyed: missing search or table config', Colors.red);
+      if (!silent) {
+        _showSnackBar('PRN keyed: missing search or table config', Colors.red);
+      }
       return;
     }
 
     // Parse search: split on separator[2] (◼ = U+25FC)
     final List<String> searchParts = _searchConfig.split(separator[2]);
     if (searchParts.length < 2) {
-      _showSnackBar('PRN keyed: invalid search format', Colors.red);
+      if (!silent)
+        _showSnackBar('PRN keyed: invalid search format', Colors.red);
       return;
     }
     final String searchField = searchParts[0].trim();
@@ -250,7 +334,9 @@ class _FtzBluetoothPrinterState extends State<FtzBluetoothPrinter> {
 
     // Guard: unresolved token still contains '{' -> abort
     if (resolvedValue.contains('{')) {
-      _showSnackBar('PRN keyed: unresolved token in search', Colors.red);
+      if (!silent) {
+        _showSnackBar('PRN keyed: unresolved token in search', Colors.red);
+      }
       return;
     }
 
@@ -261,7 +347,7 @@ class _FtzBluetoothPrinterState extends State<FtzBluetoothPrinter> {
     // matches the doc the write created at ".../tables/84214220504259/nota".
     final TablePath tp = parseTablePath(rawTable);
     if (tp.tableDocId.isEmpty || tp.subColl.isEmpty) {
-      _showSnackBar('PRN keyed: invalid table path', Colors.red);
+      if (!silent) _showSnackBar('PRN keyed: invalid table path', Colors.red);
       errorReport('[PRN keyed] bad table path: $rawTable');
       return;
     }
@@ -286,7 +372,7 @@ class _FtzBluetoothPrinterState extends State<FtzBluetoothPrinter> {
     }
 
     if (docs.isEmpty) {
-      _showSnackBar('PRN keyed: nota not found', Colors.orange);
+      if (!silent) _showSnackBar('PRN keyed: nota not found', Colors.orange);
       errorReport(
         '[PRN keyed] nota not found: path=$path $searchField=$resolvedValue',
       );
@@ -311,21 +397,25 @@ class _FtzBluetoothPrinterState extends State<FtzBluetoothPrinter> {
   /// the fallback for notas created on another device or evicted from cache.
   /// nota docs are immutable snapshots, so a cache hit is never stale.
   /// Returns [] on miss (each source's errors are swallowed + logged).
+  ///
+  /// [limit] caps the query result count. Default 2 (single-doc callers only
+  /// need 1, limit 2 to detect duplicates). Pass null for grid mode (all docs).
   Future<List<dynamic>> _queryNota(
     String path,
     String field,
-    dynamic value,
-  ) async {
+    dynamic value, {
+    int? limit = 2,
+  }) async {
     for (final fs.Source src in <fs.Source>[
       fs.Source.cache,
       fs.Source.server,
     ]) {
       try {
-        final dynamic snap = await firestoreDb
+        dynamic query = firestoreDb
             .collection(path)
-            .where(field, isEqualTo: value)
-            .limit(2)
-            .get(fs.GetOptions(source: src));
+            .where(field, isEqualTo: value);
+        if (limit != null) query = query.limit(limit);
+        final dynamic snap = await query.get(fs.GetOptions(source: src));
         final List<dynamic> docs = snap.docs as List;
         if (docs.isNotEmpty) return docs;
       } catch (e) {
@@ -341,6 +431,108 @@ class _FtzBluetoothPrinterState extends State<FtzBluetoothPrinter> {
     docData.forEach((key, value) {
       _tableData[key.toString()] = value;
     });
+  }
+
+  /// Resolve a color string to PdfColor. Hex (#RRGGBB) -> PdfColor.fromHex;
+  /// named (e.g. 'blue') -> stringToColor -> PdfColor. Default black.
+  /// Single point of resolution for both borderColor and colorResolver.
+  PdfColor _resolvePdfColor(String value) {
+    if (value.startsWith('#')) {
+      return PdfColor.fromHex(value);
+    }
+    return PdfColor.fromInt(stringToColor(value).toARGB32());
+  }
+
+  /// Load image bytes by key for TemplatePdf IMAGE tags.
+  /// - `http://` / `https://` key -> fetched over the network (e.g. a Firebase
+  ///   Storage branding image). Offline / non-200 -> null -> renderer skips it.
+  /// - otherwise -> bundle asset `assets/images/{key}.png`.
+  /// Returns null on any failure (silently skipped by renderer).
+  Future<Uint8List?> _loadAssetBytes(String key) async {
+    try {
+      if (key.startsWith('http://') || key.startsWith('https://')) {
+        final resp = await http.get(Uri.parse(key));
+        return resp.statusCode == 200 ? resp.bodyBytes : null;
+      }
+      final data = await rootBundle.load('assets/images/$key.png');
+      return data.buffer.asUint8List();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Load ALL matching docs for grid mode. Returns list of doc-data maps,
+  /// sorted by 'ln' field A->Z. 0 docs -> empty list (caller shows text[4]).
+  /// Reuses search-parsing logic from _loadKeyedData but queries without limit.
+  /// Does NOT modify _tableData (grid renderer receives items directly).
+  Future<List<Map<String, dynamic>>> _loadKeyedDataGrid() async {
+    final String rawTable = (widget.component['table'] ?? '').toString().trim();
+    if (_searchConfig.isEmpty || rawTable.isEmpty) return const [];
+
+    // Parse search: split on separator[2] (U+25FC).
+    // _searchConfig already autheniumDecoded in initState.
+    final List<String> searchParts = _searchConfig.split(separator[2]);
+    if (searchParts.length < 2) return const [];
+    final String searchField = searchParts[0].trim();
+    final String rawValue = searchParts[1].trim();
+
+    // Resolve {token} in the search value
+    final String resolvedValue = resolveDriverCurlyTokens(rawValue, _scrName);
+
+    // Guard: unresolved token still contains '{'
+    if (resolvedValue.contains('{')) {
+      devPrint('[PRN share-pdf grid] unresolved token in search: $rawValue');
+      return const [];
+    }
+
+    // Build collection path (same as _loadKeyedData)
+    final TablePath tp = parseTablePath(rawTable);
+    if (tp.tableDocId.isEmpty || tp.subColl.isEmpty) {
+      errorReport('[PRN share-pdf grid] bad table path: $rawTable');
+      return const [];
+    }
+    final String appVid = resolveAppVid(widget.component);
+    final String path =
+        '$mobileTable/$appVid/$mobileTableCollection/${tp.tableDocId}/${tp.subColl}';
+
+    devPrint(
+      '[PRN share-pdf grid] query path=$path $searchField=$resolvedValue',
+    );
+
+    // String match first, then numeric fallback (Firestore is type-exact).
+    // limit: null -> no cap, fetch ALL matching docs.
+    List<dynamic> docs = await _queryNota(
+      path,
+      searchField,
+      resolvedValue,
+      limit: null,
+    );
+    if (docs.isEmpty) {
+      final num? numValue = num.tryParse(resolvedValue);
+      if (numValue != null) {
+        docs = await _queryNota(path, searchField, numValue, limit: null);
+      }
+    }
+
+    if (docs.isEmpty) return const [];
+
+    // Convert to typed maps. Guard dynamic cast (firestoreDb is dynamic).
+    final List<Map<String, dynamic>> items = [];
+    for (final doc in docs) {
+      final dynamic rawData = doc.data();
+      if (rawData is Map) {
+        items.add(Map<String, dynamic>.from(rawData));
+      }
+    }
+
+    // Sort by 'ln' field A->Z (spec §5: deterministic order).
+    items.sort((a, b) {
+      final String aLn = (a['ln'] ?? '').toString();
+      final String bLn = (b['ln'] ?? '').toString();
+      return aLn.compareTo(bLn);
+    });
+
+    return items;
   }
 
   void _showSnackBar(String message, [Color? color]) {
@@ -627,6 +819,136 @@ class _FtzBluetoothPrinterState extends State<FtzBluetoothPrinter> {
     return await templatePrinter.getBytes();
   }
 
+  /// Share-PDF action: load doc(s) -> render PDF -> write temp file -> share.
+  /// No BLE code touched. Busy flag cleared in finally on every exit.
+  /// Branches on _isGridMode: grid loads ALL docs, single loads ONE.
+  Future<void> _startSharePdfProcess() async {
+    if (_isBusy) return;
+    if (mounted) setState(() => _isBusy = true);
+
+    try {
+      Uint8List pdfBytes;
+      String resolvedName;
+
+      if (_isGridMode) {
+        // ── Grid mode: load ALL matching docs ────────────────────────
+        if (mounted) setState(() => _isLoadingData = true);
+        final List<Map<String, dynamic>> items = await _loadKeyedDataGrid();
+        if (mounted) setState(() => _isLoadingData = false);
+        if (!mounted) return;
+
+        if (items.isEmpty) {
+          final String notFoundLabel = _labels.length > 4
+              ? _labels[4]
+              : 'Data not found.';
+          _showSnackBar(notFoundLabel, Colors.orange);
+          return;
+        }
+
+        if (_template == null || _template.isEmpty) {
+          _showSnackBar('PDF template is not defined.', Colors.red);
+          return;
+        }
+
+        // QR < 25mm warning (approximate, spec §5 guard).
+        // approxQrMm = 0.6 * min(cellW, cellH) / mm. Conservative: assumes
+        // QR takes ~60% of the smaller cell dimension after text/padding.
+        final double pW = (_pdfPageFormat ?? PdfPageFormat.a4).width;
+        final double pH = (_pdfPageFormat ?? PdfPageFormat.a4).height;
+        final double cW = (pW - 20) / _gridCols;
+        final double cH = (pH - 20) / _gridRows;
+        final double minCell = cW < cH ? cW : cH;
+        final double approxQrMm = minCell * 0.6 / PdfPageFormat.mm;
+        if (approxQrMm < 25.0) {
+          devPrint(
+            '[PRN share-pdf] WARN: grid ${_gridCols}x$_gridRows on '
+            '${(pW / PdfPageFormat.mm).toStringAsFixed(0)}x'
+            '${(pH / PdfPageFormat.mm).toStringAsFixed(0)}mm '
+            'QR ~${approxQrMm.toStringAsFixed(1)}mm (<25mm minimum)',
+          );
+        }
+
+        final pdfRenderer = TemplatePdf(
+          template: _template,
+          pageFormat: _pdfPageFormat ?? PdfPageFormat.a4,
+          tables: const {},
+          colorResolver: (String name) => _resolvePdfColor(name),
+          borderColor: _borderColor,
+          assetLoader: _loadAssetBytes,
+          borderWidth: _borderWidthPt,
+        );
+        pdfBytes = await pdfRenderer.generateGridBytes(
+          items: items,
+          gridCols: _gridCols,
+          gridRows: _gridRows,
+        );
+        // Grid fileName: literal, no per-doc {{field}} resolution.
+        resolvedName = resolveAndSanitizeFileName(_fileName, const {});
+      } else {
+        // ── Single mode: load ONE doc (existing path) ────────────────
+        await _loadPrintData();
+        if (!mounted) return;
+
+        // Guard: keyed doc didn't load. _loadKeyedData is variant-gated
+        // SILENT for share-pdf (W1), so text[4] here is the ONLY
+        // user-facing not-found message.
+        if (_tableData.isEmpty) {
+          final String notFoundLabel = _labels.length > 4
+              ? _labels[4]
+              : 'Data not found.';
+          _showSnackBar(notFoundLabel, Colors.orange);
+          return;
+        }
+
+        if (_template == null || _template.isEmpty) {
+          _showSnackBar('PDF template is not defined.', Colors.red);
+          return;
+        }
+
+        final pdfRenderer = TemplatePdf(
+          template: _template,
+          pageFormat: _pdfPageFormat ?? PdfPageFormat.a6,
+          tables: _tableData,
+          colorResolver: (String name) => _resolvePdfColor(name),
+          borderColor: _borderColor,
+          assetLoader: _loadAssetBytes,
+          borderWidth: _borderWidthPt,
+        );
+        pdfBytes = await pdfRenderer.generateBytes();
+        resolvedName = resolveAndSanitizeFileName(_fileName, _tableData);
+      }
+
+      // ── Shared: write temp file + OS share sheet ───────────────────
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/$resolvedName');
+      await file.writeAsBytes(pdfBytes, flush: true);
+
+      if (!mounted) return;
+      // sharePositionOrigin is REQUIRED on iPad: the native plugin
+      // otherwise falls back to CGRectZero and anchors the popover at the
+      // screen's top-left corner. Harmless/ignored on phones and Android.
+      final RenderObject? box = context.findRenderObject();
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path)],
+          fileNameOverrides: [resolvedName],
+          sharePositionOrigin: box is RenderBox
+              ? box.localToGlobal(Offset.zero) & box.size
+              : null,
+        ),
+      );
+    } catch (e) {
+      // text[3] = error label ("Gagal membuat PDF. Coba lagi.")
+      final String errorLabel = _labels.length > 3
+          ? _labels[3]
+          : 'Failed to create PDF.';
+      _showSnackBar(errorLabel, Colors.red);
+      errorReport('[PRN share-pdf] $e');
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // ... existing code ...
@@ -645,6 +967,11 @@ class _FtzBluetoothPrinterState extends State<FtzBluetoothPrinter> {
   }
 
   Widget _buildContent(BuildContext context, bool isEnabled) {
+    // ── Share-PDF variant: simpler button, no 16-label guard, no BLE ──
+    if (_variant == 'share-pdf') {
+      return _buildSharePdfContent(context, isEnabled);
+    }
+
     // ... existing code ...
     if (_labels.isEmpty || _labels.length < 16) {
       return Card(
@@ -742,5 +1069,90 @@ class _FtzBluetoothPrinterState extends State<FtzBluetoothPrinter> {
 
     // Default behavior if 'width' is null or invalid.
     return Row(mainAxisAlignment: _alignment, children: [printerButton]);
+  }
+
+  /// Build the share-pdf button UI. No BLE, no 16-label guard.
+  /// Button state labels read from _labels with length guards (Conventions Block #3).
+  /// Slot 0 = idle label, slot 1 = loading label, slot 2 = sharing label.
+  Widget _buildSharePdfContent(BuildContext context, bool isEnabled) {
+    final bool isBusy = _isBusy || _isLoadingData;
+    final String loadingLabel = _labels.length > 1 ? _labels[1] : 'Loading...';
+    final String sharingLabel = _labels.length > 2 ? _labels[2] : 'Sharing...';
+    // Slot 0 needs an EMPTY check, not just a length check: diamondTextToList('')
+    // returns [''] (not []), so an absent `text` yields _buttonText == '' and the
+    // button would render with an icon and no label. Applied here only -- the
+    // shared _buttonText assignment in initState is also read by the bluetooth
+    // variants, which the <16-label error card already shields.
+    final String idleLabel = _buttonText.isNotEmpty ? _buttonText : 'Print';
+    final String buttonLabel = _isLoadingData
+        ? loadingLabel
+        : (_isBusy ? sharingLabel : idleLabel);
+
+    final Widget shareButton = Card(
+      elevation: 8.0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [_buttonColor.withValues(alpha: 0.9), _buttonColor],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: ElevatedButton.icon(
+          onPressed: isBusy || !isEnabled ? null : _startSharePdfProcess,
+          icon: isBusy
+              ? Container(
+                  width: 24,
+                  height: 24,
+                  padding: const EdgeInsets.all(2.0),
+                  child: CircularProgressIndicator(
+                    color: _onButtonColor,
+                    strokeWidth: 3,
+                  ),
+                )
+              : Icon(_buttonIcon, color: _onButtonColor),
+          label: Text(
+            buttonLabel,
+            style: TextStyle(
+              color: _onButtonColor,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            disabledBackgroundColor: Colors.grey.shade300,
+            disabledForegroundColor: Colors.grey.shade500,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8.0),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // Layout: same pattern as bluetooth variant (width / alignment)
+    final dynamic widthValue = widget.component['width']
+        .toString()
+        .toLowerCase();
+
+    if (widthValue == 'full') {
+      return Row(children: [Expanded(child: shareButton)]);
+    }
+
+    final double? specificWidth = double.tryParse(widthValue?.toString() ?? '');
+
+    if (specificWidth != null) {
+      return Row(
+        mainAxisAlignment: _alignment,
+        children: [SizedBox(width: specificWidth, child: shareButton)],
+      );
+    }
+
+    return Row(mainAxisAlignment: _alignment, children: [shareButton]);
   }
 }

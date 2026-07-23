@@ -31,6 +31,7 @@ import 'bloc_timer/bloc.dart';
 import 'crypto/auth_crypto.dart';
 import 'different_code/different_code.dart';
 import 'firebase_notification_handler.dart';
+import 'firestore_repository/add_to_event.dart';
 import 'firestore_repository/firestore_generic_repository.dart';
 import 'firestore_repository/proxy_repository.dart';
 import 'firestore_repository/table_repository.dart';
@@ -57,6 +58,7 @@ import 'widget/logout_transition_support.dart';
 import 'widget/nfc_reader.dart';
 import 'widget/photo_camera.dart';
 import 'widget/ui_component.dart';
+import 'widget/whatsapp_send.dart';
 
 /// Login perf instrumentation. Mirrors UserRepository.loginPerfTrace.
 /// Set to false (or remove) after root-cause confirmation.
@@ -297,73 +299,89 @@ Future<dynamic> getAppGps() async {
       'gpsPlaceMark': placeMarkCopy(null),
     };
   } // end if (gpsTime.value > 0)
-  dynamic currentLat = returnValue['gpsData'].latitude;
   if (returnValue['gpsData'].latitude == invalidLocation ||
       returnValue['gpsData'].longitude == invalidLocation) {
     // Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high).then((Position position) {
     await Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-    ).then((Position position) async {
-      try {
-        gpsData = positionCopy(position);
-        gpsTime.value = gpsData.timestamp.millisecondsSinceEpoch;
-        returnValue['gpsTime'] = position.timestamp.millisecondsSinceEpoch;
-        returnValue['gpsData'] = position;
-        storage.write(key: 'gpsData', value: json.encode(position));
-        String gpsDataStream = positionToGpsString(position);
-        transactionStore.dispatch(
-          UpdateScreenTxAction(
-            ScreenTransaction({
-              '#GPSDATA': gpsDataStream,
-              '#LASTGPSTIME': position.timestamp.millisecondsSinceEpoch,
-            }),
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
           ),
-        );
-        prefs.setInt('@lastGpsTime', position.timestamp.millisecondsSinceEpoch);
-        List<Placemark> myPL = await placemarkFromCoordinates(
-          position.latitude,
-          position.longitude,
-        );
-        returnValue['gpsPlaceMark'] = placeMarkCopy(myPL[0]);
-        secureWrite(
-          key: 'gpsPlaceMark',
-          value: json.encode(returnValue['gpsPlaceMark']),
-        );
-      } catch (e) {
-        try {
-          returnValue['gpsData'] = position;
-        } catch (e1) {
-          returnValue['gpsData'] = Position(
-            latitude: invalidLocation,
-            longitude: invalidLocation,
-            altitude: -88.0,
-            accuracy: 0.0,
-            speed: 0.0,
-            speedAccuracy: 0.0,
-            heading: 0.0,
-            isMocked: false,
-            timestamp: invalidTime,
-            altitudeAccuracy: 0.0,
-            headingAccuracy: 0.0,
-          );
-        } // end try gpsData
-        try {
-          returnValue['gpsTime'] = position.timestamp.millisecondsSinceEpoch;
-        } catch (e2) {
-          returnValue['gpsTime'] = 0;
-        } // end try gpsTime
-        try {
-          List<Placemark> myPL2 = await placemarkFromCoordinates(
-            position.latitude,
-            position.longitude,
-          );
-          returnValue['gpsPlaceMark'] = placeMarkCopy(myPL2[0]);
-        } catch (e3) {
-          returnValue['gpsPlaceMark'] = placeMarkCopy(null);
-          returnValue['gpsPlaceMark'].name = 'Error $e';
-        } // end try gpsPlaceMark
-      } // end try
-    });
+        )
+        .then((Position position) async {
+          try {
+            gpsData = positionCopy(position);
+            gpsTime.value = gpsData.timestamp.millisecondsSinceEpoch;
+            returnValue['gpsTime'] = position.timestamp.millisecondsSinceEpoch;
+            returnValue['gpsData'] = position;
+            storage.write(key: 'gpsData', value: json.encode(position));
+            String gpsDataStream = positionToGpsString(position);
+            transactionStore.dispatch(
+              UpdateScreenTxAction(
+                ScreenTransaction({
+                  '#GPSDATA': gpsDataStream,
+                  '#LASTGPSTIME': position.timestamp.millisecondsSinceEpoch,
+                }),
+              ),
+            );
+            prefs.setInt(
+              '@lastGpsTime',
+              position.timestamp.millisecondsSinceEpoch,
+            );
+            List<Placemark> myPL = await placemarkFromCoordinates(
+              position.latitude,
+              position.longitude,
+            );
+            returnValue['gpsPlaceMark'] = placeMarkCopy(myPL[0]);
+            secureWrite(
+              key: 'gpsPlaceMark',
+              value: json.encode(returnValue['gpsPlaceMark']),
+            );
+          } catch (e) {
+            try {
+              returnValue['gpsData'] = position;
+            } catch (e1) {
+              returnValue['gpsData'] = Position(
+                latitude: invalidLocation,
+                longitude: invalidLocation,
+                altitude: -88.0,
+                accuracy: 0.0,
+                speed: 0.0,
+                speedAccuracy: 0.0,
+                heading: 0.0,
+                isMocked: false,
+                timestamp: invalidTime,
+                altitudeAccuracy: 0.0,
+                headingAccuracy: 0.0,
+              );
+            } // end try gpsData
+            try {
+              returnValue['gpsTime'] =
+                  position.timestamp.millisecondsSinceEpoch;
+            } catch (e2) {
+              returnValue['gpsTime'] = 0;
+            } // end try gpsTime
+            try {
+              List<Placemark> myPL2 = await placemarkFromCoordinates(
+                position.latitude,
+                position.longitude,
+              );
+              returnValue['gpsPlaceMark'] = placeMarkCopy(myPL2[0]);
+            } catch (e3) {
+              returnValue['gpsPlaceMark'] = placeMarkCopy(null);
+              returnValue['gpsPlaceMark'].name = 'Error $e';
+            } // end try gpsPlaceMark
+          } // end try
+        })
+        .catchError((Object e) {
+          // getCurrentPosition itself rejects (location service off, permission
+          // denied, timeout) -> the .then callback never runs, so the try/catch
+          // INSIDE it is skipped and the error escapes getAppGps -> getLocation ->
+          // OtqState.setAllDataAsync, which swallows it and returns an OtqState
+          // still holding its defaults (mock=true, latitude=invalidLocation,
+          // gpsDone=false). Keep the invalid-location sentinel already in
+          // returnValue and report non-fatal instead.
+          errorReport('getAppGps getCurrentPosition: $e');
+        });
   }
   return returnValue;
 } // end of getAppGps
@@ -518,6 +536,22 @@ Future<List<dynamic>> sendHistoryImagesToCloud(position, content) async {
   //return [position, await uploadImageToCloud(content)];
 } // end of sendHistoryImagesToCloud
 
+// Strips the leading "<appSupportDir>/otq_images/FTZIMG/" from a decoded local
+// image path, leaving the Firebase Storage folder.
+//
+// `lastIndexOf` returns -1 when the FTZIMG marker is absent, and the old inline
+// arithmetic (-1 + 6 + 1) silently degraded to `substring(6)`: a RangeError on a
+// path shorter than 6 chars, and a wrongly-chopped Storage folder on a longer
+// one. The marker IS absent on two real paths — renamePath's else branch
+// (non-camera input returned unchanged) and its rename+copy double-failure
+// fallback to the raw camera path — so treat "no marker" as "no folder prefix
+// to strip" and hand the caller what it already has.
+String folderFromRawPath(String rawFolder) {
+  final int i = rawFolder.lastIndexOf('$localImageBeginningFolderDivider/');
+  if (i < 0) return rawFolder;
+  return rawFolder.substring(i + localImageBeginningFolderDivider.length + 1);
+}
+
 Future<String> replaceLocalImageToUrl(String input) async {
   // replace local image to cloud url
   // input the whole event string
@@ -535,11 +569,7 @@ Future<String> replaceLocalImageToUrl(String input) async {
       for (Match match in matches) {
         List<String> fileArray = match.group(1)!.split('___');
         String rawFolder = Uri.decodeComponent(fileArray[0]);
-        String folder = rawFolder.substring(
-          rawFolder.lastIndexOf('$localImageBeginningFolderDivider/') +
-              localImageBeginningFolderDivider.length +
-              1,
-        );
+        String folder = folderFromRawPath(rawFolder);
         futures.add(uploadImageToCloud(match.group(1)!));
         // futures.add(saveImageToCloud(
         //     imagePath: match.group(1)!,
@@ -607,15 +637,14 @@ Future saveImagePutInImageMap(String url) async {
       // try to upload the image to cloud
       List<String> fileArray = localPath.split('___');
       String rawFolder = Uri.decodeComponent(fileArray[0]);
-      String folder = rawFolder.substring(
-        rawFolder.lastIndexOf('$localImageBeginningFolderDivider/') +
-            localImageBeginningFolderDivider.length +
-            1,
-      );
+      String folder = folderFromRawPath(rawFolder);
       await saveImageToCloud(
         imagePath: localPath,
         folder: folder,
-        rawFileName: fileArray[1],
+        // A path with no '___' splits to a single element, so fileArray[1]
+        // would throw the next RangeError right after the substring one this
+        // guard removes. Same trigger (camera cancelled -> empty path).
+        rawFileName: fileArray.length > 1 ? fileArray[1] : emptyString,
       );
     }
   } // end if (await internetConnectedCheck())
@@ -1580,7 +1609,11 @@ void resetVidUid(String userUid) async {
   // this is used by QA team
   var qParams = {"uid": userUid};
   var uri = Uri.https(cloudFunctionDomain, resetVidName, qParams);
-  await http.post(uri);
+  // Caller (ftz_row_of_button_2) does NOT await this void-async fn, so a bare
+  // http.post throw (ClientException on mid-request connection reset) would
+  // escape as a FATAL via platformDispatcher.onError. Route through the
+  // hardened callHttpPost, which catches + reports non-fatal.
+  await callHttpPost(uri, null);
 }
 
 Future getNewVid(String userUid, String userName, String userEmail) {
@@ -4117,6 +4150,11 @@ void clearData(String scrName) {
   ItemExecutionList.clearExecutionStore(scrName);
   ItemExecutionSubmit.clearState(scrName);
   NfcReader.clearCollectorState(scrName);
+  // WHATSAPP_SEND per-invoice sent badge. Must be here, not only in
+  // buildPage(clear:true): navigation goes gotoRoute -> reloadPage, which calls
+  // clearData and then returns the CACHED linkElement[page] -- buildPage never
+  // runs, so the badge would leak from invoice A onto invoice B.
+  WhatsAppSend.clearSentState(scrName);
 
   if (txfController[scrName] == null) return;
 
@@ -4405,6 +4443,16 @@ void saveSend(
         eventString = resolveDriverCurlyTokens(eventString, scrName);
         eventString = replacePlaceholders(eventString, ref);
         eventString = _resolveScreenTxMarkers(eventString);
+        // Notification fields are ADDITIVE — a failure here must never discard
+        // the base addToEvent payload (the outer catch resets eventString to '').
+        try {
+          eventString += buildNotificationSuffix(
+            component['notification'],
+            (s) => _resolveScreenTxMarkers(replacePlaceholders(s, ref)),
+          );
+        } catch (e) {
+          errorReport(e);
+        }
       }
     } catch (e) {
       eventString = '';
@@ -4882,9 +4930,12 @@ Future<Position?> getLocation() async {
   // get gps location, until #LASTGPSTIME <> current readings>
   devPrint('getLocation');
   dynamic allGpsData = await getAppGps();
+  // Kept as a typed local (not `return allGpsData['gpsData']` directly) so the
+  // implicit cast off the dynamic map still asserts the shape here rather than
+  // at a caller. Behaviour is unchanged; only the dead `myLatitude` read that
+  // used to force this same cast is gone.
   Position myPosition = allGpsData['gpsData'];
-  dynamic myLatitude = myPosition.latitude;
-  return allGpsData['gpsData'];
+  return myPosition;
 } // end of getLocation
 
 int exp2Epoch(String? inp) {

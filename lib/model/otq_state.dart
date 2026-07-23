@@ -181,53 +181,17 @@ class OtqState {
   Future<OtqState> setAllDataAsync() async {
     // DateTime currentTime = nowTime;
     gpsDone = false;
-    try {
-      await getLocation().then((pos) async {
-        if (pos != null) {
-          if (pos.latitude != invalidLocation) {
-            latitude = pos.latitude;
-            longitude = pos.longitude;
-            altitude = pos.altitude;
-            floor = pos.floor ?? -99;
-            accuracy = pos.accuracy;
-            heading = pos.heading;
-            speed = pos.speed;
-            speedAccuracy = pos.speedAccuracy;
-            gpsTimestamp = pos.timestamp;
-            mock = pos.isMocked;
-            gpsOn = true;
-            locationStatus = pos.isMocked ? fakeLoc : trueLoc;
-            try {
-              // List<Placemark?> myPlace;
-              dynamic myPlace = gpsPlaceMark;
-              isoCountryCode = (myPlace.isoCountryCode) ?? '88';
-              postalCode = myPlace.postalCode ?? '';
-              administrativeArea = cleanupString(
-                myPlace.administrativeArea ?? '',
-              );
-              subAdministrativeArea = cleanupString(
-                myPlace.subAdministrativeArea ?? '',
-              );
-              locality = cleanupString(myPlace.locality ?? '');
-              subLocality = cleanupString(myPlace.subLocality ?? '');
-              thoroughfare = cleanupString(myPlace.thoroughfare ?? '');
-              subThoroughfare = cleanupString(myPlace.subThoroughfare ?? '');
-              gpsDone = true;
-            } catch (e) {
-              gpsDone = true;
-              errorReport(e);
-            } // end try placemark
-          } else {
-            gpsDone = true;
-          } // end if pos.latitude != invalidLocation
-        } else {
-          gpsDone = true;
-        } // end if pos != null
-      }); // end of getLocation
-    } catch (eTest) {
-      errorReport(eTest);
-    }
-
+    // A second, identical `await getLocation()` block used to run here first.
+    // It was pure duplicate work: both blocks wrote the same fields, and on the
+    // GPS-failure path each one triggered its own Geolocator.getCurrentPosition
+    // (getAppGps re-fetches whenever the cached fix is invalidLocation) -- two
+    // expensive fixes plus up to two placemarkFromCoordinates calls per
+    // attendance tap. The surviving copy below runs inside Future.wait, so the
+    // GPS fix now overlaps the internet lookup and the NTP call instead of
+    // blocking them. Ordering note: getAppGps reads internetConnected(), which
+    // is internetConnectionFlag -- the same flag the lookup below sets. That
+    // race already existed for this copy; dropping the earlier sequential block
+    // does not add a new one.
     try {
       await Future.wait([
         getLocation().then((pos) async {
@@ -273,14 +237,24 @@ class OtqState {
           } // end if pos != null
         }),
         // end of getLocation
-        InternetAddress.lookup('google.com').then((conn) {
-          if (conn.isNotEmpty && conn[0].rawAddress.isNotEmpty) {
-            internetOn = true; // got internet connection
-            internetConnectionFlag.value = true;
-          } else {
-            internetConnectionFlag.value = false;
-          }
-        }), // end of interAddress.lookup
+        InternetAddress.lookup('google.com')
+            .then((conn) {
+              if (conn.isNotEmpty && conn[0].rawAddress.isNotEmpty) {
+                internetOn = true; // got internet connection
+                internetConnectionFlag.value = true;
+              } else {
+                internetConnectionFlag.value = false;
+              }
+            })
+            .catchError((Object e) {
+              // Offline: lookup throws SocketException. Unguarded it rejects the
+              // whole Future.wait below, which the outer catch turns into a
+              // Crashlytics non-fatal on every offline call -- pure noise, since
+              // Future.wait (eagerError: false) still lets the other two futures
+              // finish, so no state is lost. Same guard setInternetData() above
+              // already has. Being offline IS the answer here, not an error.
+              internetConnectionFlag.value = false;
+            }), // end of interAddress.lookup
         getRealTime().then((currentTime) {
           nowTime = DateTime.fromMillisecondsSinceEpoch(currentTime);
           trueTime = true;

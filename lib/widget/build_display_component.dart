@@ -1999,6 +1999,38 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }
+  } else if (tip == 'group_picker') {
+    try {
+      // valuePosition is required. Guard here (not in the widget):
+      // getPosition(null) throws inside initState, which runs AFTER this
+      // dispatch returns, so this try/catch would NOT contain it and the
+      // whole page would white-screen. Degrade to an inline marker instead.
+      if (component['valuePosition'] == null) {
+        result = Text('--${component['type']}-- missing valuePosition');
+      } else {
+        // Seed txfController slots so saveSend finds them.
+        final int vPos = getPosition(component['valuePosition']);
+        txfControllerCheck(scrName, vPos);
+        if (component['keyPosition'] != null) {
+          txfControllerCheck(scrName, getPosition(component['keyPosition']));
+        }
+        if (component['labelPosition'] != null) {
+          txfControllerCheck(scrName, getPosition(component['labelPosition']));
+        }
+        final gpKey = ObjectKey('$scrName-gp-$vPos');
+        result = GroupPicker(
+          key: gpKey,
+          component: component,
+          scrName: scrName,
+          lPad: lPad,
+          tPad: tPad,
+          rPad: rPad,
+          bPad: bPad,
+        );
+      }
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
   } else if (tip == 'running_task_list') {
     try {
       result = AdminActiveTripList(
@@ -2072,6 +2104,34 @@ Widget buildDisplayComponent(
   } else if (tip == 'receipt_doc') {
     try {
       result = ReceiptDoc(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'whatsapp_send') {
+    try {
+      result = WhatsAppSend(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'map_point_picker') {
+    try {
+      result = MapPointPicker(
         key: txfKey,
         component: component,
         scrName: scrName,

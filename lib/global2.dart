@@ -889,6 +889,7 @@ IconData stringToIconData(String? iconName) {
     'ring_volume': Icons.ring_volume,
     'rss_feed': Icons.rss_feed,
     'screen_share': Icons.screen_share,
+    'share': Icons.share,
     'sentiment_satisfied_alt': Icons.sentiment_satisfied_alt,
     'speaker_phone': Icons.speaker_phone,
     'stay_current_landscape': Icons.stay_current_landscape,

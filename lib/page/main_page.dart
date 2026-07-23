@@ -1352,6 +1352,23 @@ class MainPageState extends State<MainPage> {
         devPrint("Proxy/${state['#PROXY_LISTENER_SSID']} already subscribed");
         return;
       } else {
+        // ssid switch: cancel the OLD ssid's listener BEFORE subscribing to the
+        // new one. The dispatch at the bottom of this branch only overwrites the
+        // HANDLE in #PROXY_LISTENER — the old subscription itself stays live, so
+        // the device would listen to BOTH proxies. The old listener's reload
+        // writes ITS tenant's Page/System docs into the shared
+        // screenUIComponent/systemUIComponent globals => silent cross-tenant UI
+        // bleed (no error, no crash). Also unfixable via #PROXY_LISTENER_CS,
+        // which is a single global slot both listeners would fight over.
+        // No-op today (one caller: initState, which runs once per launch);
+        // insurance for the moment a second caller re-subscribes on login or
+        // tenant switch. try/catch because subscribeToProxy is fire-and-forget,
+        // so a rejected cancel() would surface as an uncaught fatal.
+        try {
+          await state['#PROXY_LISTENER']?.cancel();
+        } catch (e) {
+          devPrint('proxy old-listener cancel failed (skipped): $e');
+        }
         dynamic docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
         bool docExist;
         try {
