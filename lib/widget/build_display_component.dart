@@ -1202,6 +1202,50 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }
+  } else if (tip == 'stat_card_row') {
+    try {
+      result = StatCardRow(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'list_action_card') {
+    try {
+      // Seed txfController for note positions referenced in actionMeta so
+      // saveSend finds them when resolving ◁N▷.
+      final String rawActionMeta =
+          (component['actionMeta'] ?? '').toString().trim();
+      if (rawActionMeta.isNotEmpty) {
+        final String decoded = autheniumDecode(rawActionMeta) ?? rawActionMeta;
+        for (final part in decoded.split('\u{25C6}')) {
+          final List<String> segs = part.trim().split('\u{25FC}');
+          if (segs.length > 2) {
+            final int? notePos = int.tryParse(segs[2].trim());
+            if (notePos != null) {
+              txfControllerCheck(scrName, notePos);
+            }
+          }
+        }
+      }
+      result = ListActionCard(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
   } else if (tip == 'list_multiple_panel_card') {
     try {
       result = ListMultiplePanelCard(
@@ -2143,6 +2187,39 @@ Widget buildDisplayComponent(
         rPad: rPad,
         bPad: bPad,
       );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'payout_list') {
+    try {
+      // position is required. Guard here (not in the widget):
+      // getPosition(null) throws inside initState, which runs AFTER this
+      // dispatch returns, so this try/catch would NOT contain it and the
+      // whole page would white-screen. Degrade to an inline marker instead.
+      if (component['position'] == null) {
+        result = Text('--${component['type']}-- missing position');
+      } else {
+        // Seed txfController slots so saveSend finds them.
+        final int pos = getPosition(component['position']);
+        txfControllerCheck(scrName, pos);
+        if (component['labelPosition'] != null) {
+          txfControllerCheck(
+              scrName, getPosition(component['labelPosition']));
+        }
+        if (component['totalPosition'] != null) {
+          txfControllerCheck(
+              scrName, getPosition(component['totalPosition']));
+        }
+        result = PayoutList(
+          key: txfKey,
+          component: component,
+          scrName: scrName,
+          lPad: lPad,
+          tPad: tPad,
+          rPad: rPad,
+          bPad: bPad,
+        );
+      }
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }

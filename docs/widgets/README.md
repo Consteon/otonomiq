@@ -65,11 +65,13 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | InventoryBucketCard | [inventory_bucket_card.md](inventory_bucket_card.md) | draft | Vehicle stock per condition bucket for DriverHome P4 |
 | ItemExecutionList | [item_execution_list.md](item_execution_list.md) | draft | Per-item drop/pickup stepper list with status state-machine for P11 DeliveryWorkspace |
 | ItemExecutionSubmit | [item_execution_submit.md](item_execution_submit.md) | draft | Atomic P11 submit: persists stepper actuals to task it[] + tst/tce via writeNativeFields |
+| ListActionCard | [list_action_card.md](list_action_card.md) | draft | Keyed list with inline approve/reject action buttons per row (updateEventRow write via saveSend); optional per-action note bottom sheet |
 | ListCard | [list_card.md](list_card.md) | done | Universal config-driven keyed list (header/stats/search/group/badge/trailing + multi-pair routeParams); consolidates the ~7 legacy list types |
 | ListMultiplePanelCard | [list_multiple_panel_card.md](list_multiple_panel_card.md) | draft | Reusable card-list with N nav panels, config-driven layout/labels |
 | ListStatisticCard | [list_statistic_card.md](list_statistic_card.md) | draft | Per-point patrol/cleaning statistic list with optional typed-location merge |
 | NavActionCard | [nav_action_card.md](nav_action_card.md) | draft | Return-vehicle CTA card (muted/active by allClosed) for DriverHome P4 |
 | NoticeBar | [notice_bar.md](notice_bar.md) | draft | Notification strip/callout with variant-driven colors, optional icon, up to 3 text tiers |
+| PayoutList | [payout_list.md](payout_list.md) | draft | Multi-select keyed list with per-item nominal (count x rate), select-all, summary totals; emits values/labels/total to form positions. SDUI `PAYOUT_LIST` |
 | NotaCreateSubmit | [nota_create_submit.md](nota_create_submit.md) | draft | Submit button for nota wizard (Walk-in POS / Supplier) |
 | OfflineBannerHost | [offline_banner.md](offline_banner.md) | draft | Global offline strip above the MainPage body (Obx on internetConnectionFlag); structural shell widget, not a dispatch branch |
 | ReturnHeader | [return_header.md](return_header.md) | draft | Back arrow + label + title header for P12 ReturnVehicle |
@@ -77,6 +79,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | ReceiptDoc | [receipt_doc.md](receipt_doc.md) | draft | Read-only on-screen nota card (config-named scalar fields + li[] line loop + depo header lookup); SDUI `RECEIPT_DOC` |
 | RouteFeedHeader | [route_feed_header.md](route_feed_header.md) | draft | Sticky 3-row route header (identity, progress, drop/pickup stats) and vehicleId publisher for P10 TaskFeed |
 | RouteProgressHeader | [route_progress_header.md](route_progress_header.md) | draft | Driver identity header with workforce lookup and vehicle publish |
+| StatCardRow | [stat_card_row.md](stat_card_row.md) | draft | Horizontal row of N number-cards from one keyed cache doc; tone-colored, highlight-optional, config-driven count |
 | TaskCreateSubmit | [task_create_submit.md](task_create_submit.md) | draft | Submit button for Admin create-task wizard (P4) |
 | TaskCreateSuccess | [task_create_success.md](task_create_success.md) | draft | P5 success confirmation screen for Admin create-task wizard |
 | TaskDraftSummary | [task_draft_summary.md](task_draft_summary.md) | draft | Read-only item preview for Admin create-task wizard (P4) |

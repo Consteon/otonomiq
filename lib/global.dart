@@ -1491,8 +1491,11 @@ List<Widget> reloadPage(String page) {
   } else {
     // TODO if page not found, put error page here for application debug
     // newPageElement.addAll(linkElement[home]!); // format for output
-    newPageElement =
-        List<Widget>.of(linkElement[home]!.map((widget) => widget));
+    // Sibling of the guard in MainPageState: this is the fallback for an
+    // unknown route, so it must not itself throw when home was never built
+    // (failed startup page load). Empty list -> the shell's page gate handles it.
+    newPageElement = List<Widget>.of(
+        (linkElement[home] ?? const <Widget>[]).map((widget) => widget));
     transactionStore.dispatch(
         UpdateScreenTxAction(ScreenTransaction({'#CURRENT_ROUTE': home})));
   }

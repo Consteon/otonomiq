@@ -42,12 +42,28 @@ class MainPageState extends State<MainPage> {
   String pageName = home;
   // List<Widget> pageElements = linkElement[
   //     home]!; // page elements to display. Got this from Link Interface load home for start
+  // NOT `linkElement[home]!`. linkElement is only ever filled, never cleared,
+  // so a null here means constructPageElements(home) has not succeeded ONCE in
+  // this process — i.e. the startup page load failed (that fetch is 27-38s on
+  // the heaviest tenant against a 15s budget, and signOut wipes @screenUI, so a
+  // logout→cold-start reliably lands here). Force-unwrapping turned that into a
+  // fatal while MainPageState was being constructed, before any UI existed to
+  // report it. Empty is the honest value: userPagesLoaded() is false in that
+  // state, so the shell renders its loading/retry gate instead of crashing.
   List<Widget> pageElements = List<Widget>.of(
-    linkElement[home]!.map((widget) => widget),
+    (linkElement[home] ?? const <Widget>[]).map((widget) => widget),
   );
   bool wait = false; // if true, display wait screen (circular or other)
   bool _refreshing =
       false; // ponytail: amber dot while background refresh in-flight (also double-tap guard)
+  // Post-auth page-fetch state, driven by UserRepository._loginPagesReady via
+  // rootThis. Authentication and page availability are SEPARATE facts: the bloc
+  // flips to Authenticated the moment Firebase succeeds, while the user's pages
+  // arrive later over the network (or not at all). Rendering `pageElements` on
+  // auth alone painted the sign-in form — which still occupies the `home` slot
+  // at that moment — underneath a live navbar.
+  bool pagesFetching = false;
+  bool pagesFetchFailed = false;
   // Scoped logout spinner flag. Set true by signOut()'s cold/corrupt-snapshot
   // path (no warm guest UI cached → it must re-fetch the login page over the
   // network) and cleared inside showSignInPage() on BOTH success and failure.
@@ -196,6 +212,10 @@ class MainPageState extends State<MainPage> {
       // do nothing
     }
     if (title.substring(0, 1) == '_') title = '';
+    // While the user's pages are missing, `title` is read from the sign-in page
+    // still sitting in the `home` slot — the AppBar would read "Sign In" over a
+    // loading screen. Blank it until the real pages are up.
+    if (pagesFetching || pagesFetchFailed) title = '';
     // Scroll-to-top on page change only (not every rebuild). Deferred to a
     // post-frame callback so it runs after the new content is laid out, and
     // gated on actual page change so unrelated rebuilds (wait toggle, dataColor)
@@ -512,16 +532,19 @@ class MainPageState extends State<MainPage> {
                       //     showLicensePage(context: context);
                       //   }, // end of onPressed
                       // ),
-                      Obx(
-                        () => Icon(
+                      Obx(() {
+                        // Read the observable BEFORE the ternary: when
+                        // _refreshing is true the amber branch short-circuits
+                        // and Obx would register zero observables → GetX
+                        // "improper use of a GetX" throw.
+                        final txOK = transactionOKFlag.value;
+                        return Icon(
                           Icons.fiber_manual_record,
                           color: _refreshing
                               ? Colors.amber
-                              : (transactionOKFlag.value
-                                    ? readyColor
-                                    : notReadyColor),
-                        ),
-                      ),
+                              : (txOK ? readyColor : notReadyColor),
+                        );
+                      }),
                       IconButton(
                         icon: const Icon(
                           Icons.refresh,
@@ -710,6 +733,13 @@ class MainPageState extends State<MainPage> {
                       if (authState is Unauthenticated) {
                         return const SizedBox.shrink();
                       }
+                      // Authenticated but the user's pages are not up yet (or
+                      // failed): every nav destination would route into pages
+                      // that were never loaded, so keep the bar hidden until
+                      // there is something real behind it.
+                      if (!userPagesLoaded()) {
+                        return const SizedBox.shrink();
+                      }
                       // --- cache-first navbar restore (one-shot) ---
                       // On the first authenticated frame the in-memory
                       // systemUIComponent may still hold the guest snapshot
@@ -842,6 +872,13 @@ class MainPageState extends State<MainPage> {
                                         ),
                                       ),
                                     );
+                                  }
+                                  // Signed in, but `home` still holds the
+                                  // sign-in page because the user's pages have
+                                  // not landed. Show the real state instead of
+                                  // a login form the user already got past.
+                                  if (!userPagesLoaded()) {
+                                    return _buildPagesGate();
                                   }
                                   // Padding sits on the ListView (not a wrapping
                                   // Container) so the list clips to the FULL
@@ -1548,6 +1585,80 @@ class MainPageState extends State<MainPage> {
       } // end if ((state['#PROXY_LISTENER_SSID']??'') != '')
     }
   } // end of subscribeToProxy
+
+  /// Shown when the user is signed in but their pages are not loaded.
+  ///
+  /// Deliberately NOT the sign-in form: the user has already authenticated, so
+  /// showing login again reads as "your login failed" when it in fact succeeded.
+  Widget _buildPagesGate() {
+    final bool failed = pagesFetchFailed && !pagesFetching;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            if (!failed) ...<Widget>[
+              const CircularProgressIndicator(),
+              const SizedBox(height: 20),
+              Text(
+                textList['LoadingPages'] ?? 'Memuat halaman Anda…',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              // This fetch was measured at ~37s on the heaviest tenant. A
+              // silent spinner that long reads as a hang, so say up front that
+              // the wait is expected.
+              Text(
+                textList['LoadingPagesHint'] ??
+                    'Proses ini bisa memakan waktu hingga satu menit.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ] else ...<Widget>[
+              Icon(
+                Icons.cloud_off,
+                size: 48,
+                color: Theme.of(context).disabledColor,
+              ),
+              const SizedBox(height: 20),
+              Text(
+                textList['LoadPagesFailed'] ??
+                    'Gagal memuat halaman Anda.\nPeriksa koneksi, lalu coba lagi.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _retryUserPages,
+                child: Text(textList['TryAgain'] ?? 'Coba Lagi'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _retryUserPages() async {
+    if (pagesFetching) return; // ponytail: ignore taps while a fetch is in-flight
+    setState(() {
+      pagesFetching = true;
+      pagesFetchFailed = false;
+    });
+    bool ok = false;
+    try {
+      ok = await retryUserPages();
+    } catch (e) {
+      // retryUserPages already rebuilds the shell on success; a throw here just
+      // means we stay on the retry state.
+      devPrint('retryUserPages threw: $e');
+    }
+    if (!mounted) return;
+    setState(() {
+      pagesFetching = false;
+      pagesFetchFailed = !ok;
+    });
+  }
 
   void rePaintScreen(String source) {
     if (!mounted) return;

@@ -25,9 +25,67 @@ class UserRepository {
   /// Set to false (or remove) after root-cause confirmation.
   static bool loginPerfTrace = true;
 
+
   UserRepository({FirebaseAuth? firebaseAuth, GoogleSignIn? googleSignin})
       : _firebaseAuth = firebaseAuth ?? FirebaseAuth.instance,
         _googleSignIn = googleSignin ?? GoogleSignIn.instance;
+
+  /// Fetch the freshly-authenticated user's LIF pages. Returns FALSE when the
+  /// fetch failed, and every login path MUST skip its page swap on false.
+  ///
+  /// Why this exists: readSettings swallows TimeoutException internally and
+  /// returns normally, so a timed-out fetch is indistinguishable from a good
+  /// one at the call site. At login the in-memory screenUIComponent is still
+  /// the GUEST LIF, so an ungated swap rebuilds the sign-in form and installs
+  /// it as home — nav bar on, body stuck on the login screen.
+  ///
+  /// Fetch the signed-in user's pages, twice on a generous budget.
+  ///
+  /// A long wait is acceptable here BECAUSE the shell now shows an explicit
+  /// "loading your pages" state while this runs (`rootThis.pagesFetching`)
+  /// instead of leaving the sign-in form on screen. Correctness of the
+  /// transition was chosen over speed.
+  ///
+  /// ★ The 60s budget is LOAD-BEARING, not padding. Measured 2026-07-27 on the
+  /// heaviest tenant (`1hdcFg4…`, 71-tab workbook) across two successful
+  /// logins: this fetch took **32.8s and 37.1s**, both succeeding on the first
+  /// attempt, while the sign-in LIF took 4.5s. Earlier budgets of 8s and 20s
+  /// both timed out — and 20s-with-retry was the worst of all, burning 40s on
+  /// two attempts each capped below the ~35s the call actually needs. Anyone
+  /// lowering this below ~45s reintroduces the "logged in but stuck on the
+  /// sign-in page" bug.
+  ///
+  /// On failure it flips the shell to its retry state rather than letting the
+  /// caller paint a home that was never loaded.
+  Future<bool> _loginPagesReady(String sk) async {
+    // The fetch spans tens of seconds, so the shell can be disposed mid-flight
+    // (app killed, route torn down). setState on a dead State throws.
+    void shellState(void Function() mutate) {
+      if (rootThis == null || rootThis.mounted != true) return;
+      rootThis.setState(mutate);
+    }
+
+    shellState(() {
+      rootThis.pagesFetching = true;
+      rootThis.pagesFetchFailed = false;
+    });
+    bool ok = await readSettings(sk, 1, timeoutSec: 60);
+    if (!ok) {
+      devPrint('readSettings login attempt 1 failed, retrying');
+      ok = await readSettings(sk, 1, timeoutSec: 60);
+    }
+    // Leave pageName/#CURRENT_ROUTE alone on failure: claiming `home` while the
+    // sign-in pages are still loaded makes the AppBar title and rePaintScreen
+    // lie about which page is actually up.
+    if (!ok) devPrint('readSettings login FAILED twice — pages not swapped');
+    shellState(() {
+      rootThis.pagesFetching = false;
+      rootThis.pagesFetchFailed = !ok;
+      rootThis.wait = false;
+      rootThis.touch = !rootThis.touch;
+    });
+    return ok;
+  }
   // GoogleSignIn();
   // signInOption: SignInOption.standard,
   // scopes: [
@@ -393,7 +451,8 @@ class UserRepository {
         // not report success until that cache is written, otherwise a kill
         // right after login leaves an empty cache and the next warm reopen is
         // forced onto the (slow/possibly-stalled) network page-fetch path.
-        final Future<void> settingsReady = readSettings(sk, 1).then((_) {
+        final Future<void> settingsReady = () async {
+          if (!await _loginPagesReady(sk)) return; // pages not swapped
           transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
               {'#REFRESH': false, '#CURRENT_ROUTE': nxPage})));
           List<Widget> newElementList = reloadPage(nxPage);
@@ -403,7 +462,7 @@ class UserRepository {
             rootThis.wait = false;
             rootThis.touch = !rootThis.touch;
           });
-        });
+        }();
         final sw4 = loginPerfTrace ? (Stopwatch()..start()) : null;
         result = await reLogin();
         if (sw4 != null) {
@@ -540,26 +599,26 @@ class UserRepository {
         // TODO execute instruction2 in Lif, Hub & Account
         state = transactionStore.state.screenTx;
         var sk = state['#INTERFACE_KEY'];
-        await readSettings(sk, 1); //   read new interface key
-        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-          '#REFRESH': false
-        }))); //   refresh flag to false because this is a refresh
-        // List<Widget> newElementList =
-        //     List<Widget>.empty(); //   prepare new element list
-        var nxPage = home; //   set default page = Home
-        List<Widget> newElementList = List<Widget>.of(linkElement[nxPage]!.map(
-            (widget) =>
-                widget)); //   get all page element from global linkElement map
-        // newElementList.addAll(linkElement[
-        //     nxPage]!); //   get all page element from global linkElement map
-        routeStack.push(nxPage); //   put in routStack
-        rootThis.setState(() {
-          //   update state in main page to trigger a refresh
-          rootThis.pageName = nxPage;
-          rootThis.pageElements = newElementList;
-          rootThis.wait = false;
-          rootThis.touch = !rootThis.touch;
-        });
+        // Gated on a real fetch — see _loginPagesReady. Ungated, a timed-out
+        // readSettings leaves the GUEST LIF in memory and the block below
+        // installs the sign-in page as home.
+        if (await _loginPagesReady(sk)) {
+          transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+            '#REFRESH': false
+          }))); //   refresh flag to false because this is a refresh
+          var nxPage = home; //   set default page = Home
+          List<Widget> newElementList = List<Widget>.of(linkElement[nxPage]!
+              .map((widget) =>
+                  widget)); //   get all page element from global linkElement map
+          routeStack.push(nxPage); //   put in routStack
+          rootThis.setState(() {
+            //   update state in main page to trigger a refresh
+            rootThis.pageName = nxPage;
+            rootThis.pageElements = newElementList;
+            rootThis.wait = false;
+            rootThis.touch = !rootThis.touch;
+          });
+        }
       } catch (err) {
         result = 4;
       }
@@ -629,7 +688,8 @@ class UserRepository {
 //              value:
 //                  _sKey); //   put interface key as default LIF in secure storage
           var nxPage = home; //   set default page = Home
-          readSettings(sk, 1).then((_) {
+          _loginPagesReady(sk).then((ok) {
+            if (!ok) return; // pages not swapped — stale guest LIF in memory
             transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
                 {'#REFRESH': false, '#CURRENT_ROUTE': nxPage})));
             List<Widget> newElementList = reloadPage(nxPage);
@@ -680,26 +740,26 @@ class UserRepository {
         // TODO execute instruction2 in Lif, Hub & Account
         state = transactionStore.state.screenTx;
         var sk = state['#INTERFACE_KEY'];
-        await readSettings(sk, 1); //   read new interface key
-        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-          '#REFRESH': false
-        }))); //   refresh flag to false because this is a refresh
-        // List<Widget> newElementList =
-        //     List<Widget>.empty(); //   prepare new element list
-        var nxPage = home; //   set default page = Home
-        List<Widget> newElementList = List<Widget>.of(linkElement[nxPage]!.map(
-            (widget) =>
-                widget)); //   get all page element from global linkElement map
-        // newElementList.addAll(linkElement[
-        //     nxPage]!); //   get all page element from global linkElement map
-        routeStack.push(nxPage); //   put in routStack
-        rootThis.setState(() {
-          //   update state in main page to trigger a refresh
-          rootThis.pageName = nxPage;
-          rootThis.pageElements = newElementList;
-          rootThis.wait = false;
-          rootThis.touch = !rootThis.touch;
-        });
+        // Gated on a real fetch — see _loginPagesReady. Ungated, a timed-out
+        // readSettings leaves the GUEST LIF in memory and the block below
+        // installs the sign-in page as home.
+        if (await _loginPagesReady(sk)) {
+          transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+            '#REFRESH': false
+          }))); //   refresh flag to false because this is a refresh
+          var nxPage = home; //   set default page = Home
+          List<Widget> newElementList = List<Widget>.of(linkElement[nxPage]!
+              .map((widget) =>
+                  widget)); //   get all page element from global linkElement map
+          routeStack.push(nxPage); //   put in routStack
+          rootThis.setState(() {
+            //   update state in main page to trigger a refresh
+            rootThis.pageName = nxPage;
+            rootThis.pageElements = newElementList;
+            rootThis.wait = false;
+            rootThis.touch = !rootThis.touch;
+          });
+        }
       } catch (err) {
         result = 4;
       }
@@ -752,26 +812,25 @@ class UserRepository {
         await storage.write(
             key: 'myLif',
             value: sk); //   put interface key as default LIF in secure storage
-        await readSettings(sk, 1); //   read new interface key
-        // constructAllPageElements(); //   construct all page element for the new user
-        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-          '#REFRESH': false
-        }))); //   refresh flag to false because this is a refresh
-        // List<Widget> newElementList =
-        //     List<Widget>.empty(); //   prepare new element list
-        var nxPage = home; //   set default page = Home
-        // newElementList.addAll(linkElement[
-        //     nxPage]!); //   get all page element from global linkElement map
-        List<Widget> newElementList = List<Widget>.of(linkElement[nxPage]!.map(
-            (widget) =>
-                widget)); //   get all page element from global linkElement map
-        routeStack.push(nxPage); //   put in routStack
-        rootThis.setState(() {
-          //   update state in main page to trigger a refresh
-          rootThis.pageName = nxPage;
-          rootThis.pageElements = newElementList;
-          rootThis.wait = false;
-        });
+        // Gated on a real fetch — see _loginPagesReady. Ungated, a timed-out
+        // readSettings leaves the GUEST LIF in memory and the block below
+        // installs the sign-in page as home.
+        if (await _loginPagesReady(sk)) {
+          transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+            '#REFRESH': false
+          }))); //   refresh flag to false because this is a refresh
+          var nxPage = home; //   set default page = Home
+          List<Widget> newElementList = List<Widget>.of(linkElement[nxPage]!
+              .map((widget) =>
+                  widget)); //   get all page element from global linkElement map
+          routeStack.push(nxPage); //   put in routStack
+          rootThis.setState(() {
+            //   update state in main page to trigger a refresh
+            rootThis.pageName = nxPage;
+            rootThis.pageElements = newElementList;
+            rootThis.wait = false;
+          });
+        }
       } catch (err) {
         result = 4;
       }

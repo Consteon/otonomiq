@@ -47,6 +47,7 @@ const OtqGetImages2({
 | `imageParameter` | `String?` | Comma-separated `"width,height,quality"` (e.g. `"400,400,80"`). Falls back to `[400, 400, 80]` on parse error. |
 | `folder` | `String?` | Storage folder name. Defaults to `'default'`. |
 | `filename` | `String?` | Filename prefix; a 5-char UUID slice is appended. Defaults to `'file'`. |
+| `source` | `String?` | `"gallery"` opens device gallery picker instead of camera. Absent or unknown = camera (default). `"both"` is reserved but not yet implemented. |
 | `currentValue` | `String?` | Pre-existing image URL list (will seed the preview thumbs). |
 
 ## Usage Example
@@ -83,6 +84,7 @@ OtqGetImages2(
 - After a successful capture, the controller's `text` is replaced with the joined URL list (`processData(...)`) so the field's `finalData` reflects every captured image.
 - When the widget is mounted with `isEnabled == false`, pressing the button calls `redraw(...)` instead of capturing — the field becomes a read-only thumbnail list.
 - Errors from the controller-write block are routed through `errorReport(e)`.
+- When `source == "gallery"`, the `#CAMS` transactionStore check is bypassed (gallery does not need camera hardware). The icon changes to `Icons.photo_library_outlined` in both the header and empty-state areas. Upload pipeline is identical — the picked file goes through `prepareImageAsLocal(forceRename: true)` → `saveImagePutInImageMap` like a camera capture, ensuring the file is moved out of the OS cache dir into `<appSupport>/otq_images` with the correct `FTZIMG%2F<folder>___<fileName>.jpg` name.
 
 ## See Also
 

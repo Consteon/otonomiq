@@ -10,6 +10,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
@@ -59,6 +60,8 @@ import 'widget/nfc_reader.dart';
 import 'widget/photo_camera.dart';
 import 'widget/ui_component.dart';
 import 'widget/whatsapp_send.dart';
+import 'widget/payout_list.dart';
+import 'widget/list_action_card.dart';
 
 /// Login perf instrumentation. Mirrors UserRepository.loginPerfTrace.
 /// Set to false (or remove) after root-cause confirmation.
@@ -535,6 +538,22 @@ Future<List<dynamic>> sendHistoryImagesToCloud(position, content) async {
 // (non-camera input returned unchanged) and its rename+copy double-failure
 // fallback to the raw camera path — so treat "no marker" as "no folder prefix
 // to strip" and hand the caller what it already has.
+/// Builds the canonical image file name for local storage.
+/// Format: `FTZIMG%2F<Uri-encoded folder>___<Uri-encoded fileName>.jpg`
+///
+/// The round-trip contract:
+///   split('___')[0] → Uri.decodeComponent → folderFromRawPath → original folder
+///   split('___')[1] → raw fileName with .jpg extension
+///
+/// Used by [renamePath] and tested in test/image_destination_path_test.dart.
+String buildImageDestinationName(String folder, String fileName) {
+  String finalFolder = folder;
+  if (finalFolder.endsWith('/')) {
+    finalFolder = finalFolder.substring(0, finalFolder.length - 1);
+  }
+  return '$localImageBeginningFolderDivider%2F${Uri.encodeComponent(finalFolder)}$localImageFolderSeparator${Uri.encodeComponent(fileName)}.jpg';
+}
+
 String folderFromRawPath(String rawFolder) {
   final int i = rawFolder.lastIndexOf('$localImageBeginningFolderDivider/');
   if (i < 0) return rawFolder;
@@ -591,6 +610,7 @@ Future<String> prepareImageAsLocal({
   required String imagePath,
   required String folder,
   required String fileName,
+  bool forceRename = false,
 }) async {
   // prepare image as local file, rename it with local name standard
   String result = emptyString;
@@ -598,6 +618,7 @@ Future<String> prepareImageAsLocal({
     originalImagePath: imagePath,
     folder: folder,
     fileName: fileName,
+    forceRename: forceRename,
   );
   // finalImagePath = finalImagePath.replaceAll('.jpg', '');
   result = '$localImagePrefix$finalImagePath$localImagePostfix';
@@ -712,6 +733,7 @@ Future<String> renamePath({
   required String originalImagePath,
   required String folder,
   required String fileName,
+  bool forceRename = false,
 }) async {
   String tempImagePath = originalImagePath.replaceFirst(localImagePrefix, "");
   tempImagePath = tempImagePath.endsWith(localImagePostfix)
@@ -724,16 +746,12 @@ Future<String> renamePath({
   bool originalPath = tempImagePath.contains(
     localImageArtifact,
   ); // original path from camera
-  if (originalPath) {
-    String finalFolder = folder;
-    if (finalFolder.endsWith('/')) {
-      finalFolder = finalFolder.substring(0, finalFolder.length - 1);
-    }
+  if (originalPath || forceRename) {
     final Directory appDir = await getApplicationSupportDirectory();
     final String imageDir = '${appDir.path}/otq_images';
     await Directory(imageDir).create(recursive: true);
     finalImagePath =
-        '$imageDir/$localImageBeginningFolderDivider%2F${Uri.encodeComponent(finalFolder)}$localImageFolderSeparator${Uri.encodeComponent(fileName)}.jpg';
+        '$imageDir/${buildImageDestinationName(folder, fileName)}';
     try {
       await File(tempImagePath).rename(finalImagePath);
     } catch (e) {
@@ -1913,6 +1931,29 @@ Future<bool> newUpdateApp() async {
   return (lastVersion != null && lastVersion != '$version$subVersion');
 } // end of newUpdateApp
 
+/// Lif key whose pages are currently loaded in [screenUIComponent], or '' when
+/// unknown.
+///
+/// Assigned ONLY where a load actually succeeded. `settingKey` cannot be used
+/// for this: it is set BEFORE the HTTP call, so after a failed fetch it already
+/// names the lif whose pages never arrived.
+String loadedPagesLif = '';
+
+/// True when the loaded pages belong to a signed-in user rather than to the
+/// sign-in/signup LIF.
+///
+/// The shell must gate on THIS, not on auth state alone. `screenUIComponent`'s
+/// `home` entry is a shared slot: before auth the sign-in page is deliberately
+/// installed there (see the `settingKey == #GUEST_LIF` branch in readSettings),
+/// and after auth the user's own home is meant to overwrite it. When that second
+/// half fails, auth state says "signed in" while the slot still holds the login
+/// form — which is exactly what painted a login screen under a live navbar.
+bool userPagesLoaded() {
+  if (loadedPagesLif.isEmpty) return false;
+  final dynamic signupLif = transactionStore.state.screenTx['#GUEST_LIF'];
+  return signupLif == null || loadedPagesLif != signupLif;
+}
+
 /// Persist the current home/system page maps to SharedPreferences so the next
 /// (warm) startup renders the home shell from cache instead of re-fetching.
 /// Guarded so an encode failure can't crash startup.
@@ -1927,6 +1968,9 @@ void _persistUiCache({bool alsoGuest = false}) {
     final String systemJson = json.encode(systemUIComponent);
     prefs.setString('@screenUI', screenJson);
     prefs.setString('@systemUI', systemJson);
+    // Provenance travels WITH the cache. Without it a warm start cannot tell a
+    // cached user home from a cached sign-in page — both live under `home`.
+    prefs.setString('@screenUILif', loadedPagesLif);
     if (alsoGuest) {
       // Guest snapshot reuses the SAME encoded strings — no re-encode. Gated by
       // the caller on signInProcess so only guest bootstrap pages are captured,
@@ -2028,15 +2072,23 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
           ]);
           response = await http
               .post(Uri.parse(functionBody.url), body: functionBody.body)
-              .timeout(const Duration(seconds: 15));
+              // 60s, matching the login path. This was 15s while the same CF
+              // call measures 27-38s for a heavy tenant's own LIF (the sign-in
+              // LIF is 3.4s, which is why this only bites AFTER a login). The
+              // "recovers gracefully" note below was wrong for that case: this
+              // is `firstTimeRun`, so bailing leaves screenUIComponent empty,
+              // linkElement[home] never built, and MainPageState crashed on its
+              // force-unwrap before any UI existed. signOut wipes @screenUI, so
+              // logout -> cold start reached exactly that state.
+              .timeout(const Duration(seconds: 60));
           debugCount = 5213;
           trace(debugCount);
           lastPages = response.body;
         } catch (e) {
           debugCount = 5214;
-          // A handled 15s timeout here recovers gracefully (bail below; no
-          // cached page on first run anyway), so it's Crashlytics noise —
-          // reportNonTimeout skips TimeoutException, forwards real errors.
+          // A handled timeout here still bails below; the caller-side guards
+          // (empty linkElement -> page gate) keep that survivable instead of
+          // fatal. reportNonTimeout skips TimeoutException, forwards real errors.
           reportNonTimeout(e);
         }
         // The first-time settings POST above failed (timeout/network): the
@@ -2164,6 +2216,7 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
         // already points to the guest login page (assigned above when
         // signInProcess), so the snapshot is self-contained: signOut() can
         // restore it and show login with no fetch.
+        loadedPagesLif = settingKey ?? '';
         _persistUiCache(alsoGuest: signInProcess);
         // #2 On the startup-critical loader (opt 1) DON'T block home on the
         // full all-pages fetch — the home page is already in screenUIComponent
@@ -2203,6 +2256,9 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
       }
       screenUIComponent.clear();
       screenUIComponent = jsonDecode(lastPages);
+      // These pages came from @screenUI, so their provenance is whatever wrote
+      // that cache — restore it rather than assuming it belongs to this user.
+      loadedPagesLif = prefs.getString('@screenUILif') ?? '';
       debugCount = 5229;
     } // end if (opt == 2 || lastPages.isEmpty)
     devPrint('saving screenUIComponent & systemUIComponent to pref');
@@ -2258,7 +2314,20 @@ Future<void> readUIPages(String lifKey, int guestIndex) async {
   // constructAllPageElements();
 } // end of readUIPages
 
-Future<void> readSettings(String lifKey, int opt) async {
+/// Returns TRUE when fresh pages were fetched and applied, FALSE when the
+/// fetch failed and the in-memory `screenUIComponent` was left untouched.
+///
+/// Callers that only repaint an already-authenticated user's own pages can
+/// ignore the result — rebuilding from the surviving in-memory copy is correct
+/// graceful degradation there. The LOGIN caller must NOT: at login the surviving
+/// copy is still the GUEST LIF, so repainting it renders the sign-in form as if
+/// it were home (nav bar on, body stuck on login). That path has to gate its
+/// page swap on this flag.
+///
+/// [timeoutSec] guards the settings HTTP POST. The default 8s fits interactive
+/// refresh; login passes a longer budget because the backend has been measured
+/// at 4-14s and the user is already waiting on a blocking screen.
+Future<bool> readSettings(String lifKey, int opt, {int timeoutSec = 8}) async {
   // opt 1 = Load as usual from JSON etc; 2 = load from JSON2 only
   // then constructPageElement of the respective screen
 
@@ -2303,13 +2372,20 @@ Future<void> readSettings(String lifKey, int opt) async {
     }
     if (_loginPerfTrace) {
       debugPrint(
-        '[LOGINPERF] readSettings.req body=${functionBody.body.toString().length}b ranges=[$systemJsonRange | $screenJsonRange]',
+        // settingKey is logged because the sign-in-LIF fetch and the user-LIF
+        // fetch are otherwise indistinguishable in the log (same ranges, same
+        // body size) while only one of them fails — and an empty/wrong key
+        // looks exactly like a slow workbook from the client side.
+        // `#GUEST_LIF` is res['signupLif'] (api.dart:4146): the LIF holding the
+        // sign-in/signup screens. It is NOT a guest account — this app requires
+        // login. Labelled signupLif here to match what it actually is.
+        '[LOGINPERF] readSettings.req key=$settingKey signupLif=${settingKey == myState['#GUEST_LIF']} body=${functionBody.body.toString().length}b ranges=[$systemJsonRange | $screenJsonRange]',
       );
     }
     final swRS = _loginPerfTrace ? (Stopwatch()..start()) : null;
     response = await http
         .post(Uri.parse(functionBody.url), body: functionBody.body)
-        .timeout(const Duration(seconds: 8));
+        .timeout(Duration(seconds: timeoutSec));
     if (swRS != null) {
       debugPrint(
         '[LOGINPERF] readSettings.http = ${swRS.elapsedMilliseconds}ms',
@@ -2320,13 +2396,14 @@ Future<void> readSettings(String lifKey, int opt) async {
   }
   if (response == null) {
     // F1: HTTP timeout or network error. The in-memory screenUIComponent
-    // survives; return normally so .then() callers rebuild from it.
+    // survives, so refresh callers may rebuild from it — but say so, because
+    // the login caller must NOT (its in-memory copy is the guest LIF).
     if (_loginPerfTrace) {
       debugPrint(
         '[LOGINPERF] readSettings FAILED (response null), returning early',
       );
     }
-    return;
+    return false;
   }
   var getResult = jsonDecode(response.body);
   if (opt == 1) {
@@ -2423,23 +2500,56 @@ Future<void> readSettings(String lifKey, int opt) async {
 
   try {
     var saveLast = <Future>[];
-    saveLast.add(prefs.setString('@systemUI', json.encode(systemUIComponent)));
-    saveLast.add(prefs.setString('@screenUI', json.encode(screenUIComponent)));
+    // Encoded once each and reused below — systemUIComponent used to be encoded
+    // twice here (plain + authed snapshot).
+    final String systemJson = json.encode(systemUIComponent);
+    final String screenJson = json.encode(screenUIComponent);
+    saveLast.add(prefs.setString('@systemUI', systemJson));
+    saveLast.add(prefs.setString('@screenUI', screenJson));
     // Persist the authed system snapshot for cache-first navbar restore on the
     // next login. Gated on non-guest settingKey so the guest bootstrap pages
     // never overwrite the last authenticated session's bottomBar.
     if (settingKey != myState['#GUEST_LIF']) {
-      saveLast.add(
-        prefs.setString('@authedSystemUI', json.encode(systemUIComponent)),
-      );
+      saveLast.add(prefs.setString('@authedSystemUI', systemJson));
     }
+    // Set BEFORE the awaits: the pages are already applied to
+    // screenUIComponent at this point, so the shell may render them even if
+    // persisting them fails.
+    loadedPagesLif = lifKey;
+    saveLast.add(prefs.setString('@screenUILif', lifKey));
     await Future.wait(saveLast);
   } catch (e) {
     errorReport("Error in saving to shared preferences (readSettings): $e");
   }
   // await prefs.setString('@systemUI', json.encode(systemUIComponent));
   // await prefs.setString('@screenUI', json.encode(screenUIComponent));
+  // Pages were fetched and applied. A prefs-write failure above is logged but
+  // does not invalidate the in-memory pages, so it stays a success.
+  return true;
 } // end of readSettings
+
+/// Re-run the page fetch for the signed-in user and rebuild the shell.
+/// Used by the shell's retry action when the post-login fetch failed.
+/// Returns false when the fetch failed again (shell stays on its retry state).
+Future<bool> retryUserPages() async {
+  final dynamic lifKey = transactionStore.state.screenTx['#INTERFACE_KEY'];
+  if (lifKey == null || lifKey.toString().isEmpty) return false;
+  final bool ok = await readSettings(lifKey.toString(), 1, timeoutSec: 60);
+  if (!ok) return false;
+  transactionStore.dispatch(
+    UpdateScreenTxAction(
+      ScreenTransaction({'#REFRESH': false, '#CURRENT_ROUTE': home}),
+    ),
+  );
+  final List<Widget> newElementList = reloadPage(home);
+  rootThis.setState(() {
+    rootThis.pageName = home;
+    rootThis.pageElements = newElementList;
+    rootThis.wait = false;
+    rootThis.touch = !rootThis.touch;
+  });
+  return true;
+}
 
 Future<void> readSettingsContext(
   BuildContext context,
@@ -2763,9 +2873,18 @@ Future<String> appendToSheetOld(dynamic val) async {
 } // end of appendToSheet
 
 Future runSheetStartup(String lif, String clt) async {
+  // Per-LIF, so per-LOGIN — not per-process. signOut wipes the geofence list
+  // (`'#LQR_LIST': {}`, api.dart:3140), and while this call sat inside the
+  // appStartupRun guard a logout->login within the same process never refetched
+  // it: #LQR_LIST stayed empty, LocationDetector._deriveGpsStatus fell through
+  // to 'last_known' ("Unknown"), and attendance stopped working until a force
+  // close reset the flag. The block below is genuinely process-scoped
+  // (timezone, screen size, OS info) and stays one-shot.
+  //
+  // Fire-and-forget and cache-backed, so this costs the login nothing.
+  getLqrList(lif);
   if (!appStartupRun) {
     debugPrint('start runSheetStartup');
-    getLqrList(lif);
     Duration nw = DateTime.now().timeZoneOffset;
     String tz = (nw.inMinutes / 60).toString();
     // dynamic physicalScreenSize = window.physicalSize;
@@ -4144,6 +4263,8 @@ void clearData(String scrName) {
   // clearData and then returns the CACHED linkElement[page] -- buildPage never
   // runs, so the badge would leak from invoice A onto invoice B.
   WhatsAppSend.clearSentState(scrName);
+  PayoutList.clearState(scrName);
+  ListActionCard.clearState(scrName);
 
   if (txfController[scrName] == null) return;
 
@@ -5041,6 +5162,42 @@ Future<String> getPhotoCameraImage(
   // var url = await taskSnapshot.ref.getDownloadURL();
   return url;
 } // end of getPhotoCameraImage
+
+// Named parameters here are DELIBERATE and intentionally asymmetric with the
+// sibling getPhotoCameraImage (which uses positional args). The gallery path is
+// new and only ever called from one site (otq_get_images_2.buttonPressed); named
+// args keep that call self-documenting without disturbing the legacy positional
+// signature every camera caller depends on.
+Future<String> getGalleryImage({
+  required String folder,
+  required String fileName,
+  required int maxSize,
+  required int quality,
+}) async {
+  final ImagePicker picker = ImagePicker();
+  // maxWidth/maxHeight/imageQuality force image_picker to transcode to JPEG.
+  // This is required because renamePath (via buildImageDestinationName) hardcodes
+  // a .jpg extension. If these params were ever removed, HEIC/PNG bytes would be
+  // written under a .jpg name.
+  final XFile? picked = await picker.pickImage(
+    source: ImageSource.gallery,
+    maxWidth: maxSize.toDouble(),
+    maxHeight: maxSize.toDouble(),
+    imageQuality: quality,
+  );
+  if (picked == null) return emptyImageUrl;
+  // forceRename: true ensures the gallery file (no OTQC artifact) is relocated
+  // from the OS cache dir into <appSupport>/otq_images with the correct
+  // FTZIMG%2F<folder>___<fileName>.jpg name, preventing aum__ history wedge.
+  String url = await prepareImageAsLocal(
+    imagePath: picked.path,
+    folder: folder,
+    fileName: fileName,
+    forceRename: true,
+  );
+  await saveImagePutInImageMap(url);
+  return url;
+} // end of getGalleryImage
 
 Future<String> getCameraImageNotUsed(
   double w,
