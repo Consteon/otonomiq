@@ -201,7 +201,9 @@ import 'widget/driver_home_support.dart';
   0.9.84.02 (260714) OO : fix layout nfc reader, fix get cache data after close app, default value pickup and drop in admin runtime, 
                           implement local auth in attendance qr
   0.9.84.03 (260724) OO : fcm notification single and broadcast, notif ui, message list, asset stock, task feed list, 
-                          fix stuck capture camera, crashlytics fix, search in contact picker, map point picker, group picker, share pdf, whatsapp send
+                          fix stuck capture camera, crashlytics fix, search in contact picker, map point picker, group picker, share pdf, whatsapp send,
+  0.9.84.04 (260729) OO : fix bug login, add get image gallery, stat card row, payout list widget
+
 */
 
 // ========= Constants ==========================
@@ -213,7 +215,7 @@ int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
 const String version = '0.9.84';
-const String subVersion = '.03';
+const String subVersion = '.04';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing
@@ -1513,8 +1515,11 @@ List<Widget> reloadPage(String page) {
   } else {
     // TODO if page not found, put error page here for application debug
     // newPageElement.addAll(linkElement[home]!); // format for output
+    // Sibling of the guard in MainPageState: this is the fallback for an
+    // unknown route, so it must not itself throw when home was never built
+    // (failed startup page load). Empty list -> the shell's page gate handles it.
     newPageElement = List<Widget>.of(
-      linkElement[home]!.map((widget) => widget),
+      (linkElement[home] ?? const <Widget>[]).map((widget) => widget),
     );
     transactionStore.dispatch(
       UpdateScreenTxAction(ScreenTransaction({'#CURRENT_ROUTE': home})),

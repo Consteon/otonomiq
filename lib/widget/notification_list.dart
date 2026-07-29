@@ -113,14 +113,15 @@ class _NotificationListState extends State<NotificationList> {
       firestoreMsg = '$firestoreNotif/msg';
       setStatus(r.msgId, 101).catchError((_) {}); // offline tx may throw
     }
-    if (r.route != null && r.route!.isNotEmpty) {
-      _openRoute(r.route); // leaves the page; mark-read already fired
-      return;
-    }
+    // Clear the dot unconditionally — a route row used to `return` before this
+    // ran, so its dot only cleared on the next refetch (leave+return).
+    final hasRoute = r.route != null && r.route!.isNotEmpty;
     setState(() {
-      r.unread = false; // clear the red dot
-      r.expanded = !r.expanded; // toggle full text inline
+      r.unread = false; // clear the red dot on tap/read
+      if (!hasRoute)
+        r.expanded = !r.expanded; // expand only when not navigating
     });
+    if (hasRoute) _openRoute(r.route);
   }
 
   // Keep the message→route action from the old detail view.
@@ -306,7 +307,7 @@ class _NotificationListState extends State<NotificationList> {
   }
 
   Widget _tile(_NotifRow r) {
-    return InkWell(
+    final tile = InkWell(
       onTap: () => _onTapRow(r),
       child: Container(
         color: Colors.white,
@@ -366,5 +367,63 @@ class _NotificationListState extends State<NotificationList> {
         ),
       ),
     );
+    return Dismissible(
+      key: ValueKey('${r.vid}/${r.msgId}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        color: Colors.redAccent,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: const Icon(Icons.delete_outline, color: Colors.white),
+      ),
+      confirmDismiss: (_) => _confirmDelete(),
+      onDismissed: (_) => _deleteRow(r),
+      child: tile,
+    );
+  }
+
+  Future<bool> _confirmDelete() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Hapus notifikasi?'),
+        content: const Text('Notifikasi ini akan dihapus permanen.'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Hapus',
+              style: TextStyle(color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+    return ok ?? false;
+  }
+
+  void _deleteRow(_NotifRow r) {
+    setState(() => _rows.remove(r));
+    FirebaseFirestore.instance
+        .collection('$firestoreIO/${r.vid}/msg')
+        .doc(r.msgId)
+        .delete()
+        .catchError((_) {}); // offline: delete queues, syncs when online
+    if (r.unread) {
+      // keep the chip's unread count honest after removing an unread item
+      final ioRef = FirebaseFirestore.instance.doc('$firestoreIO/${r.vid}');
+      FirebaseFirestore.instance
+          .runTransaction<void>((tx) async {
+            final snap = await tx.get(ioRef);
+            final cur = snap.data()?['urd'];
+            final next = (cur is int && cur > 0) ? cur - 1 : 0;
+            tx.update(ioRef, {'urd': next});
+          })
+          .catchError((_) {});
+    }
   }
 }

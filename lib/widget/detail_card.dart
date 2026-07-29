@@ -112,10 +112,12 @@ class _DetailCardState extends State<DetailCard> {
 
   /// Find the single doc via the component's search filter.
   Map<String, dynamic>? _findDoc() {
-    if (_code.isEmpty) return null;
+    // Read the observable UNCONDITIONALLY — Obx needs >=1 observable per build
+    // or it throws ObxError. Do NOT move this below the _code guard.
     final List<Map<String, dynamic>> docs = List<Map<String, dynamic>>.from(
       mapTableContent[_code] ?? const [],
     );
+    if (_code.isEmpty) return null;
     if (_rawSearch.isEmpty) return docs.isNotEmpty ? docs.first : null;
     final List<Map<String, dynamic>> matched = filterDriverHomeDocs(
       docs,

@@ -41,7 +41,15 @@ class OtqTxt extends StatelessWidget {
         .trim();
     if (switchText.isNotEmpty) {
       // Obx so the label rebuilds when DriverHomeState.confirmed changes.
-      return Obx(() => _buildContent(context, switchText));
+      // Touch confirmed.value HERE, unconditionally, via getDriverHomeState
+      // (which lazily creates + returns a non-null state). _buildContent only
+      // reads the observable when driverHomeStates[scrName] is non-null, so on
+      // a screen/first-build where the state map has no entry yet the Obx saw
+      // ZERO observables and GetX threw its "improper use of a GetX" fatal.
+      return Obx(() {
+        getDriverHomeState(scrName).confirmed.value;
+        return _buildContent(context, switchText);
+      });
     }
     return _buildContent(context, '');
   } // end of build

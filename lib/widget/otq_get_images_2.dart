@@ -55,24 +55,50 @@ class OtqGetImages2State extends State<OtqGetImages2>
       } catch (e) {
         imgParameter = [400, 400, 80];
       }
-      List<CameraDescription>? cams =
-          transactionStore.state.screenTx['#CAMS'] as List<CameraDescription>?;
-      if (cams == null || cams.isEmpty) return;
 
-      String imgUrl = await getPhotoCameraImage(
-        cams,
-        component['label'] ?? 'Camera',
-        (component['camera'] ?? 1) == 0 ? 'front' : 'back',
-        (imgParameter[0] > imgParameter[1]) ? imgParameter[0] : imgParameter[1],
-        imgParameter[2],
-        // quality
-        component['folder'] ?? 'default',
-        (component['filename'] ?? 'file') +
-            '_' +
-            const Uuid().v4().replaceAll('-', '').substring(2, 7),
-        h,
-        w,
-      );
+      final String source = component['source']?.toString().toLowerCase() ?? '';
+      // maxSize collapses width/height into one dimension (the larger) so
+      // image_picker preserves aspect ratio — matches the camera path behavior.
+      final int maxSize = (imgParameter[0] > imgParameter[1])
+          ? imgParameter[0]
+          : imgParameter[1];
+      final String folderName = component['folder'] ?? 'default';
+      final String fileNameBase =
+          (component['filename'] ?? 'file') +
+          '_' +
+          const Uuid().v4().replaceAll('-', '').substring(2, 7);
+
+      String imgUrl;
+
+      if (source == 'gallery') {
+        imgUrl = await getGalleryImage(
+          folder: folderName,
+          fileName: fileNameBase,
+          maxSize: maxSize,
+          quality: imgParameter[2],
+        );
+      } else {
+        // Camera path (default / unknown source values).
+        // Note: fileNameBase is computed above unconditionally; in camera mode
+        // on a device with empty #CAMS, the UUID is generated and discarded.
+        // This is harmless and keeps the code flat.
+        List<CameraDescription>? cams =
+            transactionStore.state.screenTx['#CAMS']
+                as List<CameraDescription>?;
+        if (cams == null || cams.isEmpty) return;
+
+        imgUrl = await getPhotoCameraImage(
+          cams,
+          component['label'] ?? 'Camera',
+          (component['camera'] ?? 1) == 0 ? 'front' : 'back',
+          maxSize,
+          imgParameter[2],
+          folderName,
+          fileNameBase,
+          h,
+          w,
+        );
+      }
 
       if (!mounted) return;
 
@@ -208,6 +234,11 @@ class OtqGetImages2State extends State<OtqGetImages2>
     final List<String> texts = diamondTextToList(
       widget.component['text']?.toString() ?? '',
     );
+    final String source =
+        widget.component['source']?.toString().toLowerCase() ?? '';
+    final IconData sourceIcon = source == 'gallery'
+        ? Icons.photo_library_outlined
+        : Icons.camera_alt_outlined;
     final String emptyTitle = 'Belum ada foto';
     final String emptySubtitle = 'Ambil foto untuk melengkapi data';
     final String fotoLabel = texts.length > 2 ? texts[2] : 'foto';
@@ -253,10 +284,10 @@ class OtqGetImages2State extends State<OtqGetImages2>
                   color: const Color(0xFFEEF2F8),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(
-                  Icons.camera_alt_outlined,
+                child: Icon(
+                  sourceIcon,
                   size: 16,
-                  color: Color(0xFF334155),
+                  color: const Color(0xFF334155),
                 ),
               ),
               const SizedBox(width: 10),
@@ -303,10 +334,10 @@ class OtqGetImages2State extends State<OtqGetImages2>
                             color: const Color(0xFFEEF2F8),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Icon(
-                            Icons.camera_alt_outlined,
+                          child: Icon(
+                            sourceIcon,
                             size: 26,
-                            color: Color(0xFF94A3B8),
+                            color: const Color(0xFF94A3B8),
                           ),
                         ),
                         const SizedBox(height: 12),
