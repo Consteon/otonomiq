@@ -203,7 +203,7 @@ import 'widget/driver_home_support.dart';
   0.9.84.03 (260724) OO : fcm notification single and broadcast, notif ui, message list, asset stock, task feed list, 
                           fix stuck capture camera, crashlytics fix, search in contact picker, map point picker, group picker, share pdf, whatsapp send,
   0.9.84.04 (260729) OO : fix bug login, add get image gallery, stat card row, payout list widget
-
+  0.9.85.01 (260730) HH : update version number
 */
 
 // ========= Constants ==========================
@@ -214,8 +214,8 @@ const clearHistory =
 int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
-const String version = '0.9.84';
-const String subVersion = '.04';
+const String version = '0.9.85';
+const String subVersion = '.01';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing
