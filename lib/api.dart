@@ -3408,7 +3408,7 @@ Future getLifProfileData(String lifKey) async {
   ]);
   var response = await http
       .post(Uri.parse(functionBody.url), body: functionBody.body)
-      .timeout(const Duration(seconds: 15));
+      .timeout(const Duration(seconds: 60));
   var getResult = jsonDecode(response.body);
 
   //  var getResult = await sheetApi.spreadsheets.values
