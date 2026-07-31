@@ -141,9 +141,49 @@ void main() {
       expect(parts.length, 16);
       expect(parts[9], 'Jawa Barat'); // administrativeArea cleaned
       expect(parts[12], 'O/ck');      // subLocality cleaned
-      // Critical slots unchanged by cleanupString (locId/imageUrl are NOT cleaned)
+      // Critical slots unchanged in the normal case (nothing hostile to strip)
       expect(parts[3], 'QR');
       expect(parts[6], 'URL');
+    });
+
+    // ── JSON / record-framing safety invariant ────────────────────────────
+    // A `"` arriving from the OS geocoder used to reach the sheet backend
+    // verbatim and break its JSON composition, losing the attendance record.
+    // No slot may carry a quote, a backslash, a control char, or any framing
+    // separator — whatever the geocoder or the scanned QR hands us.
+    test('hostile geocoder text is neutralised in every slot; 16 slots survive',
+        () {
+      const hostile = 'Jl "A" \\ B';
+      final sensor = mkSensor();
+      sensor.isoCountryCode = 'I"D'; // was written RAW before the fix
+      sensor.postalCode = '401"74'; // was written RAW before the fix
+      sensor.administrativeArea = hostile;
+      sensor.subAdministrativeArea = 'Kota\nBandung'; // real newline
+      sensor.locality = 'Cicendo\t01'; // control char
+      sensor.subLocality = 'Husein${separator[1]}Sastranegara'; // ◆ framing
+      sensor.thoroughfare = 'Jl${separator[0]}Istana'; // ⬤ framing
+      sensor.subThoroughfare = 'E${separator[3]}12'; // ★ framing
+      sensor.locationStatus = 'true"location';
+
+      final parts = getLocationString(
+              'QR"01', 'https://x/s.jpg', 'check"point', sensor)
+          .split(diamond);
+
+      expect(parts.length, 16, reason: 'framing must not shift');
+      for (var i = 0; i < parts.length; i++) {
+        expect(parts[i], isNot(contains('"')), reason: 'slot $i has a quote');
+        expect(parts[i], isNot(contains('\\')),
+            reason: 'slot $i has a backslash');
+        expect(parts[i], isNot(matches(RegExp(r'[\x00-\x1F\x7F]'))),
+            reason: 'slot $i has a control char');
+        for (final c in forbiddenCharacter) {
+          expect(parts[i], isNot(contains(c)),
+              reason: 'slot $i has framing char U+${c.codeUnitAt(0).toRadixString(16)}');
+        }
+      }
+      // Spot-check the two slots that had no sanitiser at all before the fix
+      expect(parts[7], 'ID'); // isoCountryCode
+      expect(parts[8], '40174'); // postalCode
     });
   });
 

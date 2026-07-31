@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otonomiq/widget/task_item_builder.dart';
+import 'package:otonomiq/widget/admin_create_task_support.dart';
 
 void main() {
   // ── Product picker filter (mirrors _ProductPickerSheetState.build) ──────
@@ -743,6 +744,340 @@ void main() {
       expect(items[0]['in'], 'Same');
       expect(items[1]['in'], 'Same');
       expect(items[2]['in'], 'Other');
+    });
+  });
+
+  // ── Consumable order: category filter (regression doc) ────────────────
+  //
+  // MIRROR of the targetCat filter in _showProductPicker -- regression
+  // documentation, NOT verification (it re-implements the filter locally).
+  // deliver: targetCat = '' (all categories) -- consumable override in onPick.
+  // purchase/refill: targetCat = 'returnable' (unchanged).
+  // sale: targetCat = '' (unchanged).
+
+  group('Consumable order: deliver picker shows all categories', () {
+    List<Map<String, dynamic>> filterByCat(
+      List<Map<String, dynamic>> items,
+      String targetCat,
+      String catField,
+      Set<String> inDraft,
+      String idField,
+    ) {
+      return items.where((doc) {
+        final String ii = (doc[idField] ?? '').toString().trim();
+        if (ii.isEmpty || inDraft.contains(ii)) return false;
+        if (targetCat.isNotEmpty) {
+          final String cat = (doc[catField] ?? '').toString().trim();
+          if (cat != targetCat) return false;
+        }
+        return true;
+      }).toList();
+    }
+
+    final List<Map<String, dynamic>> catalog = [
+      {'ii': '001', 'in': 'Galon 19L', 'ic': 'returnable'},
+      {'ii': '002', 'in': 'Aqua 600ml', 'ic': 'consumable'},
+      {'ii': '003', 'in': 'Cleo Galon', 'ic': 'returnable'},
+      {'ii': '004', 'in': 'Teh Botol', 'ic': 'consumable'},
+    ];
+
+    test('deliver picker (targetCat="") shows ALL items', () {
+      final result = filterByCat(catalog, '', 'ic', <String>{}, 'ii');
+      expect(result.length, 4);
+    });
+
+    test('purchase picker (targetCat="returnable") shows only returnable', () {
+      final result = filterByCat(catalog, 'returnable', 'ic', <String>{}, 'ii');
+      expect(result.length, 2);
+      expect(result.every((d) => d['ic'] == 'returnable'), isTrue);
+    });
+
+    test('refill picker (targetCat="returnable") shows only returnable', () {
+      final result = filterByCat(catalog, 'returnable', 'ic', <String>{}, 'ii');
+      expect(result.length, 2);
+    });
+
+    test('sale picker (targetCat="") shows ALL items', () {
+      final result = filterByCat(catalog, '', 'ic', <String>{}, 'ii');
+      expect(result.length, 4);
+    });
+
+    test('items already in draft are excluded regardless of category', () {
+      final result = filterByCat(catalog, '', 'ic', <String>{'002'}, 'ii');
+      expect(result.length, 3);
+      expect(result.any((d) => d['ii'] == '002'), isFalse);
+    });
+
+    test('item with blank ic passes empty targetCat filter', () {
+      final items = [
+        {'ii': '005', 'in': 'NoCategory', 'ic': ''},
+      ];
+      final result = filterByCat(items, '', 'ic', <String>{}, 'ii');
+      expect(result.length, 1);
+    });
+
+    test('item with blank ic is excluded by returnable filter', () {
+      final items = [
+        {'ii': '005', 'in': 'NoCategory', 'ic': ''},
+      ];
+      final result = filterByCat(items, 'returnable', 'ic', <String>{}, 'ii');
+      expect(result, isEmpty);
+    });
+  });
+
+  // ── Consumable order: jual-putus rule (REAL helper) ───────────────────
+  //
+  // Core detection extracted as TaskItemBuilder.isSellOutright (W2). These
+  // tests call the REAL production helper, so they go RED if the rule flips.
+
+  group('Consumable detection: TaskItemBuilder.isSellOutright', () {
+    test('returnable -> not sell-outright', () {
+      expect(TaskItemBuilder.isSellOutright('returnable'), isFalse);
+    });
+
+    test('consumable -> sell-outright', () {
+      expect(TaskItemBuilder.isSellOutright('consumable'), isTrue);
+    });
+
+    test('blank category -> sell-outright (jual-putus, decision D2)', () {
+      expect(TaskItemBuilder.isSellOutright(''), isTrue);
+    });
+
+    test('arbitrary non-returnable category -> sell-outright', () {
+      expect(TaskItemBuilder.isSellOutright('perishable'), isTrue);
+    });
+  });
+
+  // ── Consumable order: onPick tx override (composite) ──────────────────
+  //
+  // Regression doc for the onPick branch: deliver + sell-outright -> tx
+  // becomes 'sale'; supplier never overrides. The load-bearing
+  // returnable-vs-not decision routes through the REAL isSellOutright helper,
+  // so this composite still fails if that rule flips.
+
+  group('Consumable detection: deliver -> sale override', () {
+    Map<String, dynamic> resolvePickResult({
+      required String txType,
+      required String pickedCat,
+      required String mode,
+    }) {
+      final bool isConsumable;
+      final String addTx;
+      if (mode == 'supplier') {
+        isConsumable = false;
+        addTx = 'buy'; // default supplier tx
+      } else {
+        isConsumable =
+            txType == 'deliver' && TaskItemBuilder.isSellOutright(pickedCat);
+        addTx = isConsumable ? 'sale' : txType;
+      }
+      return {'addTx': addTx, 'isConsumable': isConsumable};
+    }
+
+    test('deliver + consumable -> sale, isConsumable true', () {
+      final r = resolvePickResult(
+          txType: 'deliver', pickedCat: 'consumable', mode: 'order');
+      expect(r['addTx'], 'sale');
+      expect(r['isConsumable'], isTrue);
+    });
+
+    test('deliver + returnable -> deliver, isConsumable false', () {
+      final r = resolvePickResult(
+          txType: 'deliver', pickedCat: 'returnable', mode: 'order');
+      expect(r['addTx'], 'deliver');
+      expect(r['isConsumable'], isFalse);
+    });
+
+    test('deliver + blank ic -> sale (blank = jual-putus)', () {
+      final r = resolvePickResult(
+          txType: 'deliver', pickedCat: '', mode: 'order');
+      expect(r['addTx'], 'sale');
+      expect(r['isConsumable'], isTrue);
+    });
+
+    test('sale + consumable -> sale, isConsumable false (not from deliver)',
+        () {
+      final r = resolvePickResult(
+          txType: 'sale', pickedCat: 'consumable', mode: 'order');
+      expect(r['addTx'], 'sale');
+      expect(r['isConsumable'], isFalse);
+    });
+
+    test('purchase + returnable -> purchase (filter blocks consumable anyway)',
+        () {
+      final r = resolvePickResult(
+          txType: 'purchase', pickedCat: 'returnable', mode: 'order');
+      expect(r['addTx'], 'purchase');
+      expect(r['isConsumable'], isFalse);
+    });
+
+    test('supplier mode -> never consumable', () {
+      final r = resolvePickResult(
+          txType: 'deliver', pickedCat: 'consumable', mode: 'supplier');
+      expect(r['isConsumable'], isFalse);
+    });
+  });
+
+  // ── Consumable order: DraftItem seeding + toItMap (real DraftItem) ─────
+  //
+  // seedOrderItem MIRRORS the _addItem else-branch (regression doc); the
+  // toItMap tests exercise the REAL DraftItem.toItMap.
+
+  group('Consumable order: DraftItem seeding and toItMap output', () {
+    DraftItem seedOrderItem({
+      required String tx,
+      required bool consumable,
+      required String mode,
+      int hg = 0,
+    }) {
+      final String defaultCdo =
+          consumable ? '' : ((tx == 'deliver' || tx == 'sale') ? 'full' : '');
+      final String defaultCdi =
+          tx == 'deliver' ? 'empty' : (tx == 'purchase' ? 'full' : '');
+      final String defaultWt = tx == 'refill' ? 'refill' : '';
+      final int seedPs =
+          (tx == 'sale' && (mode == 'walkin' || consumable)) ? 1 : 0;
+      return DraftItem(
+        ii: 'test-ii',
+        itemName: 'Test Item',
+        tx: tx,
+        ps: seedPs,
+        cdo: defaultCdo,
+        cdi: defaultCdi,
+        wt: defaultWt,
+        hg: tx == 'sale' ? hg : 0,
+      );
+    }
+
+    test('consumable order: cdo empty, ps=1, tx=sale', () {
+      final item = seedOrderItem(tx: 'sale', consumable: true, mode: 'order');
+      expect(item.cdo, '');
+      expect(item.ps, 1);
+      expect(item.tx, 'sale');
+    });
+
+    test('consumable order: cdi empty (no purchase condition)', () {
+      final item = seedOrderItem(tx: 'sale', consumable: true, mode: 'order');
+      expect(item.cdi, '');
+    });
+
+    test('returnable order sale: cdo=full, ps=0', () {
+      final item = seedOrderItem(tx: 'sale', consumable: false, mode: 'order');
+      expect(item.cdo, 'full');
+      expect(item.ps, 0);
+    });
+
+    test('returnable order deliver: cdo=full, cdi=empty (unchanged)', () {
+      final item =
+          seedOrderItem(tx: 'deliver', consumable: false, mode: 'order');
+      expect(item.cdo, 'full');
+      expect(item.cdi, 'empty');
+      expect(item.pd, 0);
+      expect(item.pp, 0);
+    });
+
+    // W1: name corrected -- walkin sale carries cdo=='full' (else-branch seeds
+    // 'full' for tx=='sale'); the assertion was always right, the name wrong.
+    test('walkin sale: cdo=full, ps=1 (unchanged)', () {
+      final item =
+          seedOrderItem(tx: 'sale', consumable: false, mode: 'walkin');
+      expect(item.cdo, 'full');
+      expect(item.ps, 1);
+    });
+
+    // -- toItMap output shape (real DraftItem.toItMap) --
+
+    test('consumable toItMap: tx=sale, ps=qty, cdo empty, hg present', () {
+      final item = DraftItem(
+        ii: '2000000006001',
+        itemName: 'Aqua 600ml 1 Karton',
+        tx: 'sale',
+        ps: 3,
+        cdo: '',
+        hg: 0,
+      );
+      final m = item.toItMap();
+      expect(m['tx'], 'sale');
+      expect(m['ps'], 3);
+      expect(m['pd'], 0);
+      expect(m['pp'], 0);
+      expect(m['pb'], 0);
+      expect(m['pr'], 0);
+      expect(m['cdo'], '');
+      expect(m['cdi'], '');
+      expect(m['wt'], '');
+      expect(m['hg'], 0);
+      expect(m.containsKey('hg'), isTrue);
+    });
+
+    test('returnable deliver toItMap: byte-identical to pre-change', () {
+      final item = DraftItem(
+        ii: '001',
+        itemName: 'Galon 19L',
+        tx: 'deliver',
+        pd: 2,
+        pp: 1,
+        cdo: 'full',
+        cdi: 'empty',
+      );
+      final m = item.toItMap();
+      expect(m['tx'], 'deliver');
+      expect(m['pd'], 2);
+      expect(m['pp'], 1);
+      expect(m['ps'], 0);
+      expect(m['cdo'], 'full');
+      expect(m['cdi'], 'empty');
+      expect(m.containsKey('hg'), isFalse); // deliver has no hg
+    });
+
+    test('returnable sale toItMap: cdo=full, hg present', () {
+      final item = DraftItem(
+        ii: '001',
+        itemName: 'Galon 19L',
+        tx: 'sale',
+        ps: 1,
+        cdo: 'full',
+        hg: 50000,
+      );
+      final m = item.toItMap();
+      expect(m['tx'], 'sale');
+      expect(m['ps'], 1);
+      expect(m['cdo'], 'full');
+      expect(m['hg'], 50000);
+    });
+  });
+
+  // ── Consumable order: card render detection (isConsumable) ────────────
+  //
+  // MIRROR of the isConsumable detection in _buildSaleBody (regression doc):
+  //   isConsumable = !isWalkin && cdo.isEmpty
+  // The !isWalkin term is defensive redundancy (W1) -- walkin sale seeds
+  // cdo=='full', so cdo.isEmpty is already false for walkin.
+
+  group('Consumable card render detection (isConsumable)', () {
+    bool detectConsumable({
+      required String mode,
+      required String cdo,
+    }) {
+      final bool isWalkin = mode == 'walkin';
+      return !isWalkin && cdo.isEmpty;
+    }
+
+    test('order + cdo empty -> consumable', () {
+      expect(detectConsumable(mode: 'order', cdo: ''), isTrue);
+    });
+
+    test('order + cdo full -> not consumable (returnable sale)', () {
+      expect(detectConsumable(mode: 'order', cdo: 'full'), isFalse);
+    });
+
+    // I1: named to describe walkin (the mode arg is 'walkin', not 'order').
+    test('walkin + cdo empty -> not consumable (isWalkin short-circuits)', () {
+      expect(detectConsumable(mode: 'walkin', cdo: ''), isFalse);
+    });
+
+    test('walkin + cdo full -> not consumable (isWalkin short-circuits)', () {
+      expect(detectConsumable(mode: 'walkin', cdo: 'full'), isFalse);
     });
   });
 }

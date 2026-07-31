@@ -11,10 +11,12 @@ abstract class NotificationRepository {
 }
 
 class FirebaseNotificationRepository implements NotificationRepository {
-  final notificationList = FirebaseFirestore.instance
-      .collection(firestoreIO)
-      .orderBy('lt', descending: true);
-  final notificationCollection =
+  // A getter, not a field: as a field this froze whatever `firestoreIO` was at
+  // construction time (main.dart builds this repo during runApp), so every
+  // write went to the boot-default `users_<fsName>` even after login resolved
+  // the real path. `notifications()` already read the global at call time --
+  // this makes the write side agree with it.
+  CollectionReference<Map<String, dynamic>> get notificationCollection =>
       FirebaseFirestore.instance.collection(firestoreIO);
 
   @override
@@ -31,6 +33,10 @@ class FirebaseNotificationRepository implements NotificationRepository {
   Stream<List<Notification>> notifications() {
     // the stream of notification
 //    return notificationList.snapshots().map((snapshot) {
+    // The single most useful line when the inbox renders empty: which path did
+    // it actually subscribe to? `users_<fsName>` here means firestoreIO was
+    // never resolved and the feed can never populate.
+    devPrint('[inbox] subscribe $firestoreIO');
     return FirebaseFirestore.instance
         .collection(firestoreIO)
         .orderBy('lt', descending: true)

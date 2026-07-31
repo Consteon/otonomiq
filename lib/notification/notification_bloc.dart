@@ -47,6 +47,10 @@ class NotificationBloc extends Bloc<NotificationEvent, NotificationState> {
           NotificationUpdated(notifications),
         );
       },
+      // Without this a Firestore failure (wrong path, permission denied) was
+      // swallowed: the bloc sat on NotificationLoading forever and the inbox
+      // looked like "Belum ada notifikasi". Surface it via BlocObserver.onError.
+      onError: (Object e, StackTrace s) => addError(e, s),
     );
   }
 

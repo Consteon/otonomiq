@@ -12,7 +12,8 @@ Config-driven keyed list with inline per-row action buttons that write via saveS
 
 Replaces the list-navigate-act-back roundtrip for high-volume review queues. Each row shows
 a summary card (thumbnail/title/subtitle/meta/badge) and exposes up to 2 action buttons
-that submit an updateEventRow write inline. One action can optionally require a note via a
+that submit one or more write operations (updateEventRow, addToEvent, addToTable, updateTableRow)
+inline via a single saveSend call. One action can optionally require a note via a
 bottom sheet before submission.
 
 ## Signature / Constructor
@@ -42,10 +43,20 @@ ListActionCard({
 | `searchFields` | `String` | Client search bar fields |
 | `route` | `String` | Card-tap route (empty = tap disabled) |
 | `routeParams` | `String` | Route params DSL |
-| `action1` | `String` | updateEventRow DSL for button 1 |
-| `action2` | `String` | updateEventRow DSL for button 2 |
+| `updateEventRow1` | `String` | Button 1: merge keyed doc (updateEventRow DSL). Empty = this op off. |
+| `addToEvent1` | `String` | Button 1: append keyed event (addToEvent DSL). Empty = this op off. |
+| `addToTable1` | `String` | Button 1: positional table add. Empty = this op off. Must author explicit `tableVid◼` (see Behavior). |
+| `updateTableRow1` | `String` | Button 1: positional table update. Empty = this op off. Must author explicit `tableVid◼` (see Behavior). |
+| `updateEventRow2` | `String` | Button 2: merge keyed doc. Empty = this op off. |
+| `addToEvent2` | `String` | Button 2: append keyed event. Empty = this op off. |
+| `addToTable2` | `String` | Button 2: positional table add. Empty = this op off. Must author explicit `tableVid◼`. |
+| `updateTableRow2` | `String` | Button 2: positional table update. Empty = this op off. Must author explicit `tableVid◼`. |
+| `note` | `String` | Optional display line template with `<field>` tokens resolved from the row doc. Empty or absent = not rendered. If the template contains tokens and ANY resolves to missing/blank, the entire line is hidden (no half-resolved stubs). If the note does not appear, check the token spelling first — a misspelled `<field>` is hidden exactly like an unstamped one. **This is a display-only line — unrelated to the `notePosition` rejection-reason bottom sheet.** |
 | `actionMeta` | `String` | Per-action: `tone◼flag[◼posisiNote]` ◆-split |
 | `text` | `String` | 13 ◆-segments for all UI labels |
+| `gateTable` | `String` | Slot gate: keyed collection for grant docs. Bare name = subcollection under same `table` docId. Full path also accepted. **This key alone decides whether gating is requested** — empty = gating OFF, non-empty = gating ON and every later failure is fail-closed. |
+| `gateSearch` | `String` | Search DSL for current user's grant docs (raw to `filterDriverHomeDocs`). Example: `ty◼approver⭘vid◼{userVid}`. **Required whenever `gateTable` is set** — leaving it empty does NOT disable gating, it yields an empty list. **Must identify the user by the `{userVid}` token, never a literal vid** — see "Identity" in `docs/widgets/approval_detail.md`. |
+| `gateSlot` | `String` | `slotField◆pointerField◆levelField`. Example: `sc◆ak◆cl`. **Required whenever `gateTable` is set** — empty/unparseable yields an empty list, not "gating off". |
 
 ### `text` positions (0-indexed)
 
@@ -67,11 +78,13 @@ ListActionCard({
 
 ## Important Behavior
 
-- **actionMeta pairs positionally with actionN.** `actionMeta` segment 1 (before the first `◆`)
-  configures `action1`; segment 2 configures `action2`. This is by *position*, not by name —
-  authoring only `action2` still consumes `actionMeta` **segment 1** (there is no way to skip a
-  segment). If you want a single reject-only button, put its `tone◼flag[◼posisiNote]` in
-  segment 1 and author its DSL in `action1`.
+- **actionMeta pairs positionally with button N's write DSLs.** `actionMeta` segment 1 (before the
+  first `◆`) configures button 1; segment 2 configures button 2. The segment index is ABSOLUTE --
+  segment 1 always means button 1 regardless of which buttons are visible. Button N is visible when
+  at least one of its 4 write DSL keys (`updateEventRow{N}`, `addToEvent{N}`, `addToTable{N}`,
+  `updateTableRow{N}`) is non-empty AND `actionMeta` has a segment at position N-1. If you want a
+  single reject-only button, put its `tone◼flag[◼posisiNote]` in segment 1 and author its DSLs
+  under the `...1` keys, NOT the `...2` keys.
 - **Position token offset:** The note position in `actionMeta` is a literal txfController position
   (e.g. `5` means `txfController[scrName][5]`). When the RBT's DSL references this position via
   `◁N▷`, it resolves to `ref[1][N-1]` = form position `N-1`. Therefore the builder MUST author
@@ -81,6 +94,12 @@ ListActionCard({
   appVid forwarded to `appendToSheet`; every live caller passes `defaultVid()`. The target
   *table* vid reaches Firestore through the DSL's own `⭘tablevid◼…` segment, not through this
   argument. `vidtable` only feeds the read subscription path.
+- **Positional ops and tableVid injection:** `saveSend` injects `tableVid◼$currentTableVid` into
+  positional DSLs containing `◼A⭘`/`◼D⭘`/`◼S⭘` (api.dart:4506-4508) where `currentTableVid` is
+  the 5th argument (`defaultVid()`), NOT this widget's `vidtable`. An `addToTable{N}` /
+  `updateTableRow{N}` DSL using those markers would land in the wrong tenant table. Positional ops
+  on this widget must author an explicit `tableVid◼` segment in the DSL, exactly as the keyed ops
+  already ride their own `⭘tablevid◼`.
 - **`route` / `delay` are stripped before saveSend.** The card-tap `route` is always present;
   if it reached saveSend, `routeExist(component['route'])` (api.dart) would fire
   `clearData(scrName)` and wipe the whole screen's `txfController` plus every per-screen store.
@@ -88,12 +107,14 @@ ListActionCard({
 - **ABORT rule:** If any `{field}` token in the action DSL cannot be resolved from the tapped row
   doc (field absent or empty), the write is silently aborted (no saveSend, no network request)
   **before** the note sheet is shown. Buttons re-enable. A WARN is logged via devPrint.
-- **Token scope — row doc ONLY:** every `{token}` in an action DSL is resolved against the tapped
-  Firestore row doc and nothing else. Session/screen tokens (`{today}`, `{driverVid}`,
-  `{vehicleId}`, …) are NOT passed through to `saveSend`'s own `resolveDriverCurlyTokens` — they
-  have no matching row field, so they trip the ABORT rule and the write silently no-ops. Author
-  action DSLs with row-field tokens only; if a future consumer needs a session token, the resolver
-  must be widened first (it is not today).
+- **Token scope — row doc + session tokens:** every `{token}` in an action DSL is first resolved
+  against the tapped Firestore row doc. If the token is absent or empty in the row doc, the
+  resolver probes `resolveDriverCurlyTokens` -- if it recognises the token (e.g. `{userVid}`,
+  `{userName}`), the token is left literal and `saveSend`'s own `resolveDriverCurlyTokens` call
+  resolves it downstream. If neither source knows the token, the write ABORTs (no saveSend, buttons
+  re-enable, WARN logged). Note: `saveSend` only calls `resolveDriverCurlyTokens` on the
+  `addToEvent` and `updateEventRow` paths -- session tokens in `addToTable`/`updateTableRow` DSLs
+  will NOT be resolved and will reach Firestore as literal `{name}`.
 - **Note slot hygiene:** the note slot (`txfController[scrName][posisiNote]`) is cleared
   (`finalData = "--"`, `controller.text = ""`) on every exit that does not submit (sheet
   dismissed) and right after a submit reads it, so a stale reason never rides the next write.
@@ -112,6 +133,26 @@ ListActionCard({
   buttons re-enable immediately (nothing will remove the row until the queue syncs).
 - **Row disappearance:** Reactive — when the write changes the doc's `st` field it fails the
   `search` filter and drops out of the displayed list on the next Obx rebuild.
+- **Slot gating — `gateTable` is the intent switch, everything else fails CLOSED.** With
+  `gateTable` absent, gating was never requested and docs pass through untouched (back-compat for
+  `RewardReview@1014` and every pre-gating consumer). With `gateTable` present, gating WAS
+  requested and **every** subsequent failure yields an EMPTY list, never the unfiltered set —
+  unparseable `gateSlot`, empty `gateSearch`, unresolved subscription, no matching grant doc,
+  slot field with no terms, or any thrown exception. The asymmetry is the point: failing open
+  here shows every pending request to every approver **with working approve/reject buttons**.
+  Each fail-closed branch emits a `devPrint` naming the cause; a working gate logs
+  `grants=N concrete={…} wildcardLevels={…} X→Y`. Gating is applied BEFORE stats counts and
+  sorting. See `list_card.md` for the full section (identical semantics in both widgets).
+- **Level indicator via meta slot:** the `fields` position 3 (`metaTpl`) already resolves `<field>`
+  tokens from the row doc. Set it to `"Level <cl> dari <nl>"` for the approval level line. No
+  separate `note` config key is needed — the existing meta slot covers this use case. Empty meta
+  template = no line rendered.
+- **Cross-reference — detail-page gate.** The ApproverStickyBar (detail page) uses the same gate
+  infrastructure with a sibling key `gateRowSlot` (numeric row indexes instead of field names). See
+  `docs/widgets/approval_detail.md` "Slot gate on ApproverStickyBar" for details. The RBT's
+  `gateTable` MUST use the fully-qualified `{docId}//subColl` format (bare-name resolution is not
+  available on the RBT). The RBT and list components SHOULD carry the same `vidtable`/`com` so they
+  share a subscription key.
 
 ## See Also
 

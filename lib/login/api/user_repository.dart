@@ -486,6 +486,12 @@ class UserRepository {
         // 1;
       }
     } catch (err) {
+      // Everything that goes wrong in this method funnels here and becomes the
+      // generic "koneksi internet terganggu" dialog (loginStatus 99 -> the else
+      // branch in main_page). Without this line a TimeoutException, a Firestore
+      // error and a genuine `result = ds` type error are indistinguishable in
+      // the field. Log it, then keep the existing behaviour.
+      devPrint('[LOGINPERF] aumLogin failed: $err');
       result = 2;
     }
     if (swTotal != null) {

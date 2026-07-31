@@ -343,6 +343,28 @@ Data yang di-dispatch oleh `Approval._onCardTap` dan dibaca oleh `ApprovalDetail
 - **Positioning:** `bottom = navBarHeight(66) + safeBottom + commentInputOffset(76 if applicable)`
 - **AutomaticKeepAliveClientMixin:** Prevents rebuild when scrolling
 
+### Slot gate on ApproverStickyBar (detail button gating)
+
+When the RBT component on the detail page carries `gateTable`, `gateSearch`, AND `gateRowSlot`, `_buildApproval` applies slot-based permission gating before rendering buttons:
+
+| Key | Type | Required | Description |
+|---|---|---|---|
+| `gateTable` | `String` | yes (intent switch) | Full path `{docId}//subColl` to the grant collection. MUST be fully-qualified — the RBT has no primary table for bare-name resolution. Empty = gating OFF (back-compat). |
+| `gateSearch` | `String` | yes (when gating ON) | Raw search DSL to find the logged-in user's grant docs. Passed to `filterDriverHomeDocs` (decodes internally). Example: `ty◼approver⭘vid◼{userVid}`. Empty with gateTable present = fail-closed. |
+| `gateRowSlot` | `String` | yes (when gating ON) | `slotField◆pointerIndex◆levelIndex`. The `pointerIndex` and `levelIndex` are **plain integers** — the **same index base as the RBT `search` key** (`evaluateRbtSearch`, `approver_sticky_bar.dart:19-33`, which already resolves `ItemCardDetail.currentRow` by plain integer index with an `idx >= row.length` guard — that is how incident bars author `search: "5◼pending"`). They are 0-based into the published row, NOT the `◁N▷`/`◀N▶` marker grammar. Example: `sc◆5◆7`. |
+
+**Back-compat:** `gateTable` absent = gating OFF. Every existing approval sticky bar (incident bars, old `Approval` flow) is unaffected — no subscription, no gate, byte-identical behavior.
+
+**Fail-closed:** `gateTable` present but any config piece incomplete (empty `gateSearch`, unparseable/negative/out-of-range `gateRowSlot`, empty `currentRow`, no gate subscription, no matching grant doc, no slot terms, thrown exception) = buttons hidden, with `devPrint` naming the cause. The incomplete-config `devPrint` names the expected form (`expected gateRowSlot as plain integers, e.g. sc◆5◆7`). A permission gate that fails open is a Critical defect.
+
+**Data source for pointer/level — requires a publishing detail widget:** pointer/level are read from `ItemCardDetail.currentRow` — the row the detail widget resolved and published at `item_card_detail.dart:358`. **This gate only works on a detail widget that publishes the request row (with the slot pointer + level at the configured indexes) to `ItemCardDetail.currentRow`.** `WorkerCardDetailKeyed` (`worker_card_detail_keyed.dart:143-155`) publishes a synthesized `[name, is, os, vid, sv]` row — if @1055 is served by that widget instead of `ItemCardDetail`, no index maps to `ak`/`cl` and the buttons never appear (fail-closed, diagnosable from the out-of-range/mismatch `devPrint`). `currentRow` is cleared on route change (`approver_sticky_bar.dart:89`), so stale values from a previous screen never leak. Empty `currentRow` = fail-closed (covers direct navigation and the pre-publish window).
+
+**Difference from list-side `gateSlot`:** The list widgets (`LIST_CARD`, `LIST_ACTION_CARD`) use `gateSlot` with **field names** (`sc◆ak◆cl`) because they filter map-shaped docs (`doc[pointerField]`). The RBT uses `gateRowSlot` with **numeric indexes** (`sc◆5◆7`) because it reads from a positional row array (`currentRow[idx]`). The two keys are mutually exclusive by consumer — list widgets ignore `gateRowSlot`, the sticky bar ignores `gateSlot`.
+
+**Identity — same session VID that stamps the approval:** `{userVid}` in `gateSearch` resolves to `screenTx['#VID']` (`driver_home_support.dart:305-307`), the VID written at login and nowhere else. That is the **same value the approval writer stamps as the approver** — `api.dart:4699` / `:4802` read `state['#VID']` into `approverVid`, which lands in the event row and the chain step (`:4741`, `:4759`), i.e. what becomes `l{N}by` on the request. Gate and stamp agree by construction, and the list card resolves it through the identical helper — one identity, one rule, two hosts. **Never author a literal VID** (or a tenant/app constant such as a Settings-sheet cell or a `dvby`-style baked value) in `gateSearch`: a literal makes every device evaluate one person's slots, so an approver could act on another approver's queue. If `#VID` is unset (logged out), the token stays literal `{userVid}`, `filterByMultiClause` sees the `{` and returns empty — fail-closed, by design. `#VID` is an `int` while grant `vid` is usually a String; `eq()` (`dsl_eq.dart:20`) is type-tolerant, so no manual cast.
+
+**Shared subscription:** The grant collection subscription is kicked off in `ApproverStickyBar.register()` (once per RBT slot, keyed `$scrName#$position`). The subscription key (`$appVid/$docId/$subColl`) matches the list page's subscription when both components carry the same `vidtable`/`com`. If the user navigated from the list, the data is already loaded — no delay. Direct navigation triggers a lazy subscription; buttons appear after the listener fires (~100-500ms). If the RBT's `vidtable` differs from @1050's, `gateCode` resolves a different (empty) container — the no-match `devPrint` distinguishes "over 0 gate docs" (wrong docId/vidtable) from "over N gate docs, 0 match" (wrong gateSearch).
+
 ### BottomStickySlot
 
 - **File:** [lib/widget/bottom_sticky_slot.dart](../../lib/widget/bottom_sticky_slot.dart)

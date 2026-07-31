@@ -137,4 +137,79 @@ void main() {
       expect(gdp.actualPickup, 1);
     });
   });
+
+  // ── load_rejected exclusion ────────────────────────────────────────────
+  // These tests cover excludeByStatus composed with aggregateGrandDropPickup
+  // and the stopStatusOf count loop. They do NOT exercise the widget's
+  // _getFilteredTasks() wiring — that call site is verified by the
+  // device-QA steps in the Verification section of the plan.
+
+  group('load_rejected exclusion', () {
+    test('rejected task pd/pp excluded from grand totals', () {
+      // Spec §4: trip 2 tasks, 1 rejected → header counts only non-rejected.
+      final docs = <Map<String, dynamic>>[
+        {
+          'tst': 'assigned',
+          'it': [
+            {'pd': '4', 'pp': '1', 'ad': '0', 'ap': '0'},
+            {'pd': '2', 'pp': '0', 'ad': '0', 'ap': '0'},
+          ],
+        },
+        {
+          'tst': 'load_rejected',
+          'it': [
+            {'pd': '6', 'pp': '3', 'ad': '0', 'ap': '0'},
+          ],
+        },
+      ];
+      final filtered = excludeByStatus(docs, kDefaultExcludeStatus);
+      final gdp = aggregateGrandDropPickup(filtered);
+      // Only the assigned task's items counted: pd 4+2=6, pp 1+0=1
+      expect(gdp.totalDrop, 6);
+      expect(gdp.totalPickup, 1);
+      // Rejected task's pd=6, pp=3 are absent
+    });
+
+    test('rejected task excluded from stop count and progress', () {
+      final docs = <Map<String, dynamic>>[
+        {'tst': 'completed'},
+        {'tst': 'load_rejected'},
+        {'tst': 'assigned'},
+      ];
+      final filtered = excludeByStatus(docs, kDefaultExcludeStatus);
+      expect(filtered.length, 2); // total stops (rejected excluded)
+
+      // Mirrors build() lines 249-259
+      int completedCount = 0;
+      int failedCount = 0;
+      for (final doc in filtered) {
+        final status = stopStatusOf(doc);
+        if (status == 'done') {
+          completedCount++;
+        } else if (status == 'failed') {
+          failedCount++;
+        }
+      }
+      expect(completedCount, 1);
+      expect(failedCount, 0);
+      // Progress: (1+0)/2 = 0.5 (widget line 299)
+      final double progress = filtered.isNotEmpty
+          ? (completedCount + failedCount) / filtered.length
+          : 0;
+      expect(progress, 0.5);
+    });
+
+    test('exclusion respects configured stateField', () {
+      // route_feed_header reads stateField from component config.
+      // When stateField = 'st', exclusion must compare doc['st'].
+      final docs = <Map<String, dynamic>>[
+        {'st': 'assigned'},
+        {'st': 'load_rejected'},
+      ];
+      final filtered = excludeByStatus(docs, kDefaultExcludeStatus,
+          statusField: 'st');
+      expect(filtered.length, 1);
+      expect(filtered[0]['st'], 'assigned');
+    });
+  });
 }

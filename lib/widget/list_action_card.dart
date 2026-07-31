@@ -24,6 +24,23 @@ class ActionMetaEntry {
 /// Known action tones. Unrecognised → 'neutral'.
 const Set<String> _knownActionTones = {'ok', 'warn', 'danger', 'neutral'};
 
+/// The 4 saveSend operation keys a button can carry, in canonical order.
+/// `updateEventRow` and `addToEvent` get `resolveDriverCurlyTokens` inside
+/// saveSend (api.dart:4553/4576). `addToTable` and `updateTableRow` do NOT --
+/// session tokens ({userVid}, {userName}, etc.) are only safe in the Event ops.
+///
+/// Additionally, saveSend injects `tableVid` into positional DSLs containing
+/// `◼A⭘`/`◼D⭘`/`◼S⭘` using `currentTableVid = appVid` (api.dart:4506-4508),
+/// which is `defaultVid()` -- NOT the widget's `vidtable`. Positional ops on
+/// this widget must therefore author an explicit `tableVid◼` segment in the DSL
+/// (same as the keyed ops' `⭘tablevid◼`). See widget doc for details.
+const List<String> writeOpKeys = [
+  'updateEventRow',
+  'addToEvent',
+  'addToTable',
+  'updateTableRow',
+];
+
 /// Parse `actionMeta`: `tone◼flag[◼posisiNote]◆tone2◼flag2[◼posisiNote2]`.
 ///
 /// Split on ◆ first, then each segment split on ◼ (up to 3 parts).
@@ -95,31 +112,116 @@ SortConfig parseSortConfig(String raw) {
   return SortConfig(field, dir == 'desc');
 }
 
-/// Resolve `{field}` tokens in [dsl] from [rowDoc]. Returns the resolved
-/// string, or `null` if ANY token could not be resolved (field absent or empty
-/// in doc) — the ABORT signal.
+/// Collect write DSLs for buttons 1 and 2 from a component config.
 ///
-/// This is the same regex as `resolveRowCurlyTokens` (driver_home_support:485)
-/// but with ABORT semantics: a single unresolved token means the whole DSL is
-/// invalid for submission.
-String? resolveActionTokensOrAbort(String dsl, Map<String, dynamic> rowDoc) {
+/// Returns a list of length 2 (button 1, button 2). Each inner list has 4
+/// entries matching [writeOpKeys] order (updateEventRow, addToEvent,
+/// addToTable, updateTableRow). Values are autheniumDecode'd (via [decode])
+/// and trimmed. `_cfg` does NOT trim; this function owns the trim so
+/// whitespace-only config cells collapse to '' and `buttonHasWrites` returns
+/// false.
+///
+/// [decode] is the autheniumDecode accessor (injected for testability -- in
+/// production this is the `_cfg` method which calls autheniumDecode).
+List<List<String>> collectButtonWrites(String Function(String key) decode) {
+  final List<List<String>> result = [];
+  for (int n = 1; n <= 2; n++) {
+    final List<String> ops = [];
+    for (final String op in writeOpKeys) {
+      ops.add(decode('$op$n').trim());
+    }
+    result.add(ops);
+  }
+  return result;
+}
+
+/// Whether button [n] (0-indexed) has at least one non-empty write DSL.
+bool buttonHasWrites(List<List<String>> buttonWrites, int n) {
+  if (n < 0 || n >= buttonWrites.length) return false;
+  return buttonWrites[n].any((s) => s.isNotEmpty);
+}
+
+/// Build a sanitised component copy for saveSend from [component], setting
+/// the bare op keys from [resolvedWrites] and [flag].
+///
+/// Hygiene steps:
+/// 1. Removes ALL 8 numbered write keys (updateEventRow1..2, etc.) so a
+///    stale key from the other button cannot leak into the history record.
+/// 2. Removes ALL 4 bare op keys, then re-sets only those where
+///    [resolvedWrites] has a non-empty value.
+/// 3. Strips `route` (would trigger clearData inside saveSend) and `delay`
+///    (would push a wait-screen). Both are card-tap concerns, not inline
+///    row-action concerns.
+/// 4. Sets `flag`.
+Map<String, dynamic> buildSaveSendComponent(
+  Map<String, dynamic> component,
+  List<String> resolvedWrites,
+  String flag,
+) {
+  final Map<String, dynamic> copy = Map<String, dynamic>.from(component);
+  // Clean: remove ALL numbered write keys and bare op keys.
+  for (final String op in writeOpKeys) {
+    copy.remove(op);
+    copy.remove('${op}1');
+    copy.remove('${op}2');
+  }
+  // Set: write this button's resolved ops into the bare keys.
+  for (int i = 0; i < writeOpKeys.length; i++) {
+    if (i < resolvedWrites.length && resolvedWrites[i].isNotEmpty) {
+      copy[writeOpKeys[i]] = resolvedWrites[i];
+    }
+  }
+  copy['flag'] = flag;
+  // C1: `route` is the card-tap detail route and is always present; leaving
+  // it in makes saveSend call clearData(scrName) (api.dart:4602), wiping the
+  // whole screen's txfController plus every per-screen store (incl. _inflight).
+  // `delay` would push a wait-screen -- neither belongs on an inline action.
+  copy.remove('route');
+  copy.remove('delay');
+  return copy;
+}
+
+/// Resolve `{field}` tokens in [dsl] from [rowDoc]. Returns the resolved
+/// string, or `null` if ANY token could not be resolved -- the ABORT signal.
+///
+/// Token scope: row doc fields first, then session tokens known to
+/// resolveDriverCurlyTokens (resolved later inside saveSend). A token
+/// resolvable by neither source triggers ABORT.
+///
+/// When a token is absent/empty in [rowDoc] but recognised by
+/// resolveDriverCurlyTokens (i.e. returns a different string), the token is
+/// left as a literal `{name}` so saveSend's own resolveDriverCurlyTokens
+/// resolves it downstream. This allows DSLs to contain session tokens like
+/// `{userVid}` / `{userName}` without tripping the ABORT rule.
+///
+/// [scrName] is forwarded to resolveDriverCurlyTokens for screen-scoped state.
+String? resolveActionTokensOrAbort(
+  String dsl,
+  Map<String, dynamic> rowDoc,
+  String scrName,
+) {
   if (!dsl.contains('{')) return dsl; // no tokens, pass-through
   bool aborted = false;
   final String resolved = dsl.replaceAllMapped(
     RegExp(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}'),
     (Match m) {
       final String name = m.group(1)!;
+      // 1. Try the row doc first.
       final dynamic val = rowDoc[name];
-      if (val == null) {
-        aborted = true;
+      if (val != null) {
+        final String s = val.toString().trim();
+        if (s.isNotEmpty) return s;
+      }
+      // 2. Row doc miss -- probe session resolver. If it recognises the token
+      //    (returns something other than the literal), leave it for saveSend.
+      final String probe = resolveDriverCurlyTokens('{$name}', scrName);
+      if (probe != '{$name}') {
+        // Known session token -- leave literal so saveSend resolves it.
         return m.group(0)!;
       }
-      final String s = val.toString().trim();
-      if (s.isEmpty) {
-        aborted = true;
-        return m.group(0)!;
-      }
-      return s;
+      // 3. Neither source knows this token -- ABORT.
+      aborted = true;
+      return m.group(0)!;
     },
   );
   return aborted ? null : resolved;
@@ -194,6 +296,14 @@ class ListActionCard extends StatefulWidget {
 
 class _ListActionCardState extends State<ListActionCard> {
   String _code = '';
+  String _gateCode = '';
+  String _rawGateSearch = '';
+  GateSlotConfig _gateSlotConfig = const GateSlotConfig('', '', '');
+
+  /// True when the config ASKS for gating (`gateTable` authored), regardless of
+  /// whether the rest of the gate config resolved. Drives fail-closed: a screen
+  /// that requested gating must never fall back to showing every row.
+  bool _gateIntended = false;
 
   // Parsed config (set once in initState)
   List<String> _textSegments = [];
@@ -206,8 +316,10 @@ class _ListActionCardState extends State<ListActionCard> {
   String _rawSearch = '';
   SortConfig _sort = const SortConfig('', false);
   String _routeStr = '';
-  String _action1Dsl = '';
-  String _action2Dsl = '';
+  /// Per-button write DSLs: index 0 = button 1, index 1 = button 2.
+  /// Each inner list has 4 entries matching [writeOpKeys] order.
+  List<List<String>> _buttonWrites = [];
+  String _noteTpl = '';
 
   // Local UI state
   String _searchQuery = '';
@@ -277,9 +389,22 @@ class _ListActionCardState extends State<ListActionCard> {
     // route
     _routeStr = stripRouteWrapper(_cfg('route').trim());
 
-    // action DSLs: stored raw (decoded just before resolve, inside submit)
-    _action1Dsl = (widget.component['action1'] ?? '').toString().trim();
-    _action2Dsl = (widget.component['action2'] ?? '').toString().trim();
+    // Write DSLs per button: decoded via _cfg (autheniumDecode), trimmed by
+    // collectButtonWrites (since _cfg does not trim).
+    _buttonWrites = collectButtonWrites(_cfg);
+
+    // gateSearch: stored raw — filterDriverHomeDocs decodes internally
+    _rawGateSearch = (widget.component['gateSearch'] ?? '').toString().trim();
+
+    // gateSlot: autheniumDecode (via _cfg) then parse
+    _gateSlotConfig = parseGateSlot(_cfg('gateSlot'));
+
+    // Intent flag: `gateTable` authored = this screen WANTS gating. Parsed here
+    // (not in _subscribe) so it is set even when the subscription bails.
+    _gateIntended =
+        (widget.component['gateTable'] ?? '').toString().trim().isNotEmpty;
+
+    _noteTpl = _cfg('note');
   }
 
   void _subscribe() {
@@ -291,6 +416,34 @@ class _ListActionCardState extends State<ListActionCard> {
     if (tp.tableDocId.isEmpty) return;
     _code = '$appVid/${tp.tableDocId}/${tp.subColl}';
     subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _code);
+
+    // Gate table subscription (slot-based approval queue gating).
+    // Sits after _subscribe()'s early returns (lines 289,291), so a malformed
+    // primary `table` also disables gating — benign, no _code means no primary
+    // data to filter.
+    // Skip subscription when gateSlot config is incomplete (I3: avoids a live
+    // Firestore listener whose docs are never read).
+    if (!_gateSlotConfig.isEmpty) {
+      final String rawGateTable =
+          (widget.component['gateTable'] ?? '').toString().trim();
+      if (rawGateTable.isNotEmpty) {
+        if (!rawGateTable.contains('//')) {
+          // Bare name: subcollection under the main table's docId
+          if (tp.tableDocId.isNotEmpty) {
+            _gateCode = '$appVid/${tp.tableDocId}/$rawGateTable';
+            subscribeToMapCollection(
+                appVid, tp.tableDocId, rawGateTable, _gateCode);
+          }
+        } else {
+          final TablePath gtp = parseTablePath(rawGateTable);
+          if (gtp.tableDocId.isNotEmpty) {
+            _gateCode = '$appVid/${gtp.tableDocId}/${gtp.subColl}';
+            subscribeToMapCollection(
+                appVid, gtp.tableDocId, gtp.subColl, _gateCode);
+          }
+        }
+      }
+    }
   }
 
   // ── Data pipeline ────────────────────────────────────────────────────────
@@ -301,19 +454,134 @@ class _ListActionCardState extends State<ListActionCard> {
     final List<Map<String, dynamic>> all = List<Map<String, dynamic>>.from(
         mapTableContent[_code] ?? const []);
 
+    // Gate table observable read — unconditional (same Obx zero-obs rule).
+    final List<Map<String, dynamic>> rawGateDocs =
+        List<Map<String, dynamic>>.from(
+            mapTableContent[_gateCode] ?? const []);
+
     final List<Map<String, dynamic>> searched = _rawSearch.isEmpty
         ? all
         : filterDriverHomeDocs(all, _rawSearch, widget.scrName);
 
+    // Slot gate filter (D9: before sort/stats)
+    final List<Map<String, dynamic>> gated =
+        _applySlotGate(searched, rawGateDocs);
+
     if (_sort.field.isNotEmpty) {
-      searched.sort((a, b) {
+      gated.sort((a, b) {
         final num va = coerceNum(a[_sort.field]);
         final num vb = coerceNum(b[_sort.field]);
         return _sort.descending ? vb.compareTo(va) : va.compareTo(vb);
       });
     }
 
-    return searched;
+    return gated;
+  }
+
+  /// Apply slot gate filter. Identical semantics to ListCard._applySlotGate.
+  ///
+  /// Two distinct states, deliberately NOT the same:
+  ///   * `gateTable` absent  → gating was never requested → docs pass through
+  ///     untouched (back-compat for RewardReview and every pre-gating screen).
+  ///   * `gateTable` present → gating WAS requested → any failure from here on
+  ///     (unresolved config, dead subscription, no matching grant, unreadable
+  ///     slot field, thrown exception) yields an EMPTY list, never the full
+  ///     unfiltered set.
+  ///
+  /// The second rule is the whole point: an approval queue that cannot prove
+  /// which slots the viewer holds must show nothing, not everything. Failing
+  /// open here leaks every pending request to every approver — WITH working
+  /// approve/reject buttons — while still looking gated.
+  List<Map<String, dynamic>> _applySlotGate(
+    List<Map<String, dynamic>> docs,
+    List<Map<String, dynamic>> rawGateDocs,
+  ) {
+    // SS7.4: session identity for gate instrumentation. Uses the SAME
+    // screenTx['#VID'] that filterDriverHomeDocs resolves {userVid} from
+    // (driver_home_support.dart:303-306). Logging only, not a permission input.
+    final String vid = sessionVidForLog();
+
+    // Gating never requested → untouched. Log the raw gateTable value so
+    // a device log can distinguish "gate never requested" from "gateTable
+    // misspelled" from "gateTable present but _gateIntended somehow false."
+    // Frequency: fires per Obx rebuild of _getServerFiltered, which re-runs
+    // on ANY rebuild of the Obx subtree — including per-keystroke search
+    // (the search field's onChanged setState). On non-gated screens: harmless
+    // (pass-through is
+    // the only branch that fires). On gated screens with a search bar:
+    // one log line per keystroke. Accepted for now.
+    // ponytail: if log noise bothers QA, suppress when outcome == previous call.
+    if (!_gateIntended) {
+      devPrint('ListActionCard slot gate: _gateIntended=false '
+          '(gateTable=${widget.component['gateTable']}) — pass-through');
+      return docs;
+    }
+
+    // Gating requested but the config did not fully resolve → FAIL CLOSED.
+    if (_gateSlotConfig.isEmpty ||
+        _gateCode.isEmpty ||
+        _rawGateSearch.isEmpty) {
+      devPrint('ListActionCard slot gate: gateTable authored but gate '
+          'incomplete (gateSlotEmpty=${_gateSlotConfig.isEmpty} '
+          'gateCodeEmpty=${_gateCode.isEmpty} '
+          'gateSearchEmpty=${_rawGateSearch.isEmpty}) '
+          'vid=$vid visibleCount=0 — returning empty (fail-closed)');
+      // ponytail: growable (NOT const []) — callers .sort() this result
+      return <Map<String, dynamic>>[];
+    }
+
+    try {
+      final List<Map<String, dynamic>> matchedGrants =
+          filterDriverHomeDocs(rawGateDocs, _rawGateSearch, widget.scrName);
+
+      if (matchedGrants.isEmpty) {
+        devPrint('ListActionCard slot gate: no grant docs match gateSearch '
+            '"$_rawGateSearch" over ${rawGateDocs.length} gate docs '
+            '(gateCode=$_gateCode) vid=$vid grantFound=false '
+            'visibleCount=0 — returning empty (fail-closed)');
+        return <Map<String, dynamic>>[];
+      }
+
+      final Set<String> allConcrete = {};
+      final Set<String> allWildcardLevels = {};
+      final List<String> rawSlotValues = []; // I1: actual per-grant raw values
+      for (final grantDoc in matchedGrants) {
+        final String rawSlot =
+            (grantDoc[_gateSlotConfig.slotField] ?? '').toString().trim();
+        rawSlotValues.add(rawSlot);
+        final SlotTerms terms = parseSlotTerms(rawSlot);
+        allConcrete.addAll(terms.concrete);
+        allWildcardLevels.addAll(terms.wildcardLevels);
+      }
+
+      if (allConcrete.isEmpty && allWildcardLevels.isEmpty) {
+        devPrint('ListActionCard slot gate: ${matchedGrants.length} grant '
+            'doc(s) matched but slot field "${_gateSlotConfig.slotField}" '
+            'yielded no terms (raw sc=$rawSlotValues) '
+            'vid=$vid grantFound=true '
+            'visibleCount=0 — returning empty (fail-closed)');
+        return <Map<String, dynamic>>[];
+      }
+
+      final List<Map<String, dynamic>> kept = filterBySlotGate(
+        docs,
+        allConcrete,
+        allWildcardLevels,
+        _gateSlotConfig.pointerField,
+        _gateSlotConfig.levelField,
+      );
+      devPrint('ListActionCard slot gate: grants=${matchedGrants.length} '
+          'concrete=$allConcrete wildcardLevels=$allWildcardLevels '
+          'ptr="${_gateSlotConfig.pointerField}" '
+          'lvl="${_gateSlotConfig.levelField}" '
+          'vid=$vid grantFound=true visibleCount=${kept.length}');
+      return kept;
+    } catch (e) {
+      // Any gate failure is a visibility failure → show nothing, never throw.
+      devPrint('ListActionCard slot gate: ERROR vid=$vid '
+          'visibleCount=0 — returning empty (fail-closed): $e');
+      return <Map<String, dynamic>>[];
+    }
   }
 
   List<Map<String, dynamic>> _applySearchBar(
@@ -380,29 +648,35 @@ class _ListActionCardState extends State<ListActionCard> {
 
   Future<void> _onActionTap(
     Map<String, dynamic> doc,
-    String rawDsl,
+    List<String> writes,
     ActionMetaEntry meta,
     String rowId,
   ) async {
-    if (rawDsl.isEmpty) return;
+    if (!writes.any((s) => s.isNotEmpty)) return;
     if (_isInflight(rowId)) return; // guard double-tap
 
-    // W2: resolve {field} tokens from the row doc BEFORE any UI. A single
-    // unresolved token aborts the whole submission (no note sheet, no write).
-    final String decodedDsl = autheniumDecode(rawDsl) ?? rawDsl;
-    final String? resolved = resolveActionTokensOrAbort(decodedDsl, doc);
-    if (resolved == null) {
-      devPrint(
-          'WARN ListActionCard: unresolved token in action DSL after '
-          'row-resolve. rawDsl=$rawDsl, doc keys=${doc.keys.toList()}');
-      return; // nothing written yet, nothing to clean up
+    // All-or-nothing: resolve {field} tokens across ALL non-empty DSLs for
+    // this button BEFORE any UI. If any single token in any single DSL cannot
+    // be resolved, abort the entire submission (no note sheet, no write).
+    final List<String> resolvedWrites = List<String>.filled(writeOpKeys.length, '');
+    for (int i = 0; i < writeOpKeys.length; i++) {
+      if (writes[i].isEmpty) continue;
+      final String? resolved =
+          resolveActionTokensOrAbort(writes[i], doc, widget.scrName);
+      if (resolved == null) {
+        devPrint(
+            'WARN ListActionCard: unresolved token in ${writeOpKeys[i]} DSL, '
+            'aborting all writes for this button. '
+            'rowId=$rowId, doc keys=${doc.keys.toList()}');
+        return; // nothing written yet, nothing to clean up
+      }
+      resolvedWrites[i] = resolved;
     }
 
-    // W2: only once the DSL is known-good do we ask for a note.
+    // Only once ALL DSLs are known-good do we ask for a note.
     if (meta.notePosition != null) {
       final bool sent = await _showNoteSheet(meta.notePosition!);
       if (!sent) {
-        // W2: clear the slot so a stale reason cannot ride the next submit.
         _clearNoteSlot(meta.notePosition!);
         return; // user dismissed without sending
       }
@@ -410,22 +684,15 @@ class _ListActionCardState extends State<ListActionCard> {
 
     _setInflight(rowId, true);
 
-    // Build a COPY of the component for saveSend — never mutate shared config.
-    final Map<String, dynamic> saveSendComponent =
-        Map<String, dynamic>.from(widget.component as Map);
-    saveSendComponent['updateEventRow'] = resolved;
-    saveSendComponent['flag'] = meta.flag;
-    // Remove keys that would trigger unintended side-effects in saveSend.
-    saveSendComponent.remove('action1');
-    saveSendComponent.remove('action2');
-    saveSendComponent.remove('addToEvent');
-    // C1: `route` is the card-tap detail route and is always present; leaving
-    // it in makes saveSend call clearData(scrName) (api.dart:4499), wiping the
-    // whole screen's txfController plus every per-screen store (incl. our
-    // _inflight). `delay` would push a wait-screen — neither belongs on an
-    // inline row action.
-    saveSendComponent.remove('route');
-    saveSendComponent.remove('delay');
+    // Build a sanitised component copy via the pure helper (testable).
+    // `.from(… as Map)` not `as Map<String, dynamic>`: server JSON is dynamic
+    // BY DESIGN, so a Map<dynamic, dynamic> would throw on a strict cast.
+    // Matches custody_event_submit:278 / custody_count_submit:954.
+    final Map<String, dynamic> saveSendComponent = buildSaveSendComponent(
+      Map<String, dynamic>.from(widget.component as Map),
+      resolvedWrites,
+      meta.flag,
+    );
 
     // GPS-less timestamp + locString (time-only, no real GPS).
     final int timeStamp = await getRealTime();
@@ -755,6 +1022,7 @@ class _ListActionCardState extends State<ListActionCard> {
     final String title = _resolve(_fields.titleTpl, doc);
     final String subtitle = _resolve(_fields.subtitleTpl, doc);
     final String meta = _resolve(_fields.metaTpl, doc);
+    final String note = resolveNoteTemplate(_noteTpl, doc);
     final String rowId = _rowId(doc);
     final bool inflight = _isInflight(rowId);
 
@@ -854,6 +1122,15 @@ class _ListActionCardState extends State<ListActionCard> {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ],
+                          // Note (display line — unrelated to the notePosition bottom sheet)
+                          if (note.isNotEmpty) ...[
+                            const SizedBox(height: 3),
+                            Text(
+                              note,
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey.shade500),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -880,7 +1157,9 @@ class _ListActionCardState extends State<ListActionCard> {
                   ),
                 ],
                 // Action buttons
-                if (_actionMetas.isNotEmpty) ...[
+                if (_actionMetas.isNotEmpty &&
+                    (_buttonWrites.isNotEmpty &&
+                        _buttonWrites.any((w) => w.any((s) => s.isNotEmpty)))) ...[
                   const SizedBox(height: 10),
                   _buildActionRow(doc, rowId, inflight),
                 ],
@@ -897,12 +1176,12 @@ class _ListActionCardState extends State<ListActionCard> {
     final List<Widget> buttons = [];
 
     // Action 1
-    if (_actionMetas.isNotEmpty && _action1Dsl.isNotEmpty) {
+    if (_actionMetas.isNotEmpty && buttonHasWrites(_buttonWrites, 0)) {
       buttons.add(Expanded(
         child: _buildActionButton(
           label: _txt(5),
           meta: _actionMetas[0],
-          dsl: _action1Dsl,
+          writes: _buttonWrites[0],
           doc: doc,
           rowId: rowId,
           inflight: inflight,
@@ -911,13 +1190,13 @@ class _ListActionCardState extends State<ListActionCard> {
     }
 
     // Action 2
-    if (_actionMetas.length > 1 && _action2Dsl.isNotEmpty) {
+    if (_actionMetas.length > 1 && buttonHasWrites(_buttonWrites, 1)) {
       if (buttons.isNotEmpty) buttons.add(const SizedBox(width: 10));
       buttons.add(Expanded(
         child: _buildActionButton(
           label: _txt(6),
           meta: _actionMetas[1],
-          dsl: _action2Dsl,
+          writes: _buttonWrites[1],
           doc: doc,
           rowId: rowId,
           inflight: inflight,
@@ -931,7 +1210,7 @@ class _ListActionCardState extends State<ListActionCard> {
   Widget _buildActionButton({
     required String label,
     required ActionMetaEntry meta,
-    required String dsl,
+    required List<String> writes,
     required Map<String, dynamic> doc,
     required String rowId,
     required bool inflight,
@@ -940,7 +1219,7 @@ class _ListActionCardState extends State<ListActionCard> {
       height: 38,
       child: ElevatedButton(
         onPressed:
-            inflight ? null : () => _onActionTap(doc, dsl, meta, rowId),
+            inflight ? null : () => _onActionTap(doc, writes, meta, rowId),
         style: ElevatedButton.styleFrom(
           backgroundColor: _actionBgColor(meta.tone),
           foregroundColor: _actionFgColor(meta.tone),

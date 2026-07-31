@@ -255,6 +255,22 @@ void main() async {
     if (myLif != defaultLifKey && myLif != invitationKey) {
       // if user logged in
       var myClt = await storage.read(key: 'myCluster');
+      // Resolve the inbox path HERE, from secure storage, not only inside
+      // readSettingsStart's firstTimeRun branch (api.dart:2162). A warm start
+      // with a populated @screenUI cache takes the cache branch (api.dart:2249)
+      // and never reaches that assignment, so firestoreIO stayed on its boot
+      // default (`users_<fsName>`, global.dart:762/863) until the opt-2 loader's
+      // 27-38s CF fetch landed -- if it landed at all. The notification stream
+      // (notification_repository.dart:34) then queried a collection with no
+      // 'lt' field and the inbox rendered empty: no chips, no unread badge.
+      var myMsg = await storage.read(key: 'myMsgId');
+      if (myClt != null && myMsg != null) {
+        firestoreIO = msgIoPath(myClt, myMsg);
+        firestoreMsg = firestoreIO;
+      }
+      // Logs null too, so a secure-storage miss is visible instead of silently
+      // leaving firestoreIO on the boot default.
+      devPrint('[inbox] warm start: clt=$myClt msgId=$myMsg -> $firestoreIO');
       transactionStore.dispatch(
         UpdateScreenTxAction(
           ScreenTransaction({

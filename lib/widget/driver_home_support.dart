@@ -200,6 +200,11 @@ String resolveAppVid(dynamic component) {
   return getTableVid(component['com']?.toString()).toString();
 }
 
+/// Session VID for log-only use. Same `screenTx['#VID']` that
+/// [resolveDriverCurlyTokens] resolves `{userVid}` from — NOT a permission input.
+String sessionVidForLog() =>
+    (transactionStore.state.screenTx['#VID'] ?? '').toString();
+
 // ─── Driver login persistence (secure-storage mirror of #has_user_login) ────
 
 /// Secure-storage key name for the driver VID. Mirrors #has_user_login.

@@ -38,6 +38,7 @@ DetailCard({
 | `search` | String | yes | Resolve ONE doc: `key◼{token}` |
 | `title` | String | no | Template with `<field>` tokens |
 | `subtitle` | String | no | Template; empty = hidden |
+| `note` | String | no | Optional display line template with `<field>` tokens. Empty = hidden. If any token resolves empty/missing, the whole line is hidden. If the note does not appear, check the token spelling first — a misspelled `<field>` is hidden exactly like an unstamped one. |
 | `badgeField` | String | no | Doc field for badge value |
 | `badgeMap` | String | no | `value◼Label◼tier★...` (tier: danger/warn/ok/neutral) |
 | `rows` | String | no | `Label◼template★...` key-value rows |

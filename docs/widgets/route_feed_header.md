@@ -52,6 +52,7 @@ RouteFeedHeader({
 ## Important Behavior
 
 - Publishes vehicleId via post-frame callback (never during build).
+- `load_rejected` tasks are unconditionally excluded from stop count, progress bar, and Drop/Pickup grand totals. The exclusion is applied in `_getFilteredTasks()` via `excludeByStatus(filtered, kDefaultExcludeStatus, statusField: stateField)`, comparing the raw state field (not `stopStatusOf`). No component config key controls this. This is deliberately unconditional, unlike the sibling `driver_stop_card` / `nav_action_card` widgets which use a config-fallback shape.
 - Renders title unconditionally; a blank top bar = header missing from server JSON.
 - Back button: `routeStack.push(backRoute)` then `gotoRoute(backRoute)`.
 

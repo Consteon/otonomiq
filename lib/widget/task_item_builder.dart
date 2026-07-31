@@ -104,6 +104,12 @@ class TaskItemBuilder extends StatefulWidget {
     return result;
   }
 
+  /// Jual-putus test: any category that is not returnable is sold outright.
+  /// Inverts the literal already used by the picker filter -- adds no new
+  /// hardcoded string (spec §3). Blank/missing category => sell-outright
+  /// (interview decision D2).
+  static bool isSellOutright(String cat) => cat != 'returnable';
+
   /// Compute the "exchange" component of a pickup breakdown.
   /// Exchange = empties returned in exchange for drops = min(pd, pp).
   static int pickupExchange(int pd, int pp) => pd < pp ? pd : pp;
@@ -416,6 +422,9 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
     } else {
       switch (txType) {
         case 'deliver':
+          // ponytail: all categories; consumable pick → sale override in onPick
+          targetCat = '';
+          break;
         case 'purchase':
           targetCat = 'returnable';
           break;
@@ -472,12 +481,35 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
         emptyText: emptyText,
         onPick: (Map<String, dynamic> item) {
           Navigator.of(context).pop(); // close sheet
-          // Seed price: supplier/walkin from priceSourceField, order-sale from
-          // itemPriceField. Convention #7: coerceNum guards dynamic field.
+
+          // Determine effective tx: a non-returnable ("sell outright") item
+          // picked from the deliver picker becomes a jual-putus sale.
+          // Detection via configured catField (never literal 'ic'); blank
+          // category => sell-outright (isSellOutright, decision D2).
+          final String addTx;
+          final bool isConsumable;
+          if (_mode == 'supplier') {
+            final List<MapEntry<String, String>> opts =
+                TaskItemBuilder.parseTxOptions(widget.component['txOptions']);
+            addTx = opts.isNotEmpty ? opts[0].key : 'buy';
+            isConsumable = false;
+          } else {
+            final String pickedCat = (item[catField] ?? '').toString().trim();
+            // ponytail: only the deliver picker can surface consumables
+            // (purchase/refill filter to returnable at the query level).
+            isConsumable = txType == 'deliver' &&
+                TaskItemBuilder.isSellOutright(pickedCat);
+            addTx = isConsumable ? 'sale' : txType;
+          }
+
+          // Seed price: supplier from priceSourceField, sale from the mode's
+          // price field. Keys off the EFFECTIVE tx (addTx) so a consumable
+          // override (addTx=='sale') still seeds. Convention #7: coerceNum
+          // guards the dynamic field.
           final int seedPrice;
           if (_mode == 'supplier') {
             seedPrice = coerceNum(item[_priceSourceField]).toInt();
-          } else if (txType == 'sale') {
+          } else if (addTx == 'sale') {
             final String priceField =
                 _mode == 'walkin' ? _priceSourceField : _itemPriceField;
             seedPrice = coerceNum(item[priceField]).toInt();
@@ -485,21 +517,12 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
             seedPrice = 0;
           }
 
-          // Supplier: default tx = first txOption value.
-          final String addTx;
-          if (_mode == 'supplier') {
-            final List<MapEntry<String, String>> opts =
-                TaskItemBuilder.parseTxOptions(widget.component['txOptions']);
-            addTx = opts.isNotEmpty ? opts[0].key : 'buy';
-          } else {
-            addTx = txType;
-          }
-
           _addItem(
             ii: (item[idField] ?? '').toString().trim(),
             itemName: (item[nameField] ?? '').toString().trim(),
             tx: addTx,
             hg: seedPrice,
+            consumable: isConsumable,
           );
         },
       ),
@@ -511,6 +534,7 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
     required String itemName,
     required String tx,
     int hg = 0,
+    bool consumable = false,
   }) {
     final List<DraftItem> draft = AdminCreateTaskSupport.getDraft(_wizardKey);
     if (_mode == 'seed') {
@@ -537,13 +561,15 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
       );
     } else {
       // Order / walkin: existing logic unchanged.
+      // ponytail: consumable sale -> no condition, floor qty 1 (like walkin).
       final String defaultCdo =
-          (tx == 'deliver' || tx == 'sale') ? 'full' : '';
+          consumable ? '' : ((tx == 'deliver' || tx == 'sale') ? 'full' : '');
       final String defaultCdi = tx == 'deliver'
           ? 'empty'
           : (tx == 'purchase' ? 'full' : '');
       final String defaultWt = tx == 'refill' ? 'refill' : '';
-      final int seedPs = (_mode == 'walkin' && tx == 'sale') ? 1 : 0;
+      final int seedPs =
+          (tx == 'sale' && (_mode == 'walkin' || consumable)) ? 1 : 0;
       draft.add(
         DraftItem(
           ii: ii,
@@ -1092,13 +1118,18 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
 
   Widget _buildSaleBody(DraftItem item, int index) {
     final bool isWalkin = _mode == 'walkin';
+    // Consumable-sale (order mode) carries no condition (cdo==''); a
+    // returnable-sale always has cdo=='full'|'empty' (the toggle offers only
+    // those). The !isWalkin term is defensive redundancy (W1): walkin sale
+    // already seeds cdo=='full', so cdo.isEmpty is already false for walkin.
+    final bool isConsumable = !isWalkin && item.cdo.isEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Condition toggle (full/empty) -- order mode only.
-        // Walkin POS has no returnable condition concept.
-        if (!isWalkin) ...[
+        // Condition toggle (full/empty) -- order-mode returnable sale only.
+        // Walkin POS + consumable have no returnable condition concept.
+        if (!isWalkin && !isConsumable) ...[
           _conditionToggle(
             label: _t(3, 'Jual'),
             value: item.cdo,
@@ -1114,7 +1145,7 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
         _labeledStepper(
           label: isWalkin ? _t(2, 'Qty') : _t(3, 'Jual'),
           value: item.ps,
-          onDecrement: item.ps > (isWalkin ? 1 : 0)
+          onDecrement: item.ps > ((isWalkin || isConsumable) ? 1 : 0)
               ? () {
                   setState(() {
                     item.ps--;
@@ -1129,20 +1160,24 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
             TaskItemBuilder.draftRev.value++;
           },
         ),
-        const SizedBox(height: 8),
-        // Inline price input (sale only)
-        _priceInput(item),
-        // Per-line subtotal
-        if (item.ps > 0 && item.hg > 0) ...[
-          const SizedBox(height: 4),
-          Text(
-            '${item.ps} x ${AdminCreateTaskSupport.formatRupiah(item.hg)} = ${AdminCreateTaskSupport.formatRupiah(item.hg * item.ps)}',
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: Color(0xFF64748B), // slate-500
+        // Price + subtotal: skip for consumable (price silently carried in hg;
+        // CF DeliveryInvoice prices from item.hrg regardless).
+        if (!isConsumable) ...[
+          const SizedBox(height: 8),
+          // Inline price input (sale only)
+          _priceInput(item),
+          // Per-line subtotal
+          if (item.ps > 0 && item.hg > 0) ...[
+            const SizedBox(height: 4),
+            Text(
+              '${item.ps} x ${AdminCreateTaskSupport.formatRupiah(item.hg)} = ${AdminCreateTaskSupport.formatRupiah(item.hg * item.ps)}',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: Color(0xFF64748B), // slate-500
+              ),
             ),
-          ),
+          ],
         ],
       ],
     );

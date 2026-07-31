@@ -927,4 +927,63 @@ void main() {
       expect(resolveAddress('', ''), '');
     });
   });
+
+  // ── load_rejected exclusion ────────────────────────────────────────────
+  // These tests cover excludeByStatus composed with stopStatusOf grouping
+  // and the allDone gate. They do NOT exercise the widget's
+  // _getFilteredTasks() wiring — that call site is verified by the
+  // device-QA steps in the Verification section of the plan.
+
+  group('load_rejected exclusion', () {
+    test('rejected task excluded before grouping: 1 pending stop remains', () {
+      // Spec §4: trip has 2 tasks, 1 rejected. Expected: 1 stop.
+      final docs = <Map<String, dynamic>>[
+        {'tst': 'assigned', 'tnm': 'T001', 'kn': 'Toko Contoh Jaya'},
+        {'tst': 'load_rejected', 'tnm': 'T002', 'kn': 'Kopi Kenangan'},
+      ];
+      final filtered = excludeByStatus(docs, kDefaultExcludeStatus);
+      expect(filtered.length, 1);
+      expect(filtered[0]['tnm'], 'T001');
+
+      // Group the surviving docs (mirrors build() lines 399-421)
+      final pending = <Map<String, dynamic>>[];
+      final failed = <Map<String, dynamic>>[];
+      final completed = <Map<String, dynamic>>[];
+      for (final doc in filtered) {
+        final status = stopStatusOf(doc);
+        if (status == 'failed') {
+          failed.add(doc);
+        } else if (status == 'done') {
+          completed.add(doc);
+        } else {
+          pending.add(doc);
+        }
+      }
+      expect(pending.length, 1);
+      expect(failed.length, 0);
+      expect(completed.length, 0);
+      // allDone = pendingTasks.isEmpty (widget line 423)
+      expect(pending.isEmpty, false); // NOT allDone
+    });
+
+    test('all non-rejected completed → allDone true, banner shows', () {
+      // Spec §4 continued: after T001 completed, allDone should be true
+      // even though the source data still contains the rejected task.
+      final docs = <Map<String, dynamic>>[
+        {'tst': 'completed', 'tnm': 'T001', 'kn': 'Toko Contoh Jaya'},
+        {'tst': 'load_rejected', 'tnm': 'T002', 'kn': 'Kopi Kenangan'},
+      ];
+      final filtered = excludeByStatus(docs, kDefaultExcludeStatus);
+      expect(filtered.length, 1);
+
+      final pending = filtered.where((doc) {
+        final status = stopStatusOf(doc);
+        return status != 'done' && status != 'failed';
+      }).toList();
+      final bool allDone = pending.isEmpty;
+      expect(allDone, true);
+      // Banner gate: allDone && tasks.isNotEmpty (widget line 524)
+      expect(filtered.isNotEmpty, true);
+    });
+  });
 }

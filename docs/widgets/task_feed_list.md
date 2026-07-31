@@ -74,6 +74,7 @@ TaskFeedList({
 
 ### GROUPED mode only
 - `on_delivery` tasks group with `assigned` (still-open).
+- `load_rejected` tasks are unconditionally excluded from both GROUPED and FLAT modes. The exclusion is applied in `_getFilteredTasks()` via `excludeByStatus(filtered, kDefaultExcludeStatus, statusField: groupField)`, comparing the raw configured `groupField` value (defaulting to `tst`, and falling back to `tst` in FLAT mode where `groupField` is empty; not `stopStatusOf`). No component config key controls this -- it is semantic, not a display preference. This is deliberately unconditional (no `excludeStatus` config override), unlike the sibling `driver_stop_card` / `nav_action_card` widgets which use a config-fallback shape.
 - `allDone` = pending group empty AND tasks non-empty.
 - Return-CTA gate: opt-in via `returnGateSearch` + `returnGateTable`.
 - Dead routes degrade gracefully (silent push+goto).

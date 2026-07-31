@@ -1,5 +1,29 @@
 import 'admin_home_support.dart'; // evaluateGate
 
+// ─── Note template resolution ───────────────────────────────────────────────
+
+/// Mirrors panel_card_support.dart:336 — kept character-identical on purpose.
+final RegExp _noteAngleToken = RegExp(r'<([a-zA-Z][a-zA-Z0-9]*)>');
+
+/// Resolve an optional display template (`note`). Returns `''` when the
+/// template is blank, or when it contains `<field>` tokens and ANY of them
+/// is missing/blank on [doc] — a half-resolved line ("Level  dari ") is
+/// worse than no line. A token-free template renders as-is.
+String resolveNoteTemplate(String template, Map<String, dynamic> doc) {
+  if (template.trim().isEmpty) return '';
+  final Iterable<RegExpMatch> matches = _noteAngleToken.allMatches(template);
+  if (matches.isEmpty) return template; // token-free note — render as-is
+  for (final m in matches) {
+    final dynamic val = doc[m.group(1)];
+    if (val == null || val.toString().trim().isEmpty) return '';
+  }
+  // All tokens present and non-empty — substitute.
+  return template.replaceAllMapped(_noteAngleToken, (m) {
+    final dynamic val = doc[m.group(1)];
+    return val == null ? '' : val.toString();
+  });
+}
+
 // ─── LIST_CARD support — pure parsers ─────────────────────────────────────
 
 /// Parsed badge definition from the `badgeMap` config field.
@@ -169,4 +193,116 @@ List<RowDef> parseRowDefs(String raw) {
     out.add(RowDef(label, template));
   }
   return out;
+}
+
+// ─── Slot gate helpers (approve-leave-gating-and-note) ──────────────────
+
+/// Parsed `gateSlot` config: `slotField◆pointerField◆levelField`.
+class GateSlotConfig {
+  final String slotField;
+  final String pointerField;
+  final String levelField;
+  const GateSlotConfig(this.slotField, this.pointerField, this.levelField);
+
+  /// True when gating is effectively OFF (incomplete config).
+  /// Both pointerField AND levelField must be empty to disable — having only
+  /// one of the two is still a valid (concrete-only or wildcard-only) config.
+  bool get isEmpty =>
+      slotField.isEmpty || (pointerField.isEmpty && levelField.isEmpty);
+}
+
+/// Parsed slot terms from a grant doc's slot field value.
+class SlotTerms {
+  final Set<String> concrete;
+  final Set<String> wildcardLevels;
+  const SlotTerms(this.concrete, this.wildcardLevels);
+}
+
+/// Parse `gateSlot` config: `slotField◆pointerField◆levelField`.
+///
+/// Caller MUST `autheniumDecode` the raw string BEFORE calling (use `_cfg()`).
+/// Length-guarded: short arrays → empty string defaults.
+GateSlotConfig parseGateSlot(String decoded) {
+  if (decoded.trim().isEmpty) return const GateSlotConfig('', '', '');
+  final List<String> segs = decoded.split('\u{25C6}'); // ◆
+  return GateSlotConfig(
+    segs.isNotEmpty ? segs[0].trim() : '',
+    segs.length > 1 ? segs[1].trim() : '',
+    segs.length > 2 ? segs[2].trim() : '',
+  );
+}
+
+/// Parse slot terms from a grant doc's raw slot field value.
+///
+/// Split on `|`, trim each term, drop empties.
+/// Term starting with `*-` (length > 2) → wildcard: level = substring after
+/// `*-`, added to [wildcardLevels].
+/// Every other term → concrete (compared verbatim against pointerField).
+///
+/// Assumption: only `*-{lvl}` is a wildcard form; `{cc}-*` and `*-*` are NOT
+/// wildcards — treated as concrete (they simply will not match anything).
+SlotTerms parseSlotTerms(String rawSlotValue) {
+  final Set<String> concrete = {};
+  final Set<String> wildcardLevels = {};
+  for (final term in rawSlotValue.split('|')) {
+    final String t = term.trim();
+    if (t.isEmpty) continue;
+    if (t.startsWith('*-') && t.length > 2) {
+      wildcardLevels.add(t.substring(2).trim());
+    } else {
+      concrete.add(t);
+    }
+  }
+  return SlotTerms(concrete, wildcardLevels);
+}
+
+/// Filter docs by slot gate.
+///
+/// A doc is visible iff:
+///   `row[pointerField].toString().trim()` is in [concrete]
+///   OR `row[levelField].toString().trim()` is in [wildcardLevels].
+///
+/// Type tolerance: all comparisons via `.toString().trim()` (D8).
+/// No self-approve exclusion (D11): gating is purely slot-based.
+///
+/// Returns empty list when both sets are empty (no valid slots → no visible
+/// docs).
+List<Map<String, dynamic>> filterBySlotGate(
+  List<Map<String, dynamic>> docs,
+  Set<String> concrete,
+  Set<String> wildcardLevels,
+  String pointerField,
+  String levelField,
+) {
+  // ponytail: growable (NOT const []) — callers .sort() this result
+  if (concrete.isEmpty && wildcardLevels.isEmpty) {
+    return <Map<String, dynamic>>[];
+  }
+  return docs.where((doc) {
+    final String pointer = (doc[pointerField] ?? '').toString().trim();
+    final String level = (doc[levelField] ?? '').toString().trim();
+    return isVisibleBySlotGate(pointer, level, concrete, wildcardLevels);
+  }).toList();
+}
+
+/// Single-value slot gate predicate.
+///
+/// Used by the detail-page choke point (StickyBarRenderer._buildApproval)
+/// where the pointer and level arrive as scalar values resolved from the
+/// displayed row, not as keyed map fields.
+///
+/// Also called by [filterBySlotGate] so the visibility rule has ONE definition.
+///
+/// Returns false when both sets are empty (fail-closed: no valid slots = not
+/// visible). Empty pointer/level = not visible (covers direct navigation and
+/// pre-publish state).
+bool isVisibleBySlotGate(
+  String pointerValue,
+  String levelValue,
+  Set<String> concrete,
+  Set<String> wildcardLevels,
+) {
+  if (concrete.isEmpty && wildcardLevels.isEmpty) return false;
+  if (concrete.contains(pointerValue)) return true;
+  return wildcardLevels.contains(levelValue);
 }

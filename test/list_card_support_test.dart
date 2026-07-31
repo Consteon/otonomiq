@@ -455,4 +455,105 @@ void main() {
       expect(parseRowDefs(''), isEmpty);
     });
   });
+
+  // ── resolveNoteTemplate ─────────────────────────────────────────────────
+
+  group('resolveNoteTemplate', () {
+    test('blank template returns empty', () {
+      expect(resolveNoteTemplate('', {'cl': '2'}), '');
+    });
+
+    test('whitespace-only template returns empty', () {
+      expect(resolveNoteTemplate('   ', {'cl': '2'}), '');
+    });
+
+    test('token-free template renders as-is', () {
+      expect(
+        resolveNoteTemplate('Menunggu approval', {}),
+        'Menunggu approval',
+      );
+    });
+
+    test('single token present resolves', () {
+      expect(resolveNoteTemplate('<kn>', {'kn': 'Budi'}), 'Budi');
+    });
+
+    test('single token missing hides line', () {
+      expect(resolveNoteTemplate('<kn>', {}), '');
+    });
+
+    test('single token null hides line', () {
+      expect(resolveNoteTemplate('<kn>', {'kn': null}), '');
+    });
+
+    test('single token present-but-empty-string hides line', () {
+      expect(resolveNoteTemplate('<kn>', {'kn': ''}), '');
+    });
+
+    test('single token present-but-whitespace-only hides line', () {
+      expect(resolveNoteTemplate('<kn>', {'kn': '   '}), '');
+    });
+
+    test('multi-token all-present resolves', () {
+      expect(
+        resolveNoteTemplate('Level <cl> dari <nl>', {'cl': '2', 'nl': '3'}),
+        'Level 2 dari 3',
+      );
+    });
+
+    test('multi-token one-missing hides line', () {
+      expect(
+        resolveNoteTemplate('Level <cl> dari <nl>', {'nl': '3'}),
+        '',
+      );
+    });
+
+    test('multi-token one-empty-string hides line', () {
+      expect(
+        resolveNoteTemplate('Level <cl> dari <nl>', {'cl': '', 'nl': '3'}),
+        '',
+      );
+    });
+
+    test('multi-token all-missing hides line', () {
+      expect(resolveNoteTemplate('Level <cl> dari <nl>', {}), '');
+    });
+
+    test('numeric-first token <15> not matched — renders literally', () {
+      // Documents known non-support: regex requires letter-first token name.
+      expect(resolveNoteTemplate('Status <15>', {}), 'Status <15>');
+    });
+
+    test('mixed valid and numeric-first token', () {
+      // <cl> is valid and matched; <15> is not matched (letter-first rule).
+      // Only <cl> is checked for emptiness; <15> passes through literally.
+      expect(
+        resolveNoteTemplate('<cl> of <15>', {'cl': '2'}),
+        '2 of <15>',
+      );
+    });
+
+    test('token value is int 0 — NOT treated as empty', () {
+      expect(resolveNoteTemplate('Count: <n>', {'n': 0}), 'Count: 0');
+    });
+
+    test('token value is bool true — stringifies', () {
+      expect(resolveNoteTemplate('Flag: <f>', {'f': true}), 'Flag: true');
+    });
+
+    test('token value is int non-zero', () {
+      expect(resolveNoteTemplate('Level <cl>', {'cl': 3}), 'Level 3');
+    });
+
+    test('repeated token resolves all occurrences', () {
+      expect(
+        resolveNoteTemplate('<x> and <x>', {'x': 'ok'}),
+        'ok and ok',
+      );
+    });
+
+    test('empty doc with token-free template still renders', () {
+      expect(resolveNoteTemplate('Static text', {}), 'Static text');
+    });
+  });
 }

@@ -514,6 +514,11 @@ dynamic firestoreNotif;
 dynamic transactionStore;
 String fsDeviceSubCollection = 'dvc'; //= device collection in user's uid doc
 String msgPrefix = "msg_";
+
+/// The user's inbox collection: `msg_<cluster>/<msgDocId>/io`.
+/// One place, because the background-isolate bridge used to hardcode `msg_`
+/// while everything else went through [msgPrefix].
+String msgIoPath(String cluster, String msgId) => '$msgPrefix$cluster/$msgId/io';
 const defaultCluster = "DEV2";
 //const defaultCluster = "TEST1";    // comment this and uncomment DEV2
 const eventPrefix = "evnt_";
@@ -1285,8 +1290,31 @@ String replaceMarker(String source, List ref, int startIndex, bool newLine) {
   return res;
 } // end of replaceMarker
 
+/// Sanitises OS-geocoder text before it is concatenated into the ⬤/◆/★-framed
+/// record that `saveSendRows` ships to the sheet backend.
+///
+/// The backend composes JSON by concatenation, so a raw `"` coming out of a
+/// placemark field produced an unparseable payload and the whole attendance
+/// record was lost server-side. Form fields already go through `stringCleanUp`
+/// in `saveSend`; `locString` never did — this is the only sanitiser on that
+/// path, so it has to cover the full hostile set, not just the double quote:
+///   `"` `'` `\`  → JSON string/escape breakers
+///   control chars (incl. CR/LF/TAB) → a real newline inside a JSON string
+///   every char in [forbiddenCharacter] → a stray ◆/⬤/★ shifts the record's
+///   column framing, which surfaces as the same "bad data" symptom
+///
+/// Comma is deliberately kept — it separates nothing at this level and real
+/// addresses need it. Every caller is a placemark/address field.
 String cleanupString(String inp) {
-  return inp.replaceAll('"', '').replaceAll('\'', '/');
+  String output = inp
+      .replaceAll('"', '')
+      .replaceAll('\'', '/')
+      .replaceAll('\\', '/')
+      .replaceAll(RegExp(r'[\x00-\x1F\x7F]'), ' ');
+  for (final c in forbiddenCharacter) {
+    output = output.replaceAll(c, ' ');
+  }
+  return output;
 }
 
 void getTimeDifference() async {
