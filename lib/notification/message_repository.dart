@@ -13,10 +13,10 @@ abstract class MessageRepository {
 }
 
 class FirebaseMessageRepository implements MessageRepository {
-  final messageCollection = FirebaseFirestore.instance.collection(firestoreMsg);
-  final messageList = FirebaseFirestore.instance
-      .collection(firestoreMsg)
-      .orderBy('tr', descending: true);
+  // Getter, not a field -- same reason as notification_repository: a field
+  // freezes `firestoreMsg` at construction, before login resolves it.
+  CollectionReference<Map<String, dynamic>> get messageCollection =>
+      FirebaseFirestore.instance.collection(firestoreMsg);
 
   @override
   Future<void> addNewMessage(Message message) {

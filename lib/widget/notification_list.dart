@@ -163,9 +163,19 @@ class _NotificationListState extends State<NotificationList> {
         final channels = state is NotificationLoaded
             ? state.notifications
             : <Notification>[];
-        final filtered = _filterVid.isEmpty
+        // Hide chips for channels with no messages — an empty category filter
+        // only ever shows the empty state. Derived from _rows, so a chip also
+        // disappears the moment its last row is swiped away, and comes back
+        // when a new message lands. activeVid self-heals if the selected
+        // channel emptied out (no setState during build).
+        final liveVids = _rows.map((r) => r.vid).toSet();
+        final live = channels
+            .where((c) => liveVids.contains(c.vid ?? ''))
+            .toList();
+        final activeVid = liveVids.contains(_filterVid) ? _filterVid : '';
+        final filtered = activeVid.isEmpty
             ? _rows
-            : _rows.where((r) => r.vid == _filterVid).toList();
+            : _rows.where((r) => r.vid == activeVid).toList();
         return Scaffold(
           backgroundColor: notifBg,
           appBar: AppBar(
@@ -186,7 +196,7 @@ class _NotificationListState extends State<NotificationList> {
           ),
           body: Column(
             children: <Widget>[
-              _chipBar(channels, primary),
+              _chipBar(live, activeVid, primary),
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: () => _loadAll(channels),
@@ -200,7 +210,11 @@ class _NotificationListState extends State<NotificationList> {
     );
   }
 
-  Widget _chipBar(List<Notification> channels, Color primary) {
+  Widget _chipBar(
+    List<Notification> channels,
+    String activeVid,
+    Color primary,
+  ) {
     if (channels.isEmpty) return const SizedBox.shrink();
     return Container(
       color: Colors.white,
@@ -213,7 +227,7 @@ class _NotificationListState extends State<NotificationList> {
           children: <Widget>[
             _chip(
               'Semua',
-              _filterVid.isEmpty,
+              activeVid.isEmpty,
               0,
               primary,
               () => setState(() => _filterVid = ''),
@@ -223,7 +237,7 @@ class _NotificationListState extends State<NotificationList> {
                 (c.name != null && c.name!.trim().isNotEmpty)
                     ? c.name!.trim()
                     : (c.vid ?? 'Pesan'),
-                _filterVid == c.vid,
+                activeVid == c.vid,
                 c.unRead ?? 0,
                 primary,
                 () => setState(() => _filterVid = c.vid ?? ''),

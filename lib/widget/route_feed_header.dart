@@ -222,8 +222,21 @@ class _RouteFeedHeaderState extends State<RouteFeedHeader> {
     final String rawSearch = (widget.component['taskSearch'] ?? '')
         .toString()
         .trim();
-    if (rawSearch.isEmpty) return docs;
-    return filterDriverHomeDocs(docs, rawSearch, widget.scrName);
+
+    final List<Map<String, dynamic>> filtered = rawSearch.isEmpty
+        ? docs
+        : filterDriverHomeDocs(docs, rawSearch, widget.scrName);
+
+    // Unconditionally exclude load_rejected tasks. Raw tst compare, NOT
+    // stopStatusOf (load_rejected normalizes to pending). stateField read
+    // matches the build() read at the stopStatusOf loop.
+    final String stateField = (widget.component['stateField'] ?? 'tst')
+        .toString();
+    return excludeByStatus(
+      filtered,
+      kDefaultExcludeStatus,
+      statusField: stateField,
+    );
   }
 
   @override

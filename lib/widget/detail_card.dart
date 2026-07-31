@@ -42,6 +42,7 @@ class _DetailCardState extends State<DetailCard> {
   String _rawSearch = '';
   String _titleTpl = '';
   String _subtitleTpl = '';
+  String _noteTpl = '';
   String _badgeField = '';
   List<BadgeEntry> _badgeEntries = [];
   List<RowDef> _rowDefs = [];
@@ -70,6 +71,7 @@ class _DetailCardState extends State<DetailCard> {
 
     _titleTpl = _cfg('title');
     _subtitleTpl = _cfg('subtitle');
+    _noteTpl = _cfg('note');
     _badgeField = _cfg('badgeField').trim();
     _badgeEntries = parseBadgeMap(_cfg('badgeMap'));
     _rowDefs = parseRowDefs(_cfg('rows'));
@@ -174,6 +176,7 @@ class _DetailCardState extends State<DetailCard> {
       doc,
       const <String, String>{},
     );
+    final String note = resolveNoteTemplate(_noteTpl, doc);
 
     // Badge
     final String badgeValue = _badgeField.isNotEmpty
@@ -269,6 +272,14 @@ class _DetailCardState extends State<DetailCard> {
             Text(
               subtitle,
               style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            ),
+          ],
+          // ── Note ──
+          if (note.isNotEmpty) ...[
+            const SizedBox(height: 3),
+            Text(
+              note,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
             ),
           ],
           // ── KV rows ──

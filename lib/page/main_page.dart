@@ -1620,16 +1620,6 @@ class MainPageState extends State<MainPage> {
                 textList['LoadingPages'] ?? 'Memuat halaman Anda…',
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 8),
-              // This fetch was measured at ~37s on the heaviest tenant. A
-              // silent spinner that long reads as a hang, so say up front that
-              // the wait is expected.
-              Text(
-                textList['LoadingPagesHint'] ??
-                    'Proses ini bisa memakan waktu hingga satu menit.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
             ] else ...<Widget>[
               Icon(
                 Icons.cloud_off,

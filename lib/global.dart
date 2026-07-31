@@ -204,6 +204,7 @@ import 'widget/driver_home_support.dart';
                           fix stuck capture camera, crashlytics fix, search in contact picker, map point picker, group picker, share pdf, whatsapp send,
   0.9.84.04 (260729) OO : fix bug login, add get image gallery, stat card row, payout list widget
   0.9.85.01 (260730) HH : update version number
+  0.9.85.02 (260731) OO : fix bug approval, driver modul, notification list chips
 */
 
 // ========= Constants ==========================
@@ -215,7 +216,7 @@ int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
 const String version = '0.9.85';
-const String subVersion = '.01';
+const String subVersion = '.02';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing
@@ -497,6 +498,12 @@ dynamic firestoreNotif;
 dynamic transactionStore;
 String fsDeviceSubCollection = 'dvc'; //= device collection in user's uid doc
 String msgPrefix = "msg_";
+
+/// The user's inbox collection: `msg_<cluster>/<msgDocId>/io`.
+/// One place, because the background-isolate bridge used to hardcode `msg_`
+/// while everything else went through [msgPrefix].
+String msgIoPath(String cluster, String msgId) =>
+    '$msgPrefix$cluster/$msgId/io';
 const defaultCluster = "DEV2";
 //const defaultCluster = "TEST1";    // comment this and uncomment DEV2
 const eventPrefix = "evnt_";
@@ -1282,7 +1289,15 @@ String replaceMarker(String source, List ref, int startIndex, bool newLine) {
 } // end of replaceMarker
 
 String cleanupString(String inp) {
-  return inp.replaceAll('"', '').replaceAll('\'', '/');
+  String output = inp
+      .replaceAll('"', '')
+      .replaceAll('\'', '/')
+      .replaceAll('\\', '/')
+      .replaceAll(RegExp(r'[\x00-\x1F\x7F]'), ' ');
+  for (final c in forbiddenCharacter) {
+    output = output.replaceAll(c, ' ');
+  }
+  return output;
 }
 
 void getTimeDifference() async {

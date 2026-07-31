@@ -44,6 +44,9 @@ class TaskFeedList extends StatefulWidget {
   /// Per-scrName search controllers for FLAT mode local search bar.
   /// Cached SDUI widgets persist across nav; text cleared on route change
   /// via [clearFlatSearch] (called from buildPage in ui_component.dart).
+  ///
+  /// This map OWNS the controllers — [_TaskFeedListState] must never dispose
+  /// them (overlapping States for one scrName share an instance).
   static final Map<String, TextEditingController> _flatSearchControllers = {};
 
   /// Clear FLAT-mode search text for [scrName]. Called from buildPage
@@ -115,14 +118,13 @@ class _TaskFeedListState extends State<TaskFeedList> {
     }
   }
 
-  @override
-  void dispose() {
-    if (_searchController != null) {
-      TaskFeedList._flatSearchControllers.remove(widget.scrName);
-      _searchController!.dispose();
-    }
-    super.dispose();
-  }
+  // No dispose of _searchController: the static _flatSearchControllers map owns
+  // it, not this State. Two States for the same scrName can overlap during an
+  // SDUI page rebuild (new initState runs before old dispose) and share one
+  // controller instance — disposing here left the live State holding a disposed
+  // controller ("A TextEditingController was used after being disposed").
+  // ponytail: one controller per FLAT screen name, never freed — same lifetime
+  // as the cached widget in linkElement[scrName]. Bounded by screen count.
 
   void _parseText() {
     try {
@@ -226,7 +228,19 @@ class _TaskFeedListState extends State<TaskFeedList> {
       });
     }
 
-    return filtered;
+    // Unconditionally exclude load_rejected tasks. Raw state-field compare,
+    // NOT stopStatusOf (load_rejected normalizes to pending). Key on the
+    // configured groupField so the exclusion reads the same field as the
+    // bucket split; fall back to 'tst' in FLAT mode (groupField empty),
+    // because excludeByStatus short-circuits only on an empty excludeStatus,
+    // never on an empty statusField.
+    final String groupField = (widget.component['groupField'] ?? 'tst')
+        .toString();
+    return excludeByStatus(
+      filtered,
+      kDefaultExcludeStatus,
+      statusField: groupField.isEmpty ? 'tst' : groupField,
+    );
   }
 
   void _onCardTap(Map<String, dynamic> task) {

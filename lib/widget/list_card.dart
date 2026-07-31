@@ -38,6 +38,14 @@ class ListCard extends StatefulWidget {
 
 class _ListCardState extends State<ListCard> {
   String _code = '';
+  String _gateCode = '';
+  String _rawGateSearch = '';
+  GateSlotConfig _gateSlotConfig = const GateSlotConfig('', '', '');
+
+  /// True when the config ASKS for gating (`gateTable` authored), regardless of
+  /// whether the rest of the gate config resolved. Drives fail-closed: a screen
+  /// that requested gating must never fall back to showing every row.
+  bool _gateIntended = false;
 
   // Parsed config (set once in initState)
   List<String> _textSegments = [];
@@ -54,6 +62,7 @@ class _ListCardState extends State<ListCard> {
   String _titleTpl = '';
   String _subtitleTpl = '';
   String _metaTpl = '';
+  String _noteTpl = '';
   String _badgeField = '';
   String _trailingTpl = '';
   String _trailingLabelTpl = '';
@@ -125,10 +134,24 @@ class _ListCardState extends State<ListCard> {
     _titleTpl = _cfg('title');
     _subtitleTpl = _cfg('subtitle');
     _metaTpl = _cfg('meta');
+    _noteTpl = _cfg('note');
     _badgeField = _cfg('badgeField').trim();
     _trailingTpl = _cfg('trailing');
     _trailingLabelTpl = _cfg('trailingLabel');
     _routeStr = stripRouteWrapper(_cfg('route').trim());
+
+    // gateSearch: stored raw — filterDriverHomeDocs decodes internally
+    _rawGateSearch = (widget.component['gateSearch'] ?? '').toString().trim();
+
+    // gateSlot: autheniumDecode (via _cfg) then parse
+    _gateSlotConfig = parseGateSlot(_cfg('gateSlot'));
+
+    // Intent flag: `gateTable` authored = this screen WANTS gating. Parsed here
+    // (not in _subscribe) so it is set even when the subscription bails.
+    _gateIntended = (widget.component['gateTable'] ?? '')
+        .toString()
+        .trim()
+        .isNotEmpty;
   }
 
   void _subscribe() {
@@ -140,13 +163,56 @@ class _ListCardState extends State<ListCard> {
     // vid-scoped key (prevents cross-tenant subscription collision)
     _code = '$appVid/${tp.tableDocId}/${tp.subColl}';
     subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _code);
+
+    // Gate table subscription (slot-based approval queue gating).
+    // Sits after _subscribe()'s early returns (lines 138,140), so a malformed
+    // primary `table` also disables gating — benign, no _code means no primary
+    // data to filter.
+    // Skip subscription when gateSlot config is incomplete (I3: avoids a live
+    // Firestore listener whose docs are never read).
+    if (!_gateSlotConfig.isEmpty) {
+      final String rawGateTable = (widget.component['gateTable'] ?? '')
+          .toString()
+          .trim();
+      if (rawGateTable.isNotEmpty) {
+        if (!rawGateTable.contains('//')) {
+          // Bare name: subcollection under the main table's docId
+          if (tp.tableDocId.isNotEmpty) {
+            _gateCode = '$appVid/${tp.tableDocId}/$rawGateTable';
+            subscribeToMapCollection(
+              appVid,
+              tp.tableDocId,
+              rawGateTable,
+              _gateCode,
+            );
+          }
+        } else {
+          final TablePath gtp = parseTablePath(rawGateTable);
+          if (gtp.tableDocId.isNotEmpty) {
+            _gateCode = '$appVid/${gtp.tableDocId}/${gtp.subColl}';
+            subscribeToMapCollection(
+              appVid,
+              gtp.tableDocId,
+              gtp.subColl,
+              _gateCode,
+            );
+          }
+        }
+      }
+    }
   }
 
-  /// Server-side filters + sort. Returns the filtered-and-sorted list.
+  /// Server-side filters + slot gate + sort. Returns the filtered-and-sorted list.
   List<Map<String, dynamic>> _getServerFiltered() {
     final List<Map<String, dynamic>> all = List<Map<String, dynamic>>.from(
       mapTableContent[_code] ?? const [],
     );
+
+    // Gate table observable read — unconditional to prevent Obx zero-obs crash.
+    // When _gateCode is '', reads mapTableContent[''] which is null → const [];
+    // harmless no-op that still registers the Obx dependency.
+    final List<Map<String, dynamic>> rawGateDocs =
+        List<Map<String, dynamic>>.from(mapTableContent[_gateCode] ?? const []);
 
     // 1. search filter (autheniumDecode + token resolve + filterByMultiClause)
     final List<Map<String, dynamic>> searched = _rawSearch.isEmpty
@@ -158,16 +224,148 @@ class _ListCardState extends State<ListCard> {
         ? searched
         : filterDriverHomeDocs(searched, _rawConditions, widget.scrName);
 
-    // 3. sort by sortField (numeric coerce, asc/desc)
+    // 3. slot gate filter (D9: before stats/grouping/sorting)
+    final List<Map<String, dynamic>> gated = _applySlotGate(
+      conditioned,
+      rawGateDocs,
+    );
+
+    // 4. sort by sortField (numeric coerce, asc/desc)
     if (_sortField.isNotEmpty) {
-      conditioned.sort((a, b) {
+      gated.sort((a, b) {
         final num va = coerceNum(a[_sortField]);
         final num vb = coerceNum(b[_sortField]);
         return _sortDesc ? vb.compareTo(va) : va.compareTo(vb);
       });
     }
 
-    return conditioned;
+    return gated;
+  }
+
+  /// Apply slot gate filter.
+  ///
+  /// Two distinct states, deliberately NOT the same:
+  ///   * `gateTable` absent  → gating was never requested → docs pass through
+  ///     untouched (back-compat for every screen that predates gating).
+  ///   * `gateTable` present → gating WAS requested → any failure from here on
+  ///     (unresolved config, dead subscription, no matching grant, unreadable
+  ///     slot field, thrown exception) yields an EMPTY list, never the full
+  ///     unfiltered set.
+  ///
+  /// The second rule is the whole point: an approval queue that cannot prove
+  /// which slots the viewer holds must show nothing, not everything. Failing
+  /// open here leaks every pending request to every approver while still
+  /// looking gated.
+  List<Map<String, dynamic>> _applySlotGate(
+    List<Map<String, dynamic>> docs,
+    List<Map<String, dynamic>> rawGateDocs,
+  ) {
+    // SS7.4: session identity for gate instrumentation. Uses the SAME
+    // screenTx['#VID'] that filterDriverHomeDocs resolves {userVid} from
+    // (driver_home_support.dart:303-306). Logging only, not a permission input.
+    final String vid = sessionVidForLog();
+
+    // Gating never requested → untouched. Log the raw gateTable value so
+    // a device log can distinguish "gate never requested" from "gateTable
+    // misspelled" from "gateTable present but _gateIntended somehow false."
+    // Frequency: fires per Obx rebuild of _getServerFiltered, which re-runs
+    // on ANY rebuild of the Obx subtree — including per-keystroke search
+    // (the search field's onChanged setState). On non-gated screens: harmless
+    // (pass-through is
+    // the only branch that fires). On gated screens with a search bar:
+    // one log line per keystroke. Accepted for now.
+    // ponytail: if log noise bothers QA, suppress when outcome == previous call.
+    if (!_gateIntended) {
+      devPrint(
+        'ListCard slot gate: _gateIntended=false '
+        '(gateTable=${widget.component['gateTable']}) — pass-through',
+      );
+      return docs;
+    }
+
+    // Gating requested but the config did not fully resolve → FAIL CLOSED.
+    if (_gateSlotConfig.isEmpty ||
+        _gateCode.isEmpty ||
+        _rawGateSearch.isEmpty) {
+      devPrint(
+        'ListCard slot gate: gateTable authored but gate incomplete '
+        '(gateSlotEmpty=${_gateSlotConfig.isEmpty} '
+        'gateCodeEmpty=${_gateCode.isEmpty} '
+        'gateSearchEmpty=${_rawGateSearch.isEmpty}) '
+        'vid=$vid visibleCount=0 — returning empty (fail-closed)',
+      );
+      // ponytail: growable (NOT const []) — callers .sort() this result
+      return <Map<String, dynamic>>[];
+    }
+
+    try {
+      // Filter gate docs by gateSearch (finds current user's grant docs)
+      final List<Map<String, dynamic>> matchedGrants = filterDriverHomeDocs(
+        rawGateDocs,
+        _rawGateSearch,
+        widget.scrName,
+      );
+
+      // Zero matching grants → empty list (fail-closed)
+      if (matchedGrants.isEmpty) {
+        devPrint(
+          'ListCard slot gate: no grant docs match gateSearch '
+          '"$_rawGateSearch" over ${rawGateDocs.length} gate docs '
+          '(gateCode=$_gateCode) vid=$vid grantFound=false '
+          'visibleCount=0 — returning empty (fail-closed)',
+        );
+        return <Map<String, dynamic>>[];
+      }
+
+      // Union slot terms across all matched grant docs
+      final Set<String> allConcrete = {};
+      final Set<String> allWildcardLevels = {};
+      final List<String> rawSlotValues = []; // I1: actual per-grant raw values
+      for (final grantDoc in matchedGrants) {
+        final String rawSlot = (grantDoc[_gateSlotConfig.slotField] ?? '')
+            .toString()
+            .trim();
+        rawSlotValues.add(rawSlot);
+        final SlotTerms terms = parseSlotTerms(rawSlot);
+        allConcrete.addAll(terms.concrete);
+        allWildcardLevels.addAll(terms.wildcardLevels);
+      }
+
+      if (allConcrete.isEmpty && allWildcardLevels.isEmpty) {
+        devPrint(
+          'ListCard slot gate: ${matchedGrants.length} grant doc(s) '
+          'matched but slot field "${_gateSlotConfig.slotField}" yielded no '
+          'terms (raw sc=$rawSlotValues) '
+          'vid=$vid grantFound=true '
+          'visibleCount=0 — returning empty (fail-closed)',
+        );
+        return <Map<String, dynamic>>[];
+      }
+
+      // Filter request docs by slot terms (type-tolerant compare)
+      final List<Map<String, dynamic>> kept = filterBySlotGate(
+        docs,
+        allConcrete,
+        allWildcardLevels,
+        _gateSlotConfig.pointerField,
+        _gateSlotConfig.levelField,
+      );
+      devPrint(
+        'ListCard slot gate: grants=${matchedGrants.length} '
+        'concrete=$allConcrete wildcardLevels=$allWildcardLevels '
+        'ptr="${_gateSlotConfig.pointerField}" '
+        'lvl="${_gateSlotConfig.levelField}" '
+        'vid=$vid grantFound=true visibleCount=${kept.length}',
+      );
+      return kept;
+    } catch (e) {
+      // Any gate failure is a visibility failure → show nothing, never throw.
+      devPrint(
+        'ListCard slot gate: ERROR vid=$vid '
+        'visibleCount=0 — returning empty (fail-closed): $e',
+      );
+      return <Map<String, dynamic>>[];
+    }
   }
 
   /// Client-side search bar filter on configured searchFields.
@@ -470,6 +668,7 @@ class _ListCardState extends State<ListCard> {
     final String meta = _resolve(_metaTpl, doc);
     final String trailing = _resolve(_trailingTpl, doc);
     final String trailingLabel = _resolve(_trailingLabelTpl, doc);
+    final String note = resolveNoteTemplate(_noteTpl, doc);
 
     // Badge: look up from badgeField value
     final String badgeValue = _badgeField.isNotEmpty
@@ -575,6 +774,17 @@ class _ListCardState extends State<ListCard> {
                           style: TextStyle(
                             fontSize: 13,
                             color: Colors.grey.shade600,
+                          ),
+                        ),
+                      ],
+                      // Note
+                      if (note.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          note,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade500,
                           ),
                         ),
                       ],

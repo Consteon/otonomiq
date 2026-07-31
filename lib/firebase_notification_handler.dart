@@ -226,7 +226,7 @@ Future<String?> _resolveIOPath({FlutterSecureStorage? store}) async {
   final myCluster = await ss.read(key: 'myCluster');
   final myMsgId = await ss.read(key: 'myMsgId');
   if (myCluster == null || myMsgId == null) return null;
-  return 'msg_$myCluster/$myMsgId/io'; // matches api.dart:2084
+  return msgIoPath(myCluster, myMsgId); // same shape as api.dart:2162
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +251,7 @@ class FirebaseNotifications {
     _isSetUp = true;
     devPrint('[fcm] setUpFirebase START');
     await _requestPermission();
+    await _logApnsToken();
     await _registerToken();
     _listenTokenRefresh();
 
@@ -269,14 +270,38 @@ class FirebaseNotifications {
 
     // Foreground message handler
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
-      devPrint('[fcm] onMessage: ${message.data}  firestoreIO=$firestoreIO');
+      // Resolve the inbox path from secure storage, exactly like the background
+      // handler below. Trusting the global `firestoreIO` MISFILED every
+      // foreground push: on a warm start the global sits at its boot default
+      // `users_<fsName>` (global.dart:762/863), so threads and messages were
+      // written into the users collection while the real inbox
+      // (`msg_<clt>/<msgId>/io`) stayed empty. Background pushes used the
+      // secure-storage path, so the same account's history ended up split
+      // across two collections. Global kept only as a pre-login fallback.
+      final ioPath = (await _resolveIOPath()) ?? (firestoreIO as String?);
+      // `data` alone is not enough to tell "sender sent nothing" from "sender
+      // put the payload in the notification block instead of data" -- the two
+      // look identical from `${message.data}` and need opposite fixes.
+      devPrint(
+        '[fcm] onMessage: data=${message.data}'
+        ' notif=${message.notification?.title}/${message.notification?.body}'
+        ' msgId=${message.messageId} ca=${message.contentAvailable}'
+        '  io=$ioPath',
+      );
       // Bridge: write to inbox Firestore (snapshots() auto-updates UI)
-      await bridgePushToInbox(firestoreIO as String?, message.data);
+      await bridgePushToInbox(ioPath, message.data);
       // Show local notification (Android does not auto-display in foreground)
-      final dp = (message.data['dp'] ?? '') as String;
-      final nm = (message.data['nm'] ?? '') as String;
+      // Fall back to the notification block: a notification-only push carries
+      // no 'nm'/'dp' data keys, and without this the banner rendered blank --
+      // the push looked like it never arrived at all.
+      final dp =
+          (message.data['dp'] ?? message.notification?.body ?? '') as String;
+      final nm =
+          (message.data['nm'] ?? message.notification?.title ?? '') as String;
       final route = (message.data['route'] ?? '') as String;
-      await _showLocalNotification(flnp, nm, dp, route: route);
+      if (nm.isNotEmpty || dp.isNotEmpty) {
+        await _showLocalNotification(flnp, nm, dp, route: route);
+      }
     });
 
     // App brought to foreground by tapping an FCM notification.
@@ -309,7 +334,7 @@ class FirebaseNotifications {
 
   /// Request notification permission (iOS always, Android 13+).
   Future<void> _requestPermission() async {
-    await _firebaseMessaging.requestPermission(
+    final settings = await _firebaseMessaging.requestPermission(
       alert: true,
       badge: true,
       sound: true,
@@ -318,6 +343,34 @@ class FirebaseNotifications {
     // On Android 13+ this triggers the system POST_NOTIFICATIONS dialog.
     // On iOS this triggers the standard push permission dialog.
     // On older Android this is a no-op (permission granted at install).
+    //
+    // The result was previously discarded. A `denied` status means iOS shows no
+    // banner no matter what the sender does, and it is indistinguishable from a
+    // routing problem unless it is logged.
+    devPrint('[fcm] permission: ${settings.authorizationStatus}');
+  }
+
+  /// Logs the APNs device token on iOS.
+  ///
+  /// This is the one value that explains "FCM token looks fine but zero pushes
+  /// arrive": on iOS every FCM message rides APNs, so with no APNs token FCM has
+  /// nothing to route to and drops the send server-side. The FCM token stays
+  /// valid-looking the whole time, which is why [_registerToken]'s log is not
+  /// enough evidence. Android always returns null here -- skip it there.
+  Future<void> _logApnsToken() async {
+    if (!sinner) return;
+    try {
+      var apns = await _firebaseMessaging.getAPNSToken();
+      if (apns == null) {
+        // Registration with APNs is asynchronous and often not finished yet
+        // right after requestPermission; give it one retry before believing it.
+        await Future.delayed(const Duration(seconds: 3));
+        apns = await _firebaseMessaging.getAPNSToken();
+      }
+      devPrint('[fcm] apns token: $apns');
+    } catch (e) {
+      devPrint('[fcm] getAPNSToken error: $e');
+    }
   }
 
   /// Get FCM token and store in Redux #FCM_TOKEN.

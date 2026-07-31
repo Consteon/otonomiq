@@ -876,16 +876,20 @@ String getLocationString(
   String position3,
   OtqState locSensor,
 ) {
+  // Every free-text slot goes through cleanupString (global.dart). isoCountryCode
+  // and postalCode are geocoder output like the address slots below and used to
+  // be the only placemark fields written raw; locId is scanned-QR text. The
+  // numeric slots (timestamp/lat/long) cannot carry a hostile char.
   final diamond = separator[1];
   String result = diamond; //1
   result += locSensor.nowTime.millisecondsSinceEpoch.toString() + diamond; //2
-  result += position3 + diamond; //3
-  result += locId + diamond; //4
+  result += cleanupString(position3) + diamond; //3
+  result += cleanupString(locId) + diamond; //4
   result += locSensor.latitude.toString() + diamond; //5
   result += locSensor.longitude.toString() + diamond; //6
-  result += imageUrl + diamond; //7
-  result += locSensor.isoCountryCode + diamond; //8
-  result += locSensor.postalCode + diamond; //9
+  result += cleanupString(imageUrl) + diamond; //7
+  result += cleanupString(locSensor.isoCountryCode) + diamond; //8
+  result += cleanupString(locSensor.postalCode) + diamond; //9
   result += cleanupString(locSensor.administrativeArea) + diamond; //10
   result += cleanupString(locSensor.subAdministrativeArea) + diamond; //11
   result += cleanupString(locSensor.locality) + diamond; //12
@@ -2169,7 +2173,7 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
           );
           String myCluster = (await secureRead(key: "myCluster"))!;
           String myMsgId = (await secureRead(key: "myMsgId"))!;
-          firestoreIO = '$msgPrefix$myCluster/$myMsgId/io';
+          firestoreIO = msgIoPath(myCluster, myMsgId);
           firestoreMsg = firestoreIO;
           // Inbox stream was bound to the boot-time default path at launch;
           // now that the real path is set, re-subscribe so the badge + inbox
@@ -3406,6 +3410,21 @@ Future getLifProfileData(String lifKey) async {
     lifSetting,
     lifSetting2,
   ]);
+  // 60s, NOT padding. This hits the same `readSS` CF on the same workbook as
+  // readSettings, whose budget is 60s for exactly the same reason: the cost is
+  // the backend opening a heavy workbook, not the payload size (measured
+  // 2026-07-27 — 7.5s just to open, before reading anything).
+  //
+  // This call was left at 15s when readSettings went 8s -> 60s, and it is the
+  // ONLY hard timeout on the login critical path that THROWS: nothing between
+  // here and aumLogin's `catch (err) { result = 2; }` handles it, so a timeout
+  // surfaces as LoginState.failure -> "Login anda gagal. Kemungkinan karena
+  // koneksi internet anda terganggu". Measured durations were 4.2s / 10.8s /
+  // 13.6s against the 15s budget — a coin flip on every login, which is what
+  // users reported as "sering gagal".
+  //
+  // Read `[LOGINPERF] getLifProfileData = Xms` (user_repository.dart) before
+  // changing this; do not lower it on the assumption that 15s "should" be enough.
   var response = await http
       .post(Uri.parse(functionBody.url), body: functionBody.body)
       .timeout(const Duration(seconds: 60));
@@ -3663,7 +3682,15 @@ Future<int> launchCheck() async {
       var msgSnapshot = await tx.get<Map<String, dynamic>>(docRef);
       Map<String, dynamic> updateMsg = {};
       result = 9930;
-      updateMsg["f"] = state['#FCM_TOKEN'];
+      // Only write a real token. This ran unguarded, so any start that reached
+      // here before setUpFirebase had dispatched #FCM_TOKEN (getToken() null,
+      // or the static _isSetUp guard short-circuiting a later call in a process
+      // where the dispatch never happened) wrote `f: null` and WIPED the stored
+      // token -- after which the sender has no target and nobody gets a push.
+      final fcmToken = state['#FCM_TOKEN'];
+      if (fcmToken != null && fcmToken.toString().isNotEmpty) {
+        updateMsg["f"] = fcmToken;
+      }
       result = 9931;
       if (msgSnapshot.exists) {
         result = 9932;
@@ -3678,7 +3705,9 @@ Future<int> launchCheck() async {
         //await tx.update(docRef, updateMsg);
       }
       result = 9935;
-      tx.update(docRef, updateMsg);
+      // updateMsg can now be empty (no token yet, nothing else to backfill);
+      // skip the write rather than issue a pointless transaction update.
+      if (updateMsg.isNotEmpty) tx.update(docRef, updateMsg);
       result = 9936;
     }); // end of firebase transaction
     //    docRef.updateData(updateData); //= write updated data to message doc
