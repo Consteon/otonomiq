@@ -4,6 +4,7 @@ default_platform(:ios)
 platform :ios do
   desc "Build IPA and upload to App Store Connect / TestFlight"
   lane :beta do
+    sh("security unlock-keychain -p '' ~/Library/Keychains/login.keychain-db 2>/dev/null || security unlock-keychain -p '' ~/Library/Keychains/login.keychain 2>/dev/null || true")
     sh("xattr -cr .. 2>/dev/null || true")
     sh("unset GEM_HOME GEM_PATH RUBYLIB; cd .. && flutter build ipa --release")
     
