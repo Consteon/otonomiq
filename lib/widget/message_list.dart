@@ -121,7 +121,7 @@ class _MessageListState extends State<MessageList> {
                       // if msg.route is not null then display
                       if (msg.route != null && msg.route != '') {
                         if (linkElement[msg.route] == null) {
-                          // TODO put page not found error in message_list if route is not present
+                          // put page not found error in message_list if route is not present
                         } else {
                           var myRoute = msg.route;
                           //myRoute = home; // delete this line when page is available

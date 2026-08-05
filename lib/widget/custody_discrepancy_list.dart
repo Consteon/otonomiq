@@ -129,7 +129,7 @@ class _CustodyDiscrepancyListState extends State<CustodyDiscrepancyList> {
       rawSearch,
       widget.scrName,
     );
-    return matched.isNotEmpty ? matched.first : null;
+    return pickNewestDoc(matched);
   }
 
   List<Map<String, dynamic>> _extractArray(

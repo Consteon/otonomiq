@@ -22,6 +22,7 @@ class VehiclePickerSheet extends StatefulWidget {
     required this.tasks,
     required this.updateEventRowDsl,
     required this.component,
+    required this.scrName,
     this.titleAssign = 'Pilih Kendaraan',
     this.titleReassign = 'Assign Ulang Kendaraan',
     this.confirmLabel = 'Konfirmasi',
@@ -36,6 +37,7 @@ class VehiclePickerSheet extends StatefulWidget {
   final List<Map<String, dynamic>> tasks;
   final String updateEventRowDsl;
   final dynamic component; // kept for resolveAppVid
+  final String scrName; // for {today}/{now}/session token resolution
   final String titleAssign;
   final String titleReassign;
   final String confirmLabel;
@@ -80,6 +82,7 @@ class _VehiclePickerSheetState extends State<VehiclePickerSheet> {
       rawDsl: widget.updateEventRowDsl,
       tokens: {'{taskVid}': widget.taskVid, '{vehicleId}': _selectedLv!},
       component: widget.component,
+      scrName: widget.scrName,
     );
 
     if (!mounted) return;

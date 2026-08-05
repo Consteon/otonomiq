@@ -116,6 +116,10 @@ class _CirculationSummaryState extends State<CirculationSummary> {
           .toString()
           .trim()
           .isNotEmpty;
+      final String actualDropField =
+          (widget.component['actualDropField'] ?? 'ad').toString();
+      final String actualPickupField =
+          (widget.component['actualPickupField'] ?? 'ap').toString();
       if (perTx) return _buildPerTx(tasks);
 
       final CirculationResult result = aggregateItemCirculation(
@@ -124,6 +128,8 @@ class _CirculationSummaryState extends State<CirculationSummary> {
         labelField: 'in',
         dropField: (widget.component['dropField'] ?? 'pd').toString(),
         pickupField: (widget.component['pickupField'] ?? 'pp').toString(),
+        actualDropField: actualDropField,
+        actualPickupField: actualPickupField,
       );
 
       // Labels from text slots
@@ -377,6 +383,16 @@ class _CirculationSummaryState extends State<CirculationSummary> {
   // from the segments (owner-reworded), never hardcoded (spec (2).md §3).
 
   Widget _buildPerTx(List<Map<String, dynamic>> tasks) {
+    final String actualDropField = (widget.component['actualDropField'] ?? 'ad')
+        .toString();
+    final String actualPickupField =
+        (widget.component['actualPickupField'] ?? 'ap').toString();
+    final String actualSaleField = (widget.component['actualSaleField'] ?? 'as')
+        .toString();
+    final String actualRefillField =
+        (widget.component['actualRefillField'] ?? 'ar').toString();
+    final String actualBuyField = (widget.component['actualBuyField'] ?? 'ab')
+        .toString();
     final TxCirculationResult result = aggregateTxCirculation(
       tasks,
       itemsField: (widget.component['itemsField'] ?? 'it').toString(),
@@ -387,6 +403,11 @@ class _CirculationSummaryState extends State<CirculationSummary> {
       saleField: (widget.component['saleField'] ?? 'ps').toString(),
       refillField: (widget.component['refillField'] ?? 'pr').toString(),
       buyField: (widget.component['buyField'] ?? 'pb').toString(),
+      actualDropField: actualDropField,
+      actualPickupField: actualPickupField,
+      actualSaleField: actualSaleField,
+      actualRefillField: actualRefillField,
+      actualBuyField: actualBuyField,
     );
 
     final String title = _t(0, 'Total Circulation');

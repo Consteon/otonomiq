@@ -1,13 +1,14 @@
-import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:geocoding/geocoding.dart';
-import '../global.dart';
-import '../global2.dart';
-import '../model/input_controller.dart';
+
 import '../api.dart';
-import '../model/connection_data.dart';
 import '../bloc_timer/timer_bloc.dart';
 import '../bloc_timer/timer_event.dart';
+import '../global.dart';
+import '../global2.dart';
+import '../model/connection_data.dart';
+import '../model/input_controller.dart';
 import '../model/otq_state.dart';
 import '../redux/screen_transaction.dart';
 
@@ -41,19 +42,26 @@ class GpsSendState extends State<GpsSend> {
         rootThis.wait = true;
       });
       timerBloc.add(
-          const Start(duration: 5)); //  get timerBloc from transactionStore
-      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-        '#NEXTROUTE': route,
-        '#TIMER_CONTEXT': context,
-        '#TIMER_DURATION': widget.component['delay'] ?? 5,
-      }))); // set state #NEXTROUTE route that will be displayed after waitScreen
+        const Start(duration: 5),
+      ); //  get timerBloc from transactionStore
+      transactionStore.dispatch(
+        UpdateScreenTxAction(
+          ScreenTransaction({
+            '#NEXTROUTE': route,
+            '#TIMER_CONTEXT': context,
+            '#TIMER_DURATION': widget.component['delay'] ?? 5,
+          }),
+        ),
+      ); // set state #NEXTROUTE route that will be displayed after waitScreen
       saveSend(null, scrName, widget.component, locString, defaultVid());
     } // end of saveData
 
     Future<void> sendLocation(List tArray) async {
       // Platform messages may fail, so we use a try/catch PlatformException.
-      ConnectionData connectionData =
-          await ConnectionData().getConnection(true, true);
+      ConnectionData connectionData = await ConnectionData().getConnection(
+        true,
+        true,
+      );
       if (await dataOk(context)) {
         setTransactionNotOK('sendLocation [57]');
         try {
@@ -61,33 +69,32 @@ class GpsSendState extends State<GpsSend> {
           var position = connectionData.position;
           if (position == null) {
             await showDialog(
-                context: context,
-                builder: (BuildContext context) {
-                  return AlertDialog(
-                    // dialog 3
-                    title: Text(textList["Fail"]),
-                    content: Container(
-                      alignment: const Alignment(0.0, 0.0),
-                      height: dialogHeight,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        mainAxisAlignment: MainAxisAlignment.start,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(textList["GpsProblem"]),
-                        ],
-                      ),
+              context: context,
+              builder: (BuildContext context) {
+                return AlertDialog(
+                  // dialog 3
+                  title: Text(textList["Fail"]),
+                  content: Container(
+                    alignment: const Alignment(0.0, 0.0),
+                    height: dialogHeight,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [Text(textList["GpsProblem"])],
                     ),
-                    actions: <Widget>[
-                      TextButton(
-                        child: Text(getText(tArray, 8)),
-                        onPressed: () {
-                          Navigator.of(context).pop();
-                        },
-                      ),
-                    ],
-                  );
-                });
+                  ),
+                  actions: <Widget>[
+                    TextButton(
+                      child: Text(getText(tArray, 8)),
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                      },
+                    ),
+                  ],
+                );
+              },
+            );
           } else {
             // actionLock();
             String mock = 'Unknown';
@@ -109,33 +116,34 @@ class GpsSendState extends State<GpsSend> {
                   fromLinkOption = 'normal-clock-out';
                 } else {
                   await showDialog(
-                      // show dialog 34
-                      context: context,
-                      builder: (BuildContext context) {
-                        return AlertDialog(
-                          // dialog 34
-                          title: Text(getText(tArray, 9)),
-                          content: Text(getText(tArray, 10)),
-                          actions: <Widget>[
-                            TextButton(
-                              child: Text(getText(tArray, 12)), // scenario 4
-                              onPressed: () {
-                                dialogText1 = getText(tArray, 5); // scenario 4
-                                fromLinkOption = 'clock-out-overtime';
-                                Navigator.of(context).pop();
-                              },
-                            ),
-                            TextButton(
-                              child: Text(getText(tArray, 11)),
-                              onPressed: () {
-                                dialogText1 = getText(tArray, 6); // scenario 3
-                                fromLinkOption = 'forgot-clock-out';
-                                Navigator.of(context).pop();
-                              },
-                            ),
-                          ],
-                        );
-                      });
+                    // show dialog 34
+                    context: context,
+                    builder: (BuildContext context) {
+                      return AlertDialog(
+                        // dialog 34
+                        title: Text(getText(tArray, 9)),
+                        content: Text(getText(tArray, 10)),
+                        actions: <Widget>[
+                          TextButton(
+                            child: Text(getText(tArray, 12)), // scenario 4
+                            onPressed: () {
+                              dialogText1 = getText(tArray, 5); // scenario 4
+                              fromLinkOption = 'clock-out-overtime';
+                              Navigator.of(context).pop();
+                            },
+                          ),
+                          TextButton(
+                            child: Text(getText(tArray, 11)),
+                            onPressed: () {
+                              dialogText1 = getText(tArray, 6); // scenario 3
+                              fromLinkOption = 'forgot-clock-out';
+                              Navigator.of(context).pop();
+                            },
+                          ),
+                        ],
+                      );
+                    },
+                  );
                 }
                 break;
 
@@ -153,124 +161,148 @@ class GpsSendState extends State<GpsSend> {
 
             String content = widget.component['flag'] ?? 'GPS_SEND';
             txfController[widget.scrName]![1] = InputController(
-                1, TextEditingController(text: content), content, content);
+              1,
+              TextEditingController(text: content),
+              content,
+              content,
+            );
             content = nowTime.toString();
             txfController[widget.scrName]![2] = InputController(
-                2, TextEditingController(text: content), content, content);
+              2,
+              TextEditingController(text: content),
+              content,
+              content,
+            );
             content = fromLinkOption;
             txfController[widget.scrName]![3] = InputController(
-                3, TextEditingController(text: content), content, content);
+              3,
+              TextEditingController(text: content),
+              content,
+              content,
+            );
 
             content = position.latitude.toString();
             txfController[widget.scrName]![4] = InputController(
-                4, TextEditingController(text: content), content, content);
+              4,
+              TextEditingController(text: content),
+              content,
+              content,
+            );
             content = position.longitude.toString();
             txfController[widget.scrName]![5] = InputController(
-                5, TextEditingController(text: content), content, content);
+              5,
+              TextEditingController(text: content),
+              content,
+              content,
+            );
             content = placeMark.isNotEmpty
                 ? placeMark[0].isoCountryCode!
                 : invalidCountry;
             txfController[widget.scrName]![6] = InputController(
-                6, TextEditingController(text: content), content, content);
+              6,
+              TextEditingController(text: content),
+              content,
+              content,
+            );
             content = placeMark.isNotEmpty ? placeMark[0].postalCode! : "";
             txfController[widget.scrName]![7] = InputController(
-                7, TextEditingController(text: content), content, content);
+              7,
+              TextEditingController(text: content),
+              content,
+              content,
+            );
             content = cleanupString(
-                placeMark.isNotEmpty ? placeMark[0].administrativeArea! : "");
+              placeMark.isNotEmpty ? placeMark[0].administrativeArea! : "",
+            );
             txfController[widget.scrName]![8] = InputController(
-                8, TextEditingController(text: content), content, content);
-            content = cleanupString(placeMark.isNotEmpty
-                ? placeMark[0].subAdministrativeArea!
-                : "");
+              8,
+              TextEditingController(text: content),
+              content,
+              content,
+            );
+            content = cleanupString(
+              placeMark.isNotEmpty ? placeMark[0].subAdministrativeArea! : "",
+            );
             txfController[widget.scrName]![9] = InputController(
-                9, TextEditingController(text: content), content, content);
+              9,
+              TextEditingController(text: content),
+              content,
+              content,
+            );
             content = cleanupString(
-                placeMark.isNotEmpty ? placeMark[0].locality! : "");
+              placeMark.isNotEmpty ? placeMark[0].locality! : "",
+            );
             txfController[widget.scrName]![10] = InputController(
-                10, TextEditingController(text: content), content, content);
+              10,
+              TextEditingController(text: content),
+              content,
+              content,
+            );
             content = cleanupString(
-                placeMark.isNotEmpty ? placeMark[0].subLocality! : "");
+              placeMark.isNotEmpty ? placeMark[0].subLocality! : "",
+            );
             txfController[widget.scrName]![11] = InputController(
-                11, TextEditingController(text: content), content, content);
+              11,
+              TextEditingController(text: content),
+              content,
+              content,
+            );
             content = cleanupString(
-                placeMark.isNotEmpty ? placeMark[0].thoroughfare! : "");
+              placeMark.isNotEmpty ? placeMark[0].thoroughfare! : "",
+            );
             txfController[widget.scrName]![12] = InputController(
-                12, TextEditingController(text: content), content, content);
+              12,
+              TextEditingController(text: content),
+              content,
+              content,
+            );
             content = cleanupString(
-                placeMark.isNotEmpty ? placeMark[0].subThoroughfare! : "");
+              placeMark.isNotEmpty ? placeMark[0].subThoroughfare! : "",
+            );
             txfController[widget.scrName]![13] = InputController(
-                13, TextEditingController(text: content), content, content);
+              13,
+              TextEditingController(text: content),
+              content,
+              content,
+            );
             content = mock;
             txfController[widget.scrName]![14] = InputController(
-                14, TextEditingController(text: content), content, content);
+              14,
+              TextEditingController(text: content),
+              content,
+              content,
+            );
 
             widget.component['route'] =
                 widget.component['route'] ?? home; //= default route = Home
             OtqState locSensor = OtqState().getDataFrom(
-                DateTime.fromMillisecondsSinceEpoch(nowTime),
-                position,
-                placeMark);
+              DateTime.fromMillisecondsSinceEpoch(nowTime),
+              position,
+              placeMark,
+            );
             String locString = getLocationString('', '', '', locSensor);
             saveData(widget.scrName, locString); //= send record to FromLink
 
             // display dialog 1
             await showDialog(
-                context: context,
-                builder: (BuildContext context) {
-                  return AlertDialog(
-                    // dialog 1
-                    title: Text(getText(tArray, 2)),
-                    content: Container(
-                      alignment: const Alignment(0.0, 0.0),
-                      height: dialogHeight,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        mainAxisAlignment: MainAxisAlignment.start,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(dialogText1 ?? "--Bad GPS_SEND Text--"),
-                          Container(
-                            height: 12,
-                          ),
-                          Text(
-                              "${placeMark.isNotEmpty ? placeMark[0].thoroughfare! : emptyString} ${placeMark.isNotEmpty ? placeMark[0].subThoroughfare! : emptyString}, ${placeMark.isNotEmpty ? placeMark[0].administrativeArea! : emptyString} ${placeMark.isNotEmpty ? placeMark[0].postalCode! : emptyString}")
-                        ],
-                      ),
-                    ),
-                    actions: <Widget>[
-                      TextButton(
-                        child: Text(getText(tArray, 8)),
-                        onPressed: () {
-                          devPrint(
-                              '********** actionUnLock from gps_send dialog [240]');
-                          // actionUnLock('gps_send dialog action [243]');
-                          Navigator.of(context).pop();
-                        },
-                      ),
-                    ],
-                  );
-                });
-          } // end if position
-        } on PlatformException catch (err) {
-          // TODO display dialog fail, and play wrong beep
-          setDataOK(
-              '1'); // reload pages and display green anyway. So the app will not lock up
-          devPrint(err);
-          await showDialog(
               context: context,
               builder: (BuildContext context) {
                 return AlertDialog(
-                  // dialog 3
-                  title: const Text("Gagal"),
+                  // dialog 1
+                  title: Text(getText(tArray, 2)),
                   content: Container(
                     alignment: const Alignment(0.0, 0.0),
                     height: dialogHeight,
-                    child: const Column(
+                    child: Column(
                       mainAxisSize: MainAxisSize.min,
                       mainAxisAlignment: MainAxisAlignment.start,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text("Gagal, coba ulangi sekali lagi."),
+                        Text(dialogText1 ?? "--Bad GPS_SEND Text--"),
+                        Container(height: 12),
+                        Text(
+                          "${placeMark.isNotEmpty ? placeMark[0].thoroughfare! : emptyString} ${placeMark.isNotEmpty ? placeMark[0].subThoroughfare! : emptyString}, ${placeMark.isNotEmpty ? placeMark[0].administrativeArea! : emptyString} ${placeMark.isNotEmpty ? placeMark[0].postalCode! : emptyString}",
+                        ),
                       ],
                     ),
                   ),
@@ -278,12 +310,51 @@ class GpsSendState extends State<GpsSend> {
                     TextButton(
                       child: Text(getText(tArray, 8)),
                       onPressed: () {
+                        devPrint(
+                          '********** actionUnLock from gps_send dialog [240]',
+                        );
+                        // actionUnLock('gps_send dialog action [243]');
                         Navigator.of(context).pop();
                       },
                     ),
                   ],
                 );
-              });
+              },
+            );
+          } // end if position
+        } on PlatformException catch (err) {
+          // display dialog fail, and play wrong beep
+          setDataOK(
+            '1',
+          ); // reload pages and display green anyway. So the app will not lock up
+          devPrint(err);
+          await showDialog(
+            context: context,
+            builder: (BuildContext context) {
+              return AlertDialog(
+                // dialog 3
+                title: const Text("Gagal"),
+                content: Container(
+                  alignment: const Alignment(0.0, 0.0),
+                  height: dialogHeight,
+                  child: const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [Text("Gagal, coba ulangi sekali lagi.")],
+                  ),
+                ),
+                actions: <Widget>[
+                  TextButton(
+                    child: Text(getText(tArray, 8)),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                    },
+                  ),
+                ],
+              );
+            },
+          );
         }
       } // end of dataOk
     } // end of _sendLocation
@@ -300,21 +371,20 @@ class GpsSendState extends State<GpsSend> {
         child: Container(
           // if single
           alignment: Alignment.center,
-//      color: Colors.red,
+          //      color: Colors.red,
           width: (widget.component['width'] ?? 90).toDouble(),
           child: Card(
             child: InkWell(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: <Widget>[
-                  Container(
-                    height: topPad,
-                  ),
+                  Container(height: topPad),
                   AspectRatio(
                     aspectRatio: defaultAspectRatio,
                     child: displayImage(
-                        imageUrl: widget.component['url'] ?? defaultImage,
-                        cached: true),
+                      imageUrl: widget.component['url'] ?? defaultImage,
+                      cached: true,
+                    ),
                     // child: FadeInImage.memoryNetwork(
                     //   placeholder: kTransparentImage,
                     //   image: widget.component['url'] ?? defaultImage,
@@ -343,14 +413,13 @@ class GpsSendState extends State<GpsSend> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: <Widget>[
-                Container(
-                  height: topPad,
-                ),
+                Container(height: topPad),
                 AspectRatio(
                   aspectRatio: defaultAspectRatio,
                   child: displayImage(
-                      imageUrl: widget.component['url'] ?? defaultImage,
-                      cached: true),
+                    imageUrl: widget.component['url'] ?? defaultImage,
+                    cached: true,
+                  ),
                   // child: CachedNetworkImage(
                   //   imageUrl: widget.component['url'] ?? defaultImage,
                   //   placeholder: (context, url) => Container(

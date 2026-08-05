@@ -31,7 +31,14 @@ void constructHomeElements() {
 
 void constructAllPageElements() {
   screenUIComponent.forEach((k, v) {
-    constructPageElements(k);
+    // Isolate per screen. One throwing screen used to abort this forEach, so
+    // every screen after it was never built (linkElement missing -> blank page)
+    // and the log named the caller, never the screen. Report the screen name.
+    try {
+      constructPageElements(k);
+    } catch (e, s) {
+      errorReport('constructAllPageElements failed on screen "$k": $e', s);
+    }
   });
 }
 
@@ -147,6 +154,19 @@ List<Widget> buildPage(
 }) {
   // main page should omit clear (=true),
   // sub page like dialog or widgetList should set clear = false
+
+  // A screen whose `children` is an empty array threw
+  // `RangeError (length): Invalid value: Valid value range is empty: 0` on the
+  // unguarded `componentList[0]` below. constructPageElements only checks
+  // `children != null`, and constructAllPageElements iterates every screen in
+  // one forEach — so a single empty-children screen aborted the whole loop and
+  // left every screen after it unbuilt, on cache load, on opt-2 startup and on
+  // every refresh. Render it as an empty page instead.
+  if (componentList is! List || componentList.isEmpty) {
+    devPrint('buildPage: "$scrName" has no children — rendering empty page');
+    return <Widget>[];
+  }
+
   dynamic myState = transactionStore.state.screenTx;
 
   if (txfController[scrName] == null) {

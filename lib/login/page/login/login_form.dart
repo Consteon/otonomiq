@@ -232,7 +232,7 @@ class _LoginFormState extends State<LoginForm> {
             );
           } else if (state.loginStatus == 802) {
             // got text from guest | VM>JSON
-            // TODO read from Firestore
+            // read from Firestore
             showDialog(
               context: context,
               builder: (BuildContext context) {
@@ -260,7 +260,7 @@ class _LoginFormState extends State<LoginForm> {
             );
           } else if (state.loginStatus == 809) {
             // got text from guest | VM>JSON
-            // TODO read from Firestore
+            // read from Firestore
             showDialog(
               context: context,
               builder: (BuildContext context) {
@@ -312,7 +312,7 @@ class _LoginFormState extends State<LoginForm> {
         } else if (state.loginUid != '') {
           gotoRoute(
             widget.route ?? '_Invitation',
-          ); // TODO delete this line, change it with new user getter.
+          ); // delete this line, change it with new user getter.
         }
       },
       child: BlocBuilder(

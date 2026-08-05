@@ -1,16 +1,17 @@
-import '../../global.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:device_info_plus/device_info_plus.dart';
+
+import '../../global.dart';
 import '../../redux/screen_transaction.dart';
 
- /*
+/*
   This part of code is used to contain all code differences between platforms
  */
 
-void setMe(){
+void setMe() {
   // sinner(ios), andrew(android), windy(window), spider(web)
-      andrew = true; // this is android
+  andrew = true; // this is android
 } // end of setMe
 
 LocationSettings myLocationSetting() {
@@ -53,9 +54,11 @@ Future<dynamic> getOsInfo() async {
 String? getInfo(dynamic osInfo) {
   String? returnValue;
   if (andrew) {
-    returnValue = 'os:android${osInfo.version.release};model:${osInfo.manufacturer}-${osInfo.model}';
+    returnValue =
+        'os:android${osInfo.version.release};model:${osInfo.manufacturer}-${osInfo.model}';
   } else {
-    returnValue = 'os:${osInfo.systemName}-${osInfo.systemVersion};model:${osInfo.model}';
+    returnValue =
+        'os:${osInfo.systemName}-${osInfo.systemVersion};model:${osInfo.model}';
   }
   return returnValue;
 } // end getInfo
@@ -71,9 +74,9 @@ Future getDeviceIdCore() async {
       deviceInfo = DeviceInfoPlugin();
       if (andrew) {
         try {
-          // TODO need to change to https://pub.dev/packages/android_id
+          // need to change to https://pub.dev/packages/android_id
           AndroidDeviceInfo deviceData = await deviceInfo.androidInfo;
-          deviceId = deviceData.id ?? emptyString;
+          deviceId = deviceData.id;
         } catch (e) {
           errorReport(e);
         }
@@ -84,8 +87,9 @@ Future getDeviceIdCore() async {
     } on PlatformException {
       deviceId = '--';
     }
-    transactionStore.dispatch(UpdateScreenTxAction(
-        ScreenTransaction({'#DID': deviceId}))); //  set #device id
+    transactionStore.dispatch(
+      UpdateScreenTxAction(ScreenTransaction({'#DID': deviceId})),
+    ); //  set #device id
   } // end if (transactionStore.state.screenTx['#DID'] != null)
   return deviceId;
 } // end of getDeviceId

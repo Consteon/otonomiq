@@ -31,11 +31,11 @@ class AnyPage extends StatefulWidget {
 
 class AnyPageState extends State<AnyPage> {
   Key key = UniqueKey();
-//  var pageState = 1;
-//  var lastPageState = 1; // 1=init
-//  var state;
+  //  var pageState = 1;
+  //  var lastPageState = 1; // 1=init
+  //  var state;
 
-//  final _formKey = GlobalKey();
+  //  final _formKey = GlobalKey();
 
   @override
   Widget build(BuildContext context) {
@@ -55,8 +55,8 @@ class AnyPageState extends State<AnyPage> {
     double bannerAspectRatio = 1.08 / bannerImageAspectRatio;
     var state0 = transactionStore.state.screenTx;
     if (widget.pageName != state0['#CURRENT_ROUTE']) {
-//      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-//          {'#CURRENT_ROUTE': widget.pageName}))); // set state #CURRENT_ROUTE
+      //      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
+      //          {'#CURRENT_ROUTE': widget.pageName}))); // set state #CURRENT_ROUTE
     }
     var title = screenUIComponent[widget.pageName]['title'];
     double lPad = systemUIComponent['Mobile']['leftPad'].toDouble();
@@ -65,8 +65,8 @@ class AnyPageState extends State<AnyPage> {
     double bPad = systemUIComponent['Mobile']['bottomPad'].toDouble();
     rootThis = this;
     List<Widget> page;
-//    var page = buildPage(context,
-//        screenUIComponent[widget.pageName]['children'], widget.pageName);
+    //    var page = buildPage(context,
+    //        screenUIComponent[widget.pageName]['children'], widget.pageName);
     ScrollController scrollController = ScrollController();
 
     appRefresh() {
@@ -75,14 +75,15 @@ class AnyPageState extends State<AnyPage> {
         oldSettingUpShouldBeDeleted().then((aRes) {
           var state = transactionStore.state;
           var lifKey = state.screenTx['#INTERFACE_KEY'];
-          readSettings(lifKey,1).then((_) {
+          readSettings(lifKey, 1).then((_) {
             setState(() {
               key = UniqueKey();
             });
           });
         });
-        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-            {'#REFRESH': false}))); // set state #INTERFACE_KEY
+        transactionStore.dispatch(
+          UpdateScreenTxAction(ScreenTransaction({'#REFRESH': false})),
+        ); // set state #INTERFACE_KEY
       }
     }
 
@@ -90,10 +91,13 @@ class AnyPageState extends State<AnyPage> {
       appRefresh();
       var pgName = systemUIComponent[mobile]['bottomBar'][i]['route'];
       if (pgName == home) {
-        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-            {'#CURRENT_ROUTE': pgName})));
+        transactionStore.dispatch(
+          UpdateScreenTxAction(ScreenTransaction({'#CURRENT_ROUTE': pgName})),
+        );
         Navigator.popUntil(
-            context, ModalRoute.withName(Navigator.defaultRouteName));
+          context,
+          ModalRoute.withName(Navigator.defaultRouteName),
+        );
       } else {
         gotoRoute(pgName);
       }
@@ -104,18 +108,26 @@ class AnyPageState extends State<AnyPage> {
     return StoreConnector<ScreenTransaction, ScreenTransaction>(
       converter: (transactionStore) => transactionStore.state,
       builder: (context, list) {
-//        return
-//          BlocBuilder<TimerBloc, TimerState>(
-//          condition: (previousState, currentState) =>
-//              currentState.runtimeType != previousState.runtimeType,
-//          builder: (context2, state) {
+        //        return
+        //          BlocBuilder<TimerBloc, TimerState>(
+        //          condition: (previousState, currentState) =>
+        //              currentState.runtimeType != previousState.runtimeType,
+        //          builder: (context2, state) {
         Scaffold v;
-//        TimerBloc timerBloc = _state['#TIMER_BLOC']; // timer bloc from main
-//        if (state is Finished) {}
+        //        TimerBloc timerBloc = _state['#TIMER_BLOC']; // timer bloc from main
+        //        if (state is Finished) {}
         page = buildPage(
-            screenUIComponent[widget.pageName]['children'], widget.pageName, clear:false);
+          screenUIComponent[widget.pageName]['children'],
+          widget.pageName,
+          clear: false,
+        );
         v = Scaffold(
           key: key,
+          // Same floating-pill treatment as the home shell: body runs under the
+          // bar so the strip around it is page content, not the scaffold
+          // background. The ListView below has padding:null and picks up the
+          // bar-height inset from MediaQuery by itself.
+          extendBody: true,
           appBar: AppBar(
             // Here we take the value from the MyHomePage object that was created by
             // the App.build method, and use it to set our appbar title.
@@ -127,13 +139,13 @@ class AnyPageState extends State<AnyPage> {
                   oldSettingUpShouldBeDeleted().then((aRes) {
                     var state = transactionStore.state;
                     var lifKey = state.screenTx['#INTERFACE_KEY'];
-                    readSettings(lifKey,1).then((_) {
+                    readSettings(lifKey, 1).then((_) {
                       key = UniqueKey();
                       var a = 1;
-//                      this.setState(() {
-//                        key = UniqueKey();
+                      //                      this.setState(() {
+                      //                        key = UniqueKey();
 
-//                      });
+                      //                      });
                     });
                   });
                 },
@@ -144,15 +156,16 @@ class AnyPageState extends State<AnyPage> {
             selectedIndex: 0,
             items: (systemUIComponent[mobile]['bottomBar'] as List)
                 .map<OtqNavItem>((item) {
-              final iconKey = item['icon'].toString();
-              final route = item['route']?.toString() ?? '';
-              final label = item['label']?.toString() ??
-                  route.replaceAll('_', ' ');
-              return OtqNavItem(
-                icon: otqIcons[iconKey] ?? Icons.circle_outlined,
-                label: label,
-              );
-            }).toList(),
+                  final iconKey = item['icon'].toString();
+                  final route = item['route']?.toString() ?? '';
+                  final label =
+                      item['label']?.toString() ?? route.replaceAll('_', ' ');
+                  return OtqNavItem(
+                    icon: otqIcons[iconKey] ?? Icons.circle_outlined,
+                    label: label,
+                  );
+                })
+                .toList(),
             onTap: handleNavTap,
           ),
           body: Stack(
@@ -171,7 +184,7 @@ class AnyPageState extends State<AnyPage> {
               ),
               BlocBuilder<TimerBloc, TimerState>(
                 buildWhen: (previousState, currentState) =>
-                currentState.runtimeType != previousState.runtimeType,
+                    currentState.runtimeType != previousState.runtimeType,
                 builder: (context, state) {
                   Widget ret;
                   if (state is Running) {
@@ -181,29 +194,31 @@ class AnyPageState extends State<AnyPage> {
                       oldSettingUpShouldBeDeleted().then((aRes) {
                         dynamic state = transactionStore.state;
                         dynamic lifKey = state.screenTx['#INTERFACE_KEY'];
-                        readSettings(lifKey,1).then((_) {
+                        readSettings(lifKey, 1).then((_) {
                           key = UniqueKey();
                           dynamic state0 = transactionStore.state.screenTx;
                           dynamic nxPage = state0['#NEXTROUTE'];
-                          transactionStore.dispatch(UpdateScreenTxAction(
-                              ScreenTransaction({
-                                '#CURRENT_ROUTE': nxPage
-                              }))); // set state #CURRENT_ROUTE
+                          transactionStore.dispatch(
+                            UpdateScreenTxAction(
+                              ScreenTransaction({'#CURRENT_ROUTE': nxPage}),
+                            ),
+                          ); // set state #CURRENT_ROUTE
                           page = buildPage(
-                              screenUIComponent[nxPage]['children'], nxPage, clear:false);
+                            screenUIComponent[nxPage]['children'],
+                            nxPage,
+                            clear: false,
+                          );
                           title = screenUIComponent[nxPage]['title'];
                           try {
                             scrollController.jumpTo(0.0);
                           } catch (e) {}
-                          state0['#TIMER_BLOC']
-                              .dispatch(Reset()); // reset timer state to Ready
+                          state0['#TIMER_BLOC'].dispatch(
+                            Reset(),
+                          ); // reset timer state to Ready
                         });
                       });
                     }
-                    ret = const SizedBox(
-                      width: 0.0,
-                      height: 0.0,
-                    );
+                    ret = const SizedBox(width: 0.0, height: 0.0);
                   }
                   return ret;
                 },

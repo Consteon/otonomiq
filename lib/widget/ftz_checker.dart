@@ -512,7 +512,7 @@ class FtzCheckerState extends State<FtzChecker> {
             resultOk = errorString;
           } // end if position
         } catch (e) {
-          // TODO display dialog fail, and play wrong beep
+          // display dialog fail, and play wrong beep
           errorReport(e);
           setDataOK(
             '1',
@@ -657,7 +657,7 @@ class FtzCheckerState extends State<FtzChecker> {
           num finalTolerance = 0;
           String lqrText =
               await checkerTakeQR(
-                newArray[4] ?? 'LQR',
+                newArray[4],
                 widget.scrName,
                 widget.component,
                 'loc',
@@ -738,7 +738,7 @@ class FtzCheckerState extends State<FtzChecker> {
             newArray = List<String>.from(tArray);
             String qrText =
                 await checkerTakeQR(
-                  newArray[9] ?? 'QR',
+                  newArray[9],
                   widget.scrName,
                   widget.component,
                   'loc',
@@ -776,8 +776,7 @@ class FtzCheckerState extends State<FtzChecker> {
                   if (takePicture) {
                     try {
                       BuildContext pContext = context;
-                      photoUrl =
-                          await checkerTakePicture(lens, newArray[10]) ?? '';
+                      photoUrl = await checkerTakePicture(lens, newArray[10]);
                     } catch (ep) {
                       photoUrl = '';
                     }
@@ -900,7 +899,7 @@ class FtzCheckerState extends State<FtzChecker> {
           setDataOK('2'); // display green
         } // end if (checkies.isNotEmpty)
       } on PlatformException catch (err) {
-        // TODO  play wrong beep
+        // play wrong beep
         setDataOK('2'); // display green without do anything
         errorReport(err);
         await showDialog(
@@ -918,7 +917,7 @@ class FtzCheckerState extends State<FtzChecker> {
 
               actions: <Widget>[
                 TextButton(
-                  child: Text(newArray[3] ?? "--Bad GPS_SEND --"),
+                  child: Text(newArray[3]),
                   onPressed: () {
                     Navigator.of(context).pop();
                   },

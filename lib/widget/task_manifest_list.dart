@@ -70,56 +70,55 @@ class TaskManifestList extends StatefulWidget {
     String saleLabel = '',
     String buyLabel = '',
     String refillLabel = '',
+    String actualDropField = 'ad',
+    String actualPickupField = 'ap',
+    String actualSaleField = 'as',
+    String actualBuyField = 'ab',
+    String actualRefillField = 'ar',
   }) {
     final List<String> annotations = [];
     if (txField.isNotEmpty) {
       final String tx = (entry[txField] ?? '').toString().trim();
       switch (tx) {
         case 'deliver':
-          final int pd =
-              int.tryParse((entry[dropField] ?? '0').toString().trim()) ?? 0;
-          final int pp =
-              int.tryParse((entry[pickupField] ?? '0').toString().trim()) ?? 0;
+          final int pd = resolveItemQty(entry, dropField, actualDropField);
+          final int pp = resolveItemQty(entry, pickupField, actualPickupField);
           if (pd > 0) annotations.add('\u{2193} $pd $dropLabel');
           if (pp > 0) annotations.add('\u{2191} $pp $pickupLabel');
           break;
         case 'sale':
           if (saleField.isNotEmpty) {
-            final int ps =
-                int.tryParse((entry[saleField] ?? '0').toString().trim()) ?? 0;
+            final int ps = resolveItemQty(entry, saleField, actualSaleField);
             if (ps > 0) annotations.add('$ps $saleLabel');
           }
           break;
         case 'purchase':
           if (buyField.isNotEmpty) {
-            final int pb =
-                int.tryParse((entry[buyField] ?? '0').toString().trim()) ?? 0;
+            final int pb = resolveItemQty(entry, buyField, actualBuyField);
             if (pb > 0) annotations.add('$pb $buyLabel');
           }
           break;
         case 'refill':
           if (refillField.isNotEmpty) {
-            final int pr =
-                int.tryParse((entry[refillField] ?? '0').toString().trim()) ??
-                0;
+            final int pr = resolveItemQty(
+              entry,
+              refillField,
+              actualRefillField,
+            );
             if (pr > 0) annotations.add('$pr $refillLabel');
           }
           break;
         default:
           // Unknown tx: fall through to drop/pickup display.
-          final int pd =
-              int.tryParse((entry[dropField] ?? '0').toString().trim()) ?? 0;
-          final int pp =
-              int.tryParse((entry[pickupField] ?? '0').toString().trim()) ?? 0;
+          final int pd = resolveItemQty(entry, dropField, actualDropField);
+          final int pp = resolveItemQty(entry, pickupField, actualPickupField);
           if (pd > 0) annotations.add('\u{2193} $pd $dropLabel');
           if (pp > 0) annotations.add('\u{2191} $pp $pickupLabel');
       }
     } else {
       // Legacy mode: drop/pickup only.
-      final int pd =
-          int.tryParse((entry[dropField] ?? '0').toString().trim()) ?? 0;
-      final int pp =
-          int.tryParse((entry[pickupField] ?? '0').toString().trim()) ?? 0;
+      final int pd = resolveItemQty(entry, dropField, actualDropField);
+      final int pp = resolveItemQty(entry, pickupField, actualPickupField);
       if (pd > 0) annotations.add('\u{2193} $pd $dropLabel');
       if (pp > 0) annotations.add('\u{2191} $pp $pickupLabel');
     }

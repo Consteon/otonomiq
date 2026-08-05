@@ -384,6 +384,14 @@ String resolveScreenTxTokens(String raw, Map<String, dynamic> screenTx) {
 /// (search) or `[[◀field▶◼value]]` (conditions); `{...}` tokens resolve from
 /// `screenTx` first. Empty conditions → unchanged; an unresolvable value
 /// (still containing `{`) → no match. Equality only (YAGNI).
+///
+/// ## Two-evaluator contract (spec S3-A)
+///
+/// Same fail-closed shape as `filterByMultiClause` (in
+/// `driver_home_support.dart`): empty resolved value OR unresolved `{token}`
+/// → return empty list (match nothing). For match-empty semantics (empty
+/// value = doc field must be empty), see `evaluateGate` in
+/// `admin_home_support.dart`.
 List<Map<String, dynamic>> filterByCharCodeEquality(
   List<Map<String, dynamic>> docs,
   String rawConditions,

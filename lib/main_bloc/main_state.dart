@@ -39,7 +39,7 @@ class MainState {
   final int duration; // duration in second (when timer implemented)
   final String scrName; // screen name of the event
 
-  // TODO timer bloc inside MainBloc to utilize duration
+  // timer bloc inside MainBloc to utilize duration
 
   const MainState({
     required this.mainState,
@@ -80,16 +80,17 @@ class MainState {
   }
 
   factory MainState.contScan(
-      String exitRoute,
-      String crypto,
-      bool front,
-      bool flash,
-      int position,
-      String scrName,
-      int size,
-      int fSize,
-      int exitSize,
-      String exitString) {
+    String exitRoute,
+    String crypto,
+    bool front,
+    bool flash,
+    int position,
+    String scrName,
+    int size,
+    int fSize,
+    int exitSize,
+    String exitString,
+  ) {
     return MainState(
       mainState: 1,
       subState: 0,

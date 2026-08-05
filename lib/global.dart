@@ -208,6 +208,7 @@ import 'widget/driver_home_support.dart';
   0.9.86.01 (260801) OO : update version number
   0.9.87.01 (260802) OO : update version number
   0.9.87.04 (260805) HH : update version number
+  0.9.88.01 (260805) OO : add feature adhoc in driver runtime, redesign report, log, improve login and mobile refresh
 */
 
 // ========= Constants ==========================
@@ -218,8 +219,8 @@ const clearHistory =
 int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
-const String version = '0.9.87';
-const String subVersion = '.04';
+const String version = '0.9.88';
+const String subVersion = '.01';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing
@@ -515,8 +516,7 @@ const mobileTable = 'MobileTable';
 const mobileTableCollection = 'tables';
 const mobileTableContent = 'content';
 //const eventPrefix = "test_"; // comment this for production
-const String fsName =
-    'a1'; //= hard coded top user collection; TODO get from function.
+const String fsName = 'a1'; //= hard coded top user collection;
 bool timeInit = true;
 bool appStartupRun = false;
 const qrQ = '38383838';
@@ -799,7 +799,6 @@ Future<int> globalInit() async {
   functionName['runInstruction'] = '/runInstruction'; //= run instruction in gcf
   functionName['InvLogin'] = '/s1InvLogin';
   functionName['deviceOperation'] = '/deviceReset';
-  functionName['mobileRefresh'] = '/mobileRefresh';
   autsorzFunctionDomain = functionDomain['default'];
   appSettingFunctionName = functionName['appSettings'];
   sheetSystemLength = 15;
@@ -1416,7 +1415,7 @@ List<double> marginArray(String? inp) {
     for (int i = 0; i < 4; i++) {
       try {
         result.add(double.parse(sArray[i]));
-      } catch (_e) {
+      } catch (_) {
         result.add(0.0);
       } // end try
     } // end for i
@@ -1435,7 +1434,6 @@ bool string2Bool(String? inp) {
 } // end of string2Bool
 
 Future firstLogin(String vid, String sheetKey) async {
-  // TODO finish firstLogin procedure
   // no need to add document in firestore. It is done by function getNewVid
   // run when first user login
   int now = DateTime.now().millisecondsSinceEpoch;
@@ -1531,7 +1529,7 @@ List<Widget> reloadPage(String page) {
       UpdateScreenTxAction(ScreenTransaction({'#CURRENT_ROUTE': page})),
     );
   } else {
-    // TODO if page not found, put error page here for application debug
+    // if page not found, put error page here for application debug
     // newPageElement.addAll(linkElement[home]!); // format for output
     // Sibling of the guard in MainPageState: this is the fallback for an
     // unknown route, so it must not itself throw when home was never built
@@ -1710,7 +1708,7 @@ int hexToInt(String hex) {
 }
 
 Future<int> launchCheckDemo() async {
-  // TODO finish justLaunch procedure
+  // justLaunch procedure
   // Launch with logged in status. Always run at launch like good old autoexec.bat
   // firstLogin, justReLogin and launch with logged in status, run this function
   int result = 99; // return > 0 when something wrong
@@ -1726,7 +1724,7 @@ Future<int> launchCheckDemo() async {
 } // end of LaunchCheckDemo
 
 Future reLoginDemo() async {
-  // TODO finish justReLogin procedure
+  // justReLogin procedure
   // after logged out then re login
   // Set vid in transactionStore
   // save sheetKey to persistence.storage
@@ -1745,7 +1743,7 @@ Future reLoginDemo() async {
 } // end of reLoginDemo
 
 Future firstLoginDemo(String vid, String sheetKey) async {
-  // TODO finish firstLogin procedure
+  // firstLogin procedure
   // no need to add document in firestore. Done by function getNewVid
   // run when first user login
   int now = DateTime.now().millisecondsSinceEpoch;
@@ -1810,7 +1808,7 @@ Future firstLoginDemo(String vid, String sheetKey) async {
       ],
     });
     // write setting to LIF.
-    // TODO put pinhash, publicKey, [privateKey (temporary)], address in LIF
+    // put pinhash, publicKey, [privateKey (temporary)], address in LIF
     sheetApi.spreadsheets.values.update(
       profile,
       sheetKey,
@@ -1978,7 +1976,28 @@ String phoneCanonical62(String inp) {
   return '62$d';
 } // end of phoneCanonical62
 
+/// True when [e] is the shape a call gets when the radio is simply down:
+/// `ClientException with SocketException: Connection failed (OS Error: Network
+/// is unreachable, errno = 101)`, `Failed host lookup` (errno 7), etc.
+bool isNetworkDownError(dynamic e) {
+  final String s = e.toString();
+  return s.contains('SocketException') ||
+      s.contains('ClientException') ||
+      s.contains('Network is unreachable') ||
+      s.contains('Failed host lookup');
+} // end of isNetworkDownError
+
 void errorReport(dynamic e, [StackTrace? stack]) {
+  // Offline is a NORMAL state in this offline-first app — every http / Cloud
+  // Function call made with no network throws, and reporting each one made
+  // "readSS Network is unreachable" the top non-fatal. Skip ONLY when the app
+  // itself knows it is offline AND the error is network-shaped: the same
+  // exception while online is a real failure and still reported, and a
+  // non-network error while offline (RangeError, cast, …) still reports.
+  if (!internetConnectionFlag.value && isNetworkDownError(e)) {
+    debugPrint('offline (crash report skipped): ${e.toString()}');
+    return;
+  }
   // Log unconditionally (debugPrint prints in release too) AND forward to
   // Crashlytics as a non-fatal for remote capture — the hundreds of
   // catch-then-errorReport sites (incl. historySync data-loss) are now visible
@@ -2065,7 +2084,7 @@ int otqRandom(int minInt) {
   int result = 0;
   try {
     result = globalRandom.nextInt(rndMax) + minInt;
-  } catch (_r) {
+  } catch (_) {
     dynamic rndGen = Random();
     result = rndGen.nextInt(rndMax) + minInt;
   }

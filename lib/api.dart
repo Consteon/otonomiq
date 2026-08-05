@@ -53,6 +53,7 @@ import 'widget/custody_reveal.dart';
 import 'widget/driver_home_support.dart';
 import 'widget/executor_designate_card.dart';
 import 'widget/ftz_webview.dart';
+import 'widget/group_picker.dart';
 import 'widget/item_execution_list.dart';
 import 'widget/item_execution_submit.dart';
 import 'widget/list_action_card.dart';
@@ -866,7 +867,7 @@ Widget displayImage({
 
 String getAppVid(String ssid) {
   // should access to ssid and fetch the application vid from it
-  String result = 'TestVid049848784'; // todo change this for production
+  String result = 'TestVid049848784'; // change this for production
   return result;
 } // end of getAppVid
 
@@ -1037,7 +1038,7 @@ Future<String> getQRContent(
       }
     } else if (qrType == 'A') {
       // A for Asset
-      String universalCode = assetVerify(rawText, 9); // Todo use component
+      String universalCode = assetVerify(rawText, 9); // use component
       if (universalCode == errorString) {
         result = '${errString}98';
       } else {
@@ -1470,7 +1471,7 @@ Future<void> getAllPermission() async {
 
 void getCountryCodeList() async {
   // get list of country code from sim card (Android only)
-  // TODO: add getCountryCodeList ios part
+  // add getCountryCodeList ios part
   // List<String> cCodes = ['62', '63', '60', '66', '91', '84', '65'];
   List<String> cCodes = [defaultCountry];
   // try {
@@ -1490,6 +1491,13 @@ void getCountryCodeList() async {
   );
 }
 
+/// Next value of a thread's `urd` unread counter after one message is read or
+/// deleted. Tolerates a missing or garbage counter: `null - 1` threw
+/// NoSuchMethodError inside the transaction below, which aborted the decrement
+/// AFTER the `st:101` update had already been queued — leaving a badge with no
+/// unread message to match it, permanently.
+int decUnread(dynamic cur) => (cur is num && cur > 1) ? cur.toInt() - 1 : 0;
+
 Future setStatus(msgId, status) async {
   var statusUpdate = {
     "st": 101, // set to no need action
@@ -1503,11 +1511,10 @@ Future setStatus(msgId, status) async {
   final notifRef = FirebaseFirestore.instance.doc(firestoreNotif);
   await FirebaseFirestore.instance.runTransaction((Transaction tx) async {
     final docSnapshot = await tx.get<Map<String, dynamic>>(notifRef);
-    var currentUnread = (docSnapshot.data()!['urd'] - 1) >= 0
-        ? docSnapshot.data()!['urd'] - 1
-        : 0;
-    var updateData = {"urd": currentUnread};
-    tx.update(notifRef, updateData);
+    // A thread doc can exist without `urd` (server CF, half-applied offline
+    // write) or not exist at all — either way tx.update would throw here.
+    if (!docSnapshot.exists) return;
+    tx.update(notifRef, {"urd": decUnread(docSnapshot.data()?['urd'])});
   }); // end of firebase transaction
 }
 
@@ -1659,7 +1666,7 @@ void getLinkInterfaceKey(BuildContext context, String vid, String pin) {
   int foundRow = -1;
 
   Future.wait([
-    // TODO get from Firebase (get data from vidKey).
+    // get from Firebase (get data from vidKey).
     sheetApi.spreadsheets.values.batchGet(
       vidKey,
       ranges: [vidRange],
@@ -1861,7 +1868,7 @@ Future<dynamic> getDataFromCloud() async {
       );
       dynamic rawReturnValue = await Future.wait([
         http.post(uri).timeout(const Duration(seconds: 15)),
-        //      getServiceAccountCredential(), //= TODO uncomment this
+        //      getServiceAccountCredential(), //= uncomment this
       ]);
       returnValue = [
         {'body': rawReturnValue[0].body},
@@ -1876,7 +1883,7 @@ Future<dynamic> getDataFromCloud() async {
 } // end of getDataFromCloud
 
 Future settingUp() async {
-  // TODO call function in nearest server & use function callable. Still problem with firebase function
+  // call function in nearest server & use function callable. Still problem with firebase function
   dynamic r = [
     {body: jsonEncode(defaultCloudConfig)},
   ];
@@ -1996,6 +2003,207 @@ void _persistUiCache({bool alsoGuest = false}) {
   } catch (e) {
     devPrint('save screenUI/systemUI failed: $e');
   }
+}
+
+/// Load the signed-in user's pages from Firestore `/Proxy/<lif>` instead of the
+/// Sheets `readSS` Cloud Function.
+///
+/// WHY THIS EXISTS — measured 2026-08-03 against the live tenant workbook:
+///   full login payload (3 ranges, 67 page definitions, 181,557 bytes)
+///       -> 85.7s / 90.2s / 66.3s — and the 90.2s run came back HTTP 200 with a
+///          24-BYTE body, i.e. junk the parser below would have choked on
+///   system range alone (1,278 bytes) -> 3.6s / 4.0s / 5.8s
+///   one page row      (2,419 bytes)  -> 4.7s / 4.2s / 3.4s
+/// Rendering home needs ~3.7 KB and login was dragging 181 KB to get it. The
+/// SAME content already lives in Firestore: `/Proxy/<lif>/System` and
+/// `/Proxy/<lif>/Page` are exactly what the proxy listener in main_page.dart has
+/// been applying in production, and Firestore reads on this path run ~0.2-0.5s.
+///
+/// Returns false and NEVER throws, so the caller falls back to readSettings().
+/// Everything is decoded into locals and only then swapped into the globals —
+/// a half-applied swap (system map from one source, pages from another) is
+/// precisely what sank the earlier cache-first attempt.
+Future<bool> loadPagesFromProxy(String lifKey) async {
+  if (lifKey.isEmpty) return false;
+  final sw = _loginPerfTrace ? (Stopwatch()..start()) : null;
+  try {
+    final bool ok = await _loadPagesFromProxy(
+      lifKey,
+    ).timeout(const Duration(seconds: 15));
+    if (sw != null) {
+      debugPrint(
+        '[LOGINPERF] loadPagesFromProxy = ${sw.elapsedMilliseconds}ms ok=$ok',
+      );
+    }
+    return ok;
+  } catch (e) {
+    devPrint('[LOGINPERF] loadPagesFromProxy failed, falling back: $e');
+    return false;
+  }
+}
+
+/// Decode `/Proxy/<lif>/{System,Page}` document bodies into the
+/// name -> decoded-content map that systemUIComponent/screenUIComponent expect.
+///
+/// Each document is `{p: name, c: encoded JSON, t: epoch, v: vid}`. Documents
+/// with a blank `p` are skipped — a nameless entry would otherwise land under
+/// the key `''` and silently shadow nothing useful.
+///
+/// [onDecodeError] mirrors readSettings' policy for pages: one unparsable blob
+/// becomes an error page instead of failing the whole load. Pass null (the
+/// default, used for System) to let a bad blob throw, because a broken system
+/// map has no safe substitute and must fall back to Sheets.
+///
+/// Pure and Firestore-free so the decode step can be tested on its own.
+Map<String, dynamic> proxyDocsToUiMap(
+  Iterable<dynamic> docBodies, {
+  dynamic Function()? onDecodeError,
+}) {
+  final Map<String, dynamic> out = {};
+  for (final dynamic d in docBodies) {
+    if (d == null) continue;
+    final String name = '${d['p'] ?? ''}';
+    if (name.isEmpty) continue;
+    if (onDecodeError == null) {
+      out[name] = json.decode(d['c']);
+    } else {
+      try {
+        out[name] = json.decode(d['c']);
+      } catch (_) {
+        out[name] = onDecodeError();
+      }
+    }
+  }
+  return out;
+}
+
+/// Map the `/Proxy/<lif>` document's profile fields onto their screenTx keys.
+///
+/// ★ Values are stringified. readSettings sets these from Settings!B1:B5 via
+/// settingCell(), which returns `row[0].toString()`, so #VID and friends are
+/// STRINGS at rest on every pre-existing path — while the proxy stores `v` and
+/// `p` as numbers. #VID alone has 43 readers; handing them an int here would be
+/// a far more expensive bug than a slow login.
+///
+/// Empty/absent fields are omitted rather than dispatched as '', so a partially
+/// filled proxy document cannot blank out a key that already holds a good value.
+Map<String, dynamic> proxyProfileKeys(dynamic rec) {
+  const Map<String, String> fieldToKey = {
+    'v': '#VID',
+    'n': '#NAME',
+    'e': '#EMAIL',
+    'p': '#PHONE',
+  };
+  final Map<String, dynamic> out = {};
+  if (rec == null) return out;
+  fieldToKey.forEach((String field, String key) {
+    final String s = '${rec[field] ?? ''}';
+    if (s.isNotEmpty) out[key] = s;
+  });
+  return out;
+}
+
+/// Re-point the inbox stream at the real per-user message path and refresh the
+/// badge. Extracted 1:1 from readSettingsStart's settings block so the proxy
+/// loader path keeps it — without this the inbox stays bound to the boot-time
+/// default and shows empty (project_firestoreio_boot_default_empty_inbox).
+/// No-op when the stored cluster/msgId are absent (pre-login).
+Future<void> rebindInboxFromStorage() async {
+  try {
+    final String? myCluster = await secureRead(key: 'myCluster');
+    final String? myMsgId = await secureRead(key: 'myMsgId');
+    if (myCluster == null || myMsgId == null) return;
+    firestoreIO = msgIoPath(myCluster, myMsgId);
+    firestoreMsg = firestoreIO;
+    firestoreEventCollection = '$eventPrefix$myCluster';
+    NotificationBloc.instance?.add(LoadNotification());
+  } catch (e) {
+    devPrint('rebindInboxFromStorage failed: $e');
+  }
+}
+
+Future<bool> _loadPagesFromProxy(String lifKey) async {
+  final dynamic snap = await firestoreDb
+      .collection(proxyCollectionName)
+      .doc(lifKey)
+      .get();
+  if (snap == null || snap.exists != true) return false;
+  final dynamic rec = snap.data();
+  if (rec == null) return false;
+
+  // Both subcollections in flight together — two ~200ms reads, not 400ms.
+  final dynamic systemFuture = firestoreDb
+      .collection('$proxyCollectionName/$lifKey/System')
+      .get();
+  final dynamic pageFuture = firestoreDb
+      .collection('$proxyCollectionName/$lifKey/Page')
+      .get();
+  final dynamic systemSnap = await systemFuture;
+  final dynamic pageSnap = await pageFuture;
+
+  final Map<String, dynamic> newSystem = proxyDocsToUiMap(
+    systemSnap.docs.map((dynamic d) => d.data()),
+  );
+  if (newSystem.isEmpty) return false;
+
+  final Map<String, dynamic> newScreen = proxyDocsToUiMap(
+    pageSnap.docs.map((dynamic d) => d.data()),
+    onDecodeError: () => json.decode(errorPage),
+  );
+  // Provenance gate. No `home` means these are not usable pages for this user,
+  // and swapping them in would recreate the "logged in but showing a page that
+  // is not theirs" bug. Fall back to Sheets instead.
+  if (newScreen[home] == null) return false;
+
+  // ---- commit point: everything above decoded cleanly ----
+  systemUIComponent = newSystem;
+  screenUIComponent = newScreen;
+  buildTheme(systemUIComponent[theme]);
+  screenUIComponent['_Legal'] = json.decode(legalPage);
+  screenUIComponent['_Invitation'] = json.decode(invitationPage);
+  screenUIComponent['_NewPin'] = json.decode(newPinPage);
+  try {
+    asHomeArray = json.decode(rec['u'] ?? '[]');
+  } catch (_) {
+    asHomeArray = [];
+  }
+
+  // Persist the checksum of what was just loaded. subscribeToProxy restores
+  // `@proxyCS_<ssid>` into #PROXY_LISTENER_CS when it (re)subscribes — which
+  // happens right after login, when the Authenticated transition recreates
+  // MainPage. Without this write the restored CS is last session's (or absent),
+  // the listener's first snapshot sees `t != CS`, and it re-downloads the
+  // identical System+Page set seconds after this function already applied it.
+  // Same key and int guard as the listener's own persist (main_page.dart).
+  if (rec['t'] is int) {
+    try {
+      prefs.setInt('@proxyCS_$lifKey', rec['t']);
+    } catch (e) {
+      devPrint('persist @proxyCS from proxy loader failed: $e');
+    }
+  }
+
+  final Map<String, dynamic> profile = proxyProfileKeys(rec);
+  if (profile.isNotEmpty) {
+    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(profile)));
+  }
+  // Deliberately NOT writing #PROXY_LISTENER_CS here. It is a single global slot
+  // shared with the live proxy listener, which at this point is still subscribed
+  // to the SIGN-IN lif (main_page subscribes once, in initState). Writing this
+  // lif's checksum into it would mis-gate that listener. See the note in
+  // _loginPagesReady.
+
+  loadedPagesLif = lifKey;
+  _persistUiCache();
+  if (lifKey != transactionStore.state.screenTx['#GUEST_LIF']) {
+    try {
+      prefs.setString('@authedSystemUI', json.encode(systemUIComponent));
+    } catch (e) {
+      devPrint('proxy persist @authedSystemUI failed: $e');
+    }
+  }
+  constructAllPageElements();
+  return true;
 }
 
 Future<void> readSettingsStart(String? lifKey, int opt) async {
@@ -2166,8 +2374,11 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
           trace(debugCount);
         }
         debugCount = 5221;
-        if (getResult[2][0][0].toString().isNotEmpty) {
-          var currentVid = getResult[2][0][0];
+        // Settings!B1:B5 -> [vid, name, email, phone, type]. Read every cell
+        // through settingCell(): a blank cell arrives as `[]` and trailing
+        // blanks are dropped, so direct [n][0] indexing throws RangeError.
+        final String currentVid = settingCell(getResult[2], 0);
+        if (currentVid.isNotEmpty) {
           transactionStore.dispatch(
             UpdateScreenTxAction(ScreenTransaction({'#VID': currentVid})),
           );
@@ -2184,35 +2395,31 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
           debugCount = 5222;
         }
         debugCount = 5223;
-        if (getResult[2][1][0].length > 0) {
+        final String sName = settingCell(getResult[2], 1);
+        if (sName.isNotEmpty) {
           transactionStore.dispatch(
-            UpdateScreenTxAction(
-              ScreenTransaction({'#NAME': getResult[2][1][0]}),
-            ),
+            UpdateScreenTxAction(ScreenTransaction({'#NAME': sName})),
           );
         }
         debugCount = 5224;
-        if (getResult[2][2][0].length > 0) {
+        final String sEmail = settingCell(getResult[2], 2);
+        if (sEmail.isNotEmpty) {
           transactionStore.dispatch(
-            UpdateScreenTxAction(
-              ScreenTransaction({'#EMAIL': getResult[2][2][0]}),
-            ),
+            UpdateScreenTxAction(ScreenTransaction({'#EMAIL': sEmail})),
           );
         }
         debugCount = 5225;
-        if (getResult[2][3][0].toString().isNotEmpty) {
+        final String sPhone = settingCell(getResult[2], 3);
+        if (sPhone.isNotEmpty) {
           transactionStore.dispatch(
-            UpdateScreenTxAction(
-              ScreenTransaction({'#PHONE': getResult[2][3][0].toString()}),
-            ),
+            UpdateScreenTxAction(ScreenTransaction({'#PHONE': sPhone})),
           );
         }
         debugCount = 5226;
-        if (getResult[2][4][0].length > 0) {
+        final String sType = settingCell(getResult[2], 4);
+        if (sType.isNotEmpty) {
           transactionStore.dispatch(
-            UpdateScreenTxAction(
-              ScreenTransaction({'#TYPE': getResult[2][4][0]}),
-            ),
+            UpdateScreenTxAction(ScreenTransaction({'#TYPE': sType})),
           );
         }
         debugCount = 5227;
@@ -2284,7 +2491,7 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
       launchOk = await launchCheck(); // Check launch status
       if (launchOk > 0) {
         // error in launchCheck
-        // TODO create error message to display
+        // create error message to display
         debugCount = 5230;
         trace(debugCount);
       } else {
@@ -2420,6 +2627,16 @@ Future<bool> readSettings(String lifKey, int opt, {int timeoutSec = 8}) async {
     return false;
   }
   var getResult = jsonDecode(response.body);
+  // Measured 2026-08-03: the full-payload fetch sometimes returns HTTP 200 with
+  // a 24-byte body instead of the expected [system, screens, settings] arrays.
+  // Indexing that threw part-way through the load; treat it as a failed fetch
+  // so the caller can retry or fall back, exactly like a timeout.
+  if (getResult is! List || getResult.length < (opt == 1 ? 3 : 1)) {
+    devPrint(
+      'readSettings: unexpected body shape, treating as failure: ${response.body}',
+    );
+    return false;
+  }
   if (opt == 1) {
     // systemUIComponent.clear();
     for (
@@ -2457,40 +2674,40 @@ Future<bool> readSettings(String lifKey, int opt, {int timeoutSec = 8}) async {
     } else if (needUpgrade != empty) {
       screenUIComponent[home] = screenUIComponent[needUpgrade];
     }
-    if (getResult[2][0].toString().isNotEmpty) {
-      var currentVid = getResult[2][0][0];
+    // Settings!B1:B5 -> [vid, name, email, phone, type]. Read every cell
+    // through settingCell(): a blank cell arrives as `[]` and trailing blanks
+    // are dropped, so direct [n][0] indexing throws RangeError. There is no
+    // try/catch around this block, so that throw was fatal on login.
+    final String currentVid = settingCell(getResult[2], 0);
+    if (currentVid.isNotEmpty) {
       transactionStore.dispatch(
         UpdateScreenTxAction(ScreenTransaction({'#VID': currentVid})),
       );
       // firestoreIO = '$firestoreCollection/$currentVid/io';
       // firestoreMsg = firestoreIO;
       //  firestoreMsg = 'users/922250226073/io/vid1111/msg';
-      if (getResult[2][1][0].length > 0) {
+      final String sName = settingCell(getResult[2], 1);
+      if (sName.isNotEmpty) {
         transactionStore.dispatch(
-          UpdateScreenTxAction(
-            ScreenTransaction({'#NAME': getResult[2][1][0]}),
-          ),
+          UpdateScreenTxAction(ScreenTransaction({'#NAME': sName})),
         );
       }
-      if (getResult[2][2][0].length > 0) {
+      final String sEmail = settingCell(getResult[2], 2);
+      if (sEmail.isNotEmpty) {
         transactionStore.dispatch(
-          UpdateScreenTxAction(
-            ScreenTransaction({'#EMAIL': getResult[2][2][0]}),
-          ),
+          UpdateScreenTxAction(ScreenTransaction({'#EMAIL': sEmail})),
         );
       }
-      if (getResult[2][3][0].toString().isNotEmpty) {
+      final String sPhone = settingCell(getResult[2], 3);
+      if (sPhone.isNotEmpty) {
         transactionStore.dispatch(
-          UpdateScreenTxAction(
-            ScreenTransaction({'#PHONE': getResult[2][3][0].toString()}),
-          ),
+          UpdateScreenTxAction(ScreenTransaction({'#PHONE': sPhone})),
         );
       }
-      if (getResult[2][4][0].length > 0) {
+      final String sType = settingCell(getResult[2], 4);
+      if (sType.isNotEmpty) {
         transactionStore.dispatch(
-          UpdateScreenTxAction(
-            ScreenTransaction({'#TYPE': getResult[2][4][0]}),
-          ),
+          UpdateScreenTxAction(ScreenTransaction({'#TYPE': sType})),
         );
       }
     }
@@ -2687,40 +2904,40 @@ Future<void> readSettingsContext(
         } else if (needUpgrade != empty) {
           screenUIComponent[home] = screenUIComponent[needUpgrade];
         }
-        if (getResult[2][0].toString().isNotEmpty) {
-          var currentVid = getResult[2][0][0];
+        // Settings!B1:B5 -> [vid, name, email, phone, type]. Read every cell
+        // through settingCell(): a blank cell arrives as `[]` and trailing
+        // blanks are dropped, so direct [n][0] indexing threw RangeError and
+        // aborted the whole settings block mid-way on every refresh.
+        final String currentVid = settingCell(getResult[2], 0);
+        if (currentVid.isNotEmpty) {
           transactionStore.dispatch(
             UpdateScreenTxAction(ScreenTransaction({'#VID': currentVid})),
           );
           // firestoreIO = '$firestoreCollection/$currentVid/io';
           // firestoreMsg = firestoreIO;
           //  firestoreMsg = 'users/922250226073/io/vid1111/msg';
-          if (getResult[2][1][0].length > 0) {
+          final String sName = settingCell(getResult[2], 1);
+          if (sName.isNotEmpty) {
             transactionStore.dispatch(
-              UpdateScreenTxAction(
-                ScreenTransaction({'#NAME': getResult[2][1][0]}),
-              ),
+              UpdateScreenTxAction(ScreenTransaction({'#NAME': sName})),
             );
           }
-          if (getResult[2][2][0].length > 0) {
+          final String sEmail = settingCell(getResult[2], 2);
+          if (sEmail.isNotEmpty) {
             transactionStore.dispatch(
-              UpdateScreenTxAction(
-                ScreenTransaction({'#EMAIL': getResult[2][2][0]}),
-              ),
+              UpdateScreenTxAction(ScreenTransaction({'#EMAIL': sEmail})),
             );
           }
-          if (getResult[2][3][0].toString().isNotEmpty) {
+          final String sPhone = settingCell(getResult[2], 3);
+          if (sPhone.isNotEmpty) {
             transactionStore.dispatch(
-              UpdateScreenTxAction(
-                ScreenTransaction({'#PHONE': getResult[2][3][0].toString()}),
-              ),
+              UpdateScreenTxAction(ScreenTransaction({'#PHONE': sPhone})),
             );
           }
-          if (getResult[2][4][0].length > 0) {
+          final String sType = settingCell(getResult[2], 4);
+          if (sType.isNotEmpty) {
             transactionStore.dispatch(
-              UpdateScreenTxAction(
-                ScreenTransaction({'#TYPE': getResult[2][4][0]}),
-              ),
+              UpdateScreenTxAction(ScreenTransaction({'#TYPE': sType})),
             );
           }
         }
@@ -2791,6 +3008,22 @@ void showAlert(BuildContext context, String msg) {
     },
   );
 } // end of ShowAlert
+
+/// Read cell [n] of a one-column Sheets value range (e.g. `Settings!B1:B5`,
+/// which maps to `[vid, name, email, phone, type]`).
+///
+/// The Sheets API returns `[]` for a blank cell and omits trailing blank rows
+/// entirely, so the direct `rows[n][0]` this replaces threw
+/// `RangeError (length): ... Valid value range is empty: 0` whenever a tenant
+/// left one of those settings empty — fatal on the login path, a swallowed
+/// non-fatal that aborts the rest of the settings block on refresh.
+/// Returns '' for a missing row, a blank row, or a null cell.
+String settingCell(dynamic rows, int n) {
+  if (rows is! List || n < 0 || n >= rows.length) return '';
+  final row = rows[n];
+  if (row is! List || row.isEmpty) return '';
+  return row[0]?.toString() ?? '';
+}
 
 String combineJson(var j) {
   return '${j.length > 1 ? j[1].replaceAll('%26', '&') : ""}${j.length > 2 ? j[2].replaceAll('%26', '&') : ""}${j.length > 3 ? j[3].replaceAll('%26', '&') : ""}';
@@ -2940,7 +3173,7 @@ Future runSheetStartup(String lif, String clt) async {
   } // end if (!appStartupRun)
 } // end of runSheetStartup
 
-// TODO make getVidData; updateVidData; deleteVidData
+// make getVidData; updateVidData; deleteVidData
 Future getVidData() async {
   dynamic ref;
   dynamic messageRef;
@@ -2991,7 +3224,13 @@ Future getVidData() async {
   } catch (e) {
     ref = null;
   }
-  return ref.data();
+  // ref is null whenever ANYTHING above failed — most commonly the pre-login
+  // cold start, where secureRead('myPath')! throws because no user was ever
+  // stored. `ref.data()` on that null was the recurring
+  // NoSuchMethodError('data' called on null) in every fresh-install log.
+  // Callers never consume this return value (launchCheck's `vidData` local is
+  // unused); the function's real output is the #FS_* dispatches above.
+  return ref?.data();
 } // end of getVidData
 
 Future updateVidData(String key, var val) async {
@@ -3099,7 +3338,7 @@ Future signOut() async {
     // devPrint("After in = false; try to signOut from firebaseAuth");
     if (!demoApp) {
       //        FirebaseAuth.instance.signOut(); // signOut from firebase
-      // TODO signOut from google, facebook, twitter
+      // signOut from google, facebook, twitter
     }
     unSubscribeToEvent(); // unsubscribe to proxy event listener
     await Future.wait([
@@ -3323,7 +3562,7 @@ Future<int> userIntegrityCheck() async {
         try {
           secureRead(key: 'pinHash')
               .then((myPinHash) {
-                // TODO check pin hash integrity with lif
+                // check pin hash integrity with lif
                 if (myPinHash == null) {
                   sheetApi.spreadsheets.values
                       .batchGet(
@@ -3406,46 +3645,55 @@ Future<int> userIntegrityCheck() async {
 
 Future getLifProfileData(String lifKey) async {
   Map<String, dynamic> profileData = {};
-  FunctionBody functionBody = getFunctionBody(lifKey, [
-    lifSetting,
-    lifSetting2,
-  ]);
-  // 60s, NOT padding. This hits the same `readSS` CF on the same workbook as
-  // readSettings, whose budget is 60s for exactly the same reason: the cost is
-  // the backend opening a heavy workbook, not the payload size (measured
-  // 2026-07-27 — 7.5s just to open, before reading anything).
+  // `lifSetting2` (Settings!G1:G14) is NOT requested any more. Measured
+  // 2026-08-03 against the live workbook, that range comes back as fourteen
+  // empty strings:
+  //   [[""],[""],[""],[""],[""],[""],[""],[""],[""],[""],[""],[""],[""],[""]]
+  // It fed imei / pinHash / cipherText / publicKey / address, and the only
+  // callers (reLogin, reLoginDemo) dispatched pinHash/cipherText/publicKey
+  // into #PINHASH / #CIPHERTEXT / #PUBLICKEY — keys with ZERO readers
+  // anywhere in lib/. So the whole second half of this request was buying
+  // empty strings for keys nobody reads, on the slowest call in the app.
+  // Re-add it only when Settings!G actually holds something AND something
+  // reads it.
+  FunctionBody functionBody = getFunctionBody(lifKey, [lifSetting]);
+  // ★ readSS latency is NOT controllable from here. Measured 2026-08-03,
+  // 13 samples against the same workbook, varying payload shape deliberately:
+  //   3.8 4.0 4.7 4.7 4.9 15.9 18.7 34.6 38.7 40.2 54.1 60.2 79.0  (seconds)
+  // median 18.7s, ~46% over 20s, tail 79s. Byte-identical requests came back
+  // 79.0s and 4.9s back-to-back, and a 2-range request beat a 1-range one, so
+  // neither payload size nor range count predicts anything.
   //
-  // This call was left at 15s when readSettings went 8s -> 60s, and it is the
-  // ONLY hard timeout on the login critical path that THROWS: nothing between
-  // here and aumLogin's `catch (err) { result = 2; }` handles it, so a timeout
-  // surfaces as LoginState.failure -> "Login anda gagal. Kemungkinan karena
-  // koneksi internet anda terganggu". Measured durations were 4.2s / 10.8s /
-  // 13.6s against the 15s budget — a coin flip on every login, which is what
-  // users reported as "sering gagal".
-  //
-  // Read `[LOGINPERF] getLifProfileData = Xms` (user_repository.dart) before
-  // changing this; do not lower it on the assumption that 15s "should" be enough.
-  var response = await http
-      .post(Uri.parse(functionBody.url), body: functionBody.body)
-      .timeout(const Duration(seconds: 60));
-  var getResult = jsonDecode(response.body);
-
-  //  var getResult = await sheetApi.spreadsheets.values
-  //      .batchGet(lifKey, // read from Link Interface
-  //          ranges: [lifSetting, lifSetting2],
-  //          dateTimeRenderOption: "SERIAL_NUMBER",
-  //          valueRenderOption: "UNFORMATTED_VALUE");
+  // Consequences, both learned the hard way here:
+  //  - ONE long budget is bad: it buys a single draw and waits out the loss.
+  //  - Short retries are ALSO not sufficient: 3 x 20s all timed out on device,
+  //    because slow responses arrive in bursts rather than independently.
+  // So the retry below is a best-effort speedup ONLY. It is NOT what makes
+  // login reliable — the caller's fallback is (see reLogin in
+  // user_repository.dart). Do not "fix" login by growing these numbers again.
+  http.Response? response;
+  for (int attempt = 1; attempt <= 3; attempt++) {
+    try {
+      response = await http
+          .post(Uri.parse(functionBody.url), body: functionBody.body)
+          .timeout(const Duration(seconds: 20));
+      break;
+    } on TimeoutException {
+      devPrint(
+        '[LOGINPERF] getLifProfileData attempt $attempt timed out (20s)',
+      );
+      // Only timeouts are retried. A network/DNS error still throws straight
+      // out — retrying those just delays the same failure.
+      if (attempt == 3) rethrow;
+    }
+  }
+  var getResult = jsonDecode(response!.body);
   profileData['vid'] = getResult[0][0][0];
-  profileData['imei'] = getResult[1][0][0];
-  profileData['pinHash'] = getResult[1][9][0];
-  profileData['cipherText'] = getResult[1][10][0];
-  profileData['publicKey'] = getResult[1][11][0];
-  profileData['address'] = getResult[1][13][0];
   return profileData;
 }
 
 Future<int> launchCheck() async {
-  // TODO finish justLaunch procedure
+  // finish justLaunch procedure
   // Launch with logged in status. Always run at launch like good old autoexec.bat
   // firstLogin, reLogin, run this function
 
@@ -3454,6 +3702,17 @@ Future<int> launchCheck() async {
   Map<String, dynamic> updateData = {};
   final swLC = _loginPerfTrace ? (Stopwatch()..start()) : null;
   try {
+    // Pre-login cold start: readSettingsStart calls this unconditionally, but
+    // with no stored user every step below is meaningless — getVidData has no
+    // myPath/myDoc, and the pinHash block would fire a 15s readSS for nobody
+    // while the user is trying to sign in. Skip outright; the same work runs
+    // from reLogin right after login, and on every warm start once a user
+    // exists. setUpFirebase is not lost either: asyncAppStartup2 calls it
+    // separately on every app start.
+    if (await secureRead(key: 'myDoc') == null) {
+      devPrint('[LOGINPERF] launchCheck skipped: no stored user (pre-login)');
+      return result;
+    }
     // historyLoadFromSecureStorage();
     final sw1 = _loginPerfTrace ? (Stopwatch()..start()) : null;
     await FirebaseNotifications()
@@ -3774,17 +4033,17 @@ Future apiInit1() async {
 }
 
 String autheniumDecrypt(String cipherText) {
-  // TODO put decryption algorithm here
+  // put decryption algorithm here
   return cipherText;
 }
 
 String autheniumEncrypt(String rawText, String encryptionType) {
-  // TODO put encryption algorithm here
+  // put encryption algorithm here
   return rawText;
 }
 
 String getAutheniumKey(String keyType) {
-  // TODO put algorithm to get authenium key
+  // put algorithm to get authenium key
   return "11223344";
 }
 
@@ -3877,7 +4136,7 @@ Future getFirestoreUserData(
           }; // set as used
           await docRef.update(data);
           needToRegisterInvLogin = true; // put flag to register invLogin
-          //TODO call cloud function to register email, etc
+          // call cloud function to register email, etc
           invitationStatus = 1;
         } else {
           recFound = 0;
@@ -3886,7 +4145,7 @@ Future getFirestoreUserData(
         }
       } else {
         // Found more than 1,
-        // TODO: should ask for country
+        // should ask for country
         if (uidUser.docChanges[0].doc.data()!["e"] == "-") {
           // Check email
           var docRef = uidUser.docs[0].reference; // process only the first rec
@@ -3930,9 +4189,9 @@ Future getFirestoreUserData(
             user = results.docs[0].data();
             if (results.docs.length == 1) {
               if (user['in'] && user["did"] != myDevice) {
-                // TODO handle situation when user deny imei access
+                // handle situation when user deny imei access
                 result = 802;
-                // TODO call function to send reset email
+                // call function to send reset email
                 //   add prefix ";R"(reset) firebaseDocName
                 // "Login fail. You already signed in with other device, or you deny access to phone."; //= return result
               } else {
@@ -3940,7 +4199,7 @@ Future getFirestoreUserData(
               }
             } else {
               //= for some reason user was registered but no data in dvc. Treat like new user.
-              // TODO add new vid to user
+              // add new vid to user
               result = 809;
             }
           });
@@ -3952,7 +4211,7 @@ Future getFirestoreUserData(
           .then((results) async {
             if (results.docs.length == 1) {
               if (user['in'] && user["did"] != myDevice) {
-                // TODO handle situation when user deny imei access
+                // handle situation when user deny imei access
                 result = 802; // error 802
                 // "Login fail. You already signed in with other device, or you deny access to phone."; //= return result
               } else {
@@ -3960,7 +4219,7 @@ Future getFirestoreUserData(
               }
             } else if (results.docs.isEmpty) {
               //= for some reason user was registered but no data in dvc. Treat like new user.
-              // TODO add new vid to user
+              // add new vid to user
               result = 809;
             } else {
               //= multiple entry. Found demo or dev account
@@ -4008,7 +4267,7 @@ Future getFirestoreUserData(
     // var cUser = state['#FIREBASE_USER']; //= get current firebase user data
     // result =
     //     getNewVid(cUser.uid, user.displayName, user.email); //= return result
-    // TODO add new vid to user
+    // add new vid to user
     if (invitationStatus > 1) {
       result = invitationStatus; // Something wrong with invitation
     } else {
@@ -4256,7 +4515,7 @@ Future serverSetup() async {
   trace(debugCount);
   FirebaseStorage storageBucket = FirebaseStorage.instanceFor(
     bucket: 'gs://otq-01-ase2',
-  ); //= TODO move to procedure after sign in
+  ); // move to procedure after sign in
   debugCount = 216;
   trace(debugCount);
   transactionStore.dispatch(
@@ -4304,6 +4563,13 @@ void clearData(String scrName) {
   WhatsAppSend.clearSentState(scrName);
   PayoutList.clearState(scrName);
   ListActionCard.clearState(scrName);
+  // Same reason as WhatsAppSend above: buildPage(clear:true) never re-runs on
+  // gotoRoute, so a revisited picker kept the previous visit's ticked rows and
+  // last active tab. clearAll (not clearState(scrName)) because this runs
+  // POST-frame: wiping every screen means a page is cleared on the nav AWAY
+  // from it, so the next visit is already empty at its first paint instead of
+  // flashing the old selection for a frame. See GroupPicker.clearAll.
+  GroupPicker.clearAll();
 
   if (txfController[scrName] == null) return;
 
@@ -5035,26 +5301,6 @@ FunctionBody getFunctionBody(String ssid, var range) {
   //  return http.post(url, body: qParams);
 }
 
-/// Fire CF mobileRefresh: push proxy-sheet -> Firestore /Proxy.
-/// Returns true on HTTP 200, false on any error (network / CF not deployed).
-/// Uses the hardened [callHttpPost] -- never surfaces an unhandled async error.
-Future<bool> mobileRefreshFire(String? lifKey) async {
-  if (lifKey == null) return false;
-  final vid = transactionStore.state.screenTx['#VID']?.toString() ?? '';
-  final url = Uri.parse(
-    "https://$autsorzFunctionDomain${functionName['mobileRefresh']}",
-  );
-  // vid and page are JSON-array strings: the GAS wrapper does
-  // JSON.parse(decodeURIComponent(param.vid)), so ["<vid>"] not bare <vid>.
-  final body = <String, String>{
-    'ssid': lifKey,
-    'vid': jsonEncode([vid]),
-    'page': jsonEncode(['all']),
-  };
-  final result = await callHttpPost(url, body);
-  return result is http.Response && result.statusCode == 200;
-}
-
 FunctionBody appendSSA1(String ssid, var rowData, String clt) {
   // range is an array
   // Return url and body for gcf call
@@ -5293,7 +5539,7 @@ List totp(String keycode, int len, int sec) {
   // This is algorithm that used in Google Authenticator with len = 6
   var retArray = [];
   var m1 = (DateTime.now().millisecondsSinceEpoch / (sec * 1000)).floor();
-  m1 = 54427511; // TODO delete this for production
+  m1 = 54427511; // delete this for production
   Uint8List k3 = hexToUInt8(base32ToHex(keycode.replaceAll(" ", "")));
   final hmac1 = uInt8ToHex(
     hmacSha1(k3, hexToUInt8(m1.toRadixString(16).padLeft(16, "0"))),
@@ -5380,7 +5626,29 @@ Future asyncAppStartup2() async {
     20,
   );
   if (myLif != null) {
-    await readSettingsStart(myLif, 2);
+    // Secondary loader. readSettingsStart(opt 2) used to re-fetch every page
+    // from Sheets here on each start — two readSS calls (home+system row, then
+    // readUIPages all-pages ~181KB) on the endpoint measured at 4-90s with
+    // occasional junk bodies. The same pages come from /Proxy in ~1s, so load
+    // them there and keep opt 2's side effects 1:1 (runSheetStartup's
+    // getLqrList, the inbox re-bind, launchCheck). The Sheets path remains for
+    // the sign-in lif — its Page docs carry no 'home', so loadPagesFromProxy
+    // refuses it by design — and as fallback whenever the proxy is missing.
+    bool proxyOk = false;
+    if (myLif != transactionStore.state.screenTx['#GUEST_LIF']) {
+      proxyOk = await loadPagesFromProxy(myLif);
+      if (proxyOk) {
+        await runSheetStartup(
+          myLif,
+          '${transactionStore.state.screenTx['#CLUSTER'] ?? ''}',
+        );
+        await rebindInboxFromStorage();
+        await launchCheck();
+      }
+    }
+    if (!proxyOk) {
+      await readSettingsStart(myLif, 2);
+    }
   } else {
     debugPrint('#INTERFACE_KEY = NULL  in asyncAppStartup2');
   }

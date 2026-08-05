@@ -177,19 +177,19 @@ bool constantTimeComparison(String a, String b) {
 
 String crQRAttend1Enc(String content) {
   // attend1 encryption
-  // TODO put get key and iv here
+  // put get key and iv here
   return aesEnc(content, 'tempkey', 'tempiv');
 }
 
 String crQRAttend1Dec(String content) {
   // attend1 decryption
-  // TODO put get key and iv here
+  // put get key and iv here
   // return aesDec(content, 'tempkey', 'tempiv');
   return content;
 }
 
 String aesEnc(var data, var key, var iv) {
-  // TODO put AES encrypt algorithm here
+  // put AES encrypt algorithm here
   return data;
 }
 
@@ -419,7 +419,7 @@ Future<String> lqrVerify(String p, String q, var rawQrText) async {
   } else {
     returnValue = errorString;
   }
-  // TODO use code below as reference to version 1 decryption (220105)
+  // use code below as reference to version 1 decryption (220105)
   /*
   if (qrValid == empty) {
     if (qrText.substring(0, 1) == '1' &&
@@ -554,7 +554,7 @@ String assetVerify(String rawQrText, int initialCheckPosition) {
 } // end of assetVerify(String p, String q, var rawQrText)
 
 bool integrityCheck(String qrText, int initialCheckPosition) {
-  // todo put integrity check here
+  // put integrity check here
   // based on https://docs.google.com/spreadsheets/d/14qT1qbVitTYYfppF8Y21OGC_5XYUI9Kk0KzZtN15vZo/edit?gid=1066641925#gid=1066641925
   return true;
 } // end of integrityCheck
@@ -652,7 +652,7 @@ String aec1sc(String phKey, String cp, String qk) {
 String aec1h(String data) {
   // Authenium EC 1 hashing function
   String hashingPadding =
-      '76ad54fc4d31e7ec12375709f438b4bdf0d7e3107ddaf9a0e56bc5ce7afe467d'; // TODO put in secure storage
+      '76ad54fc4d31e7ec12375709f438b4bdf0d7e3107ddaf9a0e56bc5ce7afe467d'; // put in secure storage
   var o = List<int>.filled(16, 0);
   String hx = hashingPadding.substring(0, 4);
   int l = data.length;

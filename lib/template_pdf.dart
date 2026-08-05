@@ -136,16 +136,29 @@ class TemplatePdf {
     for (final line in _lines) {
       for (final match in imageTagRegex.allMatches(line)) {
         final attrs = parseAttributes(match.group(1)!);
-        final assetKey = _imgSourceKey(attrs);
-        if (assetKey.isNotEmpty && !_images.containsKey(assetKey)) {
+        final primaryKey = _imgSourceKey(attrs);
+        if (primaryKey.isNotEmpty && !_images.containsKey(primaryKey)) {
+          // Attempt primary source (src/url/asset)
+          pw.MemoryImage? img;
           try {
-            final bytes = await assetLoader!(assetKey);
-            if (bytes != null) {
-              _images[assetKey] = pw.MemoryImage(bytes);
-            }
+            final bytes = await assetLoader!(primaryKey);
+            if (bytes != null) img = pw.MemoryImage(bytes);
           } catch (_) {
-            // Asset not found or invalid image bytes -> skip silently
+            // Network error, timeout, or undecodable bytes
           }
+          // Fallback: if primary failed and a distinct asset key exists, try it
+          if (img == null) {
+            final fallbackKey = attrs['asset'] ?? '';
+            if (fallbackKey.isNotEmpty && fallbackKey != primaryKey) {
+              try {
+                final bytes = await assetLoader!(fallbackKey);
+                if (bytes != null) img = pw.MemoryImage(bytes);
+              } catch (_) {
+                // Asset not found or invalid -> skip silently
+              }
+            }
+          }
+          if (img != null) _images[primaryKey] = img;
         }
       }
     }
@@ -715,10 +728,12 @@ class TemplatePdf {
     return pw.Image(img, width: imgWidth, height: imgHeight);
   }
 
-  /// Image source key for an `<IMAGE>` tag: a network `url` takes precedence
-  /// over a bundle `asset` key. Both resolve to bytes via [assetLoader], which
-  /// the caller makes source-aware (http/https -> network fetch, else asset).
+  /// Image source key for an `<IMAGE>` tag: `src` (network URL) takes
+  /// precedence over `url` (legacy alias) over bundle `asset` key.
+  /// Both `src` and `url` resolve to the same fetch path via [assetLoader].
   String _imgSourceKey(Map<String, String> attributes) {
+    final src = attributes['src'];
+    if (src != null && src.isNotEmpty) return src;
     final url = attributes['url'];
     if (url != null && url.isNotEmpty) return url;
     return attributes['asset'] ?? '';

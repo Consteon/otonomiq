@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 
 import '../api.dart';
 import '../crypto/auth_crypto.dart';
+import '../firestore_repository/firestore_generic_repository.dart';
 // import 'package:vibration/vibration.dart';
 import '../global.dart';
 import '../model/otq_state.dart';
@@ -17,7 +18,6 @@ import '../redux/screen_transaction.dart';
 import 'biometric_gate.dart';
 import 'ftz_scanner_screen.dart';
 import 'photo_camera.dart';
-import '../firestore_repository/firestore_generic_repository.dart';
 
 part '../part/build_part/attend_qr_gps_selfie_state_part.dart';
 
@@ -757,7 +757,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
           } // end if position
         } // end if (resultOk == empty || resultOk == errorString)
       } catch (e) {
-        // TODO display dialog fail, and play wrong beep
+        // display dialog fail, and play wrong beep
         errorReport(e);
         setDataOK(
           '1',
@@ -987,7 +987,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
           } // end if ((actionType == 'selfie' && !cameraCancel)
         } // end if ((actionType != 'selfie') &&...
       } on PlatformException catch (err) {
-        // TODO  play wrong beep
+        // play wrong beep
         setDataOK('2'); // display green without do anything
         errorReport(err);
         await attendanceDialog(
@@ -2637,10 +2637,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                     setDataOK('2');
                     errorReport(e);
                   } // end of try
-                } else {
-                  setDataOK('2');
-                } // end if internetOK
-                // } // end if dataOk
+                }
                 if (mounted) {
                   setState(() {
                     tapped = false;

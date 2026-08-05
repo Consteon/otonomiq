@@ -1,16 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_redux/flutter_redux.dart';
-import '../global.dart';
+
 import '../api.dart';
+import '../bloc_timer/bloc.dart';
+import '../global.dart';
 import '../otq_icons.dart';
+import '../page/wait_screen.dart';
+import '../redux/screen_transaction.dart';
 import '../widget/otq_bottom_nav_bar.dart';
 import '../widget/ui_component.dart';
-import '../redux/screen_transaction.dart';
-import '../bloc_timer/bloc.dart';
-import '../page/wait_screen.dart';
 
 class StlPage extends StatelessWidget {
-  const StlPage({super.key, required this.pageName, this.timerState, required this.component});
+  const StlPage({
+    super.key,
+    required this.pageName,
+    this.timerState,
+    required this.component,
+  });
   //  AnyPage({Key key, this.store, this.pageName}) : super(key: key);
   // This widget is the home page of application. It is stateless.
   // This page is rebuild when pageName = refreshState.
@@ -39,8 +45,8 @@ class StlPage extends StatelessWidget {
     double bPad = systemUIComponent['Mobile']['bottomPad'].toDouble();
     rootThis = this;
     List<Widget> page;
-//    var page = buildPage(context,
-//        screenUIComponent[widget.pageName]['children'], widget.pageName);
+    //    var page = buildPage(context,
+    //        screenUIComponent[widget.pageName]['children'], widget.pageName);
     ScrollController scrollController = ScrollController();
 
     appRefresh() {
@@ -49,14 +55,15 @@ class StlPage extends StatelessWidget {
         oldSettingUpShouldBeDeleted().then((aRes) {
           var state = transactionStore.state;
           var lifKey = state.screenTx['#INTERFACE_KEY'];
-          readSettings(lifKey,1).then((_) {
-//            this.setState(() {    // TODO change to bloc dispatch
-//              key = UniqueKey();
-//            });
+          readSettings(lifKey, 1).then((_) {
+            //            this.setState(() {    // change to bloc dispatch
+            //              key = UniqueKey();
+            //            });
           });
         });
-        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-            {'#REFRESH': false}))); // set state #INTERFACE_KEY
+        transactionStore.dispatch(
+          UpdateScreenTxAction(ScreenTransaction({'#REFRESH': false})),
+        ); // set state #INTERFACE_KEY
       }
     }
 
@@ -64,10 +71,13 @@ class StlPage extends StatelessWidget {
       appRefresh();
       var pgName = systemUIComponent[mobile]['bottomBar'][i]['route'];
       if (pgName == home) {
-        transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-            {'#CURRENT_ROUTE': pgName})));
+        transactionStore.dispatch(
+          UpdateScreenTxAction(ScreenTransaction({'#CURRENT_ROUTE': pgName})),
+        );
         Navigator.popUntil(
-            context, ModalRoute.withName(Navigator.defaultRouteName));
+          context,
+          ModalRoute.withName(Navigator.defaultRouteName),
+        );
       } else {
         gotoRoute(pgName);
       }
@@ -76,17 +86,18 @@ class StlPage extends StatelessWidget {
     OtqBottomNavBar buildNavBar() {
       return OtqBottomNavBar(
         selectedIndex: 0,
-        items: (systemUIComponent[mobile]['bottomBar'] as List)
-            .map<OtqNavItem>((item) {
-          final iconKey = item['icon'].toString();
-          final route = item['route']?.toString() ?? '';
-          final label = item['label']?.toString() ??
-              route.replaceAll('_', ' ');
-          return OtqNavItem(
-            icon: otqIcons[iconKey] ?? Icons.circle_outlined,
-            label: label,
-          );
-        }).toList(),
+        items: (systemUIComponent[mobile]['bottomBar'] as List).map<OtqNavItem>(
+          (item) {
+            final iconKey = item['icon'].toString();
+            final route = item['route']?.toString() ?? '';
+            final label =
+                item['label']?.toString() ?? route.replaceAll('_', ' ');
+            return OtqNavItem(
+              icon: otqIcons[iconKey] ?? Icons.circle_outlined,
+              label: label,
+            );
+          },
+        ).toList(),
         onTap: handleNavTap,
       );
     }
@@ -101,12 +112,15 @@ class StlPage extends StatelessWidget {
           oldSettingUpShouldBeDeleted().then((aRes) {
             var state = transactionStore.state;
             var lifKey = state.screenTx['#INTERFACE_KEY'];
-            readSettings(lifKey,1).then((_) {
+            readSettings(lifKey, 1).then((_) {
               constructAllNotHomePagesSync();
               var state0 = transactionStore.state.screenTx;
               var nxPage = state0['#NEXTROUTE'];
-              transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-                  {'#CURRENT_ROUTE': nxPage}))); // set state #CURRENT_ROUTE
+              transactionStore.dispatch(
+                UpdateScreenTxAction(
+                  ScreenTransaction({'#CURRENT_ROUTE': nxPage}),
+                ),
+              ); // set state #CURRENT_ROUTE
               page = buildPage(screenUIComponent[nxPage]['children'], nxPage);
               title = screenUIComponent[nxPage]['title'];
               try {
@@ -131,7 +145,7 @@ class StlPage extends StatelessWidget {
                     oldSettingUpShouldBeDeleted().then((aRes) {
                       var state = transactionStore.state;
                       var lifKey = state.screenTx['#INTERFACE_KEY'];
-                      readSettings(lifKey,1).then((_) {
+                      readSettings(lifKey, 1).then((_) {
                         constructAllNotHomePages();
                         timerBloc.add(Reset()); // reset timer state to Ready
                       });
@@ -166,7 +180,7 @@ class StlPage extends StatelessWidget {
                     oldSettingUpShouldBeDeleted().then((aRes) {
                       var state = transactionStore.state;
                       var lifKey = state.screenTx['#INTERFACE_KEY'];
-                      readSettings(lifKey,1).then((_) {
+                      readSettings(lifKey, 1).then((_) {
                         timerBloc.add(Reset()); // reset timer state to Ready
                       });
                     });

@@ -112,7 +112,7 @@ class _CustodyConfirmedListState extends State<CustodyConfirmedList> {
       rawSearch,
       widget.scrName,
     );
-    return matched.isNotEmpty ? matched.first : null;
+    return pickNewestDoc(matched);
   }
 
   List<Map<String, dynamic>> _extractArray(

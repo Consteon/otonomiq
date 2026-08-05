@@ -2,12 +2,14 @@
 // display_list.dart
 //
 import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../widget/ui_component.dart';
+
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
 import '../global2.dart';
+import '../widget/ui_component.dart';
 import 'ftz_array_search.dart';
 import 'otq_formatted_text.dart';
 
@@ -55,14 +57,20 @@ class _DisplayListState extends State<DisplayList> {
     } catch (e) {
       // do nothing}
     }
-    variant =
-        (widget.component['variant'] ?? '').toString().trim().toLowerCase();
+    variant = (widget.component['variant'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
     margin = marginArray(widget.component['margin']);
     hasChain = widget.component['chain'] != null;
 
     if (variant == 'widget') {
-      dialogWidgets = buildPage(widget.component['children'], widget.scrName,
-          dialog: true, clear: false);
+      dialogWidgets = buildPage(
+        widget.component['children'],
+        widget.scrName,
+        dialog: true,
+        clear: false,
+      );
     } else if (variant == 'tablecard1' || variant == 'tablecardinteractive') {
       useTable = true;
     }
@@ -94,23 +102,26 @@ class _DisplayListState extends State<DisplayList> {
     }
 
     tableSourceUpdated[tableCode] = true;
-    subscribeToTable(tableCode, appCodeController.applicationTableVid)
-        .then((_) {
+    subscribeToTable(tableCode, appCodeController.applicationTableVid).then((
+      _,
+    ) {
       if (mounted) {
         // Check if the widget is still in the tree
         setState(() {
           pickTable = tableToArray(
-              transactionStore.state.screenTx['#TABLE$tableCode'],
-              tableCode,
-              widget.component['sort'])
-              .obs;
-          pickTable =
-              searchTable(widget.component['filter'] ?? '', List.from(pickTable))
-                  .obs;
+            transactionStore.state.screenTx['#TABLE$tableCode'],
+            tableCode,
+            widget.component['sort'],
+          ).obs;
+          pickTable = searchTable(
+            widget.component['filter'] ?? '',
+            List.from(pickTable),
+          ).obs;
           tableLoaded = true;
         });
         debugPrint(
-            ' ==> pickTable for $tableCode loaded, len=${pickTable.length}');
+          ' ==> pickTable for $tableCode loaded, len=${pickTable.length}',
+        );
       }
     });
   }
@@ -120,7 +131,7 @@ class _DisplayListState extends State<DisplayList> {
     String? builderId;
     if (widget.component['position'] != null) {
       builderId =
-      '${widget.scrName}-${getPosition(widget.component['position'])}';
+          '${widget.scrName}-${getPosition(widget.component['position'])}';
     }
 
     return GetBuilder<WidgetUpdateController>(
@@ -161,53 +172,57 @@ class _DisplayListState extends State<DisplayList> {
             listItems = pickTable.isEmpty
                 ? const Center(child: Text('No data'))
                 : ListView.builder(
-              itemCount: pickTable.length,
-              prototypeItem: Card(
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  children: [
-                    ListTile(
-                      subtitle: Text(
-                        widget.component['content'] == null
-                            ? '${pickTable.first[0]}\n${pickTable.first[1]}\n${pickTable.first[5]}'
-                            : replaceMarkerPrototype(
-                            widget.component['content'],
-                            pickTable.first,
-                            widget.component['indexStart'] ?? 0),
-                        style: TextStyle(
-                            color: Colors.black.withOpacity(0.6)),
-                        overflow: TextOverflow.fade,
-                        softWrap: false,
+                    itemCount: pickTable.length,
+                    prototypeItem: Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: Column(
+                        children: [
+                          ListTile(
+                            subtitle: Text(
+                              widget.component['content'] == null
+                                  ? '${pickTable.first[0]}\n${pickTable.first[1]}\n${pickTable.first[5]}'
+                                  : replaceMarkerPrototype(
+                                      widget.component['content'],
+                                      pickTable.first,
+                                      widget.component['indexStart'] ?? 0,
+                                    ),
+                              style: TextStyle(
+                                color: Colors.black.withValues(alpha: 0.6),
+                              ),
+                              overflow: TextOverflow.fade,
+                              softWrap: false,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
-              ),
-              itemBuilder: (context, index) {
-                return Card(
-                  clipBehavior: Clip.antiAlias,
-                  child: Column(
-                    children: [
-                      ListTile(
-                        subtitle: Text(
-                          widget.component['content'] == null
-                              ? '${pickTable.first[0]}\n${pickTable.first[1]}\n${pickTable.first[5]}'
-                              : replaceMarker(
-                              widget.component['content'],
-                              pickTable[index],
-                              widget.component['indexStart'] ?? 0,
-                              false),
-                          style: TextStyle(
-                              color: Colors.black.withOpacity(0.6)),
-                          overflow: TextOverflow.fade,
-                          softWrap: false,
+                    itemBuilder: (context, index) {
+                      return Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: Column(
+                          children: [
+                            ListTile(
+                              subtitle: Text(
+                                widget.component['content'] == null
+                                    ? '${pickTable.first[0]}\n${pickTable.first[1]}\n${pickTable.first[5]}'
+                                    : replaceMarker(
+                                        widget.component['content'],
+                                        pickTable[index],
+                                        widget.component['indexStart'] ?? 0,
+                                        false,
+                                      ),
+                                style: TextStyle(
+                                  color: Colors.black.withValues(alpha: 0.6),
+                                ),
+                                overflow: TextOverflow.fade,
+                                softWrap: false,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            );
+                      );
+                    },
+                  );
           }
         } else if (variant == 'widget') {
           listItems = ListView(
@@ -221,39 +236,51 @@ class _DisplayListState extends State<DisplayList> {
         }
 
         const double padWithTitle = 40;
-        final double topPad = (textArray.isNotEmpty && textArray[0].toString().trim() == '')
+        final double topPad =
+            (textArray.isNotEmpty && textArray[0].toString().trim() == '')
             ? 8
             : padWithTitle;
 
         return Container(
           constraints: BoxConstraints(
-              maxHeight: (widget.component['height'] ?? 150) + 0.0),
+            maxHeight: (widget.component['height'] ?? 150) + 0.0,
+          ),
           margin: EdgeInsets.only(top: margin[0], bottom: margin[1]),
-          padding: EdgeInsets.fromLTRB(max(0, widget.lPad + margin[2]),
-              widget.tPad, max(0, widget.rPad + margin[3]), widget.bPad),
+          padding: EdgeInsets.fromLTRB(
+            max(0, widget.lPad + margin[2]),
+            widget.tPad,
+            max(0, widget.rPad + margin[3]),
+            widget.bPad,
+          ),
           child: Stack(
             children: [
               Container(
                 decoration: BoxDecoration(
-                  border: Border.all(),
-                  borderRadius: const BorderRadius.all(Radius.circular(6.0)),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                  borderRadius: const BorderRadius.all(Radius.circular(16.0)),
                 ),
-                padding: EdgeInsets.only(top: topPad),
+                padding: EdgeInsets.fromLTRB(10, topPad, 10, 10),
                 child: listItems,
               ),
               (topPad != padWithTitle || textArray.isEmpty)
                   ? Container()
                   : Positioned(
-                  left: 8,
-                  top: 10,
-                  child: Container(
-                    padding: const EdgeInsets.only(left: 10, right: 10),
-                    color: Colors.white,
-                    child: OtqFormattedText(
-                        textData:
-                        (textArray.isNotEmpty ? textArray[0] : null) ?? "",
-                        component: widget.component),
-                  )),
+                      left: 8,
+                      top: 10,
+                      child: Container(
+                        padding: const EdgeInsets.only(left: 10, right: 10),
+                        // Match the page, not white: the title chip sits ON the
+                        // frame border, so a hardcoded white left a visible patch
+                        // on any non-white scaffold.
+                        color: Theme.of(context).scaffoldBackgroundColor,
+                        child: OtqFormattedText(
+                          textData:
+                              (textArray.isNotEmpty ? textArray[0] : null) ??
+                              "",
+                          component: widget.component,
+                        ),
+                      ),
+                    ),
             ],
           ),
         );

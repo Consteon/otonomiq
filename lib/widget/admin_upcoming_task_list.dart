@@ -150,6 +150,7 @@ class _AdminUpcomingTaskListState extends State<AdminUpcomingTaskList> {
         tasks: tasks,
         updateEventRowDsl: _updateEventRowDsl,
         component: widget.component,
+        scrName: widget.scrName,
         titleAssign: _t(4, 'Pilih Kendaraan'),
         confirmLabel: _t(5, 'Konfirmasi'),
         activeTaskSuffix: _t(6, 'task aktif'),

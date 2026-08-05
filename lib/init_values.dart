@@ -17,11 +17,11 @@ String getInitialValue(String scrName, dynamic component) {
     } else if (tip == 'switch') {
       result =
           ((component['currentValue'] ?? 'false').toString().toLowerCase() ==
-                  'true')
-              ? "TRUE"
-              : "FALSE";
+              'true')
+          ? "TRUE"
+          : "FALSE";
     } else {
-      result = component['currentValue'].toString() ?? "";
+      result = component['currentValue'].toString();
     }
   } // end if (component['position'] != null)
   return result;
@@ -45,8 +45,9 @@ String getTotalValue(String scrName, dynamic component) {
         late num referenceValue;
         try {
           int referencePosition = int.parse(currentArray[i]);
-          referenceValue =
-              num.parse(txfController[scrName]![referencePosition]!.finalData);
+          referenceValue = num.parse(
+            txfController[scrName]![referencePosition]!.finalData,
+          );
         } catch (e) {
           referenceValue = 0;
         }
@@ -110,7 +111,9 @@ String numericCleanUp(List<dynamic> formatArray, String? inp) {
 String getImageInitValue(String scrName, dynamic component) {
   // getImage
   String result = "";
-  List<String> urlList = component['currentValue'].toString().trim().split('_u2605_');
+  List<String> urlList = component['currentValue'].toString().trim().split(
+    '_u2605_',
+  );
   result = processData(urlList);
   return result;
 } // end of getImageInitValue

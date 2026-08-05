@@ -63,6 +63,9 @@ class _TimelineLedgerState extends State<TimelineLedger> {
   // Badge map lookup: value -> entry (carries palette index).
   final Map<String, BadgeEntry> _badgeLookup = {};
 
+  // Condition relabel lookup: value -> entry (label only; index unused).
+  final Map<String, BadgeEntry> _condLookup = {};
+
   // Expand/collapse state: set of expanded group keys.
   final Set<String> _expanded = {};
 
@@ -96,6 +99,12 @@ class _TimelineLedgerState extends State<TimelineLedger> {
     final String bmDecoded = autheniumDecode(bmRaw) ?? bmRaw;
     _badgeLookup.clear();
     parseBadgeMap(bmDecoded, _badgeLookup);
+
+    // Condition relabel map (same encoding as badgeMap).
+    final String cmRaw = (c['condMap'] ?? '').toString();
+    final String cmDecoded = autheniumDecode(cmRaw) ?? cmRaw;
+    _condLookup.clear();
+    parseBadgeMap(cmDecoded, _condLookup);
 
     // Template strings. autheniumDecode so structural chars the server encodes
     // (e.g. ◆ = _u25C6_, the ◆-segment separator in subText/itemText) become
@@ -347,11 +356,12 @@ class _TimelineLedgerState extends State<TimelineLedger> {
 
     final String sectionTime = formatEpochHHmm(section.minEpoch);
 
-    final String resolved = resolveMapTokens(_sectionText, rep, {
-      'sectionCount': '${section.sectionCount}',
-      'groupCount': '${section.groupCount}',
-      'sectionTime': sectionTime,
-    });
+    final String resolved =
+        resolveMapTokens(_sectionText, applyCondMap(rep, _condLookup), {
+          'sectionCount': '${section.sectionCount}',
+          'groupCount': '${section.groupCount}',
+          'sectionTime': sectionTime,
+        });
 
     return Padding(
       padding: const EdgeInsets.only(top: 16, bottom: 8),
@@ -386,8 +396,9 @@ class _TimelineLedgerState extends State<TimelineLedger> {
     final int repEpoch = docEpoch(rep, _timeField);
 
     // Inject synthetic `ts` for relativeTimestamp.
-    final Map<String, dynamic> repWithTs = Map<String, dynamic>.from(rep)
-      ..['ts'] = relativeTimestamp(repEpoch, nowMs);
+    final Map<String, dynamic> repWithTs = Map<String, dynamic>.from(
+      applyCondMap(rep, _condLookup),
+    )..['ts'] = relativeTimestamp(repEpoch, nowMs);
 
     // Badge.
     final String badgeValue = _badgeField.isNotEmpty
@@ -570,7 +581,7 @@ class _TimelineLedgerState extends State<TimelineLedger> {
     if (_itemText.isEmpty) return const SizedBox.shrink();
     final List<String> segs = resolveSegmentedTemplate(
       _itemText,
-      doc,
+      applyCondMap(doc, _condLookup),
       const {},
     );
     return Padding(

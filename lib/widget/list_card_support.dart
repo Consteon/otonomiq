@@ -105,6 +105,40 @@ List<GroupLabelEntry> parseGroupLabels(String raw) {
   return out;
 }
 
+/// Parse `groupRoutes`: `value◼route★value2◼route2`.
+///
+/// Returns a map from group value to route string. Entries without `◼` are
+/// **skipped** (fail-closed: malformed entry = read-only group, not a
+/// fallback to the global route). Empty values before `◼` are skipped.
+///
+/// Caller MUST `autheniumDecode` the raw string BEFORE calling.
+Map<String, String> parseGroupRoutes(String raw) {
+  if (raw.trim().isEmpty) return const {};
+  final Map<String, String> out = {};
+  for (final part in raw.split('\u{2605}')) {
+    // ★ separates entries
+    final String trimmed = part.trim();
+    if (trimmed.isEmpty) continue;
+    final int sep = trimmed.indexOf('\u{25FC}'); // first ◼
+    if (sep < 0) continue; // ponytail: no ◼ — skip (fail-closed, interview #2)
+    final String value = trimmed.substring(0, sep).trim();
+    final String route = trimmed.substring(sep + 1).trim();
+    if (value.isEmpty) continue;
+    out[value] = route;
+  }
+  return out;
+}
+
+/// Effective route for one group section.
+///
+/// - `null`  -> no `groupRoutes` configured; caller falls back to the global
+///              `route` (spec §3: groupBy filled + groupRoutes empty = all
+///              groups use `route`).
+/// - `''`    -> group is not in the map -> read-only (no tap, no ripple).
+/// - other   -> that group's own route.
+String? resolveGroupRoute(Map<String, String> groupRoutes, String groupKey) =>
+    groupRoutes.isEmpty ? null : (groupRoutes[groupKey] ?? '');
+
 /// Parse `stats`: `Label◼filter★Label2◼filter2`.
 ///
 /// **Split each box at the FIRST ◼ only** — the filter itself may contain ◼

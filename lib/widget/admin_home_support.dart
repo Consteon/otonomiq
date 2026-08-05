@@ -6,7 +6,7 @@ import 'package:flutter/material.dart'; // Color/Colors for AdminTierColors
 import '../api.dart'; // getNowMillisecondFromEpoch, autheniumDecode, devPrint, errorReport
 import '../firestore_repository/update_event_row.dart'; // parseUpdateEventRow, UpdateEventTarget
 import '../global.dart'; // firestoreDb, mobileTable, mobileTableCollection
-import 'driver_home_support.dart'; // resolveAppVid
+import 'driver_home_support.dart'; // resolveAppVid, resolveDriverCurlyTokens
 import 'dsl_eq.dart';
 
 // ============================================================================
@@ -451,8 +451,28 @@ int _toInt(dynamic v) {
 /// Gate format (after autheniumDecode): `field◼value⭘field◼value...`
 /// - Clauses joined by ⭘ (U+2B58) are AND'd.
 /// - Each clause: `field◼value` (U+25FC separator).
-/// - Non-empty value: doc[field] must equal value (string match).
+/// - Non-empty value: doc[field] must equal value (type-tolerant via [eq]).
 /// - Empty value (e.g. `vv◼`): doc[field] must be empty/blank.
+///
+/// ## Two-evaluator contract (spec S3-A)
+///
+/// This function implements **case 2: literal-empty = match-empty**.
+/// An empty clause value means "the doc's field must be empty/blank" -- this
+/// is the semantics needed by admin gates and picker search configs that
+/// intentionally write `dv◼` (no token) to select unassigned docs.
+///
+/// For case 1 (empty value = fail-closed, match nothing), see
+/// `filterByMultiClause` in `driver_home_support.dart`.
+///
+/// Live configs using match-empty semantics through this function:
+/// - `unassignedGate`: `tst◼assigned⭘vv◼`
+/// - `noExecutorGate`: `lt◼vehicle⭘dv◼`
+/// - `invoiceGate`: `tst◼completed⭘iv◼`
+/// - vehiclePicker `search`: `lt◼vehicle⭘lst◼active⭘dv◼`
+///
+/// No token resolution is performed here -- callers (admin signal builders,
+/// `PickerList.filterRows` in `picker_list.dart`) pass literal DSL that was
+/// never tokenized.
 ///
 /// Returns true when ALL clauses match.
 /// Returns false on empty [gateDsl] (no gate = no match = skip).
@@ -524,6 +544,7 @@ Future<bool> executeUpdateEventRow({
   required String rawDsl,
   required Map<String, String> tokens,
   required dynamic component,
+  required String scrName,
 }) async {
   try {
     if (rawDsl.trim().isEmpty) return false;
@@ -531,10 +552,16 @@ Future<bool> executeUpdateEventRow({
     // 1. autheniumDecode
     String decoded = autheniumDecode(rawDsl) ?? rawDsl;
 
-    // 2. Replace tokens
+    // 2. Replace caller tokens
     for (final entry in tokens.entries) {
       decoded = decoded.replaceAll(entry.key, entry.value);
     }
+
+    // 2b. Resolve system/session tokens the caller cannot know ({today},
+    // {now}, {userVid}, {userName}, ...) with the canonical resolver.
+    // Caller tokens win (already substituted above). Unknown tokens stay
+    // literal so the guard below still fails closed.
+    decoded = resolveDriverCurlyTokens(decoded, scrName);
 
     // Guard: if any {token} remains unresolved, bail
     if (decoded.contains('{')) {
