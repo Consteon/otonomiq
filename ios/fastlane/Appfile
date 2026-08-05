@@ -1,0 +1,5 @@
+# Appfile for Otonomiq Master App
+app_identifier("com.otonomiq.master1")
+apple_id("admin@autsorz.io")
+itc_team_id("8376259CR4")
+team_id("8376259CR4")

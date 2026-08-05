@@ -46,6 +46,15 @@ migrate_working_dir/
 .pub/
 /build/
 
+# Flutter Plugin Symlinks & Ephemeral Build Files
+**/ios/.symlinks/
+**/ios/Flutter/ephemeral/
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/Runner/GeneratedPluginRegistrant.*
+**/GeneratedPluginRegistrant.java
+**/xcuserdata/
+
 
 # Symbolication related
 app.*.symbols
