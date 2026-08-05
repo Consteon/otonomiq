@@ -67,6 +67,7 @@ class _ListCardState extends State<ListCard> {
   String _trailingTpl = '';
   String _trailingLabelTpl = '';
   String _routeStr = '';
+  Map<String, String> _groupRoutes = const {};
 
   // Local UI state
   String _searchQuery = '';
@@ -139,6 +140,8 @@ class _ListCardState extends State<ListCard> {
     _trailingTpl = _cfg('trailing');
     _trailingLabelTpl = _cfg('trailingLabel');
     _routeStr = stripRouteWrapper(_cfg('route').trim());
+    _groupRoutes = parseGroupRoutes(_cfg('groupRoutes'))
+        .map((k, v) => MapEntry(k, stripRouteWrapper(v)));
 
     // gateSearch: stored raw — filterDriverHomeDocs decodes internally
     _rawGateSearch = (widget.component['gateSearch'] ?? '').toString().trim();
@@ -355,8 +358,9 @@ class _ListCardState extends State<ListCard> {
     }).toList();
   }
 
-  void _onCardTap(Map<String, dynamic> doc) {
-    if (_routeStr.isEmpty) return;
+  void _onCardTap(Map<String, dynamic> doc, [String? routeOverride]) {
+    final String route = routeOverride ?? _routeStr;
+    if (route.isEmpty) return;
     // Dispatch routeParams: row-first resolution, session fallback.
     // writeRouteParamsFromRow handles autheniumDecode + parse + resolve + dispatch.
     writeRouteParamsFromRow(
@@ -365,9 +369,9 @@ class _ListCardState extends State<ListCard> {
       widget.scrName,
     );
     // routeStack.push BEFORE gotoRoute (back-nav uses routeStack)
-    if (routeExist(_routeStr)) {
-      routeStack.push(_routeStr);
-      gotoRoute(_routeStr);
+    if (routeExist(route)) {
+      routeStack.push(route);
+      gotoRoute(route);
     }
   }
 
@@ -560,7 +564,9 @@ class _ListCardState extends State<ListCard> {
           if ((grouped[key] ?? const []).isNotEmpty) ...[
             _buildGroupHeader(key, grouped[key]!.length),
             if (_expanded[key] ?? true)
-              for (final doc in grouped[key]!) _buildCard(doc),
+              for (final doc in grouped[key]!)
+                _buildCard(doc,
+                    groupRoute: resolveGroupRoute(_groupRoutes, key)),
             const SizedBox(height: 6),
           ],
         const SizedBox(height: 24),
@@ -626,7 +632,7 @@ class _ListCardState extends State<ListCard> {
     );
   }
 
-  Widget _buildCard(Map<String, dynamic> doc) {
+  Widget _buildCard(Map<String, dynamic> doc, {String? groupRoute}) {
     final String title = _resolve(_titleTpl, doc);
     final String subtitle = _resolve(_subtitleTpl, doc);
     final String meta = _resolve(_metaTpl, doc);
@@ -640,6 +646,13 @@ class _ListCardState extends State<ListCard> {
         : '';
     final BadgeEntry? badge =
         badgeValue.isNotEmpty ? lookupBadge(_badgeEntries, badgeValue) : null;
+
+    // Effective route: groupRoute overrides _routeStr when provided.
+    // null = flat mode or grouped without groupRoutes -> use _routeStr.
+    // '' = read-only group -> onTap: null (kills ripple).
+    // non-empty = per-group route.
+    final String effectiveRoute = groupRoute ?? _routeStr;
+    final bool tappable = effectiveRoute.isNotEmpty;
 
     // Lead widget
     Widget? lead;
@@ -673,7 +686,7 @@ class _ListCardState extends State<ListCard> {
         elevation: 0,
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
-          onTap: () => _onCardTap(doc),
+          onTap: tappable ? () => _onCardTap(doc, groupRoute) : null,
           child: Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(

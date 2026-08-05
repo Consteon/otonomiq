@@ -556,4 +556,99 @@ void main() {
       expect(resolveNoteTemplate('Static text', {}), 'Static text');
     });
   });
+
+  // ── parseGroupRoutes ──────────────────────────────────────────────────
+
+  group('parseGroupRoutes', () {
+    test('parses value-route pairs into map', () {
+      final map = parseGroupRoutes(
+          'unassigned\u{25FC}assignPage'
+          '\u{2605}assigned\u{25FC}editPage'
+          '\u{2605}rejected\u{25FC}reassignPage');
+      expect(map.length, 3);
+      expect(map['unassigned'], 'assignPage');
+      expect(map['assigned'], 'editPage');
+      expect(map['rejected'], 'reassignPage');
+    });
+
+    test('no separator: entry skipped (fail-closed)', () {
+      // Interview answer #2: bare value without ◼ is SKIPPED, not treated
+      // as "value doubles as route". Regression: if someone changes this to
+      // match parseGroupLabels behavior, this test FAILS.
+      final map = parseGroupRoutes('unassigned');
+      expect(map, isEmpty);
+    });
+
+    test('mixed valid and malformed entries: only valid kept', () {
+      final map = parseGroupRoutes(
+          'ok\u{25FC}routeA\u{2605}bare_value\u{2605}also\u{25FC}routeB');
+      expect(map.length, 2);
+      expect(map['ok'], 'routeA');
+      expect(map['also'], 'routeB');
+      expect(map.containsKey('bare_value'), isFalse);
+    });
+
+    test('empty string returns empty map', () {
+      expect(parseGroupRoutes(''), isEmpty);
+    });
+
+    test('empty value before separator is skipped', () {
+      final map = parseGroupRoutes('\u{25FC}someRoute');
+      expect(map, isEmpty);
+    });
+
+    test('leftover template literal [GROUPROUTES] returns empty map', () {
+      // Safety: builder adds [GROUPROUTES] to the shared template.
+      // Old pages carry the literal string. Parser must return empty map
+      // so _groupRoutes.isEmpty holds and flat-mode fallback works.
+      expect(parseGroupRoutes('[GROUPROUTES]'), isEmpty);
+    });
+
+    test('empty route after separator is preserved', () {
+      // Explicit empty route = group is in the map but route is empty.
+      // Widget treats empty route as read-only (onTap: null).
+      final map = parseGroupRoutes('x\u{25FC}');
+      expect(map.containsKey('x'), isTrue);
+      expect(map['x'], '');
+    });
+
+    test('spec acceptance: AdminTaskList 3 routed + 3 absent', () {
+      // Exact config from spec §4.
+      final map = parseGroupRoutes(
+          'unassigned\u{25FC}vertikaTeknoLokaciptaAssignVehicle'
+          '\u{2605}load_rejected\u{25FC}vertikaTeknoLokaciptaAssignVehicle'
+          '\u{2605}assigned\u{25FC}vertikaTeknoLokaciptaAssignVehicle');
+      expect(map.length, 3);
+      expect(map.containsKey('unassigned'), isTrue);
+      expect(map.containsKey('load_rejected'), isTrue);
+      expect(map.containsKey('assigned'), isTrue);
+      // in_execution, completed, failed are NOT in the map
+      expect(map.containsKey('in_execution'), isFalse);
+      expect(map.containsKey('completed'), isFalse);
+      expect(map.containsKey('failed'), isFalse);
+    });
+  });
+
+  // ── resolveGroupRoute ─────────────────────────────────────────────────
+
+  group('resolveGroupRoute', () {
+    test('empty map returns null (back-compat fallback to global route)', () {
+      // Catches: grouped mode without groupRoutes breaks fallback to _routeStr.
+      expect(resolveGroupRoute(const {}, 'any'), isNull);
+    });
+
+    test('key present returns that route', () {
+      // Catches: per-group routing stops working.
+      final map = {'a': 'pageA', 'b': 'pageB'};
+      expect(resolveGroupRoute(map, 'a'), 'pageA');
+      expect(resolveGroupRoute(map, 'b'), 'pageB');
+    });
+
+    test('key absent from non-empty map returns empty string (read-only)', () {
+      // Catches: an unmapped group becoming tappable — the whole point of
+      // the feature (spec §3 UX bug: completed tasks should not be tappable).
+      final map = {'a': 'pageA'};
+      expect(resolveGroupRoute(map, 'missing'), '');
+    });
+  });
 }

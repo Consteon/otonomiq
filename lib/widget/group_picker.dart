@@ -53,11 +53,49 @@ class GroupPicker extends StatefulWidget {
   static final Map<String, Map<int, Map<String, Map<String, String>>>>
       _labelStore = {};
 
-  /// Clear per-screen state. Called from buildPage clearData path.
+  /// Repaint signal for [clearState]. The stores above stay PLAIN Maps (mutated
+  /// during build via putIfAbsent); only this counter is reactive, so a reset
+  /// can never notify mid-build. Mirrors the countStore/editStore shape.
+  static final RxInt resetRev = 0.obs;
+
+  /// Clear every picker on a screen.
+  ///
+  /// Must be called from clearData (the per-NAV reset) as well as
+  /// buildPage(clear:true) -- buildPage runs at page CONSTRUCTION/refresh only.
+  /// Navigation is gotoRoute -> reloadPage, which returns the CACHED
+  /// linkElement[scrName] and never re-runs buildPage, so a buildPage-only
+  /// reset leaks the last visit's tab + ticks into the next visit.
+  ///
+  /// clearData fires POST-frame, after the cached widget already painted once,
+  /// and GroupPicker has no GetBuilder subscription -- so clearing the stores
+  /// alone would not repaint. Bumping [resetRev] (read by build's Obx) is what
+  /// makes the reset visible.
   static void clearState(String scrName) {
     _activeGroupStore.remove(scrName);
     _selectionStore.remove(scrName);
     _labelStore.remove(scrName);
+    resetRev.value++;
+  }
+
+  /// Wipe EVERY screen's picker state. This is what clearData calls.
+  ///
+  /// Clearing only the entering screen is correct but VISIBLY GLITCHY: clearData
+  /// runs post-frame, so a revisited page paints the previous visit's tab+ticks
+  /// for a frame and then snaps to empty. Wiping every screen instead means the
+  /// page is cleared on the nav AWAY from it (while it is off-screen and there
+  /// is nothing to see), so the next visit is already empty at its FIRST paint.
+  /// The entering screen is included so a same-page clearData -- saveSend after
+  /// a submit, or a reset button -- still resets the picker you are looking at.
+  ///
+  /// ponytail: blunt on purpose. Per-visit reset is this widget's semantics
+  /// everywhere (R4/R7), no screen wants its picker state preserved while a
+  /// different screen is on top, and blunt keeps the "was it cleared yet?"
+  /// bookkeeping at zero. Narrow it only if a picker ever has to survive nav.
+  static void clearAll() {
+    _activeGroupStore.clear();
+    _selectionStore.clear();
+    _labelStore.clear();
+    resetRev.value++;
   }
 
   // -- Pure static helpers (testable without SDUI globals) --------------------
@@ -584,6 +622,12 @@ class _GroupPickerState extends State<GroupPicker> {
   @override
   Widget build(BuildContext context) {
     return Obx(() {
+      // FIRST statement, unconditional: clearState (per-nav reset from
+      // clearData) bumps this, and reading it here is what repaints the picker
+      // back to group 0 with nothing ticked. Hoisted to the top so no ternary
+      // or early return can short-circuit the observable read.
+      // ignore: unused_local_variable
+      final int rev = GroupPicker.resetRev.value;
       // Obx requires >=1 observable read on EVERY build path. An all-static
       // picker (no table group) would otherwise register ZERO observables and
       // get 4.7.3 throws "improper use of a GetX has been detected" -- the

@@ -59,6 +59,14 @@ TaskFeedList({
 | `returnGateSearch` | `String` | Grouped | Return-CTA gate search. Ignored in FLAT. |
 | `text` | `String` | Grouped | Diamond-separated labels. 15 segments (section headers, badges, banners). Unused in FLAT. |
 
+### Actual-over-plan display
+
+Per-card drop/pickup counts use `resolveItemQty` (actual-over-plan): if the
+actual field is present, non-null, and non-empty, it is displayed; otherwise the
+plan field is used. Pre-execution items carry `ad: null` / `ap: null` (from
+`toItMap()`), so the null check falls back to plan. The previous `isDone`
+if/else branching is replaced by this uniform helper.
+
 ## State / Dependencies
 
 - **GetX Obx** for reactive mapTableContent reads.

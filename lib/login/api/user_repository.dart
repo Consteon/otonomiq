@@ -69,10 +69,20 @@ class UserRepository {
       rootThis.pagesFetching = true;
       rootThis.pagesFetchFailed = false;
     });
-    bool ok = await readSettings(sk, 1, timeoutSec: 60);
+    // ★ Firestore FIRST, Sheets only as fallback. `/Proxy/<lif>/{System,Page}`
+    // holds the same page definitions the Sheets fetch returns, and reads in
+    // ~0.2-0.5s against 66-90s for the 181 KB readSS payload (measured
+    // 2026-08-03; one of three runs returned a 24-byte junk body). The proxy
+    // listener in main_page.dart already applies these documents in production
+    // — this just reads them once, at the moment login actually needs them.
+    bool ok = await loadPagesFromProxy(sk);
     if (!ok) {
-      devPrint('readSettings login attempt 1 failed, retrying');
+      devPrint('proxy pages unavailable — falling back to readSettings');
       ok = await readSettings(sk, 1, timeoutSec: 60);
+      if (!ok) {
+        devPrint('readSettings login attempt 1 failed, retrying');
+        ok = await readSettings(sk, 1, timeoutSec: 60);
+      }
     }
     // Leave pageName/#CURRENT_ROUTE alone on failure: claiming `home` while the
     // sign-in pages are still loaded makes the AppBar title and rePaintScreen
@@ -445,32 +455,39 @@ class UserRepository {
             value: ftzSecretOneSeed); //   put Account key in secure storage
         var nxPage = home; //   set default page = Home
         loadHistory(clearHistory, 'aumLogin (user_repository) <= async');
-        // Load the new user's pages concurrently with reLogin(), but capture
-        // the future so we can await it below. readSettings persists the
-        // @screenUI/@systemUI cache when it completes (api.dart) — login must
-        // not report success until that cache is written, otherwise a kill
-        // right after login leaves an empty cache and the next warm reopen is
-        // forced onto the (slow/possibly-stalled) network page-fetch path.
-        final Future<void> settingsReady = () async {
-          if (!await _loginPagesReady(sk)) return; // pages not swapped
-          transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
-              {'#REFRESH': false, '#CURRENT_ROUTE': nxPage})));
-          List<Widget> newElementList = reloadPage(nxPage);
-          rootThis.setState(() {
-            rootThis.pageName = nxPage;
-            rootThis.pageElements = newElementList;
-            rootThis.wait = false;
-            rootThis.touch = !rootThis.touch;
-          });
-        }();
         final sw4 = loginPerfTrace ? (Stopwatch()..start()) : null;
         result = await reLogin();
         if (sw4 != null) {
           debugPrint('[LOGINPERF] reLogin = ${sw4.elapsedMilliseconds}ms');
         }
+        // ★ The page fetch runs AFTER reLogin, NOT concurrently with it, and it
+        // must stay that way. It was originally a detached `settingsReady`
+        // future launched beside reLogin; when reLogin threw, control jumped to
+        // the outer catch and that orphan future kept running, landing minutes
+        // later to setState home over a login that had already failed and
+        // signed out — home painted with no #VID, "Login fail" dialog on top.
+        // Awaiting it inline makes that state unreachable.
+        //
+        // reLogin no longer performs any Sheets I/O (see the note there), so
+        // sequencing costs essentially nothing now.
+        //
+        // The loader persists the @screenUI/@systemUI cache when it completes —
+        // login must not report success until that cache is written, otherwise
+        // a kill right after login leaves an empty cache and the next warm
+        // reopen is forced onto the slow network page-fetch path.
         final sw5 = loginPerfTrace ? (Stopwatch()..start()) : null;
         try {
-          await settingsReady; // ensure the page cache is persisted before success
+          if (await _loginPagesReady(sk)) {
+            transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
+                {'#REFRESH': false, '#CURRENT_ROUTE': nxPage})));
+            List<Widget> newElementList = reloadPage(nxPage);
+            rootThis.setState(() {
+              rootThis.pageName = nxPage;
+              rootThis.pageElements = newElementList;
+              rootThis.wait = false;
+              rootThis.touch = !rootThis.touch;
+            });
+          } // else pages not swapped; _loginPagesReady set the retry state
         } catch (e) {
           // A page-fetch failure shouldn't fail the login (warm reopen falls
           // back to the now-timed-out network path); just log it.
@@ -517,19 +534,35 @@ class UserRepository {
 
     var state = transactionStore.state.screenTx;
 
-    final sw2 = loginPerfTrace ? (Stopwatch()..start()) : null;
-    var sheetData = await getLifProfileData(state['#INTERFACE_KEY']);
-    if (sw2 != null) {
-      debugPrint('[LOGINPERF] getLifProfileData = ${sw2.elapsedMilliseconds}ms');
+    // ★★ THE SHEET IS OFF THE LOGIN CRITICAL PATH.
+    //
+    // #VID used to come from getLifProfileData() — a readSS call on the tenant
+    // workbook measured at 4-79s, and the ONLY call on this path that THROWS,
+    // so its latency turned straight into "Login anda gagal. Kemungkinan
+    // karena koneksi internet anda terganggu".
+    //
+    // It was also redundant. Of the four keys it dispatched, #PINHASH /
+    // #CIPHERTEXT / #PUBLICKEY have ZERO readers anywhere in lib/ (and the
+    // Settings!G range feeding them is empty on the live sheet — measured).
+    // The fourth, #VID, is set again moments later by whichever page loader
+    // runs next: readSettings dispatches it from settingCell(Settings!B1) and
+    // loadPagesFromProxy from the proxy doc's `v`. Those run LAST, so their
+    // value always won regardless.
+    //
+    // aumLogin already holds the same vid for free, from the Firestore user
+    // doc it read seconds ago (dispatched as #ADDRESS). String, to match
+    // settingCell()'s `row[0].toString()` — the setter every successful login
+    // has always ended on. Set here rather than later because launchCheck()
+    // below is fire-and-forget and reads #VID via getVidData().
+    final String fsVid = '${state['#ADDRESS'] ?? ''}';
+    if (fsVid.isEmpty) {
+      // Should not happen: aumLogin sets #ADDRESS from userData['vid'] before
+      // calling reLogin. Log rather than dispatch an empty vid over a good one.
+      devPrint('[LOGINPERF] #ADDRESS empty — #VID left unset by reLogin');
+    } else {
+      transactionStore.dispatch(
+          UpdateScreenTxAction(ScreenTransaction({'#VID': fsVid})));
     }
-
-    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-      '#VID': sheetData['vid'],
-//      '#ADDRESS': sheetData['address'],
-      '#PINHASH': sheetData['pinHash'],
-      '#CIPHERTEXT': sheetData['cipherText'],
-      '#PUBLICKEY': sheetData['publicKey'],
-    })));
     storage.write(key: 'myLif', value: state['#INTERFACE_KEY']);
 //  storage.write(key: 'myFirebaseData', value: jsonEncode(state['#FIREBASE_USER']));
 //    await setUidImeiEmail(sheetData['vid'].toString()); // To Firestore

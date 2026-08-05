@@ -410,4 +410,74 @@ void main() {
       expect(rendered, isNotEmpty);
     });
   });
+
+  group('applyCondMap', () {
+    test('mapped value relabels cd', () {
+      final Map<String, BadgeEntry> lookup = {};
+      parseBadgeMap('full\u{25FC}Isi\u{2605}empty\u{25FC}Kosong', lookup);
+      final Map<String, dynamic> doc = {'in': 'Aqua Galon', 'qt': '7', 'cd': 'full'};
+      final Map<String, dynamic> result = applyCondMap(doc, lookup);
+      expect(result['cd'], 'Isi');
+      // Other fields untouched.
+      expect(result['in'], 'Aqua Galon');
+      expect(result['qt'], '7');
+    });
+
+    test('unmapped value returns raw (not blank)', () {
+      final Map<String, BadgeEntry> lookup = {};
+      parseBadgeMap('full\u{25FC}Isi\u{2605}empty\u{25FC}Kosong', lookup);
+      final Map<String, dynamic> doc = {'cd': 'damaged'};
+      final Map<String, dynamic> result = applyCondMap(doc, lookup);
+      // Unmapped -> raw passthrough, same doc instance.
+      expect(result['cd'], 'damaged');
+      expect(identical(result, doc), isTrue);
+    });
+
+    test('empty lookup returns same doc instance (zero regression)', () {
+      final Map<String, BadgeEntry> lookup = {};
+      final Map<String, dynamic> doc = {'cd': 'full', 'in': 'Aqua'};
+      final Map<String, dynamic> result = applyCondMap(doc, lookup);
+      expect(identical(result, doc), isTrue);
+    });
+
+    test('original doc is NOT mutated', () {
+      final Map<String, BadgeEntry> lookup = {};
+      parseBadgeMap('full\u{25FC}Isi', lookup);
+      final Map<String, dynamic> original = {'cd': 'full', 'in': 'Aqua'};
+      applyCondMap(original, lookup);
+      // original still holds the canonical raw value.
+      expect(original['cd'], 'full');
+    });
+
+    test('missing cd field returns same doc instance', () {
+      final Map<String, BadgeEntry> lookup = {};
+      parseBadgeMap('full\u{25FC}Isi', lookup);
+      final Map<String, dynamic> doc = {'in': 'Aqua'};
+      final Map<String, dynamic> result = applyCondMap(doc, lookup);
+      expect(identical(result, doc), isTrue);
+    });
+
+    test('end-to-end: resolveSegmentedTemplate with condMap produces correct output', () {
+      // This test uses the REAL template from the spec and proves the full
+      // pipeline: applyCondMap -> resolveSegmentedTemplate -> split segments.
+      final Map<String, BadgeEntry> lookup = {};
+      parseBadgeMap('full\u{25FC}Isi\u{2605}empty\u{25FC}Kosong', lookup);
+
+      final Map<String, dynamic> doc = {
+        'in': 'Aqua Galon 19 Liter',
+        'qt': '7',
+        'cd': 'empty',
+      };
+
+      final List<String> segs = resolveSegmentedTemplate(
+        '<in> \u{00D7}<qt>\u{25C6}<cd>',  // "<in> x<qt>◆<cd>"
+        applyCondMap(doc, lookup),
+        const {},
+      );
+
+      expect(segs.length, 2);
+      expect(segs[0], 'Aqua Galon 19 Liter \u{00D7}7');
+      expect(segs[1], 'Kosong');
+    });
+  });
 }

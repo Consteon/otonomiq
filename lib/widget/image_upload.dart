@@ -84,7 +84,14 @@ class ImageUploadState extends State<ImageUpload> {
             ),
           ],
         ),
-        _imageFile == null ? const Placeholder() : Image.file(_imageFile!),
+        _imageFile == null
+            ? const Placeholder()
+            : Image.file(
+                _imageFile!,
+                // picked file lives in /cache; it can vanish before the async
+                // load lands → PathNotFoundException outside any try/catch
+                errorBuilder: (_, _, _) => const Placeholder(),
+              ),
       ],
     );
   }

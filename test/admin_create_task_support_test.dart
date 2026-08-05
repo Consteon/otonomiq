@@ -381,17 +381,27 @@ void main() {
       expect(doc['search'], contains('TASK-ABC'));
     });
 
-    test('empty scalars are preserved (degrade-safe)', () {
+    test('empty scalars: vv/tdt omitted when empty/null, others preserved', () {
       final doc = AdminCreateTaskSupport.assembleTaskDoc(
         tnm: 'TASK--20260624-000000',
         kl: '', kn: '', al: '', vv: '', gl: '',
         cv: '', cn: '',
-        tdt: 0, t: 0,
+        tdt: null, t: 0,
         itArray: [],
         tableVid: '',
       );
+      // vv passed as '' -> omitted (D4: absent, not empty)
+      expect(doc.containsKey('vv'), isFalse,
+          reason: 'vv must be absent when empty');
+      // tdt passed as null -> omitted
+      expect(doc.containsKey('tdt'), isFalse,
+          reason: 'tdt must be absent when null');
+      // ln defaults to '' -> omitted
+      expect(doc.containsKey('ln'), isFalse,
+          reason: 'ln must be absent when empty');
+      // Other scalars are still present (even when empty)
       expect(doc['kl'], '');
-      expect(doc['vv'], '');
+      expect(doc['tst'], 'assigned');
       expect(doc['it'], isEmpty);
     });
 
@@ -433,6 +443,68 @@ void main() {
         expect(m['ap'], isNull,
             reason: 'ap must be null in doc.it[$i] (${m['tx']})');
       }
+    });
+
+    test('tst override: unassigned status written to doc', () {
+      final doc = AdminCreateTaskSupport.assembleTaskDoc(
+        tnm: 'TASK-C1-20260803-100000',
+        kl: 'C1', kn: 'Toko A', al: 'Jl. Raya',
+        vv: '', gl: 'WH-001', cv: '12345', cn: 'Admin',
+        tdt: null, t: 1000, itArray: [], tableVid: 'VID',
+        tst: 'unassigned',
+      );
+      expect(doc['tst'], 'unassigned');
+      expect(doc.containsKey('vv'), isFalse);
+      expect(doc.containsKey('tdt'), isFalse);
+    });
+
+    test('vv present when non-empty, absent when empty', () {
+      final withVv = AdminCreateTaskSupport.assembleTaskDoc(
+        tnm: 'T1', kl: '', kn: '', al: '', vv: 'VEH-123',
+        gl: '', cv: '', cn: '',
+        tdt: null, t: 0, itArray: [], tableVid: '',
+      );
+      expect(withVv['vv'], 'VEH-123');
+
+      final withoutVv = AdminCreateTaskSupport.assembleTaskDoc(
+        tnm: 'T2', kl: '', kn: '', al: '', vv: '',
+        gl: '', cv: '', cn: '',
+        tdt: null, t: 0, itArray: [], tableVid: '',
+      );
+      expect(withoutVv.containsKey('vv'), isFalse);
+    });
+
+    test('ln present when non-empty, absent when empty', () {
+      final withLn = AdminCreateTaskSupport.assembleTaskDoc(
+        tnm: 'T1', kl: '', kn: '', al: '', vv: '',
+        gl: '', cv: '', cn: '',
+        tdt: null, t: 0, itArray: [], tableVid: '',
+        ln: 'B 1234 XY',
+      );
+      expect(withLn['ln'], 'B 1234 XY');
+
+      final withoutLn = AdminCreateTaskSupport.assembleTaskDoc(
+        tnm: 'T2', kl: '', kn: '', al: '', vv: '',
+        gl: '', cv: '', cn: '',
+        tdt: null, t: 0, itArray: [], tableVid: '',
+      );
+      expect(withoutLn.containsKey('ln'), isFalse);
+    });
+
+    test('tdt present when non-null, absent when null', () {
+      final withTdt = AdminCreateTaskSupport.assembleTaskDoc(
+        tnm: 'T1', kl: '', kn: '', al: '', vv: '',
+        gl: '', cv: '', cn: '',
+        tdt: 1782244800000, t: 0, itArray: [], tableVid: '',
+      );
+      expect(withTdt['tdt'], 1782244800000);
+
+      final withoutTdt = AdminCreateTaskSupport.assembleTaskDoc(
+        tnm: 'T2', kl: '', kn: '', al: '', vv: '',
+        gl: '', cv: '', cn: '',
+        tdt: null, t: 0, itArray: [], tableVid: '',
+      );
+      expect(withoutTdt.containsKey('tdt'), isFalse);
     });
   });
 

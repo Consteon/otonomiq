@@ -303,6 +303,7 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
         tasks: tasks,
         updateEventRowDsl: _updateEventRowDsl,
         component: widget.component,
+        scrName: widget.scrName,
         titleAssign: _t(9, 'Pilih Kendaraan'),
         titleReassign: _t(10, 'Assign Ulang Kendaraan'),
         confirmLabel: _t(11, 'Konfirmasi'),

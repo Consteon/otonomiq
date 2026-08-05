@@ -235,10 +235,10 @@ class _DisplayListState extends State<DisplayList> {
             children: [
               Container(
                 decoration: BoxDecoration(
-                  border: Border.all(),
-                  borderRadius: const BorderRadius.all(Radius.circular(6.0)),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                  borderRadius: const BorderRadius.all(Radius.circular(16.0)),
                 ),
-                padding: EdgeInsets.only(top: topPad),
+                padding: EdgeInsets.fromLTRB(10, topPad, 10, 10),
                 child: listItems,
               ),
               (topPad != padWithTitle || textArray.isEmpty)
@@ -248,7 +248,10 @@ class _DisplayListState extends State<DisplayList> {
                   top: 10,
                   child: Container(
                     padding: const EdgeInsets.only(left: 10, right: 10),
-                    color: Colors.white,
+                    // Match the page, not white: the title chip sits ON the
+                    // frame border, so a hardcoded white left a visible patch
+                    // on any non-white scaffold.
+                    color: Theme.of(context).scaffoldBackgroundColor,
                     child: OtqFormattedText(
                         textData:
                             (textArray.isNotEmpty ? textArray[0] : null) ?? "",

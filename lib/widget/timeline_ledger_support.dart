@@ -81,6 +81,28 @@ Color badgeBgColor(BadgeEntry? entry) {
   return kCategoryBgColors[entry.index % kCategoryBgColors.length];
 }
 
+// ---- Condition relabel (condMap) --------------------------------------------
+
+/// Relabel the canonical condition value `cd` in [doc] via [lookup]
+/// (produced by [parseBadgeMap] from the `condMap` config).
+///
+/// Returns [doc] UNCHANGED (same instance) when:
+/// - [lookup] is empty (no condMap configured -- zero-regression path), or
+/// - the doc's `cd` value is not in the map (unmapped -> raw passthrough).
+///
+/// Returns a SHALLOW COPY with only `cd` replaced when mapped. The caller's
+/// original doc is never mutated -- grouping/badge/conditions keep seeing
+/// canonical raw values.
+Map<String, dynamic> applyCondMap(
+  Map<String, dynamic> doc,
+  Map<String, BadgeEntry> lookup,
+) {
+  if (lookup.isEmpty) return doc;
+  final BadgeEntry? e = lookup[(doc['cd'] ?? '').toString().trim()];
+  if (e == null) return doc;
+  return Map<String, dynamic>.from(doc)..['cd'] = e.label;
+}
+
 // ---- Configurable time field ------------------------------------------------
 
 /// Read epoch (ms) from a configurable field. Falls back to the standard

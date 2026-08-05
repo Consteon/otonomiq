@@ -308,6 +308,14 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                   image: DecorationImage(
                       // image: FileImage(capturedImages.last),
                       image: FileImage(currentImage!),
+                      // Accept hands this /cache/OTQC*.jpg path to the form and
+                      // pops; saveImageToCloud → renamePath then MOVES the file
+                      // out of /cache while this page can still repaint (and
+                      // Android may evict /cache anyway) → FileImage.length()
+                      // PathNotFoundException. DecorationImage has no
+                      // errorBuilder, so without onError it escapes to
+                      // FlutterError.onError = fatal.
+                      onError: (e, s) => devPrint('preview image gone: $e'),
                       fit: BoxFit.cover),
                 ),
               )

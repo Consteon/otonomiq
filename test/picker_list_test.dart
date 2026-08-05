@@ -369,6 +369,38 @@ void main() {
 
   // ── busy-self derivation (busy-guard S2.1) ──────────────────────────────
 
+  // ── isAdhocSelected ────────────────────────────────────────────────────
+
+  group('PickerList.isAdhocSelected', () {
+    test('adhocValue empty, selected null -> true (no capture = adhoc)', () {
+      expect(
+        PickerList.isAdhocSelected(adhocValue: '', selected: null),
+        isTrue,
+      );
+    });
+
+    test('adhocValue empty, selected non-empty -> false (vehicle captured)', () {
+      expect(
+        PickerList.isAdhocSelected(adhocValue: '', selected: 'VEH-1'),
+        isFalse,
+      );
+    });
+
+    test('adhocValue set, selected matches -> true', () {
+      expect(
+        PickerList.isAdhocSelected(adhocValue: 'ADHOC', selected: 'ADHOC'),
+        isTrue,
+      );
+    });
+
+    test('adhocValue set, selected null -> false', () {
+      expect(
+        PickerList.isAdhocSelected(adhocValue: 'ADHOC', selected: null),
+        isFalse,
+      );
+    });
+  });
+
   group('busy-self field derivation', () {
     // Mirrors the _rowTile logic: read busySelfField from the row itself.
     // Pure extraction -- no widget pump needed.

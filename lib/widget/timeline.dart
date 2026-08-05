@@ -677,6 +677,13 @@ class _TimelineState extends State<Timeline> {
                             width: 72,
                             height: 72,
                             fit: BoxFit.cover,
+                            // cache-dir attachment can be evicted/moved before
+                            // the async load lands → PathNotFoundException
+                            errorBuilder: (_, _, _) => const SizedBox(
+                              width: 72,
+                              height: 72,
+                              child: Icon(Icons.broken_image, size: 24),
+                            ),
                           ),
                         )
                       else

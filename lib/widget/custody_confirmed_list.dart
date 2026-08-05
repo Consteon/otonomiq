@@ -102,7 +102,7 @@ class _CustodyConfirmedListState extends State<CustodyConfirmedList> {
     if (rawSearch.isEmpty) return docs.isNotEmpty ? docs.first : null;
     final List<Map<String, dynamic>> matched =
         filterDriverHomeDocs(docs, rawSearch, widget.scrName);
-    return matched.isNotEmpty ? matched.first : null;
+    return pickNewestDoc(matched);
   }
 
   List<Map<String, dynamic>> _extractArray(

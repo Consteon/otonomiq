@@ -559,6 +559,119 @@ void main() {
     });
   });
 
+  // -- Widget pump: revisit resets the picker -----------------------------------
+  // Leaving the page and coming back must show group 0 with nothing selected,
+  // and must do it on the FIRST painted frame -- clearData runs post-frame, so
+  // a reset scoped to the entering screen would flash the old state for a frame.
+  // clearAll wipes on the nav AWAY, while the page is off-screen.
+  group('revisit resets picker', () {
+    const String is_ = '\u{2B58}'; // itemSep (⭘)
+    const String ps = ',';
+    Widget wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
+
+    Map<String, dynamic> componentFor(int valuePosition) => {
+          'type': 'group_picker',
+          'mode': 'multi',
+          'selector': 'segmented',
+          'pairSep': ps,
+          'valuePosition': valuePosition,
+          'groups': [
+            {
+              'key': 'cc',
+              'label': 'Cost Center',
+              'src': 'static',
+              'options': 'Item1${ps}PA1${is_}Item2${ps}PA2',
+            },
+            {
+              'key': 'site',
+              'label': 'Site',
+              'src': 'static',
+              'options': 'Item3${ps}PB1${is_}Item4${ps}PB2',
+            },
+          ],
+        };
+
+    /// Switch to the second group ('Site') and tick 'Item3'.
+    Future<void> selectInSecondGroup(WidgetTester tester) async {
+      await tester.tap(find.text('Site'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Item3'));
+      await tester.pumpAndSettle();
+    }
+
+    void expectResetToFirstGroup() {
+      expect(find.byIcon(Icons.check_box), findsNothing,
+          reason: 'revisit must start with nothing selected');
+      expect(find.text('Item1'), findsOneWidget,
+          reason: 'revisit must land on the FIRST group (cc), not Site');
+      expect(find.text('Item3'), findsNothing,
+          reason: 'Site items must not be the active list on revisit');
+    }
+
+    testWidgets('away-then-back is clean on the FIRST frame (no glitch)',
+        (WidgetTester tester) async {
+      const String scrName = 'gp_revisit_01';
+      GroupPicker.clearAll();
+      addTearDown(GroupPicker.clearAll);
+
+      Widget picker() => GroupPicker(
+            component: componentFor(41),
+            scrName: scrName,
+            lPad: 0,
+            tPad: 0,
+            rPad: 0,
+            bPad: 0,
+          );
+
+      // Visit 1: pick something in the second group.
+      await tester.pumpWidget(wrap(picker()));
+      await tester.pumpAndSettle();
+      await selectInSecondGroup(tester);
+      expect(txfController[scrName]![41]!.finalData, 'PB1');
+      expect(find.byIcon(Icons.check_box), findsOneWidget);
+
+      // Navigate AWAY to another screen: reloadPage(other) schedules
+      // clearData(other) -> clearAll, which wipes this screen while it is
+      // off-screen. Unmount first, exactly as the page swap does.
+      await tester.pumpWidget(wrap(const SizedBox()));
+      await tester.pumpAndSettle();
+      GroupPicker.clearAll();
+
+      // Visit 2. ONE pump = the first painted frame. It must already be clean;
+      // pumpAndSettle here would hide a one-frame flash, which is the bug.
+      await tester.pumpWidget(wrap(picker()));
+      await tester.pump();
+      expectResetToFirstGroup();
+    });
+
+    testWidgets('same-page clearData (submit/reset) repaints a mounted picker',
+        (WidgetTester tester) async {
+      const String scrName = 'gp_revisit_02';
+      GroupPicker.clearAll();
+      addTearDown(GroupPicker.clearAll);
+
+      await tester.pumpWidget(wrap(GroupPicker(
+        component: componentFor(42),
+        scrName: scrName,
+        lPad: 0,
+        tPad: 0,
+        rPad: 0,
+        bPad: 0,
+      )));
+      await tester.pumpAndSettle();
+      await selectInSecondGroup(tester);
+      expect(txfController[scrName]![42]!.finalData, 'PB1');
+      expect(find.byIcon(Icons.check_box), findsOneWidget);
+
+      // saveSend after a submit calls clearData on the CURRENT screen, with the
+      // picker still mounted. No remount happens, so the resetRev bump inside
+      // clearAll is the only thing that can repaint it.
+      GroupPicker.clearAll();
+      await tester.pumpAndSettle();
+      expectResetToFirstGroup();
+    });
+  });
+
   // -- Widget pump: degrade paths (no crash) ----------------------------------
   // selector:dropdown → degrades to segmented (deferred feature, not a real dropdown).
   // display:sheet → GroupPicker ignores it; always renders inline.

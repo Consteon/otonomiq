@@ -24,6 +24,11 @@ Per-task accordion list with item-level detail and aggregate drop/pickup badges.
 | `itemsField` | String | Items array field (default `it`) |
 | `dropField` | String | Drop qty field in it[] (default `pd`) |
 | `pickupField` | String | Pickup qty field in it[] (default `pp`) |
+| `actualDropField` | String | Actual-drop qty field in it[] (default `ad`). Collection mode only. |
+| `actualPickupField` | String | Actual-pickup qty field in it[] (default `ap`). Collection mode only. |
+| `actualSaleField` | String | Actual-sale qty field in it[] (default `as`). Collection mode only. |
+| `actualBuyField` | String | Actual-buy qty field in it[] (default `ab`). Collection mode only. |
+| `actualRefillField` | String | Actual-refill qty field in it[] (default `ar`). Collection mode only. |
 | `text` | String | Diamond-separated text slots (see mode-specific tables below) |
 
 ### Collection-mode fields
@@ -78,6 +83,15 @@ Per-task accordion list with item-level detail and aggregate drop/pickup badges.
 | 6 | Refill annotation label | `Refill` |
 
 > **Trailing-diamond caveat:** `diamondTextToList` keeps trailing empties, so a 4-content-segment text written with a trailing `◆` (e.g. the live `"Item Order◆item line◆drop◆pickup◆"`) parses to **5** elements, the 5th being `""`. Slot 4 (sale label) then resolves to that empty string rather than the `Jual` default; slots 5/6 are out-of-range and fall back to `Beli`/`Refill`. To get the `Jual` default for sale rows, the server should either drop the trailing `◆` or supply slot 4 explicitly.
+
+### Actual-over-plan display (collection mode)
+
+Task row pills and item-line annotations use `resolveItemQty`
+(actual-over-plan): if the actual field is present, non-null, and non-empty, it
+is displayed; otherwise the plan field is used. Pre-execution items carry
+`ad: null` / `ap: null` (from `toItMap()`), so the null check falls back to
+plan. Draft mode is unaffected (drafts carry the same null values, which fall
+back to plan by the same mechanism).
 
 ## Dependencies
 

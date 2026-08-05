@@ -809,7 +809,6 @@ Future<int> globalInit() async {
   functionName['runInstruction'] = '/runInstruction'; //= run instruction in gcf
   functionName['InvLogin'] = '/s1InvLogin';
   functionName['deviceOperation'] = '/deviceReset';
-  functionName['mobileRefresh'] = '/mobileRefresh';
   autsorzFunctionDomain = functionDomain['default'];
   appSettingFunctionName = functionName['appSettings'];
   sheetSystemLength = 15;
@@ -1932,7 +1931,28 @@ String phoneCanonical62(String inp) {
   return '62$d';
 } // end of phoneCanonical62
 
+/// True when [e] is the shape a call gets when the radio is simply down:
+/// `ClientException with SocketException: Connection failed (OS Error: Network
+/// is unreachable, errno = 101)`, `Failed host lookup` (errno 7), etc.
+bool isNetworkDownError(dynamic e) {
+  final String s = e.toString();
+  return s.contains('SocketException') ||
+      s.contains('ClientException') ||
+      s.contains('Network is unreachable') ||
+      s.contains('Failed host lookup');
+} // end of isNetworkDownError
+
 void errorReport(dynamic e, [StackTrace? stack]) {
+  // Offline is a NORMAL state in this offline-first app — every http / Cloud
+  // Function call made with no network throws, and reporting each one made
+  // "readSS Network is unreachable" the top non-fatal. Skip ONLY when the app
+  // itself knows it is offline AND the error is network-shaped: the same
+  // exception while online is a real failure and still reported, and a
+  // non-network error while offline (RangeError, cast, …) still reports.
+  if (!internetConnectionFlag.value && isNetworkDownError(e)) {
+    debugPrint('offline (crash report skipped): ${e.toString()}');
+    return;
+  }
   // Log unconditionally (debugPrint prints in release too) AND forward to
   // Crashlytics as a non-fatal for remote capture — the hundreds of
   // catch-then-errorReport sites (incl. historySync data-loss) are now visible

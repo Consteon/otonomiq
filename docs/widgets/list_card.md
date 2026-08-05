@@ -44,6 +44,7 @@ All separators are server-encoded and `autheniumDecode`-d before splitting: `◼
 | `sortField` / `sortDir` | Numeric-coerced sort; `sortDir` = `asc`\|`desc`. Empty `sortField` = arrival order. |
 | `groupBy` | Field key to section by; empty = flat list. |
 | `groupLabels` | `value◼Label★value2◼Label2` — section order follows this list; data values not listed here append at the bottom as-is; empty sections are hidden. |
+| `groupRoutes` | `value◼route★value2◼route2` -- per-group route override. Groups in the map are tappable (navigates to that route); groups not in the map are read-only (`onTap: null`, no ripple). **Ignored entirely when `groupBy` is empty** (structural: `_buildGrouped` is never called in flat mode). Fallback: `groupBy` filled + `groupRoutes` empty = all groups use the global `route`. Malformed entries (no `◼`) are silently skipped (fail-closed). |
 | `lead` | `""` = no leading · `initial` = first letter of the resolved title · else an icon name (`panelIcon`). |
 | `title` | Template, `<field>` tokens from the row doc (e.g. `<tt>`). |
 | `subtitle` / `meta` | Templates (e.g. `<bn> · <vn>`, `<dt> · <st>–<et>`); empty = hidden. |
@@ -71,14 +72,14 @@ All separators are server-encoded and `autheniumDecode`-d before splitting: `◼
 [HEADER  title + subtitle + count]     text[0..2]   (hidden if text[0] empty)
 [STATS   count box ×N]                  stats        (hidden if stats empty)
 [SEARCH  bar]                           searchFields (hidden if empty)
-[GROUP   section label]                 groupBy      (flat if empty)
+[GROUP   section label]                 groupBy      (flat if empty; groupRoutes per-group tap)
 [CARD]  (lead) title [badge] / subtitle / meta … trailing+trailingLabel
 [EMPTY  text[4]]                        when 0 rows
 ```
 
 ## Reused machinery (no reinvention)
 
-`filterDriverHomeDocs` (search/conditions + token resolve), `resolveMapTokens` (`<field>`), `writeRouteParamsFromRow` (routeParams §9), `groupByField`, `statusColor`/`statusBgColor` (badge tiers), `evaluateGate` (stats counts), `subscribeToMapCollection` + `resolveAppVid` (vid-scoped subscription), `coerceNum` (sort), `panelIcon` (lead icon). Pure config parsers (`parseBadgeMap`/`parseGroupLabels`/`parseStatsDefs`/`computeStatsCounts`/`lookupBadge`) live in `list_card_support.dart` and are unit-tested in [test/list_card_support_test.dart](../../test/list_card_support_test.dart).
+`filterDriverHomeDocs` (search/conditions + token resolve), `resolveMapTokens` (`<field>`), `writeRouteParamsFromRow` (routeParams §9), `groupByField`, `statusColor`/`statusBgColor` (badge tiers), `evaluateGate` (stats counts), `subscribeToMapCollection` + `resolveAppVid` (vid-scoped subscription), `coerceNum` (sort), `panelIcon` (lead icon). Pure config parsers (`parseBadgeMap`/`parseGroupLabels`/`parseGroupRoutes`/`resolveGroupRoute`/`parseStatsDefs`/`computeStatsCounts`/`lookupBadge`) live in `list_card_support.dart` and are unit-tested in [test/list_card_support_test.dart](../../test/list_card_support_test.dart).
 
 ## Slot gating (approval queue filter)
 

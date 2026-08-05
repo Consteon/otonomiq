@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf/pdf.dart';
@@ -1209,6 +1210,196 @@ void main() {
       final bytes = await tp.generateBytes();
       expect(bytes, isNotEmpty);
       expect(String.fromCharCodes(bytes.sublist(0, 5)), startsWith('%PDF'));
+    });
+  });
+
+  // ── <IMAGE src='...'> primary attribute + asset fallback ──────────
+  group('IMAGE src attribute and asset fallback', () {
+    final testPng = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mP4'
+      '//8/AAX+Av4zEpUUAAAAAElFTkSuQmCC',
+    );
+
+    // 1. src resolves as the primary source.
+    // FAILS pre-change: _imgSourceKey does not check 'src', key resolves to
+    // '' (no asset); generateBytes throws StateError (zero-widget guard)
+    // before the expect runs.
+    test('src attr resolves via assetLoader with the URL key', () async {
+      String? receivedKey;
+      final tp = TemplatePdf(
+        template:
+            "<IMAGE src='https://storage.example.com/logo.png' align='center' height=14/>",
+        pageFormat: PdfPageFormat.a6,
+        tables: const {},
+        assetLoader: (key) async {
+          receivedKey = key;
+          return key.startsWith('http') ? testPng : null;
+        },
+      );
+      final bytes = await tp.generateBytes();
+      expect(receivedKey, 'https://storage.example.com/logo.png');
+      expect(bytes, isNotEmpty);
+      expect(String.fromCharCodes(bytes.sublist(0, 5)), startsWith('%PDF'));
+    });
+
+    // 2. src wins over url when both present.
+    // FAILS pre-change: _imgSourceKey checks url first and does not know src,
+    // so it returns the url value; keys would be ['https://b.com/old.png'].
+    test('src takes precedence over url when both present', () async {
+      final keys = <String>[];
+      final tp = TemplatePdf(
+        template:
+            "<IMAGE src='https://a.com/new.png' url='https://b.com/old.png' align='center'/>",
+        pageFormat: PdfPageFormat.a6,
+        tables: const {},
+        assetLoader: (key) async {
+          keys.add(key);
+          return testPng;
+        },
+      );
+      await tp.generateBytes();
+      expect(keys, ['https://a.com/new.png']);
+    });
+
+    // 3. url still works as alias (regression guard for existing templates).
+    // PASSES pre-change -- this is the regression test.
+    test('url attr still works as alias (regression)', () async {
+      String? receivedKey;
+      final tp = TemplatePdf(
+        template:
+            "<IMAGE url='https://example.com/logo.png' align='center'/>",
+        pageFormat: PdfPageFormat.a6,
+        tables: const {},
+        assetLoader: (key) async {
+          receivedKey = key;
+          return testPng;
+        },
+      );
+      final bytes = await tp.generateBytes();
+      expect(receivedKey, 'https://example.com/logo.png');
+      expect(bytes, isNotEmpty);
+    });
+
+    // 4. Primary (src) fails, asset fallback renders.
+    // FAILS pre-change: no fallback exists; pre-change _imgSourceKey (no url)
+    // falls through to attrs['asset']='logo', so only 'logo' is loaded.
+    // loadedKeys would be ['logo'], not ['<url>', 'logo'].
+    test('src fails and asset fallback renders image', () async {
+      final loadedKeys = <String>[];
+      final tp = TemplatePdf(
+        template:
+            "<IMAGE src='https://offline.example.com/x.png' asset='logo' align='center' height=14/>",
+        pageFormat: PdfPageFormat.a6,
+        tables: const {},
+        assetLoader: (key) async {
+          loadedKeys.add(key);
+          // URL fails (offline), asset succeeds
+          return key == 'logo' ? testPng : null;
+        },
+      );
+      final bytes = await tp.generateBytes();
+      // Both keys attempted: URL first, then asset fallback
+      expect(loadedKeys, ['https://offline.example.com/x.png', 'logo']);
+      expect(bytes, isNotEmpty);
+      expect(String.fromCharCodes(bytes.sublist(0, 5)), startsWith('%PDF'));
+    });
+
+    // 5. Garbage bytes (200-with-bad-data) from URL falls back to asset.
+    // FAILS pre-change: src is unknown, so pre-change loads 'logo' only and
+    // loadedKeys is ['logo']; the garbage-URL attempt never happens.
+    test('garbage URL bytes fall back to asset', () async {
+      final loadedKeys = <String>[];
+      final garbageBytes = Uint8List.fromList([0, 1, 2, 3, 4]);
+      final tp = TemplatePdf(
+        template:
+            "<IMAGE src='https://example.com/corrupt.png' asset='logo' align='center'/>",
+        pageFormat: PdfPageFormat.a6,
+        tables: const {},
+        assetLoader: (key) async {
+          loadedKeys.add(key);
+          if (key.startsWith('http')) return garbageBytes;
+          return key == 'logo' ? testPng : null;
+        },
+      );
+      final bytes = await tp.generateBytes();
+      // URL attempted first (returns garbage), then asset fallback
+      expect(loadedKeys, ['https://example.com/corrupt.png', 'logo']);
+      expect(bytes, isNotEmpty);
+      expect(String.fromCharCodes(bytes.sublist(0, 5)), startsWith('%PDF'));
+    });
+
+    // 6. src fails, no asset attribute, image skipped, PDF still generates.
+    // FAILS pre-change: src is unknown, key resolves to '' (empty),
+    // assetKey.isEmpty guard skips the load entirely, loader never called.
+    test('src fails with no asset skips image without crash', () async {
+      String? receivedKey;
+      final tp = TemplatePdf(
+        template: "<TEXT>Header</TEXT>"
+            ";<IMAGE src='https://example.com/missing.png' align='center'/>",
+        pageFormat: PdfPageFormat.a6,
+        tables: const {},
+        assetLoader: (key) async {
+          receivedKey = key;
+          return null;
+        },
+      );
+      final bytes = await tp.generateBytes();
+      // Proves the renderer attempted the fetch (not silently skipped)
+      expect(receivedKey, 'https://example.com/missing.png');
+      expect(bytes, isNotEmpty);
+      expect(String.fromCharCodes(bytes.sublist(0, 5)), startsWith('%PDF'));
+    });
+
+    // 7. URL with & ? % = in quoted src survives parseAttributes.
+    // FAILS pre-change: src unknown, key resolves to '' (no asset);
+    // generateBytes throws StateError (zero-widget guard) before the expect.
+    test('URL with query params in quoted src attr parsed intact', () async {
+      const firebaseUrl =
+          'https://firebasestorage.googleapis.com/v0/b/otq-01-ase2/o/c%2Fautsorz%2Fimage%2Fpowered.png?alt=media&token=cfd427f3-67df-4630-96f0-ab53a9895265';
+      String? receivedKey;
+      final tp = TemplatePdf(
+        template: "<IMAGE src='$firebaseUrl' align='center' height=14/>",
+        pageFormat: PdfPageFormat.a6,
+        tables: const {},
+        assetLoader: (key) async {
+          receivedKey = key;
+          return testPng;
+        },
+      );
+      final bytes = await tp.generateBytes();
+      expect(receivedKey, firebaseUrl);
+      expect(bytes, isNotEmpty);
+    });
+
+    // 8. Grid mode: same src URL in two tags loaded once across N cards.
+    // FAILS pre-change: src unknown, loadCount stays 0 (key is empty,
+    // isEmpty guard skips load).
+    test('grid with duplicate src URL loads once (dedup guard)', () async {
+      int loadCount = 0;
+      final tp = TemplatePdf(
+        template: "<TEXT>{{ln}}</TEXT>"
+            ";<IMAGE src='https://example.com/logo.png'/>"
+            ";<IMAGE src='https://example.com/logo.png'/>"
+            ";<QRCODE data='{{lu}}'/>",
+        pageFormat: PdfPageFormat.a4,
+        tables: const {},
+        assetLoader: (key) async {
+          loadCount++;
+          return key.startsWith('http') ? testPng : null;
+        },
+      );
+      final bytes = await tp.generateGridBytes(
+        items: [
+          {'ln': 'A', 'lu': 'https://a.com'},
+          {'ln': 'B', 'lu': 'https://b.com'},
+          {'ln': 'C', 'lu': 'https://c.com'},
+        ],
+        gridCols: 2,
+        gridRows: 2,
+      );
+      expect(bytes, isNotEmpty);
+      // same URL in two <IMAGE> tags + 3 cards -> dedup guard: loaded ONCE
+      expect(loadCount, 1);
     });
   });
 }

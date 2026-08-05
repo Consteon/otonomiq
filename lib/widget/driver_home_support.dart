@@ -87,6 +87,31 @@ Map<String, dynamic>? pickActiveOpening(List<Map<String, dynamic>> docs) {
   return openings.first;
 }
 
+/// Pick the doc with the largest `t` (newest write timestamp).
+///
+/// Single-pass, first-max-wins: strict `>` means when all docs share the same
+/// `t` (or none has `t` at all), the first element wins — identical to what
+/// `matched.first` returned before this helper existed. That is the
+/// zero-regression guarantee.
+///
+/// `t` is parsed tolerantly (int or String) — same idiom as [pickActiveOpening].
+/// Unlike [pickActiveOpening] — whose `cty == 'opening'` filter drops closing
+/// docs (they are not opening-shaped) and returns null — this reads any doc
+/// shape, which is why the ClosingMatch list can only be fixed here.
+/// Returns null on an empty list.
+Map<String, dynamic>? pickNewestDoc(List<Map<String, dynamic>> docs) {
+  Map<String, dynamic>? best;
+  int bestT = -1;
+  for (final d in docs) {
+    final int t = int.tryParse((d['t'] ?? '0').toString().trim()) ?? 0;
+    if (t > bestT) {
+      bestT = t;
+      best = d;
+    }
+  }
+  return best;
+}
+
 /// Compute the active trip doc-id from a list of vehicle_check docs.
 ///
 /// Returns:
@@ -561,6 +586,26 @@ void writeRouteParamsFromRow(
 /// is the field/value separator). All clauses must match for a doc to pass.
 ///
 /// Token resolution (`{key}`) must be done BEFORE calling this.
+///
+/// ## Two-evaluator contract (spec S3-A)
+///
+/// This function implements **case 1: fail-closed on empty value**.
+/// A literal-empty clause value here means "an unresolved token" -- NOT
+/// "match docs whose field is empty". For case 2 (literal-empty = match
+/// docs with an empty field), see `evaluateGate` in `admin_home_support.dart`.
+///
+/// Why case 1 can never accidentally match-empty:
+/// [resolveDriverCurlyTokens] and [resolveScreenTxTokens] both leave the
+/// `{token}` LITERAL when the underlying value is empty, so the
+/// `value.contains('{')` guard below fires first. An empty value without
+/// a `{` can only appear if someone writes a literal-empty clause in the
+/// SDUI config and routes it through [filterDriverHomeDocs] -- which no
+/// live config does. If a builder does this, the result is a silent zero
+/// (fail-closed), not a match-empty. That is documented behavior, not a bug.
+///
+/// Live configs that need match-empty semantics (e.g. `noExecutorGate`
+/// `lt◼vehicle⭘dv◼`, vehiclePicker `search` `lt◼vehicle⭘lst◼active⭘dv◼`)
+/// route through `evaluateGate` instead.
 ///
 /// **FAIL-CLOSED CONTRACT (scope-leak prevention):**
 /// If ANY clause has an empty resolved value (null, `""`, or whitespace-only
@@ -1364,6 +1409,8 @@ TaskAggregate aggregateTaskDropPickup(
   String itemsField = 'it',
   String dropField = 'pd',
   String pickupField = 'pp',
+  String actualDropField = 'ad',
+  String actualPickupField = 'ap',
 }) {
   final dynamic rawItems = doc[itemsField];
   if (rawItems is! List) {
@@ -1375,10 +1422,8 @@ TaskAggregate aggregateTaskDropPickup(
   for (final dynamic entry in rawItems) {
     if (entry is! Map) continue;
     lineCount++;
-    dropSum +=
-        int.tryParse((entry[dropField] ?? '0').toString().trim()) ?? 0;
-    pickupSum +=
-        int.tryParse((entry[pickupField] ?? '0').toString().trim()) ?? 0;
+    dropSum += resolveItemQty(entry, dropField, actualDropField);
+    pickupSum += resolveItemQty(entry, pickupField, actualPickupField);
   }
   return TaskAggregate(
     itemLineCount: lineCount,
@@ -1475,6 +1520,36 @@ class CirculationResult {
   });
 }
 
+// ─── Actual-over-plan qty resolution ─────────────────────────────────────
+
+/// Resolve a single item-line quantity using actual-over-plan semantics.
+///
+/// If the [actual] key is present in [e], non-null, and its trimmed string
+/// representation is non-empty, parse it as an int (unparseable -> 0).
+/// Otherwise fall back to the [plan] key with the same parse-or-zero logic.
+///
+/// This mirrors the CF `task_complete.qtFor` contract: `actual ?? plan`.
+/// Presence is checked via `containsKey` + non-null + non-empty trim, so
+/// `actual: 0` correctly displays 0 (does NOT fall back to plan), while
+/// `actual: ''` (blank SDUI cell = "unset") falls back to plan.
+///
+/// WARNING: the `e[actual] != null` clause is load-bearing. Production
+/// pre-execution docs carry `'ad': null` / `'ap': null` (written by
+/// admin_create_task_support.dart toItMap()). Removing the null check would
+/// cause null.toString() -> "null" -> int.tryParse fails -> 0, blanking
+/// every pre-execution drop/pickup number on P10, O1, and the manifest.
+///
+/// Pure function, no Flutter deps, directly testable.
+int resolveItemQty(Map e, String plan, String actual) {
+  if (e.containsKey(actual) && e[actual] != null) {
+    final String raw = e[actual].toString().trim();
+    if (raw.isNotEmpty) {
+      return int.tryParse(raw) ?? 0;
+    }
+  }
+  return int.tryParse((e[plan] ?? '0').toString().trim()) ?? 0;
+}
+
 /// Aggregate ALL tasks' it[] entries by item name, summing drop and pickup per
 /// distinct item. Returns [CirculationResult] with per-item rows (first-seen
 /// order) and grand totals.
@@ -1484,6 +1559,8 @@ class CirculationResult {
 /// [labelField] -- key for the item display name (default `in`).
 /// [dropField] -- key for planned-drop qty (default `pd`).
 /// [pickupField] -- key for planned-pickup qty (default `pp`).
+/// [actualDropField] -- key for actual-drop qty (default `ad`). Presence-checked.
+/// [actualPickupField] -- key for actual-pickup qty (default `ap`). Presence-checked.
 ///
 /// Convention #7: dynamic guards throughout (is List, is Map, int.tryParse).
 CirculationResult aggregateItemCirculation(
@@ -1492,6 +1569,8 @@ CirculationResult aggregateItemCirculation(
   String labelField = 'in',
   String dropField = 'pd',
   String pickupField = 'pp',
+  String actualDropField = 'ad',
+  String actualPickupField = 'ap',
 }) {
   final List<String> order = <String>[];
   final Map<String, int> dropTotals = <String, int>{};
@@ -1506,10 +1585,8 @@ CirculationResult aggregateItemCirculation(
       if (entry is! Map) continue;
       final String label = (entry[labelField] ?? '').toString().trim();
       if (label.isEmpty) continue;
-      final int drop =
-          int.tryParse((entry[dropField] ?? '0').toString().trim()) ?? 0;
-      final int pickup =
-          int.tryParse((entry[pickupField] ?? '0').toString().trim()) ?? 0;
+      final int drop = resolveItemQty(entry, dropField, actualDropField);
+      final int pickup = resolveItemQty(entry, pickupField, actualPickupField);
       if (!dropTotals.containsKey(label)) {
         order.add(label);
         dropTotals[label] = 0;
@@ -1606,6 +1683,11 @@ TxCirculationResult aggregateTxCirculation(
   String saleField = 'ps',
   String refillField = 'pr',
   String buyField = 'pb',
+  String actualDropField = 'ad',
+  String actualPickupField = 'ap',
+  String actualSaleField = 'as',
+  String actualRefillField = 'ar',
+  String actualBuyField = 'ab',
 }) {
   final List<String> order = <String>[];
   final Map<String, int> drop = <String, int>{};
@@ -1613,9 +1695,6 @@ TxCirculationResult aggregateTxCirculation(
   final Map<String, int> sale = <String, int>{};
   final Map<String, int> refill = <String, int>{};
   final Map<String, int> buy = <String, int>{};
-
-  int readInt(Map<dynamic, dynamic> entry, String f) =>
-      int.tryParse((entry[f] ?? '0').toString().trim()) ?? 0;
 
   for (final Map<String, dynamic> doc in taskDocs) {
     final dynamic rawItems = doc[itemsField];
@@ -1637,17 +1716,17 @@ TxCirculationResult aggregateTxCirculation(
       final String tx = (entry[txField] ?? '').toString().trim().toLowerCase();
       switch (tx) {
         case 'sale':
-          sale[label] = sale[label]! + readInt(entry, saleField);
+          sale[label] = sale[label]! + resolveItemQty(entry, saleField, actualSaleField);
           break;
         case 'refill':
-          refill[label] = refill[label]! + readInt(entry, refillField);
+          refill[label] = refill[label]! + resolveItemQty(entry, refillField, actualRefillField);
           break;
         case 'purchase':
-          buy[label] = buy[label]! + readInt(entry, buyField);
+          buy[label] = buy[label]! + resolveItemQty(entry, buyField, actualBuyField);
           break;
         default: // deliver (incl. empty/unknown tx)
-          drop[label] = drop[label]! + readInt(entry, dropField);
-          pickup[label] = pickup[label]! + readInt(entry, pickupField);
+          drop[label] = drop[label]! + resolveItemQty(entry, dropField, actualDropField);
+          pickup[label] = pickup[label]! + resolveItemQty(entry, pickupField, actualPickupField);
       }
     }
   }

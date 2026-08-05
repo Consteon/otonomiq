@@ -125,6 +125,19 @@ class PickerList extends StatefulWidget {
     return trimmed.isNotEmpty ? trimmed : null;
   }
 
+  /// Whether the adhoc row should render as selected.
+  ///
+  /// When [adhocValue] is empty (config sets no explicit value), the ad-hoc
+  /// state IS "no vehicle captured" ([selected] == null). When [adhocValue]
+  /// is non-empty, exact match. Pure; testable without SDUI globals.
+  static bool isAdhocSelected({
+    required String adhocValue,
+    required String? selected,
+  }) {
+    if (adhocValue.isEmpty) return selected == null;
+    return selected == adhocValue;
+  }
+
   @override
   State<PickerList> createState() => _PickerListState();
 }
@@ -399,7 +412,10 @@ class _PickerListState extends State<PickerList> {
       sub: '',
       meta: null,
       badge: null,
-      selected: _selected == _adhocValue && _selected != null,
+      selected: PickerList.isAdhocSelected(
+        adhocValue: _adhocValue,
+        selected: _selected,
+      ),
       onTap: () => _select(_adhocValue),
       leadingAdd: true,
       iconName: _rowIcon,

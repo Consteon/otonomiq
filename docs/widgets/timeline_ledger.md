@@ -34,6 +34,7 @@ First consumer: stock movement history (admin/supervisor). Reusable for nota his
 | `sectionText` | `String` | no | `""` | Section header template (2-level mode). `<field>` from representative doc, `{sectionCount}` = total movements, `{groupCount}` = event cards, `{sectionTime}` = HH:mm of earliest movement. |
 | `badgeField` | `String` | no | -- | Doc field for badge value. |
 | `badgeMap` | `String` | no | -- | `"value-Label-star-value-Label"` value-to-label mapping. |
+| `condMap` | `String` | no | `""` | `"value-Label-star-value-Label"` condition value-to-label map. Applied to `<cd>` token at render time (all templates). Empty/absent = raw `cd` value passthrough (zero regression). |
 | `headText` | `String` | no | -- | Template for card header (e.g. `"<ts>"`). `<field>` from doc. |
 | `titleText` | `String` | no | -- | Template for card title (e.g. `"<fln> -> <tln>"`). |
 | `subText` | `String` | no | -- | Template for card subtitle. `{n}` = items in group. Diamond-segmented. |
@@ -56,6 +57,12 @@ Templates resolve via `resolveMapTokens()`:
 ## Badge coloring
 
 Badge colors come from a category palette (8 colors), assigned by the ORDER of keys in `badgeMap`. Value not in badgeMap renders the raw value with neutral gray. The palette is defined in `timeline_ledger_support.dart`.
+
+## Condition relabel (condMap)
+
+The `condMap` param relabels the `cd` (condition) field value for DISPLAY only, using the same encoding as `badgeMap` (`value-Label-star-value-Label`). The underlying `cd` data value (`full`, `empty`, etc.) is never changed -- it stays canonical for grouping, filtering, badge logic, and all other widgets.
+
+Applied at all three render entry points (`_buildItemRow`, `_buildCard`, `_buildSectionHeader`) so `<cd>` works in any template. When `condMap` is empty or absent, behavior is identical to before (raw passthrough).
 
 ## See Also
 

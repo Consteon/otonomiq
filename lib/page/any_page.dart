@@ -116,6 +116,11 @@ class AnyPageState extends State<AnyPage> {
             screenUIComponent[widget.pageName]['children'], widget.pageName, clear:false);
         v = Scaffold(
           key: key,
+          // Same floating-pill treatment as the home shell: body runs under the
+          // bar so the strip around it is page content, not the scaffold
+          // background. The ListView below has padding:null and picks up the
+          // bar-height inset from MediaQuery by itself.
+          extendBody: true,
           appBar: AppBar(
             // Here we take the value from the MyHomePage object that was created by
             // the App.build method, and use it to set our appbar title.

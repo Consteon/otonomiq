@@ -280,8 +280,14 @@ class MainPageState extends State<MainPage> {
         });
       } else if (needUpgrade == empty) {
         if (i == 1) {
+          // Deliberately does NOT write _selectedNavIndex. Slot 1 is the only
+          // bar item with no page of its own — it is a body swap (byPass), so
+          // its highlight is DERIVED from byPass at render time. Persisting it
+          // here left the bell lit after every exit that does not go through
+          // handleNavTap (the inbox AppBar back / a tapped row's route, both in
+          // notification_list.dart). Keeping the last real page's slot here
+          // means any exit path restores the right highlight for free.
           setState(() {
-            _selectedNavIndex = i;
             byPassWidget = const NotificationList();
             byPass = 1;
           });
@@ -323,6 +329,11 @@ class MainPageState extends State<MainPage> {
           }
           setState(() {
             _selectedNavIndex = i;
+            // Leave the notification inbox when a different destination is
+            // tapped. The navbar is now visible while byPass > 0, so this path
+            // is reachable and must clear the body swap — otherwise the inbox
+            // stays on screen under the new page's title.
+            byPass = 0;
           });
         }
       }
@@ -405,12 +416,22 @@ class MainPageState extends State<MainPage> {
         v = PopScope(
           canPop: _canPop,
           onPopInvoked: (canPop) => onWillPop(canPop),
-          child: byPass > 0
-              ? byPassWidget
-              : Scaffold(
+          // byPass (notification inbox) swaps only the Scaffold BODY, never the
+          // whole shell. Replacing the Scaffold took its bottomNavigationBar
+          // with it — that is why the navbar vanished on the notification page.
+          child: Scaffold(
                   //                  endDrawer: ReduxDevTools<ScreenTransaction>(transactionStore),
                   //                  key: key,
                   key: mainScaffoldKey,
+                  // The bar is a floating pill (rounded + margin + shadow), so
+                  // let the body run underneath it: without this the strip
+                  // around the pill is scaffoldBackgroundColor and the pill
+                  // reads as sitting ON a cream band instead of over content.
+                  // Scaffold pays for it by handing the body a MediaQuery
+                  // bottom padding equal to the bar height — every padding:null
+                  // ListView below consumes that on its own; the one explicit
+                  // padding (the SDUI list) adds it back by hand.
+                  extendBody: true,
                   //            floatingActionButton: FloatingActionButton(
                   //              onPressed: () {
                   //                if (this.toggle) {
@@ -435,7 +456,12 @@ class MainPageState extends State<MainPage> {
                   //              tooltip: 'Reset',
                   //              child: Icon(Icons.cancel),
                   //            ), // This trailing comma makes auto-formatting nicer for build methods.
-                  appBar: AppBar(
+                  // byPassWidget (NotificationList) brings its own AppBar
+                  // ("Notification" + back arrow), so suppress the shell's one
+                  // instead of stacking two headers.
+                  appBar: byPass > 0
+                      ? null
+                      : AppBar(
                     backgroundColor: Theme.of(context).primaryColor,
                     leading: pageName == home
                         ? null
@@ -555,151 +581,120 @@ class MainPageState extends State<MainPage> {
                             return; // ponytail: ignore tap while refresh in-flight
                           if (!(transactionStore.state.screenTx['#CAMERA'] ??
                               false)) {
-                            await ConnectionData().getConnection(
-                              false,
-                              false,
-                              awaitImages: false,
-                            );
+                            // Claim the in-flight flag BEFORE the first await:
+                            // a second tap during getConnection's await used to
+                            // slip past the guard above and double-fire the
+                            // whole refresh (two readSS pulls, two clearData).
+                            setState(() {
+                              _refreshing = true;
+                            });
+                            try {
+                              await ConnectionData().getConnection(
+                                false,
+                                false,
+                                awaitImages: false,
+                              );
+                            } catch (e) {
+                              // Flag already claimed — a throw here would
+                              // leave the button amber/locked forever.
+                              if (mounted) {
+                                setState(() {
+                                  _refreshing = false;
+                                });
+                              }
+                              return;
+                            }
                             if (internetConnected()) {
                               // ponytail: non-blocking refresh — amber dot, page stays usable
                               setState(() {
-                                _refreshing = true;
                                 touch = !touch;
                                 if (scrollController.hasClients) {
                                   scrollController.jumpTo(0.0);
                                 }
                               });
-                              // ponytail: fire CF mobileRefresh, fall back to readSettingsContext on failure
+                              // Refresh pulls the sheet directly via
+                              // readSettingsContext (fresh, small 3-range
+                              // job); amber holds until the repaint lands.
                               try {
                                 var lifKey = transactionStore
                                     .state.screenTx['#INTERFACE_KEY'];
-                                mobileRefreshFire(lifKey).then((ok) {
-                                  if (!ok) {
-                                    // CF unavailable (not deployed yet, or network error)
-                                    // — fall back to the current slow readSettingsContext path
-                                    readSettingsContext(context, lifKey, 1)
-                                        .then((_) {
-                                          transactionStore.dispatch(
-                                            UpdateScreenTxAction(
-                                              ScreenTransaction({
-                                                '#REFRESH': false,
-                                              }),
-                                            ),
+                                readSettingsContext(context, lifKey, 1)
+                                    // readSS is bursty (median ~19s, tail 79s)
+                                    // and its socket can hang with no reply at
+                                    // all — without a cap the dot sticks amber
+                                    // for minutes. A post-timeout completion
+                                    // (value or error) is discarded by
+                                    // Future.timeout, never unhandled.
+                                    .timeout(const Duration(seconds: 60))
+                                    .then((_) {
+                                      transactionStore.dispatch(
+                                        UpdateScreenTxAction(
+                                          ScreenTransaction({
+                                            '#REFRESH': false,
+                                          }),
+                                        ),
+                                      );
+                                      _endRefresh(
+                                        elements: reloadPage(pageName),
+                                        tag: 'refresh icon',
+                                      );
+                                    })
+                                    .catchError((e) async {
+                                      // reloadPage can throw (linkElement
+                                      // force-unwrap); an un-catchError'd
+                                      // .then makes that a FATAL async error
+                                      // (project_callhttppost_clientexception_fatal).
+                                      try {
+                                        if (e is TimeoutException &&
+                                            lifKey is String &&
+                                            lifKey.isNotEmpty) {
+                                          // readSS hung — serve the
+                                          // backend-pushed Firestore proxy
+                                          // (the ~1s login loader) instead of
+                                          // an error: same pages, at worst
+                                          // one sync-cadence behind the sheet.
+                                          devPrint(
+                                            'refresh: readSS timeout, proxy fallback',
                                           );
-                                          List<Widget> newElementList =
-                                              reloadPage(pageName);
-                                          setTransactionOK('refresh icon');
-                                          transactionStore.dispatch(
-                                            UpdateScreenTxAction(
-                                              ScreenTransaction({
-                                                '#DATA_OK': true,
-                                              }),
-                                            ),
-                                          );
-                                          if (mounted) {
-                                            setState(() {
-                                              pageElements = newElementList;
-                                              _refreshing = false;
-                                              wait = false;
-                                              touch = !touch;
-                                              dataColor = readyColor;
-                                            });
-                                          }
-                                        })
-                                        .catchError((e) {
-                                          setTransactionOK(
-                                            'refresh icon catch',
-                                          );
-                                          transactionStore.dispatch(
-                                            UpdateScreenTxAction(
-                                              ScreenTransaction({
-                                                '#DATA_OK': true,
-                                              }),
-                                            ),
-                                          );
-                                          if (mounted) {
-                                            setState(() {
-                                              _refreshing = false;
-                                              wait = false;
-                                              touch = !touch;
-                                              dataColor = readyColor;
-                                            });
-                                            showAlert(
-                                              context,
-                                              textList["ErrorLoading"],
+                                          if (await loadPagesFromProxy(
+                                            lifKey,
+                                          )) {
+                                            transactionStore.dispatch(
+                                              UpdateScreenTxAction(
+                                                ScreenTransaction({
+                                                  '#REFRESH': false,
+                                                }),
+                                              ),
                                             );
+                                            _endRefresh(
+                                              elements: reloadPage(pageName),
+                                              tag: 'refresh proxy fallback',
+                                            );
+                                            return;
                                           }
-                                        });
-                                    return;
-                                  }
-                                  // CF success — proxy listener will repaint home pages;
-                                  // also manually repaint here for non-home-gate coverage
-                                  transactionStore.dispatch(
-                                    UpdateScreenTxAction(
-                                      ScreenTransaction({
-                                        '#REFRESH': false,
-                                      }),
-                                    ),
-                                  );
-                                  List<Widget> newElementList =
-                                      reloadPage(pageName);
-                                  setTransactionOK('refresh mobileRefresh');
-                                  transactionStore.dispatch(
-                                    UpdateScreenTxAction(
-                                      ScreenTransaction({
-                                        '#DATA_OK': true,
-                                      }),
-                                    ),
-                                  );
-                                  if (mounted) {
-                                    setState(() {
-                                      pageElements = newElementList;
-                                      _refreshing = false;
-                                      wait = false;
-                                      touch = !touch;
-                                      dataColor = readyColor;
+                                        }
+                                      } catch (e2) {
+                                        devPrint(
+                                          'refresh proxy fallback failed: $e2',
+                                        );
+                                      }
+                                      _endRefresh(
+                                        alert: true,
+                                        tag: 'refresh icon catch',
+                                      );
                                     });
-                                  }
-                                }).catchError((e) {
-                                  // W1: the ok==true branch calls reloadPage(), which can
-                                  // throw (linkElement[home]! force-unwrap). Inside an
-                                  // un-catchError'd .then that becomes a FATAL async error
-                                  // (project_callhttppost_clientexception_fatal). Mirror the
-                                  // fallback's error callback: clear amber, green dot, alert.
-                                  setTransactionOK('refresh mobileRefresh catch');
-                                  transactionStore.dispatch(
-                                    UpdateScreenTxAction(
-                                      ScreenTransaction({'#DATA_OK': true}),
-                                    ),
-                                  );
-                                  if (mounted) {
-                                    setState(() {
-                                      _refreshing = false;
-                                      wait = false;
-                                      touch = !touch;
-                                      dataColor = readyColor;
-                                    });
-                                    showAlert(context, textList["ErrorLoading"]);
-                                  }
-                                });
                               } catch (e) {
-                                setTransactionOK('refresh icon catch');
-                                transactionStore.dispatch(
-                                  UpdateScreenTxAction(
-                                    ScreenTransaction({'#DATA_OK': true}),
-                                  ),
+                                _endRefresh(
+                                  alert: true,
+                                  tag: 'refresh icon catch',
                                 );
-                                if (mounted) {
-                                  setState(() {
-                                    _refreshing = false;
-                                    wait = false;
-                                    touch = !touch;
-                                    dataColor = readyColor;
-                                  });
-                                }
-                                showAlert(context, textList["ErrorLoading"]);
                               }
                             } else {
+                              // No internet: release the claim or the button
+                              // stays amber/locked for the session.
+                              setState(() {
+                                _refreshing = false;
+                              });
                               await showDialog(
                                 context: context,
                                 builder: (BuildContext context) {
@@ -794,8 +789,13 @@ class MainPageState extends State<MainPage> {
                         devPrint('navbar authed-bar restore failed: $e');
                       }
                       // --- end cache-first restore ---
-                      if (screenUIComponent[pageName]?['hideBottomBar'] ==
-                          true) {
+                      // hideBottomBar is a property of the SDUI page, not of the
+                      // notification inbox: when byPass > 0 the body is the
+                      // inbox (a nav destination), so it keeps its bar even if
+                      // the page underneath opted out.
+                      if (byPass == 0 &&
+                          screenUIComponent[pageName]?['hideBottomBar'] ==
+                              true) {
                         return const SizedBox.shrink();
                       }
                       return BlocBuilder<NotificationBloc, NotificationState>(
@@ -833,7 +833,10 @@ class MainPageState extends State<MainPage> {
                             },
                           );
                           return OtqBottomNavBar(
-                            selectedIndex: _selectedNavIndex,
+                            // Inbox highlight is derived, not stored: byPass is
+                            // the single source of truth for "am I in the
+                            // inbox", so it can never disagree with the body.
+                            selectedIndex: byPass > 0 ? 1 : _selectedNavIndex,
                             items: navItems,
                             onTap: handleNavTap,
                           );
@@ -842,8 +845,8 @@ class MainPageState extends State<MainPage> {
                     },
                   ),
                   body: OfflineBannerHost(
-                    child: byPass == 1
-                        ? const NotificationList()
+                    child: byPass > 0
+                        ? byPassWidget
                         : Stack(
                             children: <Widget>[
                               // Text(gpsTime),
@@ -893,7 +896,16 @@ class MainPageState extends State<MainPage> {
                                         lPad,
                                         tPad,
                                         rPad,
-                                        bPad,
+                                        // extendBody lets the list paint under
+                                        // the floating bar; an explicit padding
+                                        // opts out of the automatic MediaQuery
+                                        // inset, so add the bar height back or
+                                        // the last row hides behind the pill.
+                                        // 0 when the bar is hidden.
+                                        bPad +
+                                            MediaQuery.of(
+                                              context,
+                                            ).padding.bottom,
                                       ),
                                       itemCount: pageElements.length,
                                       itemBuilder: (context, position) {
@@ -1316,6 +1328,34 @@ class MainPageState extends State<MainPage> {
       }, // end of builder,
     );
   } // end of build
+
+  /// Common tail of every refresh completion path: tx-ok flags, green dot,
+  /// optional repaint payload, optional error alert. Replaces three verbatim
+  /// copies that used to live inline in the refresh onPressed.
+  void _endRefresh({
+    List<Widget>? elements,
+    bool alert = false,
+    required String tag,
+  }) {
+    setTransactionOK(tag);
+    transactionStore.dispatch(
+      UpdateScreenTxAction(ScreenTransaction({'#DATA_OK': true})),
+    );
+    if (mounted) {
+      setState(() {
+        if (elements != null) {
+          pageElements = elements;
+        }
+        _refreshing = false;
+        wait = false;
+        touch = !touch;
+        dataColor = readyColor;
+      });
+      if (alert) {
+        showAlert(context, textList["ErrorLoading"]);
+      }
+    }
+  }
 
   Future subscribeToProxy(String? ssid) async {
     /*

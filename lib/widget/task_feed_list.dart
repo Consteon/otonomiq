@@ -598,26 +598,17 @@ class _TaskFeedListState extends State<TaskFeedList> {
     final String address = (doc[addressField] ?? '').toString().trim();
     final String taskType = (doc[typeField] ?? '').toString().trim().toLowerCase();
 
-    // Per-task drop/pickup
+    // Per-task drop/pickup (actual-over-plan: resolveItemQty is self-gating --
+    // pre-execution items carry ad:null/ap:null from toItMap(), so the null
+    // check falls back to plan).
     final dynamic rawItems = doc[itemsField];
     int dropCount = 0;
     int pickupCount = 0;
     if (rawItems is List) {
       for (final dynamic item in rawItems) {
         if (item is! Map) continue;
-        if (isDone) {
-          // Completed: show actual drop/pickup
-          dropCount +=
-              int.tryParse((item[actualDropField] ?? '0').toString().trim()) ?? 0;
-          pickupCount +=
-              int.tryParse((item[actualPickupField] ?? '0').toString().trim()) ?? 0;
-        } else {
-          // Assigned/failed: show planned
-          dropCount +=
-              int.tryParse((item[dropField] ?? '0').toString().trim()) ?? 0;
-          pickupCount +=
-              int.tryParse((item[pickupField] ?? '0').toString().trim()) ?? 0;
-        }
+        dropCount += resolveItemQty(item, dropField, actualDropField);
+        pickupCount += resolveItemQty(item, pickupField, actualPickupField);
       }
     }
 

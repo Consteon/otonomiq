@@ -46,23 +46,27 @@ class HorizontalImageListState extends State<HorizontalImageList> {
             },
           ),
         ),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(widget.imageUrls.length, (index) {
-            return Container(
-              width: 8,
-              height: 8,
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _currentPage == index
-                    ? Theme.of(context).colorScheme.secondary
-                    : Theme.of(context).disabledColor,
-              ),
-            );
-          }),
-        ),
+        // A single dot conveys nothing — only paginate when there is more than
+        // one page to move between.
+        if (widget.imageUrls.length > 1) ...[
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(widget.imageUrls.length, (index) {
+              return Container(
+                width: 8,
+                height: 8,
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _currentPage == index
+                      ? Theme.of(context).colorScheme.secondary
+                      : Theme.of(context).disabledColor,
+                ),
+              );
+            }),
+          ),
+        ],
       ],
     );
   }

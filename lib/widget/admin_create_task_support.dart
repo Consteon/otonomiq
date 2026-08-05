@@ -569,6 +569,23 @@ class AdminCreateTaskSupport {
   ///
   /// Pure -- all inputs are explicit parameters.
   /// Convention #7: all values are explicitly typed (no dynamic leaks).
+  ///
+  /// [tst] defaults to 'assigned'. Pass the component's `unassignedStatus`
+  /// value to write an unassigned task.
+  ///
+  /// [vv] and [tdt] are required so a caller cannot silently omit them (their
+  /// absence makes the task invisible to every driver feed and manifest --
+  /// load-bearing semantics). Pass `vv: ''` and `tdt: null` explicitly to
+  /// write an unassigned task.
+  ///
+  /// [vv], [ln], [tdt] use the omit-when-empty idiom (mirrors assembleNotaDoc
+  /// below): when empty/null the key is ABSENT from the doc, not blank.
+  /// Rationale (D4): downstream consumers (vehicle_feed_support, evaluateGate,
+  /// opening-check manifest) tolerate absent fields via `?? ''` guards, and
+  /// the unassigned task must NOT appear in any vehicle's manifest or feed.
+  ///
+  /// [ln] is the vehicle plate (display name). Emitted only on the assigned
+  /// path so AdminTaskList can render `subtitle:"<ln>"`.
   static Map<String, dynamic> assembleTaskDoc({
     required String tnm,
     required String kl,
@@ -578,28 +595,32 @@ class AdminCreateTaskSupport {
     required String gl,
     required String cv,
     required String cn,
-    required int tdt,
+    required int? tdt,
     required int t,
     required List<Map<String, dynamic>> itArray,
     required String tableVid,
+    String tst = 'assigned',
+    String ln = '',
   }) {
-    return <String, dynamic>{
+    final Map<String, dynamic> doc = <String, dynamic>{
       'tnm': tnm,
       'tty': 'delivery',
-      'tst': 'assigned',
+      'tst': tst,
       'kl': kl,
       'kn': kn,
       'al': al,
-      'vv': vv,
       'gl': gl,
       'cv': cv,
       'cn': cn,
       't': t,
-      'tdt': tdt,
       'it': itArray,
       'tablevid': tableVid,
       'search': 'tnm\u{2605}$tnm',
     };
+    if (vv.isNotEmpty) doc['vv'] = vv;
+    if (ln.isNotEmpty) doc['ln'] = ln;
+    if (tdt != null) doc['tdt'] = tdt;
+    return doc;
   }
 
   /// Assemble the complete nota doc map for Firestore.

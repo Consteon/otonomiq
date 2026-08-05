@@ -24,6 +24,50 @@ class _NotifRow {
       this.msgId, this.unread);
 }
 
+// Per-channel fetch window. Both the chip count and the `urd` heal depend on
+// it: a FULL window means older messages exist that this screen cannot see.
+const int notifFetchLimit = 50;
+
+// `urd` (the stored per-thread unread counter shown on the chip pill and the
+// home bell) is hand-maintained: +1 per push (firebase_notification_handler),
+// -1 per tap through a TRANSACTION that fails offline while the `st:101` update
+// queues and lands anyway (api.dart setStatus). Every missed decrement is
+// permanent — a badge with no unread row to match it, which is exactly the
+// "badge 5 / zero unread rows" report. So rewrite the counter from what the
+// messages actually say, but only when this fetch can see the whole truth:
+//   - fromCache: the local copy may be stale; pushing it would clobber a
+//     fresher server value once the write flushes.
+//   - fetched == limit: unread messages may exist beyond the window, so the
+//     count would then be wrong in the other direction.
+// Refetch key for the message fan-out below. The channel STREAM is live, but
+// the messages are not: they live in `$firestoreIO/<vid>/msg` and are pulled
+// with a one-shot .get() per channel, so something has to decide when that
+// pull is stale.
+//
+// vid alone is NOT that signal. A new message in an EXISTING channel leaves the
+// vid list byte-identical, and with a single channel it cannot even reorder, so
+// the feed only refreshed on leave+return — the reported bug. `lt` is written
+// fresh on every push (parseFcmPayload -> threadUpdate) and the thread doc is
+// updated AFTER the message doc, so `lt` flips exactly once per new message and
+// only once that message is already readable.
+//
+// Deliberately NOT keyed on `urd`: that also moves on tap-to-read (decUnread)
+// and on shouldHealUnread's own write, which would re-fan-out every channel for
+// content that did not change — and heal -> emit -> refetch -> heal is a loop
+// waiting to happen.
+List<String> notifReloadKeys(List<Notification> channels) => channels
+    .map((c) => '${c.vid ?? ''}|${c.lastMessageTime ?? 0}')
+    .toList();
+
+bool shouldHealUnread({
+  required int stored,
+  required int actual,
+  required int fetched,
+  required bool fromCache,
+  int limit = notifFetchLimit,
+}) =>
+    !fromCache && fetched < limit && stored != actual;
+
 class NotificationList extends StatefulWidget {
   const NotificationList({super.key});
 
@@ -35,7 +79,7 @@ class _NotificationListState extends State<NotificationList> {
   String _filterVid = ''; // '' = "All"
   bool _loading = false;
   List<_NotifRow> _rows = <_NotifRow>[];
-  List<String> _loadedVids = <String>[]; // guards duplicate fan-out fetches
+  List<String> _loadedKeys = <String>[]; // guards duplicate fan-out fetches
 
   @override
   void initState() {
@@ -52,6 +96,10 @@ class _NotificationListState extends State<NotificationList> {
   // for a handful of broadcast channels; ponytail: 50/channel cap — raise or
   // paginate if a channel ever holds more history than that.
   Future<void> _loadAll(List<Notification> channels) async {
+    // Claim the keys BEFORE the awaits, not after. Claiming at the end let a
+    // second emit landing mid-fan-out compare against the pre-fetch keys and
+    // start a duplicate concurrent load whose setState races this one.
+    _loadedKeys = notifReloadKeys(channels);
     setState(() => _loading = true);
     final List<_NotifRow> rows = <_NotifRow>[];
     for (final c in channels) {
@@ -64,13 +112,16 @@ class _NotificationListState extends State<NotificationList> {
         final snap = await FirebaseFirestore.instance
             .collection('$firestoreIO/$vid/msg')
             .orderBy('tr', descending: true)
-            .limit(50)
+            .limit(notifFetchLimit)
             .get();
+        int unread = 0;
         for (final d in snap.docs) {
           final m = d.data();
           final incoming = m['im'] == true;
           final st = _asInt(m['st']);
           final rt = (m['rt'] ?? '').toString();
+          final isUnread = incoming && st != 101;
+          if (isUnread) unread++;
           rows.add(_NotifRow(
             vid,
             name,
@@ -79,8 +130,23 @@ class _NotificationListState extends State<NotificationList> {
             notifNormalizeMs(_asInt(m['tr'])),
             rt.isEmpty ? null : rt,
             d.id,
-            incoming && st != 101,
+            isUnread,
           ));
+        }
+        // Reconcile the stored counter with the messages themselves — see
+        // shouldHealUnread. Repairs the home bell too, since it sums `urd`.
+        if (shouldHealUnread(
+          stored: c.unRead ?? 0,
+          actual: unread,
+          fetched: snap.docs.length,
+          fromCache: snap.metadata.isFromCache,
+        )) {
+          devPrint('[inbox] heal urd $vid ${c.unRead} -> $unread');
+          safeFsUpdate(
+            FirebaseFirestore.instance.doc('$firestoreIO/$vid'),
+            <String, dynamic>{'urd': unread},
+            'healUnread',
+          );
         }
       } catch (_) {
         // Skip a channel we can't read rather than failing the whole feed.
@@ -91,7 +157,6 @@ class _NotificationListState extends State<NotificationList> {
     setState(() {
       _rows = rows;
       _loading = false;
-      _loadedVids = channels.map((e) => e.vid ?? '').toList();
     });
   }
 
@@ -142,10 +207,14 @@ class _NotificationListState extends State<NotificationList> {
     return BlocConsumer<NotificationBloc, NotificationState>(
       listener: (context, state) {
         if (state is NotificationLoaded) {
-          final vids = state.notifications.map((e) => e.vid ?? '').toList();
-          if (!listEquals(vids, _loadedVids)) {
-            _loadAll(state.notifications);
-          }
+          final keys = notifReloadKeys(state.notifications);
+          final stale = !listEquals(keys, _loadedKeys);
+          // The one line that settles "did a push reach this screen, and did
+          // the guard fire?" — a live navbar badge with a stale list looks
+          // identical whether the emit never arrived or the key never moved.
+          devPrint('[inbox] emit ${stale ? 'REFETCH' : 'skip'} '
+              'keys=$keys loaded=$_loadedKeys');
+          if (stale) _loadAll(state.notifications);
         }
       },
       builder: (context, state) {
@@ -194,6 +263,13 @@ class _NotificationListState extends State<NotificationList> {
     );
   }
 
+  // Count the rows on screen, NOT the stored `urd`: the counter drifts (see
+  // shouldHealUnread) and a chip that disagrees with its own list is the bug
+  // being reported. Derived from _rows, so it also drops the moment a row is
+  // tapped or swiped away, instead of waiting for the Firestore round-trip.
+  int _unreadCount(String vid) =>
+      _rows.where((r) => r.vid == vid && r.unread).length;
+
   Widget _chipBar(
       List<Notification> channels, String activeVid, Color primary) {
     if (channels.isEmpty) return const SizedBox.shrink();
@@ -214,7 +290,7 @@ class _NotificationListState extends State<NotificationList> {
                     ? c.name!.trim()
                     : (c.vid ?? 'Pesan'),
                 activeVid == c.vid,
-                c.unRead ?? 0,
+                _unreadCount(c.vid ?? ''),
                 primary,
                 () => setState(() => _filterVid = c.vid ?? ''),
               ),
@@ -338,10 +414,11 @@ class _NotificationListState extends State<NotificationList> {
                     overflow: r.expanded
                         ? TextOverflow.visible
                         : TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 14.5,
                       height: 1.3,
-                      fontWeight: FontWeight.w600,
+                      // bold marks unread only; read rows sit at normal weight
+                      fontWeight: r.unread ? FontWeight.w700 : FontWeight.w400,
                       color: notifTextStrong,
                     ),
                   ),
@@ -401,10 +478,9 @@ class _NotificationListState extends State<NotificationList> {
       final ioRef = FirebaseFirestore.instance.doc('$firestoreIO/${r.vid}');
       FirebaseFirestore.instance.runTransaction<void>((tx) async {
         final snap = await tx.get(ioRef);
-        final cur = snap.data()?['urd'];
-        final next = (cur is int && cur > 0) ? cur - 1 : 0;
-        tx.update(ioRef, {'urd': next});
-      }).catchError((_) {});
+        if (!snap.exists) return; // tx.update on a missing doc throws
+        tx.update(ioRef, {'urd': decUnread(snap.data()?['urd'])});
+      }).catchError((_) {}); // offline: tx fails, next _loadAll heals it
     }
   }
 }

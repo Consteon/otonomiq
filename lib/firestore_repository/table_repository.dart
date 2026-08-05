@@ -1655,10 +1655,14 @@ Future<List<String>> writeUpdateEventRow(
         final docs = snap.docs;
 
         if (docs.isEmpty) {
-          devPrint('[writeUpdateEventRow] 0 match at $path; skip (no create)');
-          // ── C: loud 0-match (errorReport = always-on + Crashlytics) ────
-          errorReport(
-            'updateEventRow 0-match: '
+          // ── C: 0-match diagnostics. NOT errorReport: this branch's own
+          // result is 'ok', and a stale queued row whose search targets a
+          // status the doc already moved past (e.g. the P7/P8 custody
+          // `cst★awaiting_custody` config, already flipped natively by
+          // custody_reveal.dart) is normal — it minted a fake Crashlytics
+          // entry on every custody confirm. >1 match below stays loud.
+          devPrint(
+            '[writeUpdateEventRow] 0 match; skip (no create): '
             '[${clauseLog.join(', ')}] at $path',
           );
           result.add('ok: no match (skipped)');

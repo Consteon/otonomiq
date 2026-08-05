@@ -448,7 +448,8 @@ class _FtzBluetoothPrinterState extends State<FtzBluetoothPrinter> {
   Future<Uint8List?> _loadAssetBytes(String key) async {
     try {
       if (key.startsWith('http://') || key.startsWith('https://')) {
-        final resp = await http.get(Uri.parse(key));
+        final resp = await http.get(Uri.parse(key))
+            .timeout(const Duration(seconds: 5));
         return resp.statusCode == 200 ? resp.bodyBytes : null;
       }
       final data = await rootBundle.load('assets/images/$key.png');
