@@ -207,6 +207,7 @@ import 'widget/driver_home_support.dart';
   0.9.85.02 (260731) OO : fix bug approval, driver modul, notification list chips
   0.9.86.01 (260801) OO : update version number
   0.9.87.01 (260802) OO : update version number
+  0.9.87.04 (260805) HH : update version number
 */
 
 // ========= Constants ==========================
@@ -218,7 +219,7 @@ int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
 const String version = '0.9.87';
-const String subVersion = '.01';
+const String subVersion = '.04';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
 String versionShown = version + subVersion; // use this for debugging & testing
