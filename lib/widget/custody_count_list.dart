@@ -65,6 +65,58 @@ class CustodyCountList extends StatefulWidget {
     countRev.value++;
   }
 
+  /// Compute seed values for a recount pass.
+  ///
+  /// Returns a record with:
+  /// - [seeds]: `{ii__cd: seedQty}` for each ie entry.
+  /// - [cleared]: set of countKeys that were CLEARED (need recount).
+  ///
+  /// If [ipEntries] is empty (first-time blind count), returns empty maps --
+  /// the caller uses the default qty 0 for all rows (byte-identical to today).
+  ///
+  /// Seed rule per `ii__cd` key:
+  /// - ip absent from map -> seed 0, mark cleared (never counted).
+  /// - ip.qt == ie.qt -> seed ip.qt (KEEP -- driver does not recount).
+  /// - ip.qt != ie.qt -> seed 0, mark cleared (CLEAR -- driver recounts).
+  static ({Map<String, int> seeds, Set<String> cleared}) computeRecountSeeds({
+    required List<Map<String, dynamic>> ieEntries,
+    required List<Map<String, dynamic>> ipEntries,
+  }) {
+    if (ipEntries.isEmpty) {
+      return (seeds: const <String, int>{}, cleared: const <String>{});
+    }
+    // Build ip lookup: {ii__cd: qt}
+    final Map<String, int> ipMap = <String, int>{};
+    for (final Map<String, dynamic> entry in ipEntries) {
+      final String ii = (entry['ii'] ?? '').toString().trim();
+      final String cd = (entry['cd'] ?? '').toString().trim();
+      if (ii.isEmpty) continue;
+      final int qt =
+          int.tryParse((entry['qt'] ?? '0').toString().trim()) ?? 0;
+      ipMap['${ii}__$cd'] = qt;
+    }
+    final Map<String, int> seeds = <String, int>{};
+    final Set<String> cleared = <String>{};
+    for (final Map<String, dynamic> entry in ieEntries) {
+      final String ii = (entry['ii'] ?? '').toString().trim();
+      final String cd = (entry['cd'] ?? '').toString().trim();
+      if (ii.isEmpty) continue;
+      final int ieQt =
+          int.tryParse((entry['qt'] ?? '0').toString().trim()) ?? 0;
+      final String key = '${ii}__$cd';
+      if (!ipMap.containsKey(key)) {
+        seeds[key] = 0;
+        cleared.add(key);
+      } else if (ipMap[key] == ieQt) {
+        seeds[key] = ipMap[key]!;
+      } else {
+        seeds[key] = 0;
+        cleared.add(key);
+      }
+    }
+    return (seeds: seeds, cleared: cleared);
+  }
+
   /// Per-scrName flag: whether #ACTIVE_WAREHOUSE was published for this screen.
   /// Static map (not instance field) so clearData can reset it even though
   /// linkElement caches the widget State across navigations.
@@ -211,8 +263,9 @@ class _CustodyCountListState extends State<CustodyCountList> {
   List<_CountRow> _buildRows(
     List<Map<String, dynamic>> ieEntries,
     Map<String, ItemDetail> itemDetailMap,
-    _FilterPair? filter,
-  ) {
+    _FilterPair? filter, {
+    ({Map<String, int> seeds, Set<String> cleared})? recountResult,
+  }) {
     final List<_CountRow> rows = <_CountRow>[];
     final Map<String, CountEntry> countMap =
         CustodyCountList.getCountMap(widget.scrName);
@@ -253,12 +306,14 @@ class _CustodyCountListState extends State<CustodyCountList> {
         name: name,
         category: detail?.category ?? '',
         countKey: countKey,
+        needsRecount: recountResult?.cleared.contains(countKey) ?? false,
       ));
 
-      // Register in count store (putIfAbsent qty 0) so the submit button
-      // knows the total N even for untouched rows.
+      // Register in count store. On recount, seed matched rows with their
+      // previous ip.qt; cleared rows seed 0 (driver recounts those).
+      final int seedQty = recountResult?.seeds[countKey] ?? 0;
       countMap.putIfAbsent(
-          countKey, () => CountEntry(ii: ii, cd: cd, qty: 0));
+          countKey, () => CountEntry(ii: ii, cd: cd, qty: seedQty));
     }
 
     // W1: only refresh if the row set actually grew, scheduled post-frame to
@@ -510,11 +565,30 @@ class _CustodyCountListState extends State<CustodyCountList> {
         mapTableContent[_taskCode]; // register Obx dependency on task data
         rows = _buildAggregateRows(itemDetailMap, filter);
       } else {
-        // P6 path (UNCHANGED): find the vehicle_check opening doc + ie[]
+        // P6 path: find the vehicle_check opening doc + ie[] + ip[] for recount
         final Map<String, dynamic>? checkDoc = _findCheckDoc();
         final List<Map<String, dynamic>> ieEntries =
             _extractIeEntries(checkDoc);
-        rows = _buildRows(ieEntries, itemDetailMap, filter);
+        // Extract ip[] for recount seeding (same doc, 'ip' field).
+        // Mirrors custody_reveal.dart _extractArray pattern (lines 179-190).
+        List<Map<String, dynamic>> ipEntries = const [];
+        if (checkDoc != null) {
+          final String actualField =
+              (widget.component['actualField'] ?? 'ip').toString().trim();
+          final dynamic rawIp = checkDoc[actualField];
+          if (rawIp is List) {
+            ipEntries = <Map<String, dynamic>>[
+              for (final dynamic e in rawIp)
+                if (e is Map) Map<String, dynamic>.from(e),
+            ];
+          }
+        }
+        final recountResult = CustodyCountList.computeRecountSeeds(
+          ieEntries: ieEntries,
+          ipEntries: ipEntries,
+        );
+        rows = _buildRows(ieEntries, itemDetailMap, filter,
+            recountResult: recountResult);
       }
 
       // Read count store (reactive: touch revision signal for Obx)
@@ -580,6 +654,21 @@ class _CustodyCountListState extends State<CustodyCountList> {
       );
     }
 
+    // Recount marker for P6: cleared rows show amber hint.
+    // Only when showPlan is false (P6 blind mode) and the row was cleared
+    // by the recount seed rule. O1/C1 paths never enter _buildRows, so
+    // their _CountRow.needsRecount is always false.
+    if (!showPlan && row.needsRecount) {
+      statusLine = Text(
+        '\u{26A0} Perlu hitung ulang',
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFFB45309), // amber-700 (same as "Kurang:" branch)
+        ),
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -671,6 +760,7 @@ class _CountRow {
   final String category; // from joined item detail
   final String countKey; // "ii__cd"
   final int planQty; // 0 for P6 blind mode, >0 for O1 visible plan
+  final bool needsRecount; // true for cleared rows in P6 recount
   const _CountRow({
     required this.ii,
     required this.cd,
@@ -678,5 +768,6 @@ class _CountRow {
     required this.category,
     required this.countKey,
     this.planQty = 0,
+    this.needsRecount = false,
   });
 }

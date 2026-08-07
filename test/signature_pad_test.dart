@@ -129,4 +129,101 @@ void main() {
       expect(result.dy, 0.0);
     });
   });
+
+  // ── per-screen write-state (C1) ─────────────────────────────────────────
+  // Asserts on the REAL SignaturePad statics (rollFileName / fileNameOf /
+  // clearSignatureState). No re-implementation of the keep/roll rule here --
+  // every assertion drives the production symbol and reads back its effect.
+
+  group('SignaturePad per-screen write-state', () {
+    test('fileNameOf is empty before any session', () {
+      SignaturePad.clearSignatureState('scr-empty');
+      expect(SignaturePad.fileNameOf('scr-empty'), '');
+    });
+
+    test('rollFileName stores a prefixed id that fileNameOf reads back', () {
+      SignaturePad.clearSignatureState('scr-store');
+      final a = SignaturePad.rollFileName('scr-store', 'sig');
+      expect(a, startsWith('sig_'));
+      expect(SignaturePad.fileNameOf('scr-store'), a);
+      SignaturePad.clearSignatureState('scr-store');
+    });
+
+    test('clearSignatureState drops the entry so the base is not reused', () {
+      final a = SignaturePad.rollFileName('scr-drop', 'sig');
+      expect(SignaturePad.fileNameOf('scr-drop'), a);
+      SignaturePad.clearSignatureState('scr-drop');
+      // Entry gone -> the old base can no longer leak into the next signature.
+      expect(SignaturePad.fileNameOf('scr-drop'), '');
+      SignaturePad.clearSignatureState('scr-drop');
+    });
+
+    test('rolling per session mints fresh identities (no reuse)', () {
+      SignaturePad.clearSignatureState('scr-roll');
+      final Set<String> ids = {
+        for (int i = 0; i < 12; i++)
+          SignaturePad.rollFileName('scr-roll', 'sig')
+      };
+      // 12 sessions must not all collapse to a single reused identity.
+      expect(ids.length, greaterThan(1));
+      // fileNameOf tracks the latest roll.
+      expect(ids.contains(SignaturePad.fileNameOf('scr-roll')), true);
+      SignaturePad.clearSignatureState('scr-roll');
+    });
+
+    test('two scrNames never share state', () {
+      SignaturePad.clearSignatureState('scr-A');
+      SignaturePad.clearSignatureState('scr-B');
+      final a = SignaturePad.rollFileName('scr-A', 'sig');
+      final b = SignaturePad.rollFileName('scr-B', 'sig');
+      expect(SignaturePad.fileNameOf('scr-A'), a);
+      expect(SignaturePad.fileNameOf('scr-B'), b);
+      // Clearing one screen leaves the other intact.
+      SignaturePad.clearSignatureState('scr-A');
+      expect(SignaturePad.fileNameOf('scr-A'), '');
+      expect(SignaturePad.fileNameOf('scr-B'), b);
+      SignaturePad.clearSignatureState('scr-B');
+    });
+
+    test('clearSignatureState on an unknown screen is a no-op', () {
+      SignaturePad.clearSignatureState('never-seen');
+      expect(SignaturePad.fileNameOf('never-seen'), '');
+    });
+
+    test('prefix is honored in the minted identity', () {
+      SignaturePad.clearSignatureState('scr-pfx');
+      final a = SignaturePad.rollFileName('scr-pfx', 'custproof');
+      expect(a, startsWith('custproof_'));
+      SignaturePad.clearSignatureState('scr-pfx');
+    });
+
+    // C2: _exportAndSave captures fileNameOf(scrName) at export start (myBase)
+    // and re-reads it before the txfController write, bailing on a mismatch so
+    // an in-flight upload cannot land a stale token in the next delivery's
+    // slot. These bind that change signal to the real statics. (The guard's
+    // wiring inside the async _exportAndSave is inspection-only -- a widget
+    // pump would hit Firebase; see walkthrough.)
+    test('C2: current identity differs from captured after a route clear', () {
+      final String myBase = SignaturePad.rollFileName('scr-c2clr', 'sig');
+      expect(SignaturePad.fileNameOf('scr-c2clr'), myBase);
+      // gotoRoute -> clearData wipes the entry between export start and write.
+      SignaturePad.clearSignatureState('scr-c2clr');
+      // Guard reads fileNameOf now -> '' != myBase -> stale write abandoned.
+      expect(SignaturePad.fileNameOf('scr-c2clr'), '');
+      expect(SignaturePad.fileNameOf('scr-c2clr') == myBase, false);
+    });
+
+    test('C2: captured identity still matches when only another screen rolls',
+        () {
+      SignaturePad.clearSignatureState('scr-c2keepA');
+      SignaturePad.clearSignatureState('scr-c2keepB');
+      final String myBase = SignaturePad.rollFileName('scr-c2keepA', 'sig');
+      // A different delivery's screen opening a session must NOT abandon A's
+      // still-valid write -- the guard is keyed per scrName.
+      SignaturePad.rollFileName('scr-c2keepB', 'sig');
+      expect(SignaturePad.fileNameOf('scr-c2keepA') == myBase, true);
+      SignaturePad.clearSignatureState('scr-c2keepA');
+      SignaturePad.clearSignatureState('scr-c2keepB');
+    });
+  });
 }

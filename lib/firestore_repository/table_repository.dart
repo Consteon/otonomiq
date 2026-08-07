@@ -15,6 +15,7 @@ import '../global2.dart';
 import '../model/ftz_scanned_code.dart';
 import '../redux/screen_transaction.dart';
 import '../states/mobile_table_controller.dart';
+import '../widget/driver_home_support.dart'; // pickActiveOpening
 import 'add_to_event.dart';
 import 'firestore_generic_repository.dart';
 import 'update_event_row.dart';
@@ -1593,7 +1594,35 @@ Future<bool> writeToEvent(String? inp, String eventRowString) async {
 /// `writeToEvent`'s decode/ref handling and `updateTableRow`'s search targeting.
 /// Returns one result string per `◆`-statement ("ok ..." on success) so
 /// historySync's `resultOk` can tally it. NEVER blank-prefills (would wipe the
-/// other clock field). 0 matches -> skip+log; >1 -> error+skip (no write).
+/// other clock field). 0 matches -> skip+log; >1 -> [resolveAmbiguousEventTarget]
+/// (active trip when every match is an opening doc, else error+skip, no write).
+///
+/// Resolve the write target when a search matched more than one doc.
+///
+/// Multi-trip per vehicle per day is LEGITIMATE (trip-sequence): an opening
+/// `vehicle_check` doc anchors ONE trip, so a config searching on
+/// `(cty, vv, cdt)` — e.g. P12's `rt◼returned` handover — matches EVERY
+/// opening of that day. The old blanket "refuse >1" turned a normal second
+/// trip into permanent data loss: historySync retried 5 cycles (blocking the
+/// whole queue each time) then dropped the record as "table data lost".
+///
+/// When every match is an opening doc, pick the active trip — the same rule
+/// every READ path uses ([pickActiveOpening] in custody_count_list /
+/// custody_reveal / precondition_gate_card) so the write lands on the doc the
+/// user was actually shown. Anything else is genuine corrupt uniqueness ->
+/// null, and the caller refuses as before.
+Map<String, dynamic>? resolveAmbiguousEventTarget(
+  List<Map<String, dynamic>> docs,
+) {
+  if (docs.isEmpty) return null;
+  if (docs.length == 1) return docs.first;
+  final bool allOpenings = docs.every(
+    (d) => (d['cty'] ?? '').toString().trim() == 'opening',
+  );
+  if (!allOpenings) return null;
+  return pickActiveOpening(docs);
+}
+
 Future<List<String>> writeUpdateEventRow(
   String? inp,
   String eventRowString,
@@ -1668,13 +1697,29 @@ Future<List<String>> writeUpdateEventRow(
           result.add('ok: no match (skipped)');
           continue;
         }
+        dynamic targetDoc = docs.first;
         if (docs.length > 1) {
-          errorReport(
-            '[writeUpdateEventRow] ${docs.length} matches at $path for '
-            '${t.conditions}; refusing to write (corrupt uniqueness)',
+          final Map<String, dynamic>? picked = resolveAmbiguousEventTarget([
+            for (final d in docs)
+              <String, dynamic>{
+                ...(d.data() as Map<String, dynamic>),
+                '__docId': d.id,
+              },
+          ]);
+          if (picked == null) {
+            errorReport(
+              '[writeUpdateEventRow] ${docs.length} matches at $path for '
+              '${t.conditions}; refusing to write (corrupt uniqueness)',
+            );
+            result.add('error: ${docs.length} matches');
+            continue;
+          }
+          final String pickedId = (picked['__docId'] ?? '').toString();
+          targetDoc = docs.firstWhere((d) => d.id == pickedId);
+          devPrint(
+            '[writeUpdateEventRow] ${docs.length} matches at $path; '
+            'picked active trip $pickedId (multi-trip same day)',
           );
-          result.add('error: ${docs.length} matches');
-          continue;
         }
 
         // Resolve body values + sparse merge into the single matched doc.
@@ -1689,10 +1734,10 @@ Future<List<String>> writeUpdateEventRow(
             receivingPage: receivingPage,
           );
         });
-        await docs.first.reference.set(patch, SetOptions(merge: true));
+        await targetDoc.reference.set(patch, SetOptions(merge: true));
         debugPrint(
           '[writeUpdateEventRow] merged $patch into '
-          '$path/${docs.first.id}',
+          '$path/${targetDoc.id}',
         );
         result.add('ok');
       } catch (e) {
@@ -2748,6 +2793,15 @@ void historySyncUnLockOld(String from) {
 bool isNoMatchResult(String s) =>
     s.trim().toLowerCase().startsWith('error: no match');
 
+/// True when [s] is `writeUpdateEventRow`'s ambiguous-target outcome
+/// (`'error: <n> matches'`, emitted when [resolveAmbiguousEventTarget] could
+/// not pick a single doc). Like [isNoMatchResult] this is DETERMINISTIC:
+/// retrying cannot heal duplicate docs, so treating it as a retryable failure
+/// head-of-line blocks the whole queue for historySyncRetryMax cycles and then
+/// drops the record as "table data lost" anyway. Non-retryable + loud instead.
+bool isAmbiguousMatchResult(String s) =>
+    RegExp(r'^error:\s*\d+\s+matches').hasMatch(s.trim().toLowerCase());
+
 /// In-memory count of consecutive failed historySync attempts per history id.
 /// When ALL table writes for a record fail it is left unsent and retried next
 /// cycle; this counter caps the retries so a permanently-failing ("poison")
@@ -3052,10 +3106,15 @@ Future historySync(String source, bool forceSend) async {
                     bool resultOkOrNoMatch(String op, List<String> res) {
                       if (res.isEmpty) return false;
                       bool sawNoMatch = false;
+                      bool sawAmbiguous = false;
                       for (final String s in res) {
                         if (startsOk(s)) continue;
                         if (isNoMatchResult(s)) {
                           sawNoMatch = true;
+                          continue;
+                        }
+                        if (isAmbiguousMatchResult(s)) {
+                          sawAmbiguous = true;
                           continue;
                         }
                         return false;
@@ -3063,6 +3122,11 @@ Future historySync(String source, bool forceSend) async {
                       if (sawNoMatch) {
                         errorReport(
                           'historySync $op no match for historyId ${eventHistory[0]} (row already gone; skipped, non-retryable): $res',
+                        );
+                      }
+                      if (sawAmbiguous) {
+                        errorReport(
+                          'historySync $op ambiguous target for historyId ${eventHistory[0]} (>1 doc matched and none pickable; skipped, non-retryable — fix the duplicate docs or the config search): $res',
                         );
                       }
                       return true;
@@ -3152,7 +3216,11 @@ Future historySync(String source, bool forceSend) async {
                             updateEventStr,
                             eventRowString,
                           );
-                          tally('writeUpdateEventRow', resultOk(res), res);
+                          tally(
+                            'writeUpdateEventRow',
+                            resultOkOrNoMatch('writeUpdateEventRow', res),
+                            res,
+                          );
                         }
                       } catch (eTable) {
                         // A throw means an op did not complete -> count one

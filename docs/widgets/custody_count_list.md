@@ -26,6 +26,25 @@ Driver-entered counts are held in a per-scrName static map keyed by `ii__cd`.
 Future P7/P8 pages will read this store to build the `ip[]` physical count
 array. The store is cleared on route change.
 
+## Recount seeding
+
+When a driver returns to P6 via CustodyReveal's "Hitung Ulang" button, counts
+are seeded from the previous physical count (`ip[]`) on the opening check doc
+rather than reset to 0 wholesale. `CustodyCountList.computeRecountSeeds` applies
+a three-way rule per `ii__cd` key:
+
+- `ip[]` absent or empty -> every row starts at 0 (first-time blind count,
+  byte-identical to the original behavior).
+- `ip.qt == ie.qt` -> the row keeps its previous count (KEEP; the driver does
+  not recount it).
+- otherwise (mismatch, or the key is absent from `ip[]`) -> the row seeds 0 and
+  shows the amber `⚠ Perlu hitung ulang` status line (CLEAR; the driver
+  recounts it).
+
+This applies to the default P6 `ie[]` path only. The `aggregate` (O1) and
+`source:asset_cache` (C1) variants never call `_buildRows` and are completely
+unaffected -- a tenant running those variants sees no change whatsoever.
+
 ## Signature / Constructor
 
 ```dart
@@ -53,6 +72,7 @@ CustodyCountList({
 | `filter` | `String` | Category filter: `fieldCode◼value` (e.g. `ic◼returnable`) |
 | `blind` | `String` | `TRUE` to hide ie[].qt (warehouse expected qty) |
 | `writeField` | `String` | Target field for driver counts (default `ip`; write is P7/P8 scope) |
+| `actualField` | `String` | Field on the check doc holding the PREVIOUS driver counts, used to seed a recount (default `ip`) |
 | `text` | `String` | Currently unused (labels come from data, not text slots) |
 | `vidtable` | `String?` | Container VID for the vehicle_check + item subscriptions (applicationTableVid, e.g. `20342033315492`); read first by `resolveAppVid` |
 
@@ -62,6 +82,7 @@ CustodyCountList({
 |---|---|
 | `CustodyCountList.getCountMap(scrName)` | Get or create the count map for a screen |
 | `CustodyCountList.clearCountStore(scrName)` | Clear count store on route change |
+| `CustodyCountList.computeRecountSeeds(ieEntries, ipEntries)` | Compute recount seed values: matched rows keep `ip.qt`, mismatched/absent rows seed 0 (see Recount seeding) |
 
 ## Data Dependencies
 

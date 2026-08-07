@@ -28,6 +28,7 @@ class CustodyStepper extends StatelessWidget {
     required this.onIncrement,
     this.min = 0,
     this.enabled = true,
+    this.showButtons = true,
     this.frameBg,
     this.frameBorder,
     this.numberColor,
@@ -49,6 +50,11 @@ class CustodyStepper extends StatelessWidget {
   /// Whether the stepper is interactive. When false, both buttons are disabled
   /// regardless of value.
   final bool enabled;
+
+  /// Whether to show the -/+ buttons. When false, only the centered number
+  /// (and optional status line) renders inside the frame — buttons are
+  /// genuinely removed, not just faded. Default true.
+  final bool showButtons;
 
   /// Background color of the stepper frame. Null = white (neutral).
   final Color? frameBg;
@@ -90,20 +96,21 @@ class CustodyStepper extends StatelessWidget {
       child: Row(
         children: [
           // -- Decrement button --
-          _stepButton(
-            icon: Icons.remove,
-            enabled: canDecrement,
-            activeColor: activeIconColor,
-            disabledColor: disabledIconColor,
-            borderRadius:
-                const BorderRadius.horizontal(left: Radius.circular(9)),
-            onTap: canDecrement
-                ? () {
-                    onDecrement!();
-                    HapticFeedback.selectionClick();
-                  }
-                : null,
-          ),
+          if (showButtons)
+            _stepButton(
+              icon: Icons.remove,
+              enabled: canDecrement,
+              activeColor: activeIconColor,
+              disabledColor: disabledIconColor,
+              borderRadius:
+                  const BorderRadius.horizontal(left: Radius.circular(9)),
+              onTap: canDecrement
+                  ? () {
+                      onDecrement!();
+                      HapticFeedback.selectionClick();
+                    }
+                  : null,
+            ),
 
           // -- Center: number + optional status line --
           Expanded(
@@ -129,20 +136,21 @@ class CustodyStepper extends StatelessWidget {
           ),
 
           // -- Increment button --
-          _stepButton(
-            icon: Icons.add,
-            enabled: canIncrement,
-            activeColor: activeIconColor,
-            disabledColor: disabledIconColor,
-            borderRadius:
-                const BorderRadius.horizontal(right: Radius.circular(9)),
-            onTap: canIncrement
-                ? () {
-                    onIncrement!();
-                    HapticFeedback.selectionClick();
-                  }
-                : null,
-          ),
+          if (showButtons)
+            _stepButton(
+              icon: Icons.add,
+              enabled: canIncrement,
+              activeColor: activeIconColor,
+              disabledColor: disabledIconColor,
+              borderRadius:
+                  const BorderRadius.horizontal(right: Radius.circular(9)),
+              onTap: canIncrement
+                  ? () {
+                      onIncrement!();
+                      HapticFeedback.selectionClick();
+                    }
+                  : null,
+            ),
         ],
       ),
     );

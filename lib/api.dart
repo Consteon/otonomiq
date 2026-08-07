@@ -63,6 +63,7 @@ import 'widget/ui_component.dart';
 import 'widget/whatsapp_send.dart';
 import 'widget/payout_list.dart';
 import 'widget/list_action_card.dart';
+import 'widget/signature_pad.dart';
 
 /// Login perf instrumentation. Mirrors UserRepository.loginPerfTrace.
 /// Set to false (or remove) after root-cause confirmation.
@@ -2013,12 +2014,16 @@ void _persistUiCache({bool alsoGuest = false}) {
 /// Everything is decoded into locals and only then swapped into the globals —
 /// a half-applied swap (system map from one source, pages from another) is
 /// precisely what sank the earlier cache-first attempt.
-Future<bool> loadPagesFromProxy(String lifKey) async {
+Future<bool> loadPagesFromProxy(
+  String lifKey, {
+  bool skipIfUnchanged = false,
+}) async {
   if (lifKey.isEmpty) return false;
   final sw = _loginPerfTrace ? (Stopwatch()..start()) : null;
   try {
     final bool ok = await _loadPagesFromProxy(
       lifKey,
+      skipIfUnchanged: skipIfUnchanged,
     ).timeout(const Duration(seconds: 15));
     if (sw != null) {
       debugPrint(
@@ -2112,7 +2117,41 @@ Future<void> rebindInboxFromStorage() async {
   }
 }
 
-Future<bool> _loadPagesFromProxy(String lifKey) async {
+/// Boot-loader freshness gate: true when a cold-start proxy load must be
+/// SKIPPED because the proxy has not moved since we last applied it.
+///
+/// ★ WHY. `/Proxy/<lif>` is a materialized copy that LAGS the sheet. The AppBar
+/// refresh reads the sheet DIRECTLY (readSettingsContext -> /readSS) and writes
+/// those fresh pages to `@screenUI`; opt-1 renders them on the next cold start.
+/// Then asyncAppStartup2 ran the proxy loader unconditionally, swapped the OLDER
+/// proxy copy back in, and `_persistUiCache()` overwrote the fresh cache with it
+/// — so the refreshed data disappeared on reopen and stayed gone. Same symptom
+/// as the listener-side clobber, new path since opt 2 went proxy-first.
+///
+/// Uses the same `@proxyCS_<lif>` checksum + int guard as the live listener in
+/// main_page.dart. Skipping requires the in-memory pages to already BE this
+/// lif's — never true on the login path, where memory still holds the guest
+/// pages — so `true` means "pages for lifKey are loaded and at least as fresh
+/// as the proxy", never "no pages". A non-int `t` falls through to the load
+/// (old behaviour), as does a first run with no saved checksum.
+bool proxyBootSkip({
+  required bool skipIfUnchanged,
+  required String lifKey,
+  required String loadedLif,
+  required dynamic proxyT,
+  required int? savedCs,
+}) =>
+    skipIfUnchanged &&
+    lifKey.isNotEmpty &&
+    loadedLif == lifKey &&
+    proxyT is int &&
+    savedCs != null &&
+    proxyT == savedCs;
+
+Future<bool> _loadPagesFromProxy(
+  String lifKey, {
+  bool skipIfUnchanged = false,
+}) async {
   final dynamic snap = await firestoreDb
       .collection(proxyCollectionName)
       .doc(lifKey)
@@ -2120,6 +2159,17 @@ Future<bool> _loadPagesFromProxy(String lifKey) async {
   if (snap == null || snap.exists != true) return false;
   final dynamic rec = snap.data();
   if (rec == null) return false;
+
+  if (proxyBootSkip(
+    skipIfUnchanged: skipIfUnchanged,
+    lifKey: lifKey,
+    loadedLif: loadedPagesLif,
+    proxyT: rec['t'],
+    savedCs: prefs.getInt('@proxyCS_$lifKey'),
+  )) {
+    devPrint('proxy unchanged (t=${rec['t']}) — keeping local pages');
+    return true;
+  }
 
   // Both subcollections in flight together — two ~200ms reads, not 400ms.
   final dynamic systemFuture = firestoreDb
@@ -4544,6 +4594,7 @@ void clearData(String scrName) {
   ItemExecutionList.clearExecutionStore(scrName);
   ItemExecutionSubmit.clearState(scrName);
   NfcReader.clearCollectorState(scrName);
+  SignaturePad.clearSignatureState(scrName);
   // WHATSAPP_SEND per-invoice sent badge. Must be here, not only in
   // buildPage(clear:true): navigation goes gotoRoute -> reloadPage, which calls
   // clearData and then returns the CACHED linkElement[page] -- buildPage never
@@ -5624,7 +5675,10 @@ Future asyncAppStartup2() async {
     // refuses it by design — and as fallback whenever the proxy is missing.
     bool proxyOk = false;
     if (myLif != transactionStore.state.screenTx['#GUEST_LIF']) {
-      proxyOk = await loadPagesFromProxy(myLif);
+      // skipIfUnchanged: a cold start must not re-apply a proxy copy that has
+      // not moved since we last applied it — that is what was undoing AppBar
+      // refreshes on reopen.
+      proxyOk = await loadPagesFromProxy(myLif, skipIfUnchanged: true);
       if (proxyOk) {
         await runSheetStartup(
           myLif,

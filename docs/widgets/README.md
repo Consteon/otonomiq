@@ -79,6 +79,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | ReceiptDoc | [receipt_doc.md](receipt_doc.md) | draft | Read-only on-screen nota card (config-named scalar fields + li[] line loop + depo header lookup); SDUI `RECEIPT_DOC` |
 | RouteFeedHeader | [route_feed_header.md](route_feed_header.md) | draft | Sticky 3-row route header (identity, progress, drop/pickup stats) and vehicleId publisher for P10 TaskFeed |
 | RouteProgressHeader | [route_progress_header.md](route_progress_header.md) | draft | Driver identity header with workforce lookup and vehicle publish |
+| SignalList | [signal_list.md](signal_list.md) | draft | Generic obligation-at-risk signal card list (◆-indexed `text`, statusMap pill, amber-never-red tone guard, optional mini-timeline); card navigates only. SDUI `SIGNAL_LIST` |
 | StatCardRow | [stat_card_row.md](stat_card_row.md) | draft | Horizontal row of N number-cards from one keyed cache doc; tone-colored, highlight-optional, config-driven count |
 | TaskCreateSubmit | [task_create_submit.md](task_create_submit.md) | draft | Submit button for Admin create-task wizard (P4) |
 | TaskCreateSuccess | [task_create_success.md](task_create_success.md) | draft | P5 success confirmation screen for Admin create-task wizard |

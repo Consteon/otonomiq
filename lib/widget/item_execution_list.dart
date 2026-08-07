@@ -86,6 +86,54 @@ class ItemExecutionList extends StatefulWidget {
     executionRev.value++;
   }
 
+  /// Parse an `editDrop` / `editPickup` / `editConsumable` component config value.
+  ///
+  /// Returns `true` (editable / unlocked) unless the trimmed value equals
+  /// `"false"` (case-insensitive). Key absent / empty / any other value
+  /// → `true` (backward-compatible unlocked default).
+  ///
+  /// Note: a JSON boolean `false` also locks, because `false.toString()` is
+  /// `'false'`. This is intentional (reads like a bug but is correct).
+  static bool parseEditFlag(dynamic rawValue) {
+    final String v = (rawValue ?? '').toString().trim().toLowerCase();
+    return v != 'false';
+  }
+
+  /// Resolve whether the DROP stepper is editable for a row, given the
+  /// component config and the row's returnable-ness.
+  ///
+  /// `editDrop` governs returnable rows; `editConsumable` governs consumable
+  /// (non-returnable) rows. Pickup is gated separately by `editPickup`.
+  static bool parseDropEditable(dynamic component, bool isReturnable) {
+    final dynamic raw = isReturnable
+        ? (component is Map ? component['editDrop'] : null)
+        : (component is Map ? component['editConsumable'] : null);
+    return parseEditFlag(raw);
+  }
+
+  /// Resolve whether the PICKUP stepper is editable, given the component config.
+  ///
+  /// `editPickup` governs returnable pickup cells. Consumable rows have no
+  /// pickup cell — the flag is a silent no-op for them. `variant:pivot` renders
+  /// custody-count slots and is unaffected.
+  static bool parsePickupEditable(dynamic component) {
+    final dynamic raw = component is Map ? component['editPickup'] : null;
+    return parseEditFlag(raw);
+  }
+
+  /// Whether a sale/purchase row should render a consumable stepper.
+  ///
+  /// Returns `true` only for `txKind` == `'sale'` or `'purchase'` AND
+  /// `editConsumable` is not `"false"`. Refill and deliver always return
+  /// `false` (refill has no stepper; deliver uses [parseDropEditable]).
+  /// `variant:pivot` renders custody-count slots and is unaffected.
+  static bool parseConsumableStepperEditable(
+      dynamic component, String txKind) {
+    if (txKind != 'sale' && txKind != 'purchase') return false;
+    return parseEditFlag(
+        component is Map ? component['editConsumable'] : null);
+  }
+
   @override
   State<ItemExecutionList> createState() => _ItemExecutionListState();
 }
@@ -424,7 +472,7 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
           dropCap: rowCap,
         ));
       } else {
-        // ── Sale / Purchase / Refill: read-only, NO execution store ──
+        // ── Sale / Purchase / Refill ──────────────────────────────────
         final int txQty;
         final String subLabel;
 
@@ -456,6 +504,21 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
             roSlot: roSlot,
             isiUlangSlot: isiUlangSlot,
           );
+        }
+
+        // Seed sale/purchase in executionStore. Uses dropActual/dropPlan
+        // for the single qty (see ExecutionEntry doc). Refill stays
+        // unseeded (ar = pr always, decision 2).
+        // ponytail: no cap logic for sale/buy, upgrade path = dropCapTable
+        if (txKind == 'sale' || txKind == 'purchase') {
+          execMap.putIfAbsent(
+              key,
+              () => ExecutionEntry(
+                    dropActual: txQty,
+                    pickupActual: 0,
+                    dropPlan: txQty,
+                    pickupPlan: 0,
+                  ));
         }
 
         rows.add(_ItemRow(
@@ -515,6 +578,21 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
     final ExecutionEntry? entry = map[key];
     if (entry != null) {
       entry.pickupActual = newValue;
+      ItemExecutionList.executionRev.value++;
+      setState(() {});
+    }
+  }
+
+  /// Stepper tap callback for sale/buy items.
+  ///
+  /// Unlike [_onDropChanged], there is NO cap clamping -- sale/buy quantities
+  /// are freely adjustable (decision 3: no stock cap on sale).
+  void _onConsumableQtyChanged(String key, int newValue) {
+    final Map<String, ExecutionEntry> map =
+        ItemExecutionList.getExecMap(widget.scrName);
+    final ExecutionEntry? entry = map[key];
+    if (entry != null) {
+      entry.dropActual = newValue;
       ItemExecutionList.executionRev.value++;
       setState(() {});
     }
@@ -676,7 +754,7 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
                   consumableLabel: consumableLabel,
                 )
               else
-                _buildReadOnlyTxCard(rows[i]),
+                _buildReadOnlyTxCard(rows[i], execMap, planLabel: planLabel),
             ],
 
             // Pickup hint
@@ -1076,6 +1154,15 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
         ? () => _onDropChanged(row.key, dropActual - 1)
         : null;
 
+    // ── Edit lock: config-driven read-only drop ──────────────────────
+    // editDrop gates returnable rows; editConsumable gates consumable rows.
+    // "false" (case-insensitive, trimmed) → locked. Anything else → unlocked.
+    // Pickup gated by editPickup (returnable rows only; consumable has no pickup cell).
+    final bool dropEditable = ItemExecutionList.parseDropEditable(
+        widget.component, row.isReturnable);
+    final bool pickupEditable =
+        ItemExecutionList.parsePickupEditable(widget.component);
+
     // Type chip
     final String chipLabel =
         row.isReturnable ? returnableLabel : consumableLabel;
@@ -1153,8 +1240,9 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
                     status: dropStatus,
                     planLabel: planLabel,
                     isPickup: false,
-                    onDecrement: dropOnDecrement,
-                    onIncrement: dropOnIncrement,
+                    onDecrement: dropEditable ? dropOnDecrement : null,
+                    onIncrement: dropEditable ? dropOnIncrement : null,
+                    showButtons: dropEditable,
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -1167,12 +1255,15 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
                     status: pickupStatus,
                     planLabel: planLabel,
                     isPickup: true,
-                    onDecrement: pickupActual > 0
+                    onDecrement: pickupEditable && pickupActual > 0
                         ? () =>
                             _onPickupChanged(row.key, pickupActual - 1)
                         : null,
-                    onIncrement: () =>
-                        _onPickupChanged(row.key, pickupActual + 1),
+                    onIncrement: pickupEditable
+                        ? () =>
+                            _onPickupChanged(row.key, pickupActual + 1)
+                        : null,
+                    showButtons: pickupEditable,
                   ),
                 ),
               ],
@@ -1186,8 +1277,9 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
               status: dropStatus,
               planLabel: planLabel,
               isPickup: false,
-              onDecrement: dropOnDecrement,
-              onIncrement: dropOnIncrement,
+              onDecrement: dropEditable ? dropOnDecrement : null,
+              onIncrement: dropEditable ? dropOnIncrement : null,
+              showButtons: dropEditable,
             ),
         ],
       ),
@@ -1203,6 +1295,7 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
     required bool isPickup,
     VoidCallback? onDecrement,
     VoidCallback? onIncrement,
+    bool showButtons = true,
   }) {
     // Colors per status
     Color frameBg;
@@ -1279,6 +1372,7 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
           onIncrement: onIncrement,
           min: 0,
           enabled: true,
+          showButtons: showButtons,
           frameBg: frameBg,
           frameBorder: frameBorder,
           numberColor: numberColor,
@@ -1298,11 +1392,17 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
     );
   }
 
-  /// Build a read-only card for sale/purchase/refill items.
+  /// Build a card for sale/purchase/refill items.
   ///
-  /// Layout: item name + tx chip | direction arrow + line + desc | qty frame
+  /// Name is historical -- sale/purchase cards now render an editable stepper
+  /// when [parseConsumableStepperEditable] returns true. Refill stays static.
+  /// Layout: item name + tx chip | direction arrow + line + desc | qty section
   /// + optional sub-label (condition or water).
-  Widget _buildReadOnlyTxCard(_ItemRow row) {
+  Widget _buildReadOnlyTxCard(
+    _ItemRow row,
+    Map<String, ExecutionEntry> execMap, {
+    required String planLabel,
+  }) {
     // Per-tx config: chip label, line, desc, direction arrow, colors.
     final String chipLabel;
     final String dirArrow;
@@ -1358,6 +1458,19 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
         // Should not reach here (classifyTxKind returns 'deliver' for unknowns).
         return const SizedBox.shrink();
     }
+
+    // ── Consumable stepper resolution ──────────────────────────────
+    // editConsumable governs ALL consumable rows (decision 1).
+    // Sale/purchase get a stepper when editable. Refill stays static.
+    final bool isConsumableEditable =
+        ItemExecutionList.parseConsumableStepperEditable(
+            widget.component, row.txKind);
+    final ExecutionEntry? consumableEntry =
+        isConsumableEditable ? execMap[row.key] : null;
+    final int consumableActual = consumableEntry?.dropActual ?? row.txQty;
+    final _CellStatus consumableStatus = isConsumableEditable
+        ? _cellStatus(consumableActual, row.txQty, false)
+        : const _CellStatus('complete', '');
 
     return Container(
       decoration: BoxDecoration(
@@ -1437,32 +1550,34 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
           ),
           const SizedBox(height: 10),
 
-          // ── Qty frame (read-only, no stepper) ─────────────
-          Row(
-            children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  color: qtyFrameBg,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: qtyFrameBorder),
-                ),
-                child: Text(
-                  '${row.txQty}',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: chipFg,
-                  ),
-                ),
-              ),
-              // Sub-label (condition or water)
-              if (row.subLabel.isNotEmpty) ...[
-                const SizedBox(width: 10),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          // ── Qty section ─────────────────────────────────────
+          // Sale/purchase: stepper when editConsumable is true.
+          // Refill or locked: static frame (read-only).
+          // Decision 4 superseded by decision 5: stepper frame colours
+          // follow _cellStatus (emerald/amber/violet), not the card's
+          // teal/emerald palette. Sub-label moves below the stepper
+          // (deliberate: stepper is full-width, horizontal Row no longer fits).
+          if (isConsumableEditable) ...[
+            _buildStepperCell(
+              label: '$dirArrow ${chipLabel.toUpperCase()}',
+              planValue: row.txQty,
+              actualValue: consumableActual,
+              status: consumableStatus,
+              planLabel: planLabel,
+              isPickup: false,
+              onDecrement: consumableActual > 0
+                  ? () => _onConsumableQtyChanged(
+                      row.key, consumableActual - 1)
+                  : null,
+              onIncrement: () =>
+                  _onConsumableQtyChanged(row.key, consumableActual + 1),
+            ),
+            if (row.subLabel.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: qtyFrameBg,
                     borderRadius: BorderRadius.circular(6),
@@ -1476,9 +1591,50 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
                     ),
                   ),
                 ),
+              ),
+          ] else ...[
+            Row(
+              children: [
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: qtyFrameBg,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: qtyFrameBorder),
+                  ),
+                  child: Text(
+                    '${row.txQty}',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: chipFg,
+                    ),
+                  ),
+                ),
+                // Sub-label (condition or water)
+                if (row.subLabel.isNotEmpty) ...[
+                  const SizedBox(width: 10),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: qtyFrameBg,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      row.subLabel,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: chipFg,
+                      ),
+                    ),
+                  ),
+                ],
               ],
-            ],
-          ),
+            ),
+          ],
         ],
       ),
     );
@@ -1488,6 +1644,12 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
 // ── Internal helpers ─────────────────────────────────────────────────────
 
 /// One entry in the execution store.
+///
+/// For **deliver** rows: [dropActual]/[dropPlan] are drop qty,
+/// [pickupActual]/[pickupPlan] are pickup qty.
+/// For **sale/purchase** rows: [dropActual]/[dropPlan] are reused for the
+/// single tx qty (sale or buy). [pickupActual]/[pickupPlan] are 0 (unused).
+/// **Refill** rows do not seed the store (ar = pr always).
 class ExecutionEntry {
   int dropActual;
   int pickupActual;

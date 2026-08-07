@@ -548,14 +548,18 @@ List<Map<String, dynamic>> rebuildItWithActuals(
         }
         break;
       case 'sale':
-        item[cfg.actualSaleField] = int.tryParse(
-                (item[cfg.saleField] ?? '0').toString().trim()) ??
-            0;
+        final ExecutionEntry? saleEntry = execMap[key];
+        item[cfg.actualSaleField] = saleEntry?.dropActual ??
+            (int.tryParse(
+                    (item[cfg.saleField] ?? '0').toString().trim()) ??
+                0);
         break;
       case 'purchase':
-        item[cfg.actualBuyField] = int.tryParse(
-                (item[cfg.buyField] ?? '0').toString().trim()) ??
-            0;
+        final ExecutionEntry? buyEntry = execMap[key];
+        item[cfg.actualBuyField] = buyEntry?.dropActual ??
+            (int.tryParse(
+                    (item[cfg.buyField] ?? '0').toString().trim()) ??
+                0);
         break;
       case 'refill':
         item[cfg.actualRefillField] = int.tryParse(

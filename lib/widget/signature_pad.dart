@@ -1,6 +1,15 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
+import 'package:flutter/material.dart';
+import 'package:image/image.dart' as img_pkg;
+import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
+
+import '../api.dart';
 import '../global.dart';
+import '../global2.dart';
 
 /// Clamps [p] so that dx stays in [0, width] and dy stays in [0, height].
 /// Pure helper -- no side effects; importable for unit testing.
@@ -19,13 +28,11 @@ Offset clampToCanvas(Offset p, double width, double height) {
 ///   - Empty: dashed slate border (CustomPaint), light bg, centered placeholder.
 ///   - Filled: solid emerald border, "Hapus" clear control, confirmed hint.
 ///
-/// DEFERRED: strokes are LOCAL widget state only. No image-bytes export,
-/// no txfController write this round. When writes land:
-///   - position: 3 (from component['position'])
-///   - writeField: "sig" (from component['writeField'])
-///   - Export strokes as PNG bytes, write to txfController[scrName][3].
-///
-/// Read-only for Firestore: no txfController, no saveSend, no history.
+/// On each pan-end, strokes are rendered to a JPEG via PictureRecorder,
+/// saved locally via prepareImageAsLocal(forceRename: true), registered
+/// in imageMap, and written to txfController[scrName][position] as an
+/// aum__ token. The existing submit/historySync pipeline carries the
+/// signature to Firebase Storage with zero additional code.
 class SignaturePad extends StatefulWidget {
   const SignaturePad({
     super.key,
@@ -41,8 +48,53 @@ class SignaturePad extends StatefulWidget {
   final String scrName;
   final double lPad, tPad, rPad, bPad;
 
+  /// Per-screen signature write-state, keyed by scrName. Kept STATIC (not
+  /// instance fields) and reset per route change by [clearSignatureState]
+  /// (wired into clearData) -- the codebase's per-screen-state convention.
+  /// This does not depend on State lifetime: a normal gotoRoute disposes this
+  /// State, but an AnyPage in-place reconciliation (any_page.dart:115,
+  /// buildPage(clear:false)) can reuse it via identical ObjectKeys -- clearData
+  /// resets the state in both cases, so signature A's ink and file identity
+  /// never leak onto B. The identity also rolls per session in _onPanStart.
+  /// Mirrors CustodyCountList.countStore.
+  static final Map<String, _SigWriteState> _writeState = {};
+
+  /// Drop [scrName]'s signature write-state so a revisit starts clean.
+  /// Registered in clearData (api.dart) beside the sibling driver widgets.
+  static void clearSignatureState(String scrName) =>
+      _writeState.remove(scrName);
+
+  /// Current file identity for [scrName] ('' when no signature session is
+  /// active). The write path (_exportAndSave) and tests share this reader --
+  /// no re-implementation of the roll rule.
+  static String fileNameOf(String scrName) =>
+      _writeState[scrName]?.fileNameBase ?? '';
+
+  /// Mint and store a fresh file identity for [scrName]'s new signature
+  /// session, returning it. Called only on the empty->non-empty stroke edge
+  /// so it stays stable across the strokes of ONE signature but rolls per
+  /// submitted signature -- signature B never reuses signature A's key.
+  static String rollFileName(String scrName, String prefix) {
+    final String base = '${prefix}_'
+        '${const Uuid().v4().replaceAll('-', '').substring(2, 7)}';
+    _writeState.putIfAbsent(scrName, () => _SigWriteState()).fileNameBase =
+        base;
+    return base;
+  }
+
   @override
   State<SignaturePad> createState() => _SignaturePadState();
+}
+
+/// Mutable per-screen signature state held in [SignaturePad._writeState].
+/// Kept off the State and reset by SignaturePad.clearSignatureState on route
+/// change, so an AnyPage in-place State reuse (any_page.dart:115) cannot carry
+/// one delivery's strokes/identity into the next.
+class _SigWriteState {
+  final List<List<Offset>> strokes = [];
+  String fileNameBase = '';
+  bool saving = false;
+  bool pendingExport = false;
 }
 
 class _SignaturePadState extends State<SignaturePad> {
@@ -56,8 +108,28 @@ class _SignaturePadState extends State<SignaturePad> {
 
   static const double _canvasHeight = 150;
 
+  // ── Write-path fields ──────────────────────────────────────────────────
+  static const double _exportScale = 3.0;
+  static const int _jpegQuality = 90;
+
+  late final int? _position;
+  late final String _folder;
+
+  // Leak-prone state (strokes, file identity, export flags) lives in the
+  // static SignaturePad._writeState keyed by scrName -- reset via clearData on
+  // route change rather than relying on State lifetime (an AnyPage in-place
+  // reconciliation can preserve this State; any_page.dart:115). Proxied here so
+  // the render and write-path code reads the per-screen holder transparently.
+  _SigWriteState get _state => SignaturePad._writeState
+      .putIfAbsent(widget.scrName, () => _SigWriteState());
+  List<List<Offset>> get _strokes => _state.strokes;
+  String get _fileNameBase => SignaturePad.fileNameOf(widget.scrName);
+  bool get _saving => _state.saving;
+  set _saving(bool v) => _state.saving = v;
+  bool get _pendingExport => _state.pendingExport;
+  set _pendingExport(bool v) => _state.pendingExport = v;
+
   List<String> _textArray = [];
-  final List<List<Offset>> _strokes = [];
   List<Offset> _currentStroke = [];
   double _canvasWidth = 0;
 
@@ -65,6 +137,9 @@ class _SignaturePadState extends State<SignaturePad> {
   void initState() {
     super.initState();
     _parseText();
+    _position = int.tryParse(
+        (widget.component['position'] ?? '').toString());
+    _folder = (widget.component['folder'] ?? 'signature').toString().trim();
   }
 
   void _parseText() {
@@ -85,7 +160,141 @@ class _SignaturePadState extends State<SignaturePad> {
 
   bool get _isEmpty => _strokes.isEmpty;
 
+  /// Render strokes to JPEG, save locally, register in imageMap,
+  /// write aum__ token to txfController.
+  ///
+  /// Guarded by [_saving] to serialise concurrent exports. If a pan-end
+  /// fires while an export is in progress, [_pendingExport] ensures the
+  /// latest strokes are re-exported when the current one finishes.
+  Future<void> _exportAndSave() async {
+    if (_position == null || _strokes.isEmpty) return;
+    if (_saving) {
+      _pendingExport = true;
+      return;
+    }
+    _saving = true;
+    // C2: pin this export to the signature session that started it. If a route
+    // change (clearData) or a Hapus-then-redraw rolls the file identity while
+    // the online upload below is still in flight, the captured token must NOT
+    // land in the next delivery's txfController slot (proof-of-delivery loss).
+    final String myBase = SignaturePad.fileNameOf(widget.scrName);
+    try {
+      final double w = _canvasWidth;
+      final double h = _canvasHeight;
+      if (w <= 0) return;
+
+      // 1. Render strokes onto a fresh canvas with opaque white background.
+      //    JPEG has no alpha channel; the white rect prevents black artifacts.
+      final ui.PictureRecorder recorder = ui.PictureRecorder();
+      final Canvas canvas = Canvas(recorder);
+      canvas.scale(_exportScale);
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, w, h),
+        Paint()..color = Colors.white,
+      );
+      // Reuse the existing _SignaturePainter -- no new painting code.
+      _SignaturePainter(
+        strokes: _strokes,
+        currentStroke: const [],
+        inkColor: _ink,
+      ).paint(canvas, Size(w, h));
+
+      final int imgWidth = (w * _exportScale).round();
+      final int imgHeight = (h * _exportScale).round();
+      final ui.Image uiImage =
+          await recorder.endRecording().toImage(imgWidth, imgHeight);
+      // I2: dispose the native handle even if toByteData throws.
+      ByteData? rawBytes;
+      try {
+        rawBytes =
+            await uiImage.toByteData(format: ui.ImageByteFormat.rawRgba);
+      } finally {
+        uiImage.dispose();
+      }
+      if (rawBytes == null) return;
+
+      // 2. Encode as JPEG via the image package (v4.9.1, already installed).
+      final img_pkg.Image sigImage = img_pkg.Image.fromBytes(
+        width: imgWidth,
+        height: imgHeight,
+        bytes: rawBytes.buffer,
+        numChannels: 4,
+        order: img_pkg.ChannelOrder.rgba,
+      );
+      final Uint8List jpegBytes =
+          img_pkg.encodeJpg(sigImage, quality: _jpegQuality);
+
+      // 3. Write JPEG to a temp file in app support dir.
+      final Directory appDir = await getApplicationSupportDirectory();
+      final String tempPath = '${appDir.path}/sig_tmp_$_fileNameBase.jpg';
+      await File(tempPath).writeAsBytes(jpegBytes, flush: true);
+
+      // 4. Relocate via prepareImageAsLocal with forceRename: true.
+      //    CRITICAL: without forceRename, renamePath's OTQC check fails
+      //    (signature path has no OTQC artifact), the file is never moved,
+      //    the path carries no ___ separator, and saveImagePutInImageMap's
+      //    split('___') yields one element -- the upload targets a garbage
+      //    folder and a later cache purge strands an aum__ entry, halting
+      //    the entire history queue (image-poison wedge).
+      //    See api.dart:5511-5518 (gallery path) for prior art.
+      final String aumToken = await prepareImageAsLocal(
+        imagePath: tempPath,
+        folder: _folder,
+        fileName: _fileNameBase,
+        forceRename: true,
+      );
+
+      // 5. Register in imageMap and upload if online.
+      // The eager upload here may no-op if a prior stroke already set the
+      // imageMap URL (saveImagePutInImageMap skips a filled URL slot).
+      // Harmless: at historySync, uploadImageToCloud
+      // (table_repository.dart:3545-3599) does NOT short-circuit on an
+      // existing URL -- when online it unconditionally re-uploads the CURRENT
+      // local bytes (the finished signature) to the deterministic key
+      // "$folder/$fileName.jpg", so intermediate strokes self-heal. Nothing
+      // to defer. That same stable-key property is exactly what made C1
+      // dangerous ACROSS signatures -- fixed by rolling _fileNameBase per
+      // signature session (see _onPanStart / SignaturePad.rollFileName).
+      await saveImagePutInImageMap(aumToken);
+
+      // 6. Write to txfController (mirrors otq_get_images_2.dart:120-133).
+      //    C2: bail if this State was disposed, no session was active at export
+      //    start (empty myBase), or the identity rolled/cleared since -- the
+      //    captured token no longer belongs to this scrName's current slot.
+      if (!mounted ||
+          myBase.isEmpty ||
+          SignaturePad.fileNameOf(widget.scrName) != myBase) {
+        return;
+      }
+      try {
+        txfControllerCheck(widget.scrName, _position);
+        txfController[widget.scrName]![_position]!.controller.text = aumToken;
+        txfController[widget.scrName]![_position]!.finalData = aumToken;
+      } catch (e) {
+        errorReport(e);
+      }
+    } catch (e) {
+      errorReport(e);
+    } finally {
+      _saving = false;
+      if (_pendingExport) {
+        _pendingExport = false;
+        _exportAndSave();
+      }
+    }
+  }
+
   void _onPanStart(DragStartDetails details) {
+    // Empty -> non-empty edge = a new signature session begins. Roll a fresh
+    // file identity now so this signature will not overwrite the previous one
+    // at the same Storage key. No roll on later strokes -- the identity must
+    // stay stable across the strokes of one signature (see I1).
+    if (_strokes.isEmpty) {
+      SignaturePad.rollFileName(
+        widget.scrName,
+        (widget.component['filename'] ?? 'sig').toString().trim(),
+      );
+    }
     _currentStroke = [
       clampToCanvas(details.localPosition, _canvasWidth, _canvasHeight)
     ];
@@ -104,12 +313,25 @@ class _SignaturePadState extends State<SignaturePad> {
     }
     _currentStroke = [];
     setState(() {});
+    _exportAndSave();
   }
 
   void _onClear() {
     _strokes.clear();
+    // End the session: next stroke rolls a fresh identity (see _onPanStart).
+    _state.fileNameBase = '';
     _currentStroke = [];
     setState(() {});
+    // Blank txfController so submit does not carry a stale signature.
+    if (_position != null) {
+      try {
+        txfControllerCheck(widget.scrName, _position);
+        txfController[widget.scrName]![_position]!.controller.text = '';
+        txfController[widget.scrName]![_position]!.finalData = '';
+      } catch (e) {
+        errorReport(e);
+      }
+    }
   }
 
   @override
@@ -126,12 +348,6 @@ class _SignaturePadState extends State<SignaturePad> {
     final String hintFilled = _t(
         3,
         '\u{2713} Tanda tangan tersimpan \u{00B7} customer confirmed');
-
-    // DEFERRED: position and writeField for future write integration.
-    // final int position = int.tryParse(
-    //     (widget.component['position'] ?? '').toString()) ?? -1;
-    // final String writeField =
-    //     (widget.component['writeField'] ?? '').toString();
 
     return Padding(
       padding: EdgeInsets.fromLTRB(

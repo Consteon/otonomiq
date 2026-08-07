@@ -1150,6 +1150,218 @@ void main() {
       expect(survivingIds(docs, slots, hideZero: false), ['A']);
     });
   });
+
+  // ── Edit lock flag parsing (production symbol) ───────────────────────
+
+  group('parseEditFlag', () {
+    test('null returns true (editable)', () {
+      expect(ItemExecutionList.parseEditFlag(null), true);
+    });
+
+    test('empty string returns true (editable)', () {
+      expect(ItemExecutionList.parseEditFlag(''), true);
+    });
+
+    test('"true" returns true (editable)', () {
+      expect(ItemExecutionList.parseEditFlag('true'), true);
+    });
+
+    test('"TRUE" returns true (editable)', () {
+      expect(ItemExecutionList.parseEditFlag('TRUE'), true);
+    });
+
+    test('"false" returns false (locked)', () {
+      expect(ItemExecutionList.parseEditFlag('false'), false);
+    });
+
+    test('"FALSE" returns false (locked)', () {
+      expect(ItemExecutionList.parseEditFlag('FALSE'), false);
+    });
+
+    test('"False" returns false (locked)', () {
+      expect(ItemExecutionList.parseEditFlag('False'), false);
+    });
+
+    test('" false " (padded) returns false (locked)', () {
+      expect(ItemExecutionList.parseEditFlag(' false '), false);
+    });
+
+    test('"0" returns true (only literal false locks)', () {
+      expect(ItemExecutionList.parseEditFlag('0'), true);
+    });
+
+    test('arbitrary string returns true (editable)', () {
+      expect(ItemExecutionList.parseEditFlag('yes'), true);
+      expect(ItemExecutionList.parseEditFlag('no'), true);
+      expect(ItemExecutionList.parseEditFlag('anything'), true);
+    });
+
+    test('integer 0 returns true (not string false)', () {
+      expect(ItemExecutionList.parseEditFlag(0), true);
+    });
+
+    test('bool false returns false (toString == "false")', () {
+      expect(ItemExecutionList.parseEditFlag(false), false);
+    });
+
+    test('bool true returns true', () {
+      expect(ItemExecutionList.parseEditFlag(true), true);
+    });
+  });
+
+  // ── Edit lock gating: correct flag per row type (production symbol) ────
+
+  group('edit lock flag selection by row type', () {
+    // Verifies the gating RULE (which flag applies to which row type) via the
+    // real production ItemExecutionList.parseDropEditable — not a restated
+    // ternary. A backwards wiring in _buildItemCard would fail these.
+
+    test('returnable row checks editDrop', () {
+      final component = {'editDrop': 'false', 'editConsumable': 'true'};
+      expect(ItemExecutionList.parseDropEditable(component, true), false);
+    });
+
+    test('consumable row checks editConsumable', () {
+      final component = {'editDrop': 'true', 'editConsumable': 'false'};
+      expect(ItemExecutionList.parseDropEditable(component, false), false);
+    });
+
+    test('returnable row ignores editConsumable', () {
+      final component = {'editDrop': 'true', 'editConsumable': 'false'};
+      expect(ItemExecutionList.parseDropEditable(component, true), true);
+    });
+
+    test('consumable row ignores editDrop', () {
+      final component = {'editDrop': 'false', 'editConsumable': 'true'};
+      expect(ItemExecutionList.parseDropEditable(component, false), true);
+    });
+
+    test('both absent -> both editable (backward compat)', () {
+      final Map<String, dynamic> component = {};
+      expect(ItemExecutionList.parseDropEditable(component, true), true);
+      expect(ItemExecutionList.parseDropEditable(component, false), true);
+    });
+
+    test('both false -> both locked', () {
+      final component = {'editDrop': 'false', 'editConsumable': 'false'};
+      expect(ItemExecutionList.parseDropEditable(component, true), false);
+      expect(ItemExecutionList.parseDropEditable(component, false), false);
+    });
+  });
+
+  // ── Pickup edit lock: correct key read (production symbol) ──────────
+
+  group('parsePickupEditable', () {
+    test('absent → editable', () {
+      expect(ItemExecutionList.parsePickupEditable({}), true);
+    });
+
+    test('"true" → editable', () {
+      expect(
+          ItemExecutionList.parsePickupEditable({'editPickup': 'true'}), true);
+    });
+
+    test('"false" → locked', () {
+      expect(
+          ItemExecutionList.parsePickupEditable({'editPickup': 'false'}), false);
+    });
+
+    test('"FALSE" → locked', () {
+      expect(
+          ItemExecutionList.parsePickupEditable({'editPickup': 'FALSE'}), false);
+    });
+
+    test('" false " (whitespace) → locked', () {
+      expect(ItemExecutionList.parsePickupEditable({'editPickup': ' false '}),
+          false);
+    });
+
+    test('empty string → editable', () {
+      expect(
+          ItemExecutionList.parsePickupEditable({'editPickup': ''}), true);
+    });
+
+    test('JSON boolean false → locked', () {
+      expect(
+          ItemExecutionList.parsePickupEditable({'editPickup': false}), false);
+    });
+
+    test('non-Map component → editable (fallback)', () {
+      expect(ItemExecutionList.parsePickupEditable('not a map'), true);
+    });
+
+    // ── Independence: editPickup reads ONLY 'editPickup' ──────────
+    // These fail if parsePickupEditable accidentally reads editDrop.
+
+    test('editDrop false does NOT lock pickup', () {
+      expect(
+          ItemExecutionList.parsePickupEditable({'editDrop': 'false'}), true);
+    });
+
+    test('editPickup false + editDrop true → pickup locked', () {
+      final component = {'editPickup': 'false', 'editDrop': 'true'};
+      expect(ItemExecutionList.parsePickupEditable(component), false);
+    });
+  });
+
+  // ── Consumable stepper editable: production symbol for the txKind × flag rule ──
+
+  group('parseConsumableStepperEditable', () {
+    test('sale + absent editConsumable → editable', () {
+      expect(
+          ItemExecutionList.parseConsumableStepperEditable({}, 'sale'), true);
+    });
+
+    test('purchase + absent editConsumable → editable', () {
+      expect(
+          ItemExecutionList.parseConsumableStepperEditable({}, 'purchase'),
+          true);
+    });
+
+    test('sale + editConsumable:"false" → locked', () {
+      expect(
+          ItemExecutionList.parseConsumableStepperEditable(
+              {'editConsumable': 'false'}, 'sale'),
+          false);
+    });
+
+    test('purchase + editConsumable:"FALSE" → locked', () {
+      expect(
+          ItemExecutionList.parseConsumableStepperEditable(
+              {'editConsumable': 'FALSE'}, 'purchase'),
+          false);
+    });
+
+    test('refill never editable regardless of flag', () {
+      expect(
+          ItemExecutionList.parseConsumableStepperEditable({}, 'refill'),
+          false);
+      expect(
+          ItemExecutionList.parseConsumableStepperEditable(
+              {'editConsumable': 'true'}, 'refill'),
+          false);
+    });
+
+    test('deliver returns false (deliver uses parseDropEditable)', () {
+      expect(
+          ItemExecutionList.parseConsumableStepperEditable({}, 'deliver'),
+          false);
+    });
+
+    test('editDrop:"false" does NOT lock sale (independence)', () {
+      expect(
+          ItemExecutionList.parseConsumableStepperEditable(
+              {'editDrop': 'false'}, 'sale'),
+          true);
+    });
+
+    test('editPickup:"false" does NOT lock purchase (independence)', () {
+      expect(
+          ItemExecutionList.parseConsumableStepperEditable(
+              {'editPickup': 'false'}, 'purchase'),
+          true);
+    });
+  });
 }
 
 /// Test-only stand-in for ExecutionEntry (avoids importing widget file

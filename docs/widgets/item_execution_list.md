@@ -11,9 +11,9 @@ Per-item execution list for P11 DeliveryWorkspace. Supports four transaction typ
 
 Renders per-item execution controls based on the item's transaction type (`tx` field):
 - **deliver** (default): name, type chip (returnable/consumable), DROP stepper, PICKUP stepper (returnable only). Status state-machine: partial (amber), sesuai (emerald), opportunistic/extra (violet).
-- **sale**: read-only teal card with qty display + condition sub-label.
-- **purchase**: read-only teal card with qty display + condition sub-label.
-- **refill**: read-only emerald card with qty display + water sub-label.
+- **sale**: teal card with qty stepper (when `editConsumable` is true/absent) or static qty display (when false) + condition sub-label.
+- **purchase**: teal card with qty stepper or static qty display + condition sub-label. Same `editConsumable` rule as sale.
+- **refill**: read-only emerald card with static qty display + water sub-label. No stepper (deliberate deferral).
 
 Items without a `tx` field (or `tx` empty) render as deliver for backward compatibility.
 
@@ -41,6 +41,9 @@ Items without a `tx` field (or `tx` empty) render as deliver for backward compat
 | condOutField | `cdo` | Outbound condition key |
 | condInField | `cdi` | Inbound condition key |
 | waterField | `wt` | Water type key |
+| editDrop | `"true"` | Edit lock for **returnable** deliver rows. `"false"` (case-insensitive) removes +/- buttons and locks drop at seeded value (plan, or min(plan, cap) when `dropCapTable` is configured). Any other value or absent = editable (backward-compatible default). Pickup is gated separately by `editPickup`. Applies to the default (`fields`) variant only — `variant:pivot` renders custody-count slots and is unaffected. |
+| editPickup | `"true"` | Edit lock for **returnable** pickup cells. `"false"` (case-insensitive) removes +/- buttons and locks pickup at seeded value (`ap` = `pp`). Pickup is never capped, so the lock always produces `ap` = `pp` exactly. Any other value or absent = editable (backward-compatible default). Consumable rows have no pickup cell — the flag is a silent no-op. Applies to the default (`fields`) variant only — `variant:pivot` renders custody-count slots and is unaffected. Locking pickup makes the **Opportunistic** and **Partial** pickup states unreachable (`_cellStatus` always returns `complete`); the cell permanently renders `✓ Sesuai`. This is why spec §2 defaults pickup to `TRUE` — the opportunistic empty-return count is only known at the customer site. |
+| editConsumable | `"true"` | Edit lock for **consumable** rows. Governs: (a) non-returnable deliver rows (stepper hidden, actual = plan) and (b) sale/purchase cards (stepper shown when true, static qty frame when false). Same parse rule as `editDrop`. Refill is always static (no stepper regardless of this flag). Applies to the default (`fields`) variant only -- `variant:pivot` renders custody-count slots and is unaffected. **Edge case:** `putIfAbsent` seeds sale/buy once per session. A mid-session flip to `"false"` (requires page-JSON reload) leaves an already-adjusted entry at its driver-set value. Same property as `editDrop`. |
 | `variant` | `"fields"` (default) or `"pivot"` | Structural variant. `fields` = existing behavior (1 record/item, field-pair steppers). `pivot` = N records/item grouped by `groupKey`, stepper per `pivotField` value. |
 
 ### Pivot-specific config (variant:"pivot")
@@ -107,7 +110,7 @@ Same task table subscription as WorkspaceHeader. Extracts `it[]` array from the 
 
 ## State store
 
-`executionStore` is a plain `Map<String, Map<String, ExecutionEntry>>` keyed by `scrName` then item-index string. Only **deliver** items seed the store. Sale/purchase/refill items are stateless (read-only). NOT an RxMap. Reactivity via separate `RxInt executionRev` signal. Cleared per-NAV in `clearData` and in `buildPage` startup hook.
+`executionStore` is a plain `Map<String, Map<String, ExecutionEntry>>` keyed by `scrName` then item-index string. **Deliver**, **sale**, and **purchase** items seed the store. Sale/purchase entries reuse `dropActual`/`dropPlan` for their single qty (`pickupActual`/`pickupPlan` are 0). Refill items are stateless (no store entry; `ar` = `pr` always). NOT an RxMap. Reactivity via separate `RxInt executionRev` signal. Cleared per-NAV in `clearData` and in `buildPage` startup hook.
 
 ## Condition / water label mapping
 
@@ -120,6 +123,26 @@ Best-guess mapping (schema/CF not yet defined):
 - SUBMIT_CONFIRM_SHEET per-tx recap (widget does not exist yet).
 - All writes: movement CF, actual=plan auto-set, saveSend, history queue.
 - Failed delivery sheet.
+- Admin edit order UI (`TASK_EDIT_SUBMIT`, `TASK_ITEM_BUILDER` mode edit) -- separate workflow run.
+- **Spec divergence (D2), SUPERSEDED:** Prior note said sale/purchase/refill are "already permanently read-only" and `editConsumable` governs only the consumable deliver row. This is now WRONG. As of round `item-execution-consumable-stepper`, sale and purchase rows have editable steppers when `editConsumable` is true (or absent). `editConsumable` governs: consumable deliver rows AND sale/purchase cards. Refill remains static.
+- **Spec divergence (D3), restated as deferral:** Refill gets no stepper. The spec says refill "sementara ikut editDrop" but refill has no stepper to lock or unlock. `ar` = `pr` always. A separate refill stepper is a deliberate deferral -- add when the business requires adjustable refill quantities.
+
+## Manual verification
+
+| Scenario | Expected |
+|----------|----------|
+| `editPickup:"false"` | Pickup cell has no +/- buttons and is pinned at plan seed. `_cellStatus` returns `complete` always, so the **Opportunistic** (violet) and **Partial** (amber) pickup states are unreachable — the cell permanently renders `✓ Sesuai`. `ap` == `pp` on submit. Drop and consumable rows are unaffected. |
+| All three keys absent | All steppers present and editable: deliver drop/pickup, sale, purchase. Refill stays static. Byte-identical to the new default behavior. |
+| `editConsumable:"false"` | Sale and purchase cards show static qty frame (no stepper). Consumable deliver row locked. Returnable rows unaffected. On submit: `as`=`ps`, `ab`=`pb`. |
+| `editConsumable:"true"` (or absent) | Sale and purchase cards show `- [n] +` stepper. Driver can adjust qty. Status line shows `✓ Sesuai` when actual == plan, `Partial` when under, `+N extra` when over. On submit: `as`/`ab` = driver-adjusted value. |
+| Sale stepper + driver changes qty | Tap `+` on a sale card: value increments, status updates. Tap `-`: value decrements (min 0). Submit writes the adjusted value to `as`. |
+| Refill row (any flag combo) | Always static. No stepper regardless of `editConsumable`. `ar` = `pr` on submit. |
+| `editConsumable:"false"` + `editDrop:"false"` | All consumable rows locked (sale, purchase, consumable deliver). Returnable drop also locked. Pickup editable. |
+| Sale stepper sub-label | Condition badge (Penuh/Kosong) appears below the stepper (deliberate: stepper is full-width), not beside it as in the static frame. |
+
+### Edge cases
+
+- **Mid-session `editConsumable` flip:** `putIfAbsent` seeds sale/buy once per session. If the config changes to `"false"` mid-session (requires page-JSON reload/proxy refresh), an already-adjusted entry retains its driver-set value, so `as` may differ from `ps`. Same behaviour as `editDrop` with deliver rows. Extremely unlikely in practice.
 
 ## See Also
 

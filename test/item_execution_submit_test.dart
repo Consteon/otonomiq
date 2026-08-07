@@ -226,6 +226,69 @@ void main() {
       expect(result[0]['actPickup'], 2);
       expect(result[0].containsKey('ad'), false); // not the default name
     });
+
+    test('sale with execMap entry: as reads from entry.dropActual', () {
+      final items = <Map<String, dynamic>>[
+        {'in': 'Tabung', 'tx': 'sale', 'ps': 5},
+      ];
+      final execMap = <String, ExecutionEntry>{
+        '0': ExecutionEntry(
+            dropActual: 7, pickupActual: 0, dropPlan: 5, pickupPlan: 0),
+      };
+      final result = rebuildItWithActuals(items, execMap, cfg);
+      expect(result[0]['as'], 7); // from entry, NOT plan
+      // ad/ap NOT written for sale
+      expect(result[0].containsKey('ad'), false);
+      expect(result[0].containsKey('ap'), false);
+    });
+
+    test('purchase with execMap entry: ab reads from entry.dropActual', () {
+      final items = <Map<String, dynamic>>[
+        {'in': 'Kompor', 'tx': 'purchase', 'pb': 10},
+      ];
+      final execMap = <String, ExecutionEntry>{
+        '0': ExecutionEntry(
+            dropActual: 8, pickupActual: 0, dropPlan: 10, pickupPlan: 0),
+      };
+      final result = rebuildItWithActuals(items, execMap, cfg);
+      expect(result[0]['ab'], 8); // from entry, NOT plan
+    });
+
+    test('sale entry at plan: as == ps when driver untouched', () {
+      final items = <Map<String, dynamic>>[
+        {'in': 'Tabung', 'tx': 'sale', 'ps': 5},
+      ];
+      final execMap = <String, ExecutionEntry>{
+        '0': ExecutionEntry(
+            dropActual: 5, pickupActual: 0, dropPlan: 5, pickupPlan: 0),
+      };
+      final result = rebuildItWithActuals(items, execMap, cfg);
+      expect(result[0]['as'], 5); // from entry, happens to equal plan
+    });
+
+    test('mixed with sale/buy entries: each tx writes correct actual', () {
+      final items = <Map<String, dynamic>>[
+        {'in': 'Galon', 'pd': 3, 'pp': 2, 'tx': 'deliver'},
+        {'in': 'Tabung', 'tx': 'sale', 'ps': 5},
+        {'in': 'Kompor', 'tx': 'purchase', 'pb': 10},
+        {'in': 'CustGalon', 'tx': 'refill', 'pr': 4},
+      ];
+      final execMap = <String, ExecutionEntry>{
+        '0': ExecutionEntry(
+            dropActual: 2, pickupActual: 1, dropPlan: 3, pickupPlan: 2),
+        '1': ExecutionEntry(
+            dropActual: 7, pickupActual: 0, dropPlan: 5, pickupPlan: 0),
+        '2': ExecutionEntry(
+            dropActual: 8, pickupActual: 0, dropPlan: 10, pickupPlan: 0),
+        // no entry for refill at index 3
+      };
+      final result = rebuildItWithActuals(items, execMap, cfg);
+      expect(result[0]['ad'], 2); // deliver from store
+      expect(result[0]['ap'], 1);
+      expect(result[1]['as'], 7); // sale from store
+      expect(result[2]['ab'], 8); // purchase from store
+      expect(result[3]['ar'], 4); // refill: plan copy (no store entry)
+    });
   });
 
   // ── stripTstFromUpdateEventRow ──────────────────────────────────────────

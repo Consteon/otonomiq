@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otonomiq/global.dart';
 import 'package:otonomiq/widget/custody_stepper.dart';
 import 'package:otonomiq/widget/driver_home_support.dart';
+import 'package:otonomiq/widget/custody_count_list.dart';
 
 void main() {
   // ── buildItemDetailMap ─────────────────────────────────────────────────
@@ -212,6 +213,123 @@ void main() {
 
     test('value above min is unchanged', () {
       expect(clampStepperValue(7, 0), 7);
+    });
+  });
+
+  // ── computeRecountSeeds ───────────────────────────────────────────────
+
+  group('computeRecountSeeds', () {
+    test('empty ipEntries returns empty seeds and cleared (first-time)', () {
+      final result = CustodyCountList.computeRecountSeeds(
+        ieEntries: [
+          {'ii': 'galon', 'cd': 'full', 'qt': 25},
+        ],
+        ipEntries: [],
+      );
+      expect(result.seeds, isEmpty);
+      expect(result.cleared, isEmpty);
+    });
+
+    test('all match: seeds keep ip.qt, nothing cleared', () {
+      final result = CustodyCountList.computeRecountSeeds(
+        ieEntries: [
+          {'ii': 'galon', 'cd': 'full', 'qt': 25},
+          {'ii': 'lpg12', 'cd': 'full', 'qt': 10},
+        ],
+        ipEntries: [
+          {'ii': 'galon', 'cd': 'full', 'qt': 25},
+          {'ii': 'lpg12', 'cd': 'full', 'qt': 10},
+        ],
+      );
+      expect(result.seeds['galon__full'], 25);
+      expect(result.seeds['lpg12__full'], 10);
+      expect(result.cleared, isEmpty);
+    });
+
+    test('mismatch: cleared rows seed 0', () {
+      final result = CustodyCountList.computeRecountSeeds(
+        ieEntries: [
+          {'ii': 'galon', 'cd': 'full', 'qt': 25},
+          {'ii': 'lpg12', 'cd': 'full', 'qt': 10},
+        ],
+        ipEntries: [
+          {'ii': 'galon', 'cd': 'full', 'qt': 20},
+          {'ii': 'lpg12', 'cd': 'full', 'qt': 10},
+        ],
+      );
+      expect(result.seeds['galon__full'], 0);
+      expect(result.seeds['lpg12__full'], 10);
+      expect(result.cleared, contains('galon__full'));
+      expect(result.cleared, isNot(contains('lpg12__full')));
+    });
+
+    test('ie key absent from ip: seed 0, marked cleared', () {
+      final result = CustodyCountList.computeRecountSeeds(
+        ieEntries: [
+          {'ii': 'galon', 'cd': 'full', 'qt': 25},
+          {'ii': 'aqua', 'cd': 'full', 'qt': 5},
+        ],
+        ipEntries: [
+          {'ii': 'galon', 'cd': 'full', 'qt': 25},
+        ],
+      );
+      expect(result.seeds['galon__full'], 25);
+      expect(result.seeds['aqua__full'], 0);
+      expect(result.cleared, contains('aqua__full'));
+    });
+
+    test('ip key absent from ie: ignored (no row)', () {
+      final result = CustodyCountList.computeRecountSeeds(
+        ieEntries: [
+          {'ii': 'galon', 'cd': 'full', 'qt': 25},
+        ],
+        ipEntries: [
+          {'ii': 'galon', 'cd': 'full', 'qt': 25},
+          {'ii': 'phantom', 'cd': 'full', 'qt': 99},
+        ],
+      );
+      expect(result.seeds.length, 1);
+      expect(result.seeds.containsKey('phantom__full'), false);
+    });
+
+    test('both qt zero and matching: seed 0, NOT cleared', () {
+      final result = CustodyCountList.computeRecountSeeds(
+        ieEntries: [
+          {'ii': 'galon', 'cd': 'full', 'qt': 0},
+        ],
+        ipEntries: [
+          {'ii': 'galon', 'cd': 'full', 'qt': 0},
+        ],
+      );
+      expect(result.seeds['galon__full'], 0);
+      expect(result.cleared, isEmpty);
+    });
+
+    test('string qt values are parsed correctly', () {
+      final result = CustodyCountList.computeRecountSeeds(
+        ieEntries: [
+          {'ii': 'galon', 'cd': 'full', 'qt': '25'},
+        ],
+        ipEntries: [
+          {'ii': 'galon', 'cd': 'full', 'qt': '25'},
+        ],
+      );
+      expect(result.seeds['galon__full'], 25);
+      expect(result.cleared, isEmpty);
+    });
+
+    test('empty ii entries are skipped', () {
+      final result = CustodyCountList.computeRecountSeeds(
+        ieEntries: [
+          {'ii': '', 'cd': 'full', 'qt': 5},
+          {'ii': 'galon', 'cd': 'full', 'qt': 10},
+        ],
+        ipEntries: [
+          {'ii': 'galon', 'cd': 'full', 'qt': 10},
+        ],
+      );
+      expect(result.seeds.length, 1);
+      expect(result.seeds.containsKey('__full'), false);
     });
   });
 }

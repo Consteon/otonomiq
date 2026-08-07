@@ -116,5 +116,46 @@ void main() {
       await tester.pump();
       expect(decremented, true);
     });
+
+    testWidgets('showButtons: false hides +/- buttons', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CustodyStepper(
+              value: 5,
+              min: 0,
+              showButtons: false,
+              onDecrement: () {},
+              onIncrement: () {},
+            ),
+          ),
+        ),
+      );
+
+      // Number is visible.
+      expect(find.text('5'), findsOneWidget);
+
+      // +/- buttons are genuinely absent (not just disabled).
+      expect(find.byIcon(Icons.remove), findsNothing);
+      expect(find.byIcon(Icons.add), findsNothing);
+    });
+
+    testWidgets('showButtons: true (default) shows +/- buttons', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CustodyStepper(
+              value: 5,
+              min: 0,
+              onDecrement: () {},
+              onIncrement: () {},
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byIcon(Icons.remove), findsOneWidget);
+      expect(find.byIcon(Icons.add), findsOneWidget);
+    });
   });
 }

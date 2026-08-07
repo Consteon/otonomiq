@@ -148,6 +148,35 @@ The green Container's child is a `Column`:
 - `dp[]` absent/null/empty/non-List -> no sub-bar (state 3).
 - Text slots 7+8 absent (lean tenant) -> hardcoded defaults render.
 
+## Mode toggle: count vs ack (custody-mode-toggle)
+
+Two config keys select which route the CTA opens, resolved by the static
+`PreconditionGateCard.resolveCtaRoute(component)`:
+
+| Key | Effect |
+|---|---|
+| `custodyMode` | `"ack"` (case-insensitive, trimmed) selects Mode B. Absent or `"count"` = Mode A. |
+| `ackRoute` | Route opened in Mode B. Ignored in Mode A. |
+
+| Mode | CTA opens | `text` slot [3] | Driver flow |
+|---|---|---|---|
+| A (default) | `route` | `Konfirmasi Penerimaan` | CustodyNotif -> Count -> Reveal -> Success |
+| B (ack) | `ackRoute` | `Terima & Berangkat` | Ack page (manifest + reject + photo + 1-tap) |
+
+Backward-compat: a tenant that never sets `custodyMode` reads `route` exactly as
+before. `custodyMode:"ack"` with an empty/missing `ackRoute` falls back to `route`
+rather than dead-ending the button.
+
+The **CTA label is not** part of the toggle — it is `text` slot [3], flipped in the
+sheet alongside the mode. The button always appends ` →` (hardcoded at
+`precondition_gate_card.dart:586`).
+
+See `docs/driver_runtime/custody-mode-toggle-op1screen.md` for the ack page rows.
+Covered by `test/precondition_gate_card_route_test.dart`.
+
+The gate logic, items display, existence-gate, confirmed/pending state,
+and selisih sub-bar are all mode-independent — identical behavior in A and B.
+
 ## See Also
 
 - `RouteProgressHeader` — publishes `(VEHICLEID)` consumed by this widget's search

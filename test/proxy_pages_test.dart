@@ -16,6 +16,50 @@ void main() {
         'v': 87544551624342,
       };
 
+  // The cold-start gate that stops the lagging proxy copy from overwriting
+  // pages an AppBar refresh just pulled fresh from the sheet.
+  group('proxyBootSkip', () {
+    bool call({
+      bool skip = true,
+      String lif = 'LIF1',
+      String loaded = 'LIF1',
+      dynamic t = 100,
+      int? saved = 100,
+    }) =>
+        proxyBootSkip(
+          skipIfUnchanged: skip,
+          lifKey: lif,
+          loadedLif: loaded,
+          proxyT: t,
+          savedCs: saved,
+        );
+
+    test('skips when the proxy checksum has not moved', () {
+      expect(call(), isTrue);
+    });
+
+    test('loads when the proxy actually changed', () {
+      expect(call(t: 101, saved: 100), isFalse);
+    });
+
+    test('loads on first run (no saved checksum)', () {
+      expect(call(saved: null), isFalse);
+    });
+
+    test('loads on the login path (guest pages still in memory)', () {
+      expect(call(loaded: 'GUEST'), isFalse);
+    });
+
+    test('loads when the caller did not ask to skip', () {
+      expect(call(skip: false), isFalse);
+    });
+
+    test('loads when t is not an int', () {
+      expect(call(t: '100'), isFalse);
+      expect(call(t: null), isFalse);
+    });
+  });
+
   group('proxyDocsToUiMap', () {
     test('decodes each document under its page name', () {
       final result = proxyDocsToUiMap([
