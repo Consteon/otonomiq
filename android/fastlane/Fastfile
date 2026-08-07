@@ -1,0 +1,29 @@
+# Fastfile for Android - Otonomiq & Frontez Engine Brands
+default_platform(:android)
+
+platform :android do
+  desc "Upload Android AppBundle (.aab) to Google Play Console Internal Testing track"
+  lane :internal do |options|
+    package_name = options[:package_name] || "com.autsorz.mobile"
+    aab_path = options[:aab_path] || Dir["../../frontez-releases/*.aab"].last || Dir["../build/app/outputs/bundle/release/*.aab"].first
+    
+    key_file = ENV["GOOGLE_PLAY_KEY_PATH"] || File.expand_path("~/.fastlane/google-play-key.json")
+    if !File.exist?(key_file) && File.exist?(File.expand_path("google-play-key.json", __dir__))
+      key_file = File.expand_path("google-play-key.json", __dir__)
+    end
+    
+    UI.message("Uploading AAB file: #{aab_path} for package: #{package_name} to Google Play Internal Track using key: #{key_file}")
+    
+    upload_to_play_store(
+      package_name: package_name,
+      track: "internal",
+      aab: aab_path,
+      json_key: key_file,
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      skip_upload_changelog: true
+    )
+  end
+end

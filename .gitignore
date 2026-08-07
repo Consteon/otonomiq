@@ -7,6 +7,8 @@
 /start.sct
 /.agents/
 /skills-lock.json
+/google-play-key.json
+android/fastlane/google-play-key.json
 /.firebaserc
 
 # Miscellaneous
