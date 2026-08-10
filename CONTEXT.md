@@ -14,3 +14,9 @@ Two distinct **events** end or refresh screen session state — they are not int
 Per-store policy is declared at registration (`ensure(name, clearOne, {nav: screen|all|none, rebuild: screen|none, clearAllFn, persistent})`). `nav: all` exists because navigated fires post-frame: clearing only the entering screen flashes one frame of stale state (the GroupPicker case). `persistent` entries (AdminCreateTask wizard drafts) are registered for auditability but only cleared explicitly at flow boundaries. Registration is idempotent and sits on the store's access path — Dart statics are lazy, so a bare `static final _reg = …` would never run.
 
 Known exception, by design: `ApproverStickyBar` keeps its own `#CURRENT_ROUTE` listener (approver_sticky_bar.dart) for `activeBarScreen` — its `_configs` must survive navigated (the renderer reads them on cached pages) and are refilled by `buildPage(clear:false)` re-entries on Redux changes. Do not migrate it to navigated-clearing.
+
+## SduiSpec
+
+The read-side accessor for a server-driven component map (`lib/sdui_spec.dart`): decode (`autheniumDecode`), ◆-split (`diamondTextToList`), index-guard and default happen inside the module, behind four reads — `text(i)`, `str(key)`, `intOr(key, def)`, `list(key)` (+ `textLength`, `has`). It exists because the hand-rolled per-widget parsing idiom (47 `_t()` copies, raw `component[...]` reads) repeatedly shipped RangeError and missed-decode crashes.
+
+Adoption is **on-touch only**: new widgets must read config through `SduiSpec`; an existing widget is migrated only when it is already being edited for another reason — never in bulk. `str()` trims by default; `list()` returns `[]` for empty (never `['']`); decode runs before split (repo ordering contract).
