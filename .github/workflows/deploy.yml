@@ -13,7 +13,7 @@ jobs:
       - name: Checkout Master Repository
         uses: actions/checkout@v4
 
-      - name: Build and Upload Autsorz to TestFlight
+      - name: Build and Deploy All Brands (Autsorz & G78force)
         run: |
           export PATH="$HOME/.local/bin:/opt/homebrew/bin:$PATH"
-          aum autsorz
+          aum all
