@@ -8,6 +8,7 @@ import 'driver_home_support.dart'; // resolveAppVid
 import 'panel_card_support.dart'; // parseTablePath, TablePath
 import 'picker_list.dart'; // PickerList.filterRows (static reuse, no coupling)
 import 'table_picker.dart'; // TablePicker.resolveValueFromDoc, .clientSearch
+import '../screen_session.dart';
 
 /// GROUP_PICKER -- multi-group single/multi-select picker with internal toggle.
 ///
@@ -70,6 +71,15 @@ class GroupPicker extends StatefulWidget {
   /// and GroupPicker has no GetBuilder subscription -- so clearing the stores
   /// alone would not repaint. Bumping [resetRev] (read by build's Obx) is what
   /// makes the reset visible.
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'GroupPicker.stores',
+      GroupPicker.clearState,
+      nav: NavPolicy.all,
+      clearAllFn: GroupPicker.clearAll,
+    );
+  }
+
   static void clearState(String scrName) {
     _activeGroupStore.remove(scrName);
     _selectionStore.remove(scrName);
@@ -284,6 +294,7 @@ class _GroupPickerState extends State<GroupPicker> {
   @override
   void initState() {
     super.initState();
+    GroupPicker.registerScreenSession();
     _parseText();
     _parseGroups();
   }

@@ -7,6 +7,7 @@ import '../global.dart';
 import 'admin_home_support.dart';
 import 'driver_home_support.dart';
 import 'panel_card_support.dart';
+import '../screen_session.dart';
 
 // ─── Chip accent palette (W3: category-colored chips) ──────────────────────
 
@@ -306,6 +307,16 @@ class CustomerOutstandingList extends StatefulWidget {
   /// shared state as static Map, not global.dart).
   static final Map<String, String> _searchText = <String, String>{};
 
+  static void registerScreenSession() {
+    // Phase 1: nav:none mirrors today (buildPage-only).
+    // Phase 2: flipped to nav:screen (search text leaking across visits).
+    ScreenSession.ensure(
+      'CustomerOutstandingList.searchText',
+      CustomerOutstandingList.clearState,
+      nav: NavPolicy.none,
+    );
+  }
+
   /// Called from buildPage in ui_component.dart on route change to release
   /// per-screen state. Mirrors CustodyEventSubmit.clearState,
   /// ItemExecutionSubmit.clearState, TaskFeedList.clearFlatSearch, etc.
@@ -354,6 +365,7 @@ class _CustomerOutstandingListState extends State<CustomerOutstandingList> {
   @override
   void initState() {
     super.initState();
+    CustomerOutstandingList.registerScreenSession();
     _parseText();
     _parseConfig();
     _subscribe();

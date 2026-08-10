@@ -48,22 +48,12 @@ import 'page/main_page.dart';
 import 'part/build_part/channel.dart';
 import 'redux/screen_transaction.dart';
 import 'widget/build_theme.dart';
-import 'widget/custody_count_list.dart';
-import 'widget/custody_reveal.dart';
 import 'widget/driver_home_support.dart';
-import 'widget/executor_designate_card.dart';
 import 'widget/ftz_webview.dart';
-import 'widget/group_picker.dart';
-import 'widget/item_execution_list.dart';
-import 'widget/item_execution_submit.dart';
 import 'widget/logout_transition_support.dart';
-import 'widget/nfc_reader.dart';
 import 'widget/photo_camera.dart';
 import 'widget/ui_component.dart';
-import 'widget/whatsapp_send.dart';
-import 'widget/payout_list.dart';
-import 'widget/list_action_card.dart';
-import 'widget/signature_pad.dart';
+import 'screen_session.dart';
 
 /// Login perf instrumentation. Mirrors UserRepository.loginPerfTrace.
 /// Set to false (or remove) after root-cause confirmation.
@@ -4590,30 +4580,12 @@ String getEventDocName(String vidTime) {
 void clearData(String scrName) {
   // clear all data in a page
 
-  // Clear per-scrName custody stores unconditionally -- custody pages have no
-  // txfController entries, so the early-return below would skip them.
-  // These are idempotent no-ops for non-custody pages.
-  CustodyCountList.clearCountStore(scrName);
-  CustodyReveal.clearEditState(scrName);
-  ExecutorDesignateCard.clearO1State(scrName);
-  ItemExecutionList.clearExecutionStore(scrName);
-  ItemExecutionSubmit.clearState(scrName);
-  NfcReader.clearCollectorState(scrName);
-  SignaturePad.clearSignatureState(scrName);
-  // WHATSAPP_SEND per-invoice sent badge. Must be here, not only in
-  // buildPage(clear:true): navigation goes gotoRoute -> reloadPage, which calls
-  // clearData and then returns the CACHED linkElement[page] -- buildPage never
-  // runs, so the badge would leak from invoice A onto invoice B.
-  WhatsAppSend.clearSentState(scrName);
-  PayoutList.clearState(scrName);
-  ListActionCard.clearState(scrName);
-  // Same reason as WhatsAppSend above: buildPage(clear:true) never re-runs on
-  // gotoRoute, so a revisited picker kept the previous visit's ticked rows and
-  // last active tab. clearAll (not clearState(scrName)) because this runs
-  // POST-frame: wiping every screen means a page is cleared on the nav AWAY
-  // from it, so the next visit is already empty at its first paint instead of
-  // flashing the old selection for a frame. See GroupPicker.clearAll.
-  GroupPicker.clearAll();
+  // ScreenSession.navReset iterates all registered stores whose NavPolicy
+  // is screen or all, and fires their clear function. This replaces the
+  // hand-maintained list of 11 static clear calls + GroupPicker.clearAll
+  // that lived here before. Must run ABOVE the txfController early-return:
+  // custody pages have no txfController entries and would be skipped.
+  ScreenSession.navReset(scrName);
 
   if (txfController[scrName] == null) return;
 

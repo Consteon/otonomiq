@@ -10,6 +10,7 @@ import 'admin_home_support.dart'; // AdminTierColors
 import 'custody_stepper.dart'; // CustodyStepper (reusable stepper control)
 import 'driver_home_support.dart'; // resolveAppVid
 import 'panel_card_support.dart'; // parseTablePath, TablePath
+import '../screen_session.dart';
 
 /// TASK_ITEM_BUILDER -- the core item-line builder for P2 (Admin create-task
 /// wizard, mode=order).
@@ -55,6 +56,17 @@ class TaskItemBuilder extends StatefulWidget {
   /// customer's kn/al into the next task (review C-1). Static so clearData can
   /// reset it.
   static final Map<String, String> _lastPublishedKl = {};
+
+  static void registerScreenSession() {
+    // Phase 1: nav:none mirrors today (buildPage-only).
+    // Phase 2: flipped to nav:screen (its own doc comment says "Static so
+    // clearData can reset it").
+    ScreenSession.ensure(
+      'TaskItemBuilder.lastPublishedKl',
+      TaskItemBuilder.resetClientPublished,
+      nav: NavPolicy.none,
+    );
+  }
 
   /// Reset client-published tracking for a screen.
   static void resetClientPublished(String scrName) {
@@ -162,6 +174,7 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
   @override
   void initState() {
     super.initState();
+    TaskItemBuilder.registerScreenSession();
     _parseText();
     _subscribe();
   }

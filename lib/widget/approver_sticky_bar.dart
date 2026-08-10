@@ -9,6 +9,7 @@ import 'ftz_row_of_button_2.dart';
 import 'item_card_detail.dart';
 import 'list_card_support.dart'; // GateSlotConfig, SlotTerms, parseGateSlot, parseSlotTerms, isVisibleBySlotGate
 import 'panel_card_support.dart'; // TablePath, parseTablePath
+import '../screen_session.dart';
 
 dynamic _deepCopy(dynamic value) {
   if (value is Map) {
@@ -119,6 +120,7 @@ class ApproverStickyBar {
     double rPad = 0,
     double bPad = 0,
   }) {
+    registerScreenSession();
     ensureRouteListener();
     final List<StickyBarConfig> list = _configs[scrName] ??= [];
     final copy = _deepCopy(component) as Map<dynamic, dynamic>;
@@ -174,6 +176,14 @@ class ApproverStickyBar {
             appVid, gtp.tableDocId, gtp.subColl, gateCode);
       }
     }
+  }
+
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'ApproverStickyBar.configs',
+      ApproverStickyBar.clearConfigs,
+      nav: NavPolicy.none,
+    );
   }
 
   static void clearConfigs(String scrName) {
@@ -434,6 +444,7 @@ class _StickyBarSlotState extends State<StickyBarSlot> {
   @override
   void initState() {
     super.initState();
+    ApproverStickyBar.registerScreenSession();
     _registerSlot();
   }
 

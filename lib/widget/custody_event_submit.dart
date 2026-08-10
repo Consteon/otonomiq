@@ -11,6 +11,7 @@ import '../model/otq_state.dart';
 import 'driver_home_support.dart';
 import 'panel_card_support.dart';
 import 'do_chain.dart';
+import '../screen_session.dart';
 
 /// CUSTODY_EVENT_SUBMIT -- pre-resolving submit button for P7 and P8.
 ///
@@ -77,6 +78,16 @@ class CustodyEventSubmit extends StatefulWidget {
   static final Map<String, bool> _writing = {};
 
   /// Clear state for a screen. Called from buildPage.
+  static void registerScreenSession() {
+    // Phase 1: nav:none mirrors today (buildPage-only).
+    // Phase 2: flipped to nav:screen (writing flag stuck after mid-await dispose).
+    ScreenSession.ensure(
+      'CustodyEventSubmit.writing',
+      CustodyEventSubmit.clearState,
+      nav: NavPolicy.none,
+    );
+  }
+
   static void clearState(String scrName) {
     _writing.remove(scrName);
   }
@@ -101,6 +112,7 @@ class _CustodyEventSubmitState extends State<CustodyEventSubmit> {
   @override
   void initState() {
     super.initState();
+    CustodyEventSubmit.registerScreenSession();
     _parseText();
     _subscribe();
     _parseGate();

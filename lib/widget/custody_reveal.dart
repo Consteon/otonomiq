@@ -6,6 +6,7 @@ import '../global.dart';
 import 'custody_stepper.dart';
 import 'driver_home_support.dart';
 import 'panel_card_support.dart';
+import '../screen_session.dart';
 
 /// CUSTODY_REVEAL -- STEP 2/2: reveal warehouse qty, compare vs driver,
 /// then branch (match -> P7, mismatch -> P8, recount -> P6).
@@ -55,7 +56,15 @@ class CustodyReveal extends StatefulWidget {
 
   /// Get or create the edit map for a screen.
   static Map<String, CountEntry> getEditMap(String scrName) {
+    registerScreenSession();
     return _editStore.putIfAbsent(scrName, () => <String, CountEntry>{});
+  }
+
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'CustodyReveal.editState',
+      CustodyReveal.clearEditState,
+    );
   }
 
   /// Clear edit state for a screen. Called from buildPage alongside
@@ -79,6 +88,7 @@ class _CustodyRevealState extends State<CustodyReveal> {
   @override
   void initState() {
     super.initState();
+    CustodyReveal.registerScreenSession();
     _parseText();
     _subscribe();
   }

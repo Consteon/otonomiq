@@ -1,6 +1,7 @@
 import '../api.dart'; // getNowMillisecondFromEpoch
 import '../global.dart'; // emptyString ('--' no-data marker)
 import 'driver_home_support.dart'; // coerceNum
+import '../screen_session.dart';
 
 // ============================================================================
 // Admin Create Task support -- pure helpers for P2 taskItemBuilder +
@@ -247,6 +248,7 @@ class AdminCreateTaskSupport {
       required String kn,
       required String al,
       String pic = ''}) {
+    registerScreenSession();
     draftCustomer[wizardKey] = <String, String>{
       'kl': kl,
       'kn': kn,
@@ -301,7 +303,28 @@ class AdminCreateTaskSupport {
 
   /// Get or create the draft list for a wizard key.
   static List<DraftItem> getDraft(String wizardKey) {
+    registerScreenSession();
     return draftItems.putIfAbsent(wizardKey, () => <DraftItem>[]);
+  }
+
+  static void registerScreenSession() {
+    // Registered for audit; never auto-cleared. Flow-boundary clearDraft
+    // calls stay as-is. The ponytail comment from ui_component.dart's clear
+    // block (explaining why clearAllDrafts is NOT in buildPage) now lives
+    // here as the design rationale for persistent:true.
+    //
+    // ponytail: do NOT clear drafts on buildPage(clear:true). That runs once
+    // per screen on every readSettings refresh (constructPageElements), so a
+    // background refresh mid-wizard wiped the in-flight customer/vehicle and
+    // P4 rendered null. The real resets are per-wizardKey and already covered:
+    // P1 customer-pick clearDraft (task_feed_list) + submit-success clearDraft
+    // (task_create_submit). Re-add a scoped clear only if a tenant switch must
+    // drop a half-done draft.
+    ScreenSession.ensure(
+      'AdminCreateTaskSupport.drafts',
+      (_) => AdminCreateTaskSupport.clearAllDrafts(),
+      persistent: true,
+    );
   }
 
   /// Clear the draft for a wizard key.

@@ -9,6 +9,7 @@ import 'do_chain.dart';
 import 'driver_home_support.dart';
 import 'item_execution_list.dart';
 import 'panel_card_support.dart';
+import '../screen_session.dart';
 
 /// ITEM_EXECUTION_SUBMIT -- atomic submit button for P11 DeliveryWorkspace.
 ///
@@ -73,6 +74,13 @@ class ItemExecutionSubmit extends StatefulWidget {
 
   /// Per-scrName writing-in-progress flag to prevent double taps.
   static final Map<String, bool> _writing = {};
+
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'ItemExecutionSubmit.writing',
+      ItemExecutionSubmit.clearState,
+    );
+  }
 
   /// Clear state for a screen. Called from buildPage / clearData.
   static void clearState(String scrName) {
@@ -180,6 +188,7 @@ class _ItemExecutionSubmitState extends State<ItemExecutionSubmit> {
   @override
   void initState() {
     super.initState();
+    ItemExecutionSubmit.registerScreenSession();
     _parseText();
     _subscribe();
   }

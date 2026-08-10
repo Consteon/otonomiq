@@ -7,6 +7,7 @@ import '../redux/screen_transaction.dart';
 import 'custody_stepper.dart';
 import 'driver_home_support.dart';
 import 'panel_card_support.dart';
+import '../screen_session.dart';
 
 /// CUSTODY_COUNT_LIST -- blind stepper list for P6 CustodyCount.
 ///
@@ -55,7 +56,15 @@ class CustodyCountList extends StatefulWidget {
 
   /// Get or create the count map for a screen.
   static Map<String, CountEntry> getCountMap(String scrName) {
+    registerScreenSession();
     return countStore.putIfAbsent(scrName, () => <String, CountEntry>{});
+  }
+
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'CustodyCountList.countStore',
+      CustodyCountList.clearCountStore,
+    );
   }
 
   /// Clear count store for a screen. Called from buildPage alongside
@@ -141,6 +150,7 @@ class _CustodyCountListState extends State<CustodyCountList> {
   @override
   void initState() {
     super.initState();
+    CustodyCountList.registerScreenSession();
     _subscribe();
   }
 

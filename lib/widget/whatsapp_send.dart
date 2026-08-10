@@ -8,6 +8,7 @@ import 'driver_home_support.dart'; // resolveAppVid, resolveDriverCurlyTokens, w
 import 'ftz_contact_picker.dart'; // chooseContactAndGetPhoneNumber
 import 'panel_card_support.dart'; // parseTablePath, TablePath
 import 'statistic_card_support.dart'; // filterByCharCodeEquality, resolveScreenTxTokens
+import '../screen_session.dart';
 
 /// WHATSAPP_SEND -- generic WhatsApp message sender with editable bottom sheet.
 ///
@@ -51,6 +52,13 @@ class WhatsAppSend extends StatefulWidget {
   // Convention #4: cleared per-scrName on route change.
   static final Map<String, bool> _sentBySearch = {};
 
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'WhatsAppSend.sentState',
+      WhatsAppSend.clearSentState,
+    );
+  }
+
   static void clearSentState(String scrName) {
     // Remove all entries whose key starts with the scrName prefix.
     // The key format is "$scrName::$resolvedSearch".
@@ -78,6 +86,7 @@ class _WhatsAppSendState extends State<WhatsAppSend> {
   @override
   void initState() {
     super.initState();
+    WhatsAppSend.registerScreenSession();
     _parseConfig();
     _subscribe();
   }

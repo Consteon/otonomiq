@@ -9,6 +9,7 @@ import '../global2.dart'; // txfController, txfControllerCheck, getPosition
 import 'driver_home_support.dart'; // resolveAppVid
 import 'panel_card_support.dart'; // parseTablePath, TablePath
 import 'picker_list.dart'; // PickerList.filterRows (static reuse, no coupling)
+import '../screen_session.dart';
 
 /// TABLE_PICKER -- generic single/multi-select picker bound to form positions.
 ///
@@ -43,6 +44,16 @@ class TablePicker extends StatefulWidget {
 
   /// Companion label store: `{ scrName -> { position -> { vid -> label } } }`.
   static final Map<String, Map<int, Map<String, String>>> _labelStore = {};
+
+  static void registerScreenSession() {
+    // Phase 1: nav:none, rebuild:screen mirrors today (buildPage-only).
+    // Phase 2: flipped to nav:all with clearAll (GroupPicker parity).
+    ScreenSession.ensure(
+      'TablePicker.selectionStore',
+      TablePicker.clearState,
+      nav: NavPolicy.none,
+    );
+  }
 
   /// Clear per-screen state. Called from buildPage clearData path.
   static void clearState(String scrName) {
@@ -170,6 +181,7 @@ class _TablePickerState extends State<TablePicker> {
   @override
   void initState() {
     super.initState();
+    TablePicker.registerScreenSession();
     _parseText();
     _subscribe();
     _seedFromController();

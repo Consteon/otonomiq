@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 import '../api.dart';
 import '../global.dart';
 import '../global2.dart';
+import '../screen_session.dart';
 
 /// Clamps [p] so that dx stays in [0, width] and dy stays in [0, height].
 /// Pure helper -- no side effects; importable for unit testing.
@@ -61,8 +62,17 @@ class SignaturePad extends StatefulWidget {
 
   /// Drop [scrName]'s signature write-state so a revisit starts clean.
   /// Registered in clearData (api.dart) beside the sibling driver widgets.
-  static void clearSignatureState(String scrName) =>
-      _writeState.remove(scrName);
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'SignaturePad.writeState',
+      SignaturePad.clearSignatureState,
+      rebuild: RebuildPolicy.none,
+    );
+  }
+
+  static void clearSignatureState(String scrName) {
+    _writeState.remove(scrName);
+  }
 
   /// Current file identity for [scrName] ('' when no signature session is
   /// active). The write path (_exportAndSave) and tests share this reader --
@@ -136,6 +146,7 @@ class _SignaturePadState extends State<SignaturePad> {
   @override
   void initState() {
     super.initState();
+    SignaturePad.registerScreenSession();
     _parseText();
     _position = int.tryParse(
         (widget.component['position'] ?? '').toString());

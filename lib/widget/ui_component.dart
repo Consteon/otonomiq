@@ -7,7 +7,7 @@ import '../page/any_page.dart';
 import '../page/home_page.dart';
 import '../redux/screen_transaction.dart';
 import '../widget/all_widget.dart';
-import '../widget/approver_sticky_bar.dart';
+import '../screen_session.dart';
 
 void constructPageElements(String scrName) {
   // initiate txfController and linkElement of a page (scrName)
@@ -160,32 +160,11 @@ List<Widget> buildPage(var componentList, String scrName,
     }
   } // end if (txfController[scrName] == null
   if (clear) {
-    ApproverStickyBar.clearConfigs(scrName);
-    clearDriverHomeState(scrName);
-    TaskManifestList.clearExpandState(scrName);
-    CustodyCountList.clearCountStore(scrName);
-    CustodyReveal.clearEditState(scrName);
-    CustodyEventSubmit.clearState(scrName);
-    ItemExecutionList.clearExecutionStore(scrName);
-    ItemExecutionSubmit.clearState(scrName);
-    // ponytail: do NOT clearAllDrafts() here. buildPage(clear:true) runs once
-    // per screen on every readSettings refresh (constructPageElements), so a
-    // background refresh mid-wizard wiped the in-flight customer/vehicle and P4
-    // rendered null. The real resets are per-wizardKey and already covered:
-    // P1 customer-pick clearDraft (task_feed_list) + submit-success clearDraft
-    // (task_create_submit). Re-add a scoped clear only if a tenant switch must
-    // drop a half-done draft.
-    TaskItemBuilder.resetClientPublished(scrName);
-    TaskCreateSubmit.resetWriting(scrName);
-    NotaCreateSubmit.resetWriting(scrName);
-    TaskFeedList.clearFlatSearch(scrName);
-    CustomerOutstandingList.clearState(scrName);
-    AssetStockList.clearState(scrName);
-    TablePicker.clearState(scrName);
-    GroupPicker.clearState(scrName);
-    WhatsAppSend.clearSentState(scrName);
-    PayoutList.clearState(scrName);
-    ListActionCard.clearState(scrName);
+    // ScreenSession.pageBuild iterates all registered stores whose
+    // RebuildPolicy is screen and fires their clear function. The ponytail
+    // comment about clearAllDrafts has moved to AdminCreateTaskSupport's
+    // registerScreenSession (persistent:true rationale).
+    ScreenSession.pageBuild(scrName);
   }
 
   dynamic userRepository = myState['#USER_REPOSITORY'];

@@ -10,6 +10,7 @@ import '../redux/screen_transaction.dart';
 import 'dsl_eq.dart';
 import 'panel_card_support.dart';
 import 'statistic_card_support.dart';
+import '../screen_session.dart';
 
 // ─── DriverHome session state ──────────────────────────────────────────────
 
@@ -47,7 +48,16 @@ final Map<String, DriverHomeState> driverHomeStates = {};
 
 /// Obtain or create the DriverHomeState for a screen.
 DriverHomeState getDriverHomeState(String scrName) {
+  registerDriverHomeScreenSession();
   return driverHomeStates.putIfAbsent(scrName, () => DriverHomeState());
+}
+
+void registerDriverHomeScreenSession() {
+  ScreenSession.ensure(
+    'DriverHomeState',
+    clearDriverHomeState,
+    nav: NavPolicy.none,
+  );
 }
 
 /// Clear state for a screen. Called from buildPage alongside

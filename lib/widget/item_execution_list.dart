@@ -7,6 +7,7 @@ import 'custody_stepper.dart';
 import 'driver_home_support.dart';
 import 'panel_card_support.dart';
 import 'custody_count_list.dart';
+import '../screen_session.dart';
 
 /// ITEM_EXECUTION_LIST -- per-item drop/pickup stepper list for P11.
 ///
@@ -73,8 +74,16 @@ class ItemExecutionList extends StatefulWidget {
 
   /// Get or create the execution map for a screen.
   static Map<String, ExecutionEntry> getExecMap(String scrName) {
+    registerScreenSession();
     return executionStore.putIfAbsent(
         scrName, () => <String, ExecutionEntry>{});
+  }
+
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'ItemExecutionList.executionStore',
+      ItemExecutionList.clearExecutionStore,
+    );
   }
 
   /// Clear execution store and cap store for a screen.
@@ -169,6 +178,7 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
   @override
   void initState() {
     super.initState();
+    ItemExecutionList.registerScreenSession();
     _parseText();
     _subscribe();
     // Register for saveSend actual-write hook (fields variant only).

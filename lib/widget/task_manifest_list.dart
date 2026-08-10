@@ -6,6 +6,7 @@ import '../global.dart';
 import 'admin_create_task_support.dart';
 import 'driver_home_support.dart';
 import 'panel_card_support.dart';
+import '../screen_session.dart';
 
 /// TASK_MANIFEST_LIST -- per-task accordion list + aggregate badges (P5).
 ///
@@ -38,6 +39,14 @@ class TaskManifestList extends StatefulWidget {
   // Per-screen "seeded once" flag. Prevents re-seeding the first task after
   // the user manually collapses it. Cleared alongside _expandedTasks.
   static final Map<String, bool> _seeded = {};
+
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'TaskManifestList.expandState',
+      TaskManifestList.clearExpandState,
+      nav: NavPolicy.none,
+    );
+  }
 
   /// Clear expand state for a screen (e.g. on route change).
   static void clearExpandState(String scrName) {
@@ -136,6 +145,7 @@ class _TaskManifestListState extends State<TaskManifestList> {
   @override
   void initState() {
     super.initState();
+    TaskManifestList.registerScreenSession();
     _parseText();
     _source =
         (widget.component['source'] ?? '').toString().trim().toLowerCase();

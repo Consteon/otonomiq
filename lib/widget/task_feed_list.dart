@@ -10,6 +10,7 @@ import 'driver_home_support.dart';
 import 'panel_card_support.dart';
 import 'receipt_doc.dart'; // formatThousands, formatReceiptDate
 import 'task_item_builder.dart'; // TaskItemBuilder.draftRev
+import '../screen_session.dart';
 
 /// TASK_FEED_LIST — grouped task card list for P10 TaskFeed.
 ///
@@ -51,6 +52,16 @@ class TaskFeedList extends StatefulWidget {
 
   /// Clear FLAT-mode search text for [scrName]. Called from buildPage
   /// (ui_component.dart) on route change / screen reload.
+  static void registerScreenSession() {
+    // Phase 1: nav:none mirrors today (buildPage-only).
+    // Phase 2: flipped to nav:screen (search text leaking across visits).
+    ScreenSession.ensure(
+      'TaskFeedList.flatSearch',
+      TaskFeedList.clearFlatSearch,
+      nav: NavPolicy.none,
+    );
+  }
+
   static void clearFlatSearch(String scrName) {
     _flatSearchControllers[scrName]?.clear();
   }
@@ -103,6 +114,7 @@ class _TaskFeedListState extends State<TaskFeedList> {
   @override
   void initState() {
     super.initState();
+    TaskFeedList.registerScreenSession();
     _parseText();
     _subscribe();
     // Create search controller for FLAT mode (groupField empty).

@@ -10,6 +10,7 @@ import 'panel_card_support.dart'; // parseTablePath, TablePath
 import 'picker_list.dart'; // PickerList.filterRows
 import 'table_picker.dart'; // TablePicker.resolveValueFromDoc
 import 'task_item_builder.dart'; // TaskItemBuilder.sortPickerItems
+import '../screen_session.dart';
 
 /// PAYOUT_LIST -- multi-select list with per-item nominal (count x rate),
 /// select-all, summary totals, emitting values/labels/total to form positions.
@@ -44,6 +45,13 @@ class PayoutList extends StatefulWidget {
 
   /// Clear per-screen state. Called from clearData (api.dart) and buildPage
   /// (ui_component.dart) on route change.
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'PayoutList.selectionStore',
+      PayoutList.clearState,
+    );
+  }
+
   static void clearState(String scrName) {
     _selectionStore.remove(scrName);
   }
@@ -138,6 +146,7 @@ class _PayoutListState extends State<PayoutList> {
   @override
   void initState() {
     super.initState();
+    PayoutList.registerScreenSession();
     _parseText();
     _parseRate();
     _subscribe();
