@@ -140,7 +140,9 @@ Future subscribeToUserReset(String docId) async {
                 }
               } // end if (event.data() == null)
               if (kicked) {
-                kickedOut();
+                // Un-awaited inside a snapshot callback: anything kickedOut()
+                // throws would surface as a FATAL crash with no app frames.
+                safeUnawaited(kickedOut(), 'deviceListener kickedOut');
               }
             },
             onError: (error) => devPrint("Listen failed: $error"),

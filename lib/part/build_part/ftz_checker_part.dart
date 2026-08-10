@@ -23,6 +23,15 @@ extension CTakeQr on FtzCheckerState {
       // hardware before the scanner (mobile_scanner) opens — otherwise the
       // scanner preview can come up blank on the multiple-scan handoff.
       await Future.delayed(const Duration(milliseconds: 350));
+      // `context` here is FtzCheckerState.context — this extension declares no
+      // context parameter, so it is the `_element!` getter. After the delay
+      // above the user may have left the page, and merely READING a disposed
+      // State's context throws "Null check operator used on a null value" (a
+      // fatal with no app frames). Return `empty`, not null: callers do
+      // `await checkerTakeQR(...) ?? 'Error'` (ftz_checker.dart:619, 692), so
+      // null would be read back as a scanned code named "Error", while `empty`
+      // is the existing cancel path (`lqrText == empty` → locationStatus 99).
+      if (!mounted) return empty;
       final qrResult = await Navigator.of(context).push<String>(
         MaterialPageRoute(
           builder: (context) => FtzScannerScreen(title: label, camera: lens.toLowerCase()),

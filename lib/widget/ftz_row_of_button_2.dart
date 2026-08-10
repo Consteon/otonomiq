@@ -711,7 +711,18 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
 
                         case 'savesend':
                           {
-                            if (await dataOk(context)) {
+                            // `mounted &&` on every dataOk() call in this switch.
+                            // `context` here is the State getter (`_element!`),
+                            // and this closure has already awaited before the
+                            // switch (the get_gps / get_address / generate_number
+                            // branches above). If the user leaves the page while
+                            // one of those is in flight, the State is disposed and
+                            // merely READING `context` throws "Null check operator
+                            // used on a null value" — a fatal with no app frames
+                            // below the closure. Unmounted means the tap has no
+                            // page left to act on, so skipping is the correct
+                            // outcome, not just the safe one.
+                            if (mounted && await dataOk(context)) {
                               final List<String> btnTextArray =
                                   (autheniumDecode(
                                               buttonData['text']?.toString()) ??
@@ -861,7 +872,7 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
 
                         case 'update':
                           {
-                            if (await dataOk(context)) {
+                            if (mounted && await dataOk(context)) {
                               actionLock('update case ftz_row_of_button');
                               try {
                                 // 1. Resolve Table VID
@@ -1038,7 +1049,7 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
                         case 'resetvid':
                           {
                             int resetStatus = -99;
-                            if (await dataOk(context)) {
+                            if (mounted && await dataOk(context)) {
                               if (buttonData['reference'] != null &&
                                   buttonData['reference'] > 0) {
                                 String vid = emptyString;
@@ -1090,7 +1101,7 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
 
                         case 'reset':
                           {
-                            if (await dataOk(context)) {
+                            if (mounted && await dataOk(context)) {
                               actionLock('reset case ftz_row_of_button');
                               resetVidUid(state['#FIREBASE_USER'].uid);
                             }
@@ -1110,7 +1121,7 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
                             // while local history is unsynced; image/history sync
                             // run on their own triggers (connectivity listener,
                             // app resume, timer).
-                            if (await dataOk(context)) {
+                            if (mounted && await dataOk(context)) {
                               actionLock('signout case ftz_row_of_button');
                               // Order matters. signOut() resets the shell to the
                               // login page (guest-snapshot swap → showSignInPage)
@@ -1131,10 +1142,17 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
                               // unmounting this button's `context`. The
                               // AuthenticationBloc is provided above MainPage
                               // (main.dart), so the captured ref stays valid.
-                              final authBloc =
-                                  BlocProvider.of<AuthenticationBloc>(context);
-                              await signOut();
-                              authBloc.add(LoggedOut());
+                              //
+                              // The re-check is not redundant with the one on the
+                              // dataOk() line: dataOk awaits a dialog whenever the
+                              // data is NOT ready, so the page can be gone by the
+                              // time this reads `context`.
+                              if (mounted) {
+                                final authBloc =
+                                    BlocProvider.of<AuthenticationBloc>(context);
+                                await signOut();
+                                authBloc.add(LoggedOut());
+                              }
                             }
                           }
                           break;
@@ -1165,7 +1183,11 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
                         }
                       }
 
-                      if (hasChain) {
+                      // Widest exposure of all: this runs AFTER the whole switch,
+                      // including cases that navigate away (`default` → gotoRoute)
+                      // or tear the page down (`signout` → showSignInPage), plus
+                      // the awaited _updateApprovalChain above.
+                      if (hasChain && mounted) {
                         await doChain(context, scrName, buttonData['chain']);
                       }
                       if (dialog ?? false) {

@@ -629,7 +629,9 @@ Future<int> globalInit() async {
       : versionShown;
   Get.put(WidgetUpdateController());
   vGoogleSignIn = GoogleSignIn.instance;
-  unawaited(vGoogleSignIn.initialize());
+  // Deliberately not awaited (startup must not block on it), but `unawaited`
+  // alone leaves a rejection unhandled → fatal. See [safeUnawaited].
+  safeUnawaited(vGoogleSignIn.initialize(), 'GoogleSignIn.initialize');
   if (sinner) {
     secureStorageOptions = const IOSOptions(
       accessibility: KeychainAccessibility.first_unlock,
@@ -1931,6 +1933,24 @@ String phoneCanonical62(String inp) {
   return '62$d';
 } // end of phoneCanonical62
 
+/// True when [e] can ONLY mean the device has no route out — `Network is
+/// unreachable` (errno 101) and `Failed host lookup` (errno 7) are never a
+/// server or app fault, so they are suppressed regardless of what
+/// [internetConnectionFlag] currently says.
+///
+/// That flag lags the radio, and `getLqrList` sits in the widest lag window in
+/// the app: `ConnectionData.getConnection` sets the flag true from an
+/// `InternetAddress.lookup` (connection_data.dart:35) — which can answer from
+/// the OS DNS cache with no route — then calls `runSheetStartup` →
+/// `getLqrList`, which busy-waits on `locRange` (api.dart:1420) before posting
+/// to readSS. By post time the flag is routinely stale, so the AND-gate in
+/// [errorReport] leaked "readSS Network is unreachable" back into Crashlytics.
+bool isNoRouteError(dynamic e) {
+  final String s = e.toString();
+  return s.contains('Network is unreachable') ||
+      s.contains('Failed host lookup');
+} // end of isNoRouteError
+
 /// True when [e] is the shape a call gets when the radio is simply down:
 /// `ClientException with SocketException: Connection failed (OS Error: Network
 /// is unreachable, errno = 101)`, `Failed host lookup` (errno 7), etc.
@@ -1938,18 +1958,21 @@ bool isNetworkDownError(dynamic e) {
   final String s = e.toString();
   return s.contains('SocketException') ||
       s.contains('ClientException') ||
-      s.contains('Network is unreachable') ||
-      s.contains('Failed host lookup');
+      isNoRouteError(e);
 } // end of isNetworkDownError
 
 void errorReport(dynamic e, [StackTrace? stack]) {
   // Offline is a NORMAL state in this offline-first app — every http / Cloud
   // Function call made with no network throws, and reporting each one made
-  // "readSS Network is unreachable" the top non-fatal. Skip ONLY when the app
-  // itself knows it is offline AND the error is network-shaped: the same
-  // exception while online is a real failure and still reported, and a
+  // "readSS Network is unreachable" the top non-fatal. Skip a network-shaped
+  // error when EITHER the app knows it is offline, OR the error itself proves
+  // there was no route ([isNoRouteError]) — the flag alone was not enough, it
+  // lags the radio and let the readSS noise through. A generic
+  // SocketException / ClientException while the app believes it is online
+  // (TLS, server reset, …) is still a real failure and still reported, and a
   // non-network error while offline (RangeError, cast, …) still reports.
-  if (!internetConnectionFlag.value && isNetworkDownError(e)) {
+  if (isNetworkDownError(e) &&
+      (!internetConnectionFlag.value || isNoRouteError(e))) {
     debugPrint('offline (crash report skipped): ${e.toString()}');
     return;
   }
@@ -2008,6 +2031,23 @@ Future<void> safeFsUpdate(dynamic ref, Map<String, dynamic> data, String tag) {
     errorReport('[safeFsUpdate] $tag ${docRef.path} data=$data err=$e');
   });
 } // end of safeFsUpdate
+
+/// Fire-and-forget [f] WITHOUT letting a rejection become a fatal crash.
+///
+/// Same failure shape as [safeFsUpdate], generalised: an un-awaited Future with
+/// no error handler escapes to `platformDispatcher.onError` (main.dart:90) and
+/// is recorded as FATAL, with no app frames (the async gap drops them).
+/// `unawaited()` does NOT help — it only silences the analyzer.
+///
+/// This is what turned `GoogleSignIn.instance.signOut()` in [kickedOut] into a
+/// fatal: google_sign_in 7.x routes signOut through Android CredentialManager,
+/// which throws `clearCredentialState no provider dependencies found` on a
+/// device with no credential provider. That is a device state, not an app
+/// fault, and local logout does not depend on it — so it belongs in
+/// [errorReport] (non-fatal), not on the crash screen.
+void safeUnawaited(Future<void> f, String tag) {
+  f.catchError((Object e) => errorReport('$tag: $e'));
+} // end of safeUnawaited
 
 /// Forward [e] to [errorReport] (Crashlytics non-fatal) UNLESS it is a handled
 /// [TimeoutException] from a best-effort read / time fetch. Those recover

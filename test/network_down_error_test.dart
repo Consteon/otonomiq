@@ -50,4 +50,50 @@ void main() {
       expect(isNetworkDownError('[safeFsUpdate] task write failed'), isFalse);
     });
   });
+
+  // isNoRouteError is the half of the gate that ignores internetConnectionFlag.
+  // getLqrList throws AFTER the flag was set true and AFTER an unbounded wait
+  // on locRange, so "the app thinks it is online" carries no information there.
+  group('isNoRouteError — suppress even while the flag says online', () {
+    test('the reported readSS failure (errno 101)', () {
+      expect(
+        isNoRouteError(
+          'ClientException with SocketException: Connection failed '
+          '(OS Error: Network is unreachable, errno = 101), '
+          'address = asia-northeast1-otq-01.cloudfunctions.net, port = 443, '
+          'uri=https://asia-northeast1-otq-01.cloudfunctions.net/readSS',
+        ),
+        isTrue,
+      );
+    });
+
+    test('host lookup failure (errno 7)', () {
+      expect(
+        isNoRouteError(
+          const SocketException('Failed host lookup: firestore.googleapis.com'),
+        ),
+        isTrue,
+      );
+    });
+  });
+
+  group('isNoRouteError — narrower than isNetworkDownError', () {
+    test('connection reset is network-shaped but NOT proof of no route', () {
+      // Server / TLS side failure: still reported when the app is online.
+      const String reset =
+          'ClientException with SocketException: Connection reset by peer '
+          '(OS Error: Connection reset by peer, errno = 104), '
+          'address = asia-northeast1-otq-01.cloudfunctions.net, port = 443';
+      expect(isNetworkDownError(reset), isTrue);
+      expect(isNoRouteError(reset), isFalse);
+    });
+
+    test('non-network error is neither', () {
+      const String denied =
+          '[cloud_firestore/permission-denied] Missing or insufficient '
+          'permissions.';
+      expect(isNetworkDownError(denied), isFalse);
+      expect(isNoRouteError(denied), isFalse);
+    });
+  });
 }

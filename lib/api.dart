@@ -3325,8 +3325,13 @@ Future getMyImei() async {
 
 Future kickedOut() async {
   await unsubscribeUserReset();
-  FirebaseAuth.instance.signOut();
-  GoogleSignIn.instance.signOut();
+  // Both stay fire-and-forget — tearing down the local session must not block
+  // on a provider round-trip — but an un-awaited rejection is recorded as a
+  // FATAL crash (main.dart:90). GoogleSignIn.signOut() in particular throws
+  // `clearCredentialState no provider dependencies found` on devices with no
+  // Android credential provider, which killed the app on every forced logout.
+  safeUnawaited(FirebaseAuth.instance.signOut(), 'kickedOut FirebaseAuth');
+  safeUnawaited(GoogleSignIn.instance.signOut(), 'kickedOut GoogleSignIn');
   // GoogleSignIn().signOut();
   // signInOption: SignInOption.standard,
   // scopes: [],
