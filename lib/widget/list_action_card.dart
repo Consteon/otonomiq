@@ -7,6 +7,7 @@ import '../global.dart'; // mapTableContent, diamondTextToList, autheniumDecode,
 import '../global2.dart'; // txfController, txfControllerCheck
 import '../model/input_controller.dart'; // InputController
 import '../model/otq_state.dart'; // OtqState
+import '../screen_session.dart';
 import 'driver_home_support.dart'; // resolveAppVid, writeRouteParamsFromRow, filterDriverHomeDocs, coerceNum, stripRouteWrapper
 import 'list_card_support.dart'; // BadgeEntry, StatsDef, parseBadgeMap, lookupBadge, parseStatsDefs, computeStatsCounts
 import 'panel_card_support.dart'; // TablePath, parseTablePath, resolveMapTokens, statusColor, statusBgColor
@@ -292,6 +293,10 @@ class ListActionCard extends StatefulWidget {
 
   /// Clear per-screen state. Called from clearData (api.dart) and buildPage
   /// (ui_component.dart) on route change.
+  static void registerScreenSession() {
+    ScreenSession.ensure('ListActionCard.inflight', ListActionCard.clearState);
+  }
+
   static void clearState(String scrName) {
     _inflight.remove(scrName);
   }
@@ -346,6 +351,7 @@ class _ListActionCardState extends State<ListActionCard> {
   @override
   void initState() {
     super.initState();
+    ListActionCard.registerScreenSession();
     _initConfig();
     _subscribe();
   }

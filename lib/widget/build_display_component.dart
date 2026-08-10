@@ -1902,6 +1902,20 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }
+  } else if (tip == 'signal_list') {
+    try {
+      result = SignalList(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
   } else if (tip == 'executor_designate_card') {
     try {
       result = ExecutorDesignateCard(

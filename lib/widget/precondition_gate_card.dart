@@ -28,6 +28,24 @@ class PreconditionGateCard extends StatefulWidget {
   final String scrName;
   final double lPad, tPad, rPad, bPad;
 
+  /// Custody mode toggle — which route the CTA opens.
+  ///
+  /// `custodyMode:"ack"` (Mode B) -> `ackRoute` (1-tap "Terima Muatan" page,
+  /// no blind count). Anything else — absent, `"count"`, Mode A — keeps
+  /// `route`, so tenants that never set the param behave exactly as before.
+  /// Falls back to `route` when `ackRoute` is missing rather than dead-ending
+  /// the button.
+  static String resolveCtaRoute(dynamic component) {
+    final String route = (component['route'] ?? '').toString().trim();
+    final String mode = (component['custodyMode'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    if (mode != 'ack') return route;
+    final String ackRoute = (component['ackRoute'] ?? '').toString().trim();
+    return ackRoute.isEmpty ? route : ackRoute;
+  }
+
   @override
   State<PreconditionGateCard> createState() => _PreconditionGateCardState();
 }
@@ -327,7 +345,7 @@ class _PreconditionGateCardState extends State<PreconditionGateCard> {
   }
 
   void _onCtaTap() {
-    final String route = (widget.component['route'] ?? '').toString().trim();
+    final String route = PreconditionGateCard.resolveCtaRoute(widget.component);
     if (route.isEmpty) return;
     if (routeExist(route)) {
       routeStack.push(route);

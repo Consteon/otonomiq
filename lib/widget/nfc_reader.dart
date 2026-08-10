@@ -9,6 +9,7 @@ import '../global.dart';
 import '../global2.dart';
 import '../model/otq_state.dart';
 import '../redux/screen_transaction.dart';
+import '../screen_session.dart';
 import 'panel_card_support.dart';
 
 /// Length-guarded slot access for NFC text slots. Mirrors `scannerSlot`
@@ -181,6 +182,7 @@ class NfcReader extends StatefulWidget {
   /// groups. Returns the existing state if it matches the expected group count;
   /// otherwise creates a fresh state.
   static List<List<String>> getOrInitState(String key, int groupCount) {
+    registerScreenSession();
     final existing = collectorState[key];
     if (existing != null && existing.length == groupCount) return existing;
     final fresh = List.generate(groupCount, (_) => <String>[]);
@@ -190,6 +192,14 @@ class NfcReader extends StatefulWidget {
 
   /// Clear ALL collector state for a screen (every group-position instance).
   /// Called from clearData (api.dart) on route change.
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'NfcReader.collectorState',
+      NfcReader.clearCollectorState,
+      rebuild: RebuildPolicy.none,
+    );
+  }
+
   static void clearCollectorState(String scrName) {
     collectorState.removeWhere(
       (k, _) => k == scrName || k.startsWith('$scrName#'),

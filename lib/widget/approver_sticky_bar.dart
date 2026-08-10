@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 
 import '../firestore_repository/table_repository.dart'; // subscribeToMapCollection
 import '../global.dart';
+import '../screen_session.dart';
 import 'driver_home_support.dart'; // resolveAppVid, filterDriverHomeDocs
 import 'dsl_eq.dart';
 import 'ftz_row_of_button_2.dart';
@@ -89,20 +90,7 @@ class ApproverStickyBar {
     transactionStore.onChange.listen((state) {
       final route = state.screenTx['#CURRENT_ROUTE'];
       if (route is String && route.isNotEmpty) {
-        // onChange fires on EVERY dispatch (the store is not distinct), so
-        // gate the clear on an actual route CHANGE — an unconditional clear
-        // would wipe currentRow mid-screen on any #GPSDATA/timer dispatch and
-        // blank the incident bar until the detail card happens to rebuild.
-        if (route != activeBarScreen.value) {
-          // Per-screen state cleared on route change: currentRow is a single
-          // static Rx published by the leaving screen's detail card
-          // (ItemCardDetail / WorkerCardDetailKeyed); left uncleared, the
-          // previous worker's row leaks into the next screen's incident bar
-          // until that screen's own publisher runs.
-          ItemCardDetail.currentRow.value = const [];
-        }
         activeBarScreen.value = route;
-        ItemCardDetail.screenStatus.remove(route);
       }
     });
   }
@@ -119,6 +107,7 @@ class ApproverStickyBar {
     double rPad = 0,
     double bPad = 0,
   }) {
+    registerScreenSession();
     ensureRouteListener();
     final List<StickyBarConfig> list = _configs[scrName] ??= [];
     final copy = _deepCopy(component) as Map<dynamic, dynamic>;
@@ -175,6 +164,14 @@ class ApproverStickyBar {
         subscribeToMapCollection(appVid, gtp.tableDocId, gtp.subColl, gateCode);
       }
     }
+  }
+
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'ApproverStickyBar.configs',
+      ApproverStickyBar.clearConfigs,
+      nav: NavPolicy.none,
+    );
   }
 
   static void clearConfigs(String scrName) {
@@ -459,6 +456,7 @@ class _StickyBarSlotState extends State<StickyBarSlot> {
   @override
   void initState() {
     super.initState();
+    ApproverStickyBar.registerScreenSession();
     _registerSlot();
   }
 

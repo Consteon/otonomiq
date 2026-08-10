@@ -7,6 +7,7 @@ import 'package:get/get.dart';
 import '../api.dart'; // getTableVid
 import '../global.dart';
 import '../redux/screen_transaction.dart';
+import '../screen_session.dart';
 import 'dsl_eq.dart';
 import 'panel_card_support.dart';
 import 'statistic_card_support.dart';
@@ -47,7 +48,16 @@ final Map<String, DriverHomeState> driverHomeStates = {};
 
 /// Obtain or create the DriverHomeState for a screen.
 DriverHomeState getDriverHomeState(String scrName) {
+  registerDriverHomeScreenSession();
   return driverHomeStates.putIfAbsent(scrName, () => DriverHomeState());
+}
+
+void registerDriverHomeScreenSession() {
+  ScreenSession.ensure(
+    'DriverHomeState',
+    clearDriverHomeState,
+    nav: NavPolicy.none,
+  );
 }
 
 /// Clear state for a screen. Called from buildPage alongside
@@ -56,12 +66,27 @@ void clearDriverHomeState(String scrName) {
   driverHomeStates.remove(scrName);
 }
 
-/// Pick the active (newest non-closed) opening from a list of docs.
+/// `cst` values that END a trip: an opening doc in one of these anchors no
+/// live trip.
+///
+/// `closed` = C1 closing done. `cancelled` = trip abandoned — written
+/// CONFIG-side (the ad-hoc driver flow), never by Dart, and absent from the
+/// field dictionary, which is why every "is this trip live" check used to
+/// compare against `'closed'` alone. Prod consequence (otq-01, MBL-01
+/// 2026-08-05): an abandoned `CHK-MBL-01-20260805-3` with an empty `ie[]`
+/// out-ranked the real newest trip and became the "active" trip for every
+/// read path once that trip closed.
+bool isTripTerminalCst(Object? cst) {
+  final String s = (cst ?? '').toString().trim();
+  return s == 'closed' || s == 'cancelled';
+}
+
+/// Pick the active (newest non-terminal) opening from a list of docs.
 ///
 /// Filters for `cty == 'opening'`, sorts by `t` desc, and prefers the newest
-/// doc whose `cst != 'closed'`. Falls back to the newest opening overall
-/// (even if closed) when all openings are closed. Returns `null` when the
-/// input contains no opening-shaped docs.
+/// doc whose `cst` is not trip-terminal ([isTripTerminalCst]). Falls back to
+/// the newest opening overall when every opening is closed/cancelled. Returns
+/// `null` when the input contains no opening-shaped docs.
 ///
 /// Shared by [resolveAndPublishActiveTrip] (driver pages) and
 /// `_findCheckDoc` in custody_count_list / custody_reveal (P6/P7).
@@ -79,11 +104,11 @@ Map<String, dynamic>? pickActiveOpening(List<Map<String, dynamic>> docs) {
     final int tB = int.tryParse((b['t'] ?? '0').toString().trim()) ?? 0;
     return tB.compareTo(tA);
   });
-  // Prefer newest non-closed
+  // Prefer newest non-terminal
   for (final doc in openings) {
-    if ((doc['cst'] ?? '').toString().trim() != 'closed') return doc;
+    if (!isTripTerminalCst(doc['cst'])) return doc;
   }
-  // All closed: return newest overall
+  // All closed/cancelled: return newest overall
   return openings.first;
 }
 
@@ -155,8 +180,8 @@ String? computeActiveTripDocId(
   }
 
   final Map<String, dynamic>? picked = pickActiveOpening(vvDocs);
-  // If picked is non-null but closed, treat as no active trip.
-  if (picked != null && (picked['cst'] ?? '').toString().trim() != 'closed') {
+  // If picked is non-null but closed/cancelled, treat as no active trip.
+  if (picked != null && !isTripTerminalCst(picked['cst'])) {
     return (picked['__docId'] ?? '').toString();
   }
   return ''; // openings exist but none active for this vehicle
@@ -2259,7 +2284,7 @@ Future<({String activeDocId, int todayCount})> fetchOpeningState({
         ? await query.get()
         : await query.get(const GetOptions(source: Source.cache));
 
-    // Client-side: count today's openings + find newest non-closed
+    // Client-side: count today's openings + find newest non-terminal
     int todayCount = 0;
     final List<dynamic> nonClosed = <dynamic>[];
     for (final d in snap.docs) {
@@ -2267,8 +2292,7 @@ Future<({String activeDocId, int todayCount})> fetchOpeningState({
         d.data() as Map,
       );
       if (eq((data['cdt'] ?? '').toString().trim(), today)) todayCount++;
-      final String cst = (data['cst'] ?? '').toString().trim();
-      if (cst != 'closed') nonClosed.add(d);
+      if (!isTripTerminalCst(data['cst'])) nonClosed.add(d);
     }
 
     String activeDocId = '';

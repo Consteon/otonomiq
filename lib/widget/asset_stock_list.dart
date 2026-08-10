@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
+import '../screen_session.dart';
 import 'admin_home_support.dart';
 import 'customer_outstanding_list.dart'; // ChipAccent
 import 'driver_home_support.dart';
@@ -355,6 +356,14 @@ class AssetStockList extends StatefulWidget {
   /// screen-specific shared state as static Map, not global.dart).
   static final Map<String, int> _activeTab = <String, int>{};
 
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'AssetStockList.activeTab',
+      AssetStockList.clearState,
+      nav: NavPolicy.none,
+    );
+  }
+
   /// Called from buildPage in ui_component.dart on route change to release
   /// per-screen state. Mirrors CustomerOutstandingList.clearState.
   static void clearState(String scrName) {
@@ -403,6 +412,7 @@ class _AssetStockListState extends State<AssetStockList> {
   @override
   void initState() {
     super.initState();
+    AssetStockList.registerScreenSession();
     _parseText();
     _parseConfig();
     _subscribe();

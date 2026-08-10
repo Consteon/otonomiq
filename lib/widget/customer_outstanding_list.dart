@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import '../api.dart'; // getNowMillisecondFromEpoch
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
+import '../screen_session.dart';
 import 'admin_home_support.dart';
 import 'driver_home_support.dart';
 import 'panel_card_support.dart';
@@ -345,6 +346,14 @@ class CustomerOutstandingList extends StatefulWidget {
   /// shared state as static Map, not global.dart).
   static final Map<String, String> _searchText = <String, String>{};
 
+  static void registerScreenSession() {
+    // Phase 2: flipped to nav:screen (search text leaking across visits).
+    ScreenSession.ensure(
+      'CustomerOutstandingList.searchText',
+      CustomerOutstandingList.clearState,
+    );
+  }
+
   /// Called from buildPage in ui_component.dart on route change to release
   /// per-screen state. Mirrors CustodyEventSubmit.clearState,
   /// ItemExecutionSubmit.clearState, TaskFeedList.clearFlatSearch, etc.
@@ -393,6 +402,7 @@ class _CustomerOutstandingListState extends State<CustomerOutstandingList> {
   @override
   void initState() {
     super.initState();
+    CustomerOutstandingList.registerScreenSession();
     _parseText();
     _parseConfig();
     _subscribe();

@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 import '../firestore_repository/table_repository.dart'; // subscribeToMapCollection
 import '../global.dart'; // diamondTextToList, mapTableContent, emptyString
 import '../global2.dart'; // txfController, txfControllerCheck, getPosition
+import '../screen_session.dart';
 import 'driver_home_support.dart'; // resolveAppVid
 import 'panel_card_support.dart'; // parseTablePath, TablePath
 import 'picker_list.dart'; // PickerList.filterRows (static reuse, no coupling)
@@ -44,10 +45,27 @@ class TablePicker extends StatefulWidget {
   /// Companion label store: `{ scrName -> { position -> { vid -> label } } }`.
   static final Map<String, Map<int, Map<String, String>>> _labelStore = {};
 
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'TablePicker.selectionStore',
+      TablePicker.clearState,
+      nav: NavPolicy.all,
+      clearAllFn: TablePicker.clearAll,
+    );
+  }
+
   /// Clear per-screen state. Called from buildPage clearData path.
   static void clearState(String scrName) {
     _selectionStore.remove(scrName);
     _labelStore.remove(scrName);
+  }
+
+  /// Wipe EVERY screen's picker state. GroupPicker parity: clearData runs
+  /// post-frame, so clearing only the entering screen flashes stale ticks
+  /// for one frame. See GroupPicker.clearAll for the full rationale.
+  static void clearAll() {
+    _selectionStore.clear();
+    _labelStore.clear();
   }
 
   // ── Pure static helpers (testable without SDUI globals) ─────────────────
@@ -172,6 +190,7 @@ class _TablePickerState extends State<TablePicker> {
   @override
   void initState() {
     super.initState();
+    TablePicker.registerScreenSession();
     _parseText();
     _subscribe();
     _seedFromController();

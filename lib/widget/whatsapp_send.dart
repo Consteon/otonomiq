@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../firestore_repository/table_repository.dart'; // subscribeToMapCollection
 import '../global.dart'; // phoneCanonical62, diamondTextToList, mapTableContent, transactionStore, autheniumDecode
+import '../screen_session.dart';
 import 'driver_home_support.dart'; // resolveAppVid, resolveDriverCurlyTokens, writeNativeFields
 import 'ftz_contact_picker.dart'; // chooseContactAndGetPhoneNumber
 import 'panel_card_support.dart'; // parseTablePath, TablePath
@@ -51,6 +52,10 @@ class WhatsAppSend extends StatefulWidget {
   // Convention #4: cleared per-scrName on route change.
   static final Map<String, bool> _sentBySearch = {};
 
+  static void registerScreenSession() {
+    ScreenSession.ensure('WhatsAppSend.sentState', WhatsAppSend.clearSentState);
+  }
+
   static void clearSentState(String scrName) {
     // Remove all entries whose key starts with the scrName prefix.
     // The key format is "$scrName::$resolvedSearch".
@@ -78,6 +83,7 @@ class _WhatsAppSendState extends State<WhatsAppSend> {
   @override
   void initState() {
     super.initState();
+    WhatsAppSend.registerScreenSession();
     _parseConfig();
     _subscribe();
   }

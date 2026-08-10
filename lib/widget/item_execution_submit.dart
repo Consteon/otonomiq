@@ -5,6 +5,7 @@ import '../api.dart';
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
 import '../model/otq_state.dart';
+import '../screen_session.dart';
 import 'do_chain.dart';
 import 'driver_home_support.dart';
 import 'item_execution_list.dart';
@@ -73,6 +74,13 @@ class ItemExecutionSubmit extends StatefulWidget {
 
   /// Per-scrName writing-in-progress flag to prevent double taps.
   static final Map<String, bool> _writing = {};
+
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'ItemExecutionSubmit.writing',
+      ItemExecutionSubmit.clearState,
+    );
+  }
 
   /// Clear state for a screen. Called from buildPage / clearData.
   static void clearState(String scrName) {
@@ -185,6 +193,7 @@ class _ItemExecutionSubmitState extends State<ItemExecutionSubmit> {
   @override
   void initState() {
     super.initState();
+    ItemExecutionSubmit.registerScreenSession();
     _parseText();
     _subscribe();
   }
@@ -581,12 +590,16 @@ List<Map<String, dynamic>> rebuildItWithActuals(
         }
         break;
       case 'sale':
+        final ExecutionEntry? saleEntry = execMap[key];
         item[cfg.actualSaleField] =
-            int.tryParse((item[cfg.saleField] ?? '0').toString().trim()) ?? 0;
+            saleEntry?.dropActual ??
+            (int.tryParse((item[cfg.saleField] ?? '0').toString().trim()) ?? 0);
         break;
       case 'purchase':
+        final ExecutionEntry? buyEntry = execMap[key];
         item[cfg.actualBuyField] =
-            int.tryParse((item[cfg.buyField] ?? '0').toString().trim()) ?? 0;
+            buyEntry?.dropActual ??
+            (int.tryParse((item[cfg.buyField] ?? '0').toString().trim()) ?? 0);
         break;
       case 'refill':
         item[cfg.actualRefillField] =

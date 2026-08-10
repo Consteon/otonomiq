@@ -5,6 +5,7 @@ import 'package:get/get.dart';
 import '../firestore_repository/table_repository.dart'; // subscribeToMapCollection
 import '../global.dart'; // transactionStore, mapTableContent, diamondTextToList
 import '../redux/screen_transaction.dart'; // UpdateScreenTxAction, ScreenTransaction
+import '../screen_session.dart';
 import 'admin_create_task_support.dart';
 import 'admin_home_support.dart'; // AdminTierColors
 import 'custody_stepper.dart'; // CustodyStepper (reusable stepper control)
@@ -55,6 +56,15 @@ class TaskItemBuilder extends StatefulWidget {
   /// customer's kn/al into the next task (review C-1). Static so clearData can
   /// reset it.
   static final Map<String, String> _lastPublishedKl = {};
+
+  static void registerScreenSession() {
+    // Phase 2: flipped to nav:screen (its own doc comment says "Static so
+    // clearData can reset it").
+    ScreenSession.ensure(
+      'TaskItemBuilder.lastPublishedKl',
+      TaskItemBuilder.resetClientPublished,
+    );
+  }
 
   /// Reset client-published tracking for a screen.
   static void resetClientPublished(String scrName) {
@@ -162,6 +172,7 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
   @override
   void initState() {
     super.initState();
+    TaskItemBuilder.registerScreenSession();
     _parseText();
     _subscribe();
   }

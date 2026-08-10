@@ -47,22 +47,14 @@ import 'notification/bloc.dart';
 import 'page/main_page.dart';
 import 'part/build_part/channel.dart';
 import 'redux/screen_transaction.dart';
+import 'screen_session.dart';
+import 'token_resolver.dart';
 import 'widget/build_theme.dart';
-import 'widget/custody_count_list.dart';
-import 'widget/custody_reveal.dart';
 import 'widget/driver_home_support.dart';
-import 'widget/executor_designate_card.dart';
 import 'widget/ftz_webview.dart';
-import 'widget/group_picker.dart';
-import 'widget/item_execution_list.dart';
-import 'widget/item_execution_submit.dart';
-import 'widget/list_action_card.dart';
 import 'widget/logout_transition_support.dart';
-import 'widget/nfc_reader.dart';
-import 'widget/payout_list.dart';
 import 'widget/photo_camera.dart';
 import 'widget/ui_component.dart';
-import 'widget/whatsapp_send.dart';
 
 /// Login perf instrumentation. Mirrors UserRepository.loginPerfTrace.
 /// Set to false (or remove) after root-cause confirmation.
@@ -867,7 +859,7 @@ Widget displayImage({
 
 String getAppVid(String ssid) {
   // should access to ssid and fetch the application vid from it
-  String result = 'TestVid049848784'; // change this for production
+  String result = 'TestVid049848784'; // todo change this for production
   return result;
 } // end of getAppVid
 
@@ -1038,7 +1030,7 @@ Future<String> getQRContent(
       }
     } else if (qrType == 'A') {
       // A for Asset
-      String universalCode = assetVerify(rawText, 9); // use component
+      String universalCode = assetVerify(rawText, 9); // Todo use component
       if (universalCode == errorString) {
         result = '${errString}98';
       } else {
@@ -1471,7 +1463,7 @@ Future<void> getAllPermission() async {
 
 void getCountryCodeList() async {
   // get list of country code from sim card (Android only)
-  // add getCountryCodeList ios part
+  // TODO: add getCountryCodeList ios part
   // List<String> cCodes = ['62', '63', '60', '66', '91', '84', '65'];
   List<String> cCodes = [defaultCountry];
   // try {
@@ -1666,7 +1658,7 @@ void getLinkInterfaceKey(BuildContext context, String vid, String pin) {
   int foundRow = -1;
 
   Future.wait([
-    // get from Firebase (get data from vidKey).
+    // TODO get from Firebase (get data from vidKey).
     sheetApi.spreadsheets.values.batchGet(
       vidKey,
       ranges: [vidRange],
@@ -1868,7 +1860,7 @@ Future<dynamic> getDataFromCloud() async {
       );
       dynamic rawReturnValue = await Future.wait([
         http.post(uri).timeout(const Duration(seconds: 15)),
-        //      getServiceAccountCredential(), //= uncomment this
+        //      getServiceAccountCredential(), //= TODO uncomment this
       ]);
       returnValue = [
         {'body': rawReturnValue[0].body},
@@ -1883,7 +1875,7 @@ Future<dynamic> getDataFromCloud() async {
 } // end of getDataFromCloud
 
 Future settingUp() async {
-  // call function in nearest server & use function callable. Still problem with firebase function
+  // TODO call function in nearest server & use function callable. Still problem with firebase function
   dynamic r = [
     {body: jsonEncode(defaultCloudConfig)},
   ];
@@ -2023,12 +2015,16 @@ void _persistUiCache({bool alsoGuest = false}) {
 /// Everything is decoded into locals and only then swapped into the globals —
 /// a half-applied swap (system map from one source, pages from another) is
 /// precisely what sank the earlier cache-first attempt.
-Future<bool> loadPagesFromProxy(String lifKey) async {
+Future<bool> loadPagesFromProxy(
+  String lifKey, {
+  bool skipIfUnchanged = false,
+}) async {
   if (lifKey.isEmpty) return false;
   final sw = _loginPerfTrace ? (Stopwatch()..start()) : null;
   try {
     final bool ok = await _loadPagesFromProxy(
       lifKey,
+      skipIfUnchanged: skipIfUnchanged,
     ).timeout(const Duration(seconds: 15));
     if (sw != null) {
       debugPrint(
@@ -2122,7 +2118,41 @@ Future<void> rebindInboxFromStorage() async {
   }
 }
 
-Future<bool> _loadPagesFromProxy(String lifKey) async {
+/// Boot-loader freshness gate: true when a cold-start proxy load must be
+/// SKIPPED because the proxy has not moved since we last applied it.
+///
+/// ★ WHY. `/Proxy/<lif>` is a materialized copy that LAGS the sheet. The AppBar
+/// refresh reads the sheet DIRECTLY (readSettingsContext -> /readSS) and writes
+/// those fresh pages to `@screenUI`; opt-1 renders them on the next cold start.
+/// Then asyncAppStartup2 ran the proxy loader unconditionally, swapped the OLDER
+/// proxy copy back in, and `_persistUiCache()` overwrote the fresh cache with it
+/// — so the refreshed data disappeared on reopen and stayed gone. Same symptom
+/// as the listener-side clobber, new path since opt 2 went proxy-first.
+///
+/// Uses the same `@proxyCS_<lif>` checksum + int guard as the live listener in
+/// main_page.dart. Skipping requires the in-memory pages to already BE this
+/// lif's — never true on the login path, where memory still holds the guest
+/// pages — so `true` means "pages for lifKey are loaded and at least as fresh
+/// as the proxy", never "no pages". A non-int `t` falls through to the load
+/// (old behaviour), as does a first run with no saved checksum.
+bool proxyBootSkip({
+  required bool skipIfUnchanged,
+  required String lifKey,
+  required String loadedLif,
+  required dynamic proxyT,
+  required int? savedCs,
+}) =>
+    skipIfUnchanged &&
+    lifKey.isNotEmpty &&
+    loadedLif == lifKey &&
+    proxyT is int &&
+    savedCs != null &&
+    proxyT == savedCs;
+
+Future<bool> _loadPagesFromProxy(
+  String lifKey, {
+  bool skipIfUnchanged = false,
+}) async {
   final dynamic snap = await firestoreDb
       .collection(proxyCollectionName)
       .doc(lifKey)
@@ -2130,6 +2160,17 @@ Future<bool> _loadPagesFromProxy(String lifKey) async {
   if (snap == null || snap.exists != true) return false;
   final dynamic rec = snap.data();
   if (rec == null) return false;
+
+  if (proxyBootSkip(
+    skipIfUnchanged: skipIfUnchanged,
+    lifKey: lifKey,
+    loadedLif: loadedPagesLif,
+    proxyT: rec['t'],
+    savedCs: prefs.getInt('@proxyCS_$lifKey'),
+  )) {
+    devPrint('proxy unchanged (t=${rec['t']}) — keeping local pages');
+    return true;
+  }
 
   // Both subcollections in flight together — two ~200ms reads, not 400ms.
   final dynamic systemFuture = firestoreDb
@@ -2491,7 +2532,7 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
       launchOk = await launchCheck(); // Check launch status
       if (launchOk > 0) {
         // error in launchCheck
-        // create error message to display
+        // TODO create error message to display
         debugCount = 5230;
         trace(debugCount);
       } else {
@@ -3173,7 +3214,7 @@ Future runSheetStartup(String lif, String clt) async {
   } // end if (!appStartupRun)
 } // end of runSheetStartup
 
-// make getVidData; updateVidData; deleteVidData
+// TODO make getVidData; updateVidData; deleteVidData
 Future getVidData() async {
   dynamic ref;
   dynamic messageRef;
@@ -3285,8 +3326,13 @@ Future getMyImei() async {
 
 Future kickedOut() async {
   await unsubscribeUserReset();
-  FirebaseAuth.instance.signOut();
-  GoogleSignIn.instance.signOut();
+  // Both stay fire-and-forget — tearing down the local session must not block
+  // on a provider round-trip — but an un-awaited rejection is recorded as a
+  // FATAL crash (main.dart:90). GoogleSignIn.signOut() in particular throws
+  // `clearCredentialState no provider dependencies found` on devices with no
+  // Android credential provider, which killed the app on every forced logout.
+  safeUnawaited(FirebaseAuth.instance.signOut(), 'kickedOut FirebaseAuth');
+  safeUnawaited(GoogleSignIn.instance.signOut(), 'kickedOut GoogleSignIn');
   // GoogleSignIn().signOut();
   // signInOption: SignInOption.standard,
   // scopes: [],
@@ -3338,7 +3384,7 @@ Future signOut() async {
     // devPrint("After in = false; try to signOut from firebaseAuth");
     if (!demoApp) {
       //        FirebaseAuth.instance.signOut(); // signOut from firebase
-      // signOut from google, facebook, twitter
+      // TODO signOut from google, facebook, twitter
     }
     unSubscribeToEvent(); // unsubscribe to proxy event listener
     await Future.wait([
@@ -3562,7 +3608,7 @@ Future<int> userIntegrityCheck() async {
         try {
           secureRead(key: 'pinHash')
               .then((myPinHash) {
-                // check pin hash integrity with lif
+                // TODO check pin hash integrity with lif
                 if (myPinHash == null) {
                   sheetApi.spreadsheets.values
                       .batchGet(
@@ -3693,7 +3739,7 @@ Future getLifProfileData(String lifKey) async {
 }
 
 Future<int> launchCheck() async {
-  // finish justLaunch procedure
+  // TODO finish justLaunch procedure
   // Launch with logged in status. Always run at launch like good old autoexec.bat
   // firstLogin, reLogin, run this function
 
@@ -4033,17 +4079,17 @@ Future apiInit1() async {
 }
 
 String autheniumDecrypt(String cipherText) {
-  // put decryption algorithm here
+  // TODO put decryption algorithm here
   return cipherText;
 }
 
 String autheniumEncrypt(String rawText, String encryptionType) {
-  // put encryption algorithm here
+  // TODO put encryption algorithm here
   return rawText;
 }
 
 String getAutheniumKey(String keyType) {
-  // put algorithm to get authenium key
+  // TODO put algorithm to get authenium key
   return "11223344";
 }
 
@@ -4136,7 +4182,7 @@ Future getFirestoreUserData(
           }; // set as used
           await docRef.update(data);
           needToRegisterInvLogin = true; // put flag to register invLogin
-          // call cloud function to register email, etc
+          //TODO call cloud function to register email, etc
           invitationStatus = 1;
         } else {
           recFound = 0;
@@ -4145,7 +4191,7 @@ Future getFirestoreUserData(
         }
       } else {
         // Found more than 1,
-        // should ask for country
+        // TODO: should ask for country
         if (uidUser.docChanges[0].doc.data()!["e"] == "-") {
           // Check email
           var docRef = uidUser.docs[0].reference; // process only the first rec
@@ -4189,9 +4235,9 @@ Future getFirestoreUserData(
             user = results.docs[0].data();
             if (results.docs.length == 1) {
               if (user['in'] && user["did"] != myDevice) {
-                // handle situation when user deny imei access
+                // TODO handle situation when user deny imei access
                 result = 802;
-                // call function to send reset email
+                // TODO call function to send reset email
                 //   add prefix ";R"(reset) firebaseDocName
                 // "Login fail. You already signed in with other device, or you deny access to phone."; //= return result
               } else {
@@ -4199,7 +4245,7 @@ Future getFirestoreUserData(
               }
             } else {
               //= for some reason user was registered but no data in dvc. Treat like new user.
-              // add new vid to user
+              // TODO add new vid to user
               result = 809;
             }
           });
@@ -4211,7 +4257,7 @@ Future getFirestoreUserData(
           .then((results) async {
             if (results.docs.length == 1) {
               if (user['in'] && user["did"] != myDevice) {
-                // handle situation when user deny imei access
+                // TODO handle situation when user deny imei access
                 result = 802; // error 802
                 // "Login fail. You already signed in with other device, or you deny access to phone."; //= return result
               } else {
@@ -4219,7 +4265,7 @@ Future getFirestoreUserData(
               }
             } else if (results.docs.isEmpty) {
               //= for some reason user was registered but no data in dvc. Treat like new user.
-              // add new vid to user
+              // TODO add new vid to user
               result = 809;
             } else {
               //= multiple entry. Found demo or dev account
@@ -4267,7 +4313,7 @@ Future getFirestoreUserData(
     // var cUser = state['#FIREBASE_USER']; //= get current firebase user data
     // result =
     //     getNewVid(cUser.uid, user.displayName, user.email); //= return result
-    // add new vid to user
+    // TODO add new vid to user
     if (invitationStatus > 1) {
       result = invitationStatus; // Something wrong with invitation
     } else {
@@ -4515,7 +4561,7 @@ Future serverSetup() async {
   trace(debugCount);
   FirebaseStorage storageBucket = FirebaseStorage.instanceFor(
     bucket: 'gs://otq-01-ase2',
-  ); // move to procedure after sign in
+  ); //= TODO move to procedure after sign in
   debugCount = 216;
   trace(debugCount);
   transactionStore.dispatch(
@@ -4547,29 +4593,12 @@ String getEventDocName(String vidTime) {
 void clearData(String scrName) {
   // clear all data in a page
 
-  // Clear per-scrName custody stores unconditionally -- custody pages have no
-  // txfController entries, so the early-return below would skip them.
-  // These are idempotent no-ops for non-custody pages.
-  CustodyCountList.clearCountStore(scrName);
-  CustodyReveal.clearEditState(scrName);
-  ExecutorDesignateCard.clearO1State(scrName);
-  ItemExecutionList.clearExecutionStore(scrName);
-  ItemExecutionSubmit.clearState(scrName);
-  NfcReader.clearCollectorState(scrName);
-  // WHATSAPP_SEND per-invoice sent badge. Must be here, not only in
-  // buildPage(clear:true): navigation goes gotoRoute -> reloadPage, which calls
-  // clearData and then returns the CACHED linkElement[page] -- buildPage never
-  // runs, so the badge would leak from invoice A onto invoice B.
-  WhatsAppSend.clearSentState(scrName);
-  PayoutList.clearState(scrName);
-  ListActionCard.clearState(scrName);
-  // Same reason as WhatsAppSend above: buildPage(clear:true) never re-runs on
-  // gotoRoute, so a revisited picker kept the previous visit's ticked rows and
-  // last active tab. clearAll (not clearState(scrName)) because this runs
-  // POST-frame: wiping every screen means a page is cleared on the nav AWAY
-  // from it, so the next visit is already empty at its first paint instead of
-  // flashing the old selection for a frame. See GroupPicker.clearAll.
-  GroupPicker.clearAll();
+  // ScreenSession.navReset iterates all registered stores whose NavPolicy
+  // is screen or all, and fires their clear function. This replaces the
+  // hand-maintained list of 11 static clear calls + GroupPicker.clearAll
+  // that lived here before. Must run ABOVE the txfController early-return:
+  // custody pages have no txfController entries and would be skipped.
+  ScreenSession.navReset(scrName);
 
   if (txfController[scrName] == null) return;
 
@@ -4683,14 +4712,6 @@ String replacePlaceholders(String text, List<List<dynamic>> ref) {
     return 'NO-DATA';
   });
 } // end of replacePlaceholders
-
-String _resolveScreenTxMarkers(String text) {
-  var screenTx = transactionStore.state.screenTx;
-  return text.replaceAllMapped(RegExp(r'<([a-zA-Z_][a-zA-Z0-9_]*)>'), (m) {
-    String key = m.group(1)!;
-    return screenTx[key]?.toString() ?? m.group(0)!;
-  });
-}
 
 void saveSend(
   int? timeStamp,
@@ -4812,7 +4833,7 @@ void saveSend(
           .replaceAll("◼D⭘", "◼D⭘tableVid◼$currentTableVid⭘")
           .replaceAll("◼S⭘", "◼S⭘tableVid◼$currentTableVid⭘");
       tableString = replacePlaceholders(tableString, ref);
-      tableString = _resolveScreenTxMarkers(tableString);
+      tableString = TokenResolver.screenTxMarkers(tableString);
       int d = 1;
     } catch (e) {
       // tableString = null;
@@ -4828,7 +4849,7 @@ void saveSend(
           "◼D⭘tableVid◼$currentTableVid⭘",
         );
         updateString = replacePlaceholders(updateString, ref);
-        updateString = _resolveScreenTxMarkers(updateString);
+        updateString = TokenResolver.screenTxMarkers(updateString);
       }
     } catch (e) {
       updateString = '';
@@ -4844,7 +4865,7 @@ void saveSend(
           "◼D⭘tableVid◼$currentTableVid⭘",
         );
         deleteString = replacePlaceholders(deleteString, ref);
-        deleteString = _resolveScreenTxMarkers(deleteString);
+        deleteString = TokenResolver.screenTxMarkers(deleteString);
       }
     } catch (e) {
       deleteString = '';
@@ -4857,13 +4878,13 @@ void saveSend(
         eventString = autheniumDecode(raw) ?? '';
         eventString = resolveDriverCurlyTokens(eventString, scrName);
         eventString = replacePlaceholders(eventString, ref);
-        eventString = _resolveScreenTxMarkers(eventString);
+        eventString = TokenResolver.screenTxMarkers(eventString);
         // Notification fields are ADDITIVE — a failure here must never discard
         // the base addToEvent payload (the outer catch resets eventString to '').
         try {
           eventString += buildNotificationSuffix(
             component['notification'],
-            (s) => _resolveScreenTxMarkers(replacePlaceholders(s, ref)),
+            (s) => TokenResolver.screenTxMarkers(replacePlaceholders(s, ref)),
           );
         } catch (e) {
           errorReport(e);
@@ -4883,7 +4904,7 @@ void saveSend(
           scrName,
         );
         updateEventString = replacePlaceholders(updateEventString, ref);
-        updateEventString = _resolveScreenTxMarkers(updateEventString);
+        updateEventString = TokenResolver.screenTxMarkers(updateEventString);
       }
     } catch (e) {
       updateEventString = '';
@@ -5539,7 +5560,7 @@ List totp(String keycode, int len, int sec) {
   // This is algorithm that used in Google Authenticator with len = 6
   var retArray = [];
   var m1 = (DateTime.now().millisecondsSinceEpoch / (sec * 1000)).floor();
-  m1 = 54427511; // delete this for production
+  m1 = 54427511; // TODO delete this for production
   Uint8List k3 = hexToUInt8(base32ToHex(keycode.replaceAll(" ", "")));
   final hmac1 = uInt8ToHex(
     hmacSha1(k3, hexToUInt8(m1.toRadixString(16).padLeft(16, "0"))),
@@ -5636,7 +5657,10 @@ Future asyncAppStartup2() async {
     // refuses it by design — and as fallback whenever the proxy is missing.
     bool proxyOk = false;
     if (myLif != transactionStore.state.screenTx['#GUEST_LIF']) {
-      proxyOk = await loadPagesFromProxy(myLif);
+      // skipIfUnchanged: a cold start must not re-apply a proxy copy that has
+      // not moved since we last applied it — that is what was undoing AppBar
+      // refreshes on reopen.
+      proxyOk = await loadPagesFromProxy(myLif, skipIfUnchanged: true);
       if (proxyOk) {
         await runSheetStartup(
           myLif,

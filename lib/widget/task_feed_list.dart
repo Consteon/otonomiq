@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
 import '../redux/screen_transaction.dart';
+import '../screen_session.dart';
 import 'admin_create_task_support.dart'; // AdminCreateTaskSupport.setCustomer
 import 'admin_home_support.dart'; // evaluateGate
 import 'driver_home_support.dart';
@@ -51,6 +52,14 @@ class TaskFeedList extends StatefulWidget {
 
   /// Clear FLAT-mode search text for [scrName]. Called from buildPage
   /// (ui_component.dart) on route change / screen reload.
+  static void registerScreenSession() {
+    // Phase 2: flipped to nav:screen (search text leaking across visits).
+    ScreenSession.ensure(
+      'TaskFeedList.flatSearch',
+      TaskFeedList.clearFlatSearch,
+    );
+  }
+
   static void clearFlatSearch(String scrName) {
     _flatSearchControllers[scrName]?.clear();
   }
@@ -105,6 +114,7 @@ class _TaskFeedListState extends State<TaskFeedList> {
   @override
   void initState() {
     super.initState();
+    TaskFeedList.registerScreenSession();
     _parseText();
     _subscribe();
     // Create search controller for FLAT mode (groupField empty).

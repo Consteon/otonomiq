@@ -1,15 +1,19 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'table_repository.dart';
+
+import '../api.dart';
 //import 'table_repository.dart';
 import '../global.dart';
-import '../api.dart';
 import '../redux/screen_transaction.dart';
+import 'table_repository.dart';
 
 Future<String> uploadToCloudStorage(
-    String localImage, String cloudFolder) async {
+  String localImage,
+  String cloudFolder,
+) async {
   // upload local image to cloud storage
   // return emptyImageUrl if failed; return cloud url if success
   // delete local file if success
@@ -26,7 +30,7 @@ Future<String> uploadToCloudStorage(
           File file = File(currentLocal);
           if (file.existsSync()) {
             dynamic storageBucket =
-            transactionStore.state.screenTx['#STORAGE_BUCKET'];
+                transactionStore.state.screenTx['#STORAGE_BUCKET'];
             Reference storageRef = storageBucket.ref().child(cloudFolder);
             try {
               result = await storageRef.getDownloadURL();
@@ -78,15 +82,16 @@ Future<String?> checkIfUserReset(var user, String did) async {
   String? result;
   String path = topCollection;
   final query = await _getResilient(
-      firestoreDb.collection(fsCollection).where("u", isEqualTo: user.uid));
-  if (query.docs.length > 0) {
+    firestoreDb.collection(fsCollection).where("u", isEqualTo: user.uid),
+  );
+  if (query.docs.isNotEmpty) {
     path += '/${query.docs[0].id}';
-    final device = await _getResilient(query.docs[0].reference
-        .collection('dvc')
-        .where('did', isEqualTo: did));
-    if (device.docs.length > 0) {
+    final device = await _getResilient(
+      query.docs[0].reference.collection('dvc').where('did', isEqualTo: did),
+    );
+    if (device.docs.isNotEmpty) {
       result =
-      '$path/dvc${separator[1]}${device.docs[0].id}'; // get first record
+          '$path/dvc${separator[1]}${device.docs[0].id}'; // get first record
     }
   } // end if (query.docs.length >0)
   return result;
@@ -99,7 +104,8 @@ Future<String?> checkIfUserReset(var user, String did) async {
 // Server-side changes (e.g. device reset on another phone) are still caught
 // shortly after by the subscribeToUserReset() snapshot listener.
 Future<QuerySnapshot<Map<String, dynamic>>> _getResilient(
-    Query<Map<String, dynamic>> query) async {
+  Query<Map<String, dynamic>> query,
+) async {
   try {
     final cached = await query.get(const GetOptions(source: Source.cache));
     if (cached.docs.isNotEmpty) return cached;
@@ -116,7 +122,7 @@ Future subscribeToUserReset(String docId) async {
     String myDid = await getDeviceId();
     List<String> docPath = docId.split(separator[1]);
     dynamic deviceListener =
-    transactionStore.state.screenTx['#DEVICE_LISTENER'];
+        transactionStore.state.screenTx['#DEVICE_LISTENER'];
     bool needToListen = false;
     if (deviceListener == null) {
       devPrint('No DEVICE_LISTENER subscribed');
@@ -130,7 +136,7 @@ Future subscribeToUserReset(String docId) async {
       if (docRef != null) {
         try {
           deviceListener = docRef.snapshots().listen(
-                (event) {
+            (event) {
               bool kicked = false;
               if (event.data() == null) {
                 kicked = true;
@@ -140,14 +146,18 @@ Future subscribeToUserReset(String docId) async {
                 }
               } // end if (event.data() == null)
               if (kicked) {
-                kickedOut();
+                // Un-awaited inside a snapshot callback: anything kickedOut()
+                // throws would surface as a FATAL crash with no app frames.
+                safeUnawaited(kickedOut(), 'deviceListener kickedOut');
               }
             },
             onError: (error) => devPrint("Listen failed: $error"),
           ); // end of listener
-          transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-            '#DEVICE_LISTENER': deviceListener,
-          })));
+          transactionStore.dispatch(
+            UpdateScreenTxAction(
+              ScreenTransaction({'#DEVICE_LISTENER': deviceListener}),
+            ),
+          );
         } catch (e1) {
           devPrint('error listening to device $e1');
         }
@@ -165,9 +175,9 @@ Future unsubscribeUserReset() async {
     var handle = transactionStore.state.screenTx['#DEVICE_LISTENER'];
     if (handle != null) {
       await handle.close();
-      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-        '#DEVICE_LISTENER': null,
-      })));
+      transactionStore.dispatch(
+        UpdateScreenTxAction(ScreenTransaction({'#DEVICE_LISTENER': null})),
+      );
     } // end if (handle != null)
   } catch (e) {
     devPrint(e);

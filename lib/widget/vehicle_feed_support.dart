@@ -383,9 +383,10 @@ List<VehicleFeedEntry> buildVehicleFeed({
             final int tB = int.tryParse((b['t'] ?? '0').toString().trim()) ?? 0;
             return tB.compareTo(tA); // desc
           });
-      // Prefer a non-closed opening (active trip) over a closed one.
+      // Prefer a non-terminal opening (active trip) over a closed/cancelled
+      // one -- see [isTripTerminalCst].
       openingDoc = sorted.firstWhere(
-        (d) => (d['cst'] ?? '').toString().trim() != 'closed',
+        (d) => !isTripTerminalCst(d['cst']),
         orElse: () => sorted.first,
       );
     }
@@ -403,8 +404,7 @@ List<VehicleFeedEntry> buildVehicleFeed({
     // executed) belong to the active trip, so they pass the scope too.
     final List<Map<String, dynamic>> allVvTasks = tasksByVv[lv] ?? const [];
     final bool openingActive =
-        openingDoc != null &&
-        (openingDoc[cstField] ?? '').toString().trim() != 'closed';
+        openingDoc != null && !isTripTerminalCst(openingDoc[cstField]);
     final String activeOpeningId = openingActive
         ? (openingDoc['__docId'] ?? '').toString()
         : '';

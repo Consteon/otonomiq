@@ -5,6 +5,7 @@ import '../api.dart'; // getNowMillisecondFromEpoch
 import '../firestore_repository/table_repository.dart'; // subscribeToMapCollection
 import '../global.dart'; // transactionStore, routeStack, gotoRoute, routeExist, errorReport, diamondTextToList, autheniumDecode, mapTableContent
 import '../global2.dart'; // txfController, txfControllerCheck, generateAutoNumber, addToTxfController, WidgetUpdateController
+import '../screen_session.dart';
 import 'admin_create_task_support.dart';
 import 'admin_home_support.dart'; // AdminTierColors
 import 'do_chain.dart';
@@ -54,7 +55,17 @@ class TaskCreateSubmit extends StatefulWidget {
   /// ui_component.dart clearData so a disposed-mid-await widget (whose
   /// _onSubmit `finally` never ran) cannot leave the button permanently
   /// disabled. Mirrors [TaskItemBuilder.resetClientPublished].
-  static void resetWriting(String scrName) => _writing.remove(scrName);
+  static void registerScreenSession() {
+    // Phase 2: flipped to nav:screen (stuck-flag after mid-await dispose).
+    ScreenSession.ensure(
+      'TaskCreateSubmit.writing',
+      TaskCreateSubmit.resetWriting,
+    );
+  }
+
+  static void resetWriting(String scrName) {
+    _writing.remove(scrName);
+  }
 
   /// Resolve the wizard vehicle id from the draft (SSOT when [wizardKey] is
   /// configured) with a screenTx fallback for non-wizard configs.
@@ -182,6 +193,7 @@ class _TaskCreateSubmitState extends State<TaskCreateSubmit> {
   @override
   void initState() {
     super.initState();
+    TaskCreateSubmit.registerScreenSession();
     _parseText();
     _subscribeStockLocation();
   }

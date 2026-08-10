@@ -4,12 +4,26 @@ import 'package:get/get.dart';
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
 import '../global2.dart';
+import '../screen_session.dart';
 import 'approver_sticky_bar.dart';
 
 class ItemCardDetail extends StatefulWidget {
   static final RxString currentStatus = ''.obs;
   static final Rx<List<dynamic>> currentRow = Rx<List<dynamic>>([]);
   static final RxMap<String, String> screenStatus = RxMap<String, String>({});
+
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'ItemCardDetail.screenStatus',
+      (scrName) => screenStatus.remove(scrName),
+      rebuild: RebuildPolicy.none,
+    );
+    ScreenSession.ensure(
+      'ItemCardDetail.currentRow',
+      (_) => currentRow.value = const [],
+      rebuild: RebuildPolicy.none,
+    );
+  }
 
   const ItemCardDetail({
     super.key,
@@ -45,6 +59,7 @@ class _ItemCardDetailState extends State<ItemCardDetail> {
   }
 
   void _initConfig() {
+    ItemCardDetail.registerScreenSession();
     try {
       _textArray = diamondTextToList(widget.component['text'] ?? '');
     } catch (_) {

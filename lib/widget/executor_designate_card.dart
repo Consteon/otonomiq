@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
 import '../redux/screen_transaction.dart';
+import '../screen_session.dart';
 import 'custody_count_list.dart';
 import 'driver_home_support.dart';
 import 'panel_card_support.dart';
@@ -43,6 +44,14 @@ class ExecutorDesignateCard extends StatefulWidget {
   /// Revision signal bumped on pick/clear. CustodyCountSubmit Obx-reads this
   /// to gate the enable state. Plain RxInt -- NOT an RxMap (no mutate-in-build).
   static final RxInt chosenRev = 0.obs;
+
+  static void registerScreenSession() {
+    ScreenSession.ensure(
+      'ExecutorDesignateCard.o1State',
+      ExecutorDesignateCard.clearO1State,
+      rebuild: RebuildPolicy.none,
+    );
+  }
 
   /// Clear ALL O1 state for a screen. Called from clearData (api.dart)
   /// on route change. Covers: #CHOSEN_DRIVER_VID, #CHOSEN_DRIVER_NAME,
@@ -133,6 +142,7 @@ class _ExecutorDesignateCardState extends State<ExecutorDesignateCard> {
   @override
   void initState() {
     super.initState();
+    ExecutorDesignateCard.registerScreenSession();
     _parseText();
     _subscribe();
   }

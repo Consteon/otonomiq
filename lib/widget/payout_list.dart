@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import '../firestore_repository/table_repository.dart'; // subscribeToMapCollection
 import '../global.dart'; // diamondTextToList, mapTableContent, autheniumDecode
 import '../global2.dart'; // txfController, txfControllerCheck, getPosition
+import '../screen_session.dart';
 import 'admin_create_task_support.dart'; // AdminCreateTaskSupport.formatRupiah
 import 'driver_home_support.dart'; // resolveAppVid, resolveDriverCurlyTokens, coerceNum
 import 'panel_card_support.dart'; // parseTablePath, TablePath
@@ -44,6 +45,10 @@ class PayoutList extends StatefulWidget {
 
   /// Clear per-screen state. Called from clearData (api.dart) and buildPage
   /// (ui_component.dart) on route change.
+  static void registerScreenSession() {
+    ScreenSession.ensure('PayoutList.selectionStore', PayoutList.clearState);
+  }
+
   static void clearState(String scrName) {
     _selectionStore.remove(scrName);
   }
@@ -138,6 +143,7 @@ class _PayoutListState extends State<PayoutList> {
   @override
   void initState() {
     super.initState();
+    PayoutList.registerScreenSession();
     _parseText();
     _parseRate();
     _subscribe();

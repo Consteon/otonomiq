@@ -8,6 +8,7 @@ import '../global2.dart';
 import '../model/general_get_controller.dart';
 import '../model/input_controller.dart';
 import '../model/otq_state.dart';
+import '../screen_session.dart';
 import 'do_chain.dart';
 import 'driver_home_support.dart';
 import 'panel_card_support.dart';
@@ -77,6 +78,14 @@ class CustodyEventSubmit extends StatefulWidget {
   static final Map<String, bool> _writing = {};
 
   /// Clear state for a screen. Called from buildPage.
+  static void registerScreenSession() {
+    // Phase 2: flipped to nav:screen (writing flag stuck after mid-await dispose).
+    ScreenSession.ensure(
+      'CustodyEventSubmit.writing',
+      CustodyEventSubmit.clearState,
+    );
+  }
+
   static void clearState(String scrName) {
     _writing.remove(scrName);
   }
@@ -101,6 +110,7 @@ class _CustodyEventSubmitState extends State<CustodyEventSubmit> {
   @override
   void initState() {
     super.initState();
+    CustodyEventSubmit.registerScreenSession();
     _parseText();
     _subscribe();
     _parseGate();
