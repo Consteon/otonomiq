@@ -46,12 +46,11 @@ class TablePicker extends StatefulWidget {
   static final Map<String, Map<int, Map<String, String>>> _labelStore = {};
 
   static void registerScreenSession() {
-    // Phase 1: nav:none, rebuild:screen mirrors today (buildPage-only).
-    // Phase 2: flipped to nav:all with clearAll (GroupPicker parity).
     ScreenSession.ensure(
       'TablePicker.selectionStore',
       TablePicker.clearState,
-      nav: NavPolicy.none,
+      nav: NavPolicy.all,
+      clearAllFn: TablePicker.clearAll,
     );
   }
 
@@ -59,6 +58,14 @@ class TablePicker extends StatefulWidget {
   static void clearState(String scrName) {
     _selectionStore.remove(scrName);
     _labelStore.remove(scrName);
+  }
+
+  /// Wipe EVERY screen's picker state. GroupPicker parity: clearData runs
+  /// post-frame, so clearing only the entering screen flashes stale ticks
+  /// for one frame. See GroupPicker.clearAll for the full rationale.
+  static void clearAll() {
+    _selectionStore.clear();
+    _labelStore.clear();
   }
 
   // ── Pure static helpers (testable without SDUI globals) ─────────────────

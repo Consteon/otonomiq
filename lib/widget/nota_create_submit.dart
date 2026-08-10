@@ -50,12 +50,10 @@ class NotaCreateSubmit extends StatefulWidget {
   /// ui_component.dart clearData so a disposed-mid-await widget cannot leave
   /// the button permanently disabled.
   static void registerScreenSession() {
-    // Phase 1: nav:none mirrors today (buildPage-only).
     // Phase 2: flipped to nav:screen (stuck-flag after mid-await dispose).
     ScreenSession.ensure(
       'NotaCreateSubmit.writing',
       NotaCreateSubmit.resetWriting,
-      nav: NavPolicy.none,
     );
   }
 

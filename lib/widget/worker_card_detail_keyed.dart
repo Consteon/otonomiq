@@ -37,6 +37,12 @@ class _WorkerCardDetailKeyedState extends State<WorkerCardDetailKeyed> {
   @override
   void initState() {
     super.initState();
+    // Register ItemCardDetail's ScreenSession entries: this widget publishes
+    // ItemCardDetail.currentRow (in build), so a screen that renders only this
+    // card — never ItemCardDetail itself — must still register so navReset
+    // clears currentRow on route change (the old approver_sticky_bar reach-in
+    // did this unconditionally before Phase 2).
+    ItemCardDetail.registerScreenSession();
     _initConfig();
     _subscribe();
   }

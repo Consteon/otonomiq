@@ -9,10 +9,10 @@ void main() {
     registerAllScreenSessionEntries();
   });
 
-  test('Phase 1 matrix: every entry has the expected policy', () {
+  test('Phase 2 matrix: every entry has the expected policy', () {
     final snap = ScreenSession.registrySnapshot;
 
-    // ── Both lists (nav:screen, rebuild:screen) ──────────────────────────
+    // ── nav:screen, rebuild:screen ───────────────────────────────────────
     _expectEntry(snap, 'CustodyCountList.countStore',
         nav: NavPolicy.screen, rebuild: RebuildPolicy.screen);
     _expectEntry(snap, 'CustodyReveal.editState',
@@ -27,55 +27,58 @@ void main() {
         nav: NavPolicy.screen, rebuild: RebuildPolicy.screen);
     _expectEntry(snap, 'ListActionCard.inflight',
         nav: NavPolicy.screen, rebuild: RebuildPolicy.screen);
+    // Phase 2 flips (were nav:none in Phase 1):
+    _expectEntry(snap, 'TaskItemBuilder.lastPublishedKl',
+        nav: NavPolicy.screen, rebuild: RebuildPolicy.screen);
+    _expectEntry(snap, 'TaskCreateSubmit.writing',
+        nav: NavPolicy.screen, rebuild: RebuildPolicy.screen);
+    _expectEntry(snap, 'NotaCreateSubmit.writing',
+        nav: NavPolicy.screen, rebuild: RebuildPolicy.screen);
+    _expectEntry(snap, 'CustodyEventSubmit.writing',
+        nav: NavPolicy.screen, rebuild: RebuildPolicy.screen);
+    _expectEntry(snap, 'TaskFeedList.flatSearch',
+        nav: NavPolicy.screen, rebuild: RebuildPolicy.screen);
+    _expectEntry(snap, 'CustomerOutstandingList.searchText',
+        nav: NavPolicy.screen, rebuild: RebuildPolicy.screen);
 
-    // ── nav:all (GroupPicker) ────────────────────────────────────────────
+    // ── nav:all ──────────────────────────────────────────────────────────
     _expectEntry(snap, 'GroupPicker.stores',
         nav: NavPolicy.all, rebuild: RebuildPolicy.screen);
+    // Phase 2 flip (was nav:none in Phase 1):
+    _expectEntry(snap, 'TablePicker.selectionStore',
+        nav: NavPolicy.all, rebuild: RebuildPolicy.screen);
 
-    // ── clearData-only (nav:screen, rebuild:none) ────────────────────────
+    // ── nav:screen, rebuild:none ─────────────────────────────────────────
     _expectEntry(snap, 'ExecutorDesignateCard.o1State',
         nav: NavPolicy.screen, rebuild: RebuildPolicy.none);
     _expectEntry(snap, 'NfcReader.collectorState',
         nav: NavPolicy.screen, rebuild: RebuildPolicy.none);
     _expectEntry(snap, 'SignaturePad.writeState',
         nav: NavPolicy.screen, rebuild: RebuildPolicy.none);
+    // Phase 2 new entries:
+    _expectEntry(snap, 'ItemCardDetail.screenStatus',
+        nav: NavPolicy.screen, rebuild: RebuildPolicy.none);
+    _expectEntry(snap, 'ItemCardDetail.currentRow',
+        nav: NavPolicy.screen, rebuild: RebuildPolicy.none);
 
-    // ── buildPage-only (nav:none, rebuild:screen) ────────────────────────
+    // ── nav:none, rebuild:screen (NOT flipped — documented reasons) ──────
     _expectEntry(snap, 'ApproverStickyBar.configs',
         nav: NavPolicy.none, rebuild: RebuildPolicy.screen);
     _expectEntry(snap, 'DriverHomeState',
         nav: NavPolicy.none, rebuild: RebuildPolicy.screen);
     _expectEntry(snap, 'TaskManifestList.expandState',
         nav: NavPolicy.none, rebuild: RebuildPolicy.screen);
-    _expectEntry(snap, 'CustodyEventSubmit.writing',
-        nav: NavPolicy.none, rebuild: RebuildPolicy.screen);
-    _expectEntry(snap, 'TaskItemBuilder.lastPublishedKl',
-        nav: NavPolicy.none, rebuild: RebuildPolicy.screen);
-    _expectEntry(snap, 'TaskCreateSubmit.writing',
-        nav: NavPolicy.none, rebuild: RebuildPolicy.screen);
-    _expectEntry(snap, 'NotaCreateSubmit.writing',
-        nav: NavPolicy.none, rebuild: RebuildPolicy.screen);
-    _expectEntry(snap, 'TaskFeedList.flatSearch',
-        nav: NavPolicy.none, rebuild: RebuildPolicy.screen);
-    _expectEntry(snap, 'CustomerOutstandingList.searchText',
-        nav: NavPolicy.none, rebuild: RebuildPolicy.screen);
     _expectEntry(snap, 'AssetStockList.activeTab',
-        nav: NavPolicy.none, rebuild: RebuildPolicy.screen);
-    _expectEntry(snap, 'TablePicker.selectionStore',
         nav: NavPolicy.none, rebuild: RebuildPolicy.screen);
 
     // ── Persistent ───────────────────────────────────────────────────────
-    // persistent:true with default nav/rebuild (screen/screen). The values
-    // are inert (persistent entries are skipped by both navReset and
-    // pageBuild) but the matrix pins what is actually stored.
     _expectEntry(snap, 'AdminCreateTaskSupport.drafts',
         nav: NavPolicy.screen, rebuild: RebuildPolicy.screen,
         persistent: true);
 
     // ── Completeness check ───────────────────────────────────────────────
-    // If a new entry is added to production but not to this test, this fails.
-    expect(snap.length, 23,
-        reason: 'expected 23 registered entries (22 non-persistent + 1 persistent)');
+    expect(snap.length, 25,
+        reason: 'expected 25 registered entries (Phase 2: +2 ItemCardDetail)');
   });
 }
 

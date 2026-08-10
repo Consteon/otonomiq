@@ -14,6 +14,7 @@ import 'widget/customer_outstanding_list.dart';
 import 'widget/driver_home_support.dart';
 import 'widget/executor_designate_card.dart';
 import 'widget/group_picker.dart';
+import 'widget/item_card_detail.dart';
 import 'widget/item_execution_list.dart';
 import 'widget/item_execution_submit.dart';
 import 'widget/list_action_card.dart';
@@ -52,4 +53,5 @@ void registerAllScreenSessionEntries() {
   AssetStockList.registerScreenSession();
   TablePicker.registerScreenSession();
   AdminCreateTaskSupport.registerScreenSession();
+  ItemCardDetail.registerScreenSession();
 }

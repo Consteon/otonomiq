@@ -308,12 +308,10 @@ class CustomerOutstandingList extends StatefulWidget {
   static final Map<String, String> _searchText = <String, String>{};
 
   static void registerScreenSession() {
-    // Phase 1: nav:none mirrors today (buildPage-only).
     // Phase 2: flipped to nav:screen (search text leaking across visits).
     ScreenSession.ensure(
       'CustomerOutstandingList.searchText',
       CustomerOutstandingList.clearState,
-      nav: NavPolicy.none,
     );
   }
 

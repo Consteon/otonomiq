@@ -56,12 +56,10 @@ class TaskCreateSubmit extends StatefulWidget {
   /// _onSubmit `finally` never ran) cannot leave the button permanently
   /// disabled. Mirrors [TaskItemBuilder.resetClientPublished].
   static void registerScreenSession() {
-    // Phase 1: nav:none mirrors today (buildPage-only).
     // Phase 2: flipped to nav:screen (stuck-flag after mid-await dispose).
     ScreenSession.ensure(
       'TaskCreateSubmit.writing',
       TaskCreateSubmit.resetWriting,
-      nav: NavPolicy.none,
     );
   }
 

@@ -79,12 +79,10 @@ class CustodyEventSubmit extends StatefulWidget {
 
   /// Clear state for a screen. Called from buildPage.
   static void registerScreenSession() {
-    // Phase 1: nav:none mirrors today (buildPage-only).
     // Phase 2: flipped to nav:screen (writing flag stuck after mid-await dispose).
     ScreenSession.ensure(
       'CustodyEventSubmit.writing',
       CustodyEventSubmit.clearState,
-      nav: NavPolicy.none,
     );
   }
 

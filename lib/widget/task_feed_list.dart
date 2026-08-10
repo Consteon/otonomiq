@@ -53,12 +53,10 @@ class TaskFeedList extends StatefulWidget {
   /// Clear FLAT-mode search text for [scrName]. Called from buildPage
   /// (ui_component.dart) on route change / screen reload.
   static void registerScreenSession() {
-    // Phase 1: nav:none mirrors today (buildPage-only).
     // Phase 2: flipped to nav:screen (search text leaking across visits).
     ScreenSession.ensure(
       'TaskFeedList.flatSearch',
       TaskFeedList.clearFlatSearch,
-      nav: NavPolicy.none,
     );
   }
 

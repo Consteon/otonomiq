@@ -58,13 +58,11 @@ class TaskItemBuilder extends StatefulWidget {
   static final Map<String, String> _lastPublishedKl = {};
 
   static void registerScreenSession() {
-    // Phase 1: nav:none mirrors today (buildPage-only).
     // Phase 2: flipped to nav:screen (its own doc comment says "Static so
     // clearData can reset it").
     ScreenSession.ensure(
       'TaskItemBuilder.lastPublishedKl',
       TaskItemBuilder.resetClientPublished,
-      nav: NavPolicy.none,
     );
   }
 
