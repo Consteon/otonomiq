@@ -210,6 +210,7 @@ import 'widget/driver_home_support.dart';
   0.9.87.04 (260805) HH : update version number
   0.9.88.01 (260805) OO : add feature adhoc in driver runtime, redesign report, log, improve login and mobile refresh
   0.9.89.01 (260810) OO : toggle for driver module, signature store to firebase storage, crash hardening, screen session, token resolver
+  0.9.90.01 (260810) HH : version update
 */
 
 // ========= Constants ==========================
@@ -220,7 +221,7 @@ const clearHistory =
 int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
-const String version = '0.9.89';
+const String version = '0.9.90';
 const String subVersion = '.01';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
