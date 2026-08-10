@@ -29,7 +29,7 @@ Map<String, dynamic> parseAddToEvent(String body) {
 /// absent, not a Map, or has an empty mode.
 ///
 /// [resolve] applies the same token pipeline the caller uses for addToEvent
-/// values (replacePlaceholders + _resolveScreenTxMarkers). Notification
+/// values (replacePlaceholders + TokenResolver.screenTxMarkers). Notification
 /// values intentionally skip resolveDriverCurlyTokens so that CF
 /// per-recipient {field} tokens (e.g. {nama}) survive literally.
 ///

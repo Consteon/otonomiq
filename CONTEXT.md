@@ -20,3 +20,23 @@ Known exception, by design: `ApproverStickyBar` keeps its own `#CURRENT_ROUTE` l
 The read-side accessor for a server-driven component map (`lib/sdui_spec.dart`): decode (`autheniumDecode`), ◆-split (`diamondTextToList`), index-guard and default happen inside the module, behind four reads — `text(i)`, `str(key)`, `intOr(key, def)`, `list(key)` (+ `textLength`, `has`). It exists because the hand-rolled per-widget parsing idiom (47 `_t()` copies, raw `component[...]` reads) repeatedly shipped RangeError and missed-decode crashes.
 
 Adoption is **on-touch only**: new widgets must read config through `SduiSpec`; an existing widget is migrated only when it is already being edited for another reason — never in bulk. `str()` trims by default; `list()` returns `[]` for empty (never `['']`); decode runs before split (repo ordering contract).
+
+## TokenResolver
+
+Unified entry point for token resolution (`lib/token_resolver.dart`). Five grammars exist in the SDUI pipeline:
+
+| Syntax | Example | Resolver | Empty semantics |
+|--------|---------|----------|-----------------|
+| `{token}` | `{userVid}` | `TokenResolver.curly` → `resolveDriverCurlyTokens` | Empty leaves literal (pending-safe) |
+| `<KEY>` | `<APPROVAL_STATUS>` | `TokenResolver.screenTxMarkers` | Empty resolves to `''` |
+| `{{POS(n)}}` / `{{DOC(n)}}` | `{{POS(3)}}` | `replacePlaceholders` (api.dart) | — |
+| `◁N▷` / `◀N▶` | `◁2▷` | `resolveValueTokens` (table_repository.dart) | — |
+| `#KEY` reads | `#VID` | Direct `transactionStore.state.screenTx` reads | — |
+
+Canonical composition order: `curly → replacePlaceholders → screenTxMarkers`.
+
+The `{token}` vs `<KEY>` empty-semantics dialect difference is load-bearing: `{token}` leaves the literal so `filterByMultiClause`'s `value.contains('{')` guard detects unresolved state (pending-safe / fail-closed). `<KEY>` treats empty as a valid resolution.
+
+`TokenResolver.curly` delegates to `resolveDriverCurlyTokens` (body stays in `driver_home_support.dart`). Moving the body and extracting the `_deferActiveTripPublish` side effect are F2 work.
+
+Adoption: new widgets use `TokenResolver`; existing regex copies migrate on-touch only.

@@ -47,6 +47,7 @@ import 'notification/bloc.dart';
 import 'page/main_page.dart';
 import 'part/build_part/channel.dart';
 import 'redux/screen_transaction.dart';
+import 'token_resolver.dart';
 import 'widget/build_theme.dart';
 import 'widget/driver_home_support.dart';
 import 'widget/ftz_webview.dart';
@@ -4700,14 +4701,6 @@ String replacePlaceholders(String text, List<List<dynamic>> ref) {
   });
 } // end of replacePlaceholders
 
-String _resolveScreenTxMarkers(String text) {
-  var screenTx = transactionStore.state.screenTx;
-  return text.replaceAllMapped(RegExp(r'<([a-zA-Z_][a-zA-Z0-9_]*)>'), (m) {
-    String key = m.group(1)!;
-    return screenTx[key]?.toString() ?? m.group(0)!;
-  });
-}
-
 void saveSend(
   int? timeStamp,
   String scrName,
@@ -4828,7 +4821,7 @@ void saveSend(
           .replaceAll("◼D⭘", "◼D⭘tableVid◼$currentTableVid⭘")
           .replaceAll("◼S⭘", "◼S⭘tableVid◼$currentTableVid⭘");
       tableString = replacePlaceholders(tableString, ref);
-      tableString = _resolveScreenTxMarkers(tableString);
+      tableString = TokenResolver.screenTxMarkers(tableString);
       int d = 1;
     } catch (e) {
       // tableString = null;
@@ -4844,7 +4837,7 @@ void saveSend(
           "◼D⭘tableVid◼$currentTableVid⭘",
         );
         updateString = replacePlaceholders(updateString, ref);
-        updateString = _resolveScreenTxMarkers(updateString);
+        updateString = TokenResolver.screenTxMarkers(updateString);
       }
     } catch (e) {
       updateString = '';
@@ -4860,7 +4853,7 @@ void saveSend(
           "◼D⭘tableVid◼$currentTableVid⭘",
         );
         deleteString = replacePlaceholders(deleteString, ref);
-        deleteString = _resolveScreenTxMarkers(deleteString);
+        deleteString = TokenResolver.screenTxMarkers(deleteString);
       }
     } catch (e) {
       deleteString = '';
@@ -4873,13 +4866,13 @@ void saveSend(
         eventString = autheniumDecode(raw) ?? '';
         eventString = resolveDriverCurlyTokens(eventString, scrName);
         eventString = replacePlaceholders(eventString, ref);
-        eventString = _resolveScreenTxMarkers(eventString);
+        eventString = TokenResolver.screenTxMarkers(eventString);
         // Notification fields are ADDITIVE — a failure here must never discard
         // the base addToEvent payload (the outer catch resets eventString to '').
         try {
           eventString += buildNotificationSuffix(
             component['notification'],
-            (s) => _resolveScreenTxMarkers(replacePlaceholders(s, ref)),
+            (s) => TokenResolver.screenTxMarkers(replacePlaceholders(s, ref)),
           );
         } catch (e) {
           errorReport(e);
@@ -4899,7 +4892,7 @@ void saveSend(
           scrName,
         );
         updateEventString = replacePlaceholders(updateEventString, ref);
-        updateEventString = _resolveScreenTxMarkers(updateEventString);
+        updateEventString = TokenResolver.screenTxMarkers(updateEventString);
       }
     } catch (e) {
       updateEventString = '';
