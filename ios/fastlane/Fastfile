@@ -8,8 +8,9 @@ platform :ios do
     sh("xattr -cr .. 2>/dev/null || true")
     sh("unset GEM_HOME GEM_PATH RUBYLIB; cd .. && flutter build ipa --release")
     
-    # Locate built IPA package AFTER build completes
-    ipa_path = Dir["../build/ios/ipa/*.ipa"].first || Dir["build/ios/ipa/*.ipa"].first || Dir["/tmp/*_build/ios/ipa/*.ipa"].first
+    # Resolve real path of ../build to handle symlinks like /tmp/<app>_build
+    build_dir = File.exist?("../build") ? File.realpath("../build") : nil
+    ipa_path = (build_dir ? Dir["#{build_dir}/ios/ipa/*.ipa"].first : nil) || Dir["../build/ios/ipa/*.ipa"].first || Dir["build/ios/ipa/*.ipa"].first
     
     # Locate any AuthKey_*.p8 file in fastlane directory or ios directory
     p8_files = Dir["fastlane/AuthKey_*.p8"] + Dir["AuthKey_*.p8"]
