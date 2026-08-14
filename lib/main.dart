@@ -607,6 +607,8 @@ class _MyHomePageState extends State<MyHomePage> {
             child: Image.network(
               'https://firebasestorage.googleapis.com/v0/b/otq-01-ase2/o/c%2Fautsorz%2Fimage%2Fautsorz-signup-300x70.png?alt=media&token=fdf74314-429c-4c1e-bd31-a857e6f4b744',
               width: 400,
+              // Offline here would otherwise report a fatal via onError above.
+              errorBuilder: (_, _, _) => const SizedBox(height: 80),
               // height: 80,
               // alignment: Alignment.center,
             ),

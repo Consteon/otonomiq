@@ -81,10 +81,8 @@ class OtqGetImages2State extends State<OtqGetImages2>
         // Note: fileNameBase is computed above unconditionally; in camera mode
         // on a device with empty #CAMS, the UUID is generated and discarded.
         // This is harmless and keeps the code flat.
-        List<CameraDescription>? cams =
-            transactionStore.state.screenTx['#CAMS']
-                as List<CameraDescription>?;
-        if (cams == null || cams.isEmpty) return;
+        final List<CameraDescription> cams = await ensureCams();
+        if (cams.isEmpty) return;
 
         imgUrl = await getPhotoCameraImage(
           cams,

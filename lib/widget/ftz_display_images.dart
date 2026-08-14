@@ -219,7 +219,12 @@ class _FullScreenImageViewState extends State<FullScreenImageView> {
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    _imageListener = ImageStreamListener(_onImageLoad);
+    // onError marks a failed load as HANDLED. Without an error listener the
+    // framework routes the failure to FlutterError.onError, which main.dart
+    // reports as a FATAL crash (Crashlytics: NetworkImage._loadAsync, HTTP
+    // 403/404/offline) even though nothing actually died. The user-visible
+    // fallback is the errorBuilder on the image in build().
+    _imageListener = ImageStreamListener(_onImageLoad, onError: (_, _) {});
   }
 
   @override
@@ -286,7 +291,19 @@ class _FullScreenImageViewState extends State<FullScreenImageView> {
           maxScale: 5.0,
           boundaryMargin: const EdgeInsets.all(100.0),
           constrained: false,
-          child: Image.network(widget.imageUrl),
+          child: Image.network(
+            widget.imageUrl,
+            // No errorBuilder ⇒ Image registers no error listener in release,
+            // so a dead url becomes a Crashlytics fatal instead of an icon.
+            errorBuilder: (_, _, _) => const SizedBox(
+              width: 200,
+              height: 200,
+              child: Center(
+                child: Icon(Icons.broken_image_outlined,
+                    size: 48, color: Colors.white54),
+              ),
+            ),
+          ),
         ),
       ),
     );

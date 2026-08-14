@@ -188,13 +188,16 @@ class _DetailCardState extends State<DetailCard> {
     // Image gallery: resolve each template, pair with label, skip empty urls
     final List<_ImageSlot> imageSlots = [];
     for (int i = 0; i < _imageTpls.length; i++) {
-      final String url =
-          resolveMapTokens(_imageTpls[i], doc, const <String, String>{})
-              .trim();
-      if (url.isEmpty) continue;
+      final String resolved =
+          resolveMapTokens(_imageTpls[i], doc, const <String, String>{});
       final String caption =
           _imageLabels.length > i ? _imageLabels[i].trim() : '';
-      imageSlots.add(_ImageSlot(url: url, caption: caption));
+      // One field can hold several ◇-joined urls; one slot each (the gallery is
+      // a Wrap, so N slots fit). See splitImageUrls for why the joined string
+      // must never reach Image.network.
+      for (final String url in splitImageUrls(resolved)) {
+        imageSlots.add(_ImageSlot(url: url, caption: caption));
+      }
     }
 
     return Container(

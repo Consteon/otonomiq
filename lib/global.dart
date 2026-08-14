@@ -620,6 +620,32 @@ const a64 = [
 const proxyCollectionName = 'Proxy';
 const eventCollectionName = 'Event';
 
+/// Cameras for `#CAMS` — fetched on first camera use, then cached in the store.
+///
+/// Deliberately NOT fetched during globalInit: `availableCameras()` starts
+/// CameraX (`ProcessCameraProvider.getInstance()`), and if the Flutter engine
+/// detaches while that call is still in flight, camera_android_camerax replies
+/// to a dead Dart isolate and its pigeon codec throws
+/// `IllegalArgumentException: Unsupported value` on the Android main thread —
+/// an uncatchable fatal (Crashlytics: CameraXLibrary.g.kt:1219). Fetching on
+/// demand keeps that window out of every cold start, and also removes the old
+/// race where a camera screen opened before boot finished saw `#CAMS` null.
+Future<List<CameraDescription>> ensureCams() async {
+  final Object? cached = transactionStore.state.screenTx['#CAMS'];
+  if (cached is List && cached.isNotEmpty) {
+    return cached.cast<CameraDescription>();
+  }
+  try {
+    final List<CameraDescription> cams = await availableCameras();
+    transactionStore
+        .dispatch(UpdateScreenTxAction(ScreenTransaction({'#CAMS': cams})));
+    return cams;
+  } catch (e) {
+    devPrint('ensureCams error: $e');
+    return const <CameraDescription>[];
+  }
+}
+
 Future<int> globalInit() async {
   setMe();
   debugCount = -21;
@@ -874,11 +900,7 @@ Future<int> globalInit() async {
       firestoreIO; // firestore doc for notification from others. Document before /msg
   transactionStore = DevToolsStore<ScreenTransaction>(transactionReducer,
       initialState: ScreenTransaction(initTransactionStore()));
-  availableCameras().then((value) {
-    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-      '#CAMS': value,
-    })));
-  });
+  // #CAMS is filled lazily by ensureCams() on first camera use — see its doc.
   // ---- Restore persisted driver login (secure storage -> Redux) ----
   // I2: placed strictly AFTER transactionStore is non-null (created just
   // above). Read the driverLogin key; if non-empty, seed #has_user_login so the

@@ -289,8 +289,7 @@ class FtzCheckerState extends State<FtzChecker> {
 
     Future<String> checkerTakePicture(String lens, String? title) async {
       // get selfie, save to firebase, then return url to selfie image
-      List<CameraDescription> cameras =
-          transactionStore.state.screenTx['#CAMS'];
+      final List<CameraDescription> cameras = await ensureCams();
       int imgSize = (widget.component['imgWidth'] ?? 540) >
               (widget.component['imgHeight'] ?? 540)
           ? widget.component['imgWidth'] ?? 540

@@ -308,7 +308,7 @@ Error when executing method get() from document reference. Should be gone when a
     '#INTERNET' = bool, false = no internet connection, true = internet ok
     '#CAMERA' = bool, true = camera mode is on, refresh action cannot functioned; false = no camera activity.
     '#SIM_COUNTRY_CODES = List<String>, list of country code prefixz in all sim cards.
-    '#CAMS' = List <CameraDescription>, list of available cameras.
+    '#CAMS' = List <CameraDescription>, list of available cameras. Filled lazily by ensureCams() (global.dart) on first camera use — NOT at boot, because a CameraX getInstance() still in flight when the engine detaches is a native fatal. Always read it through ensureCams().
     '#LASTGPSTIME' = Last timestamp.millisecondsSinceEpoch from GPS reading.
 	'#GPSDELAYTIME' = Delay time (ms) to get #GPSDATA from gps data before it. Calculated from #LASTGPSTIME. At launch, initialized as 0
 	'#GPSDATA' = Latest gps data in diamond separated. At launch, initialized as '--'

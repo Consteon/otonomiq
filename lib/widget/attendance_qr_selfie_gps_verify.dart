@@ -217,9 +217,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
 
     Future<String> takePicture(String lens) async {
       // get selfie, save to firebase, then return url to selfie image
-      List<CameraDescription>? cams =
-          transactionStore.state.screenTx['#CAMS'] as List<CameraDescription>?;
-      if (cams == null || cams.isEmpty) return emptyImageUrl;
+      final List<CameraDescription> cams = await ensureCams();
+      if (cams.isEmpty) return emptyImageUrl;
       String selfieUrl = await getPhotoCameraImage(
         cams,
         widget.component['label'] ?? 'Camera',
@@ -783,9 +782,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
               lens = 'back';
             }
             try {
-              List<CameraDescription>? cams =
-                  transactionStore.state.screenTx['#CAMS'] as List<CameraDescription>?;
-              if (cams == null || cams.isEmpty) throw Exception('No cameras available');
+              final List<CameraDescription> cams = await ensureCams();
+              if (cams.isEmpty) throw Exception('No cameras available');
               transactionStore.dispatch(
                   UpdateScreenTxAction(ScreenTransaction({'#CAMERA': true})));
               selfieUrl = await getPhotoCameraImage(
@@ -1211,9 +1209,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
         await Future.delayed(const Duration(milliseconds: 500));
 
         // --- §3 step 3→4 transition: Front-camera selfie ---
-        List<CameraDescription>? cams = transactionStore
-            .state.screenTx['#CAMS'] as List<CameraDescription>?;
-        if (cams == null || cams.isEmpty) {
+        final List<CameraDescription> cams = await ensureCams();
+        if (cams.isEmpty) {
           setDataOK('2');
           return;
         }

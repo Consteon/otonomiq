@@ -979,20 +979,8 @@ class _TimelineState extends State<Timeline> {
 
     try {
       if (choice == 'camera') {
-        List<CameraDescription>? cams;
-        try {
-          cams =
-              transactionStore.state.screenTx['#CAMS']
-                  as List<CameraDescription>?;
-        } catch (_) {
-          try {
-            final raw = transactionStore.state.screenTx['#CAMS'] as List?;
-            cams = raw?.cast<CameraDescription>();
-          } catch (_) {
-            cams = null;
-          }
-        }
-        if (cams == null || cams.isEmpty) {
+        final List<CameraDescription> cams = await ensureCams();
+        if (cams.isEmpty) {
           debugPrint('[Timeline] #CAMS missing, fallback to ImagePicker');
           final XFile? picked = await _picker.pickImage(
             source: ImageSource.camera,

@@ -641,13 +641,25 @@ Future saveImagePutInImageMap(String url) async {
       List<String> fileArray = localPath.split('___');
       String rawFolder = Uri.decodeComponent(fileArray[0]);
       String folder = folderFromRawPath(rawFolder);
-      await saveImageToCloud(
-        imagePath: localPath,
-        folder: folder,
-        // A path with no '___' splits to a single element, so fileArray[1]
-        // would throw the next RangeError right after the substring one this
-        // guard removes. Same trigger (camera cancelled -> empty path).
-        rawFileName: fileArray.length > 1 ? fileArray[1] : emptyString,
+      // NOT awaited. Both callers (getPhotoCameraImage / getGalleryImage) are
+      // awaited by the widget BEFORE it shows the thumbnail, so awaiting the
+      // Storage round-trip here froze every capture for the whole upload:
+      // getDownloadURL (404) + putFile + getDownloadURL — seconds on a weak
+      // network, and the camera dialog was already closed with nothing on
+      // screen. Nothing downstream needs the URL now: the entry is registered
+      // in imageMap above, sendImagesInImageMap() re-uploads it periodically
+      // AND is awaited at submit time (submit_repository.addNewSubmit2), which
+      // is exactly the offline path that already works with no upload here.
+      safeUnawaited(
+        saveImageToCloud(
+          imagePath: localPath,
+          folder: folder,
+          // A path with no '___' splits to a single element, so fileArray[1]
+          // would throw the next RangeError right after the substring one this
+          // guard removes. Same trigger (camera cancelled -> empty path).
+          rawFileName: fileArray.length > 1 ? fileArray[1] : emptyString,
+        ),
+        'saveImagePutInImageMap upload',
       );
     }
   } // end if (await internetConnectedCheck())
@@ -828,6 +840,10 @@ Widget displayImage({
           fit: BoxFit.contain,
           placeholder: kTransparentImage,
           image: finalUrl,
+          // Without imageErrorBuilder a failed fetch has no error listener, so
+          // the framework reports it to FlutterError.onError → Crashlytics
+          // fatal. Same guard the cached branch gets from errorWidget.
+          imageErrorBuilder: (_, _, _) => const Icon(Icons.error),
         );
       } // end if(cached)
     }
@@ -3263,6 +3279,9 @@ Future getVidData() async {
       ),
     );
   } catch (e) {
+    // Swallowing this silently also hid WHY #MSG_REF/#FS_REF stayed null for
+    // the rest of the launch (see launchCheck's msgDoc guard).
+    devPrint('getVidData failed — #FS_REF/#MSG_REF not dispatched: $e');
     ref = null;
   }
   // ref is null whenever ANYTHING above failed — most commonly the pre-login
@@ -3980,47 +3999,59 @@ Future<int> launchCheck() async {
     ); //= write updated data to user dpc
     result = 9928;
     docRef = state['#MSG_REF']; //= get message doc reference for firestore
-    // A transaction NEVER works offline — unlike the plain update above it
-    // cannot be queued by Firestore persistence, it needs a server round-trip.
-    // Un-awaited and unguarded, its rejection ([cloud_firestore/unavailable]
-    // "Unable to resolve host") escaped the surrounding (synchronous) try to
-    // platformDispatcher.onError and was recorded as a FATAL. Awaiting instead
-    // would block login on that round-trip, so keep it fire-and-forget and
-    // guard it. The write is retried by the next launchCheck.
-    safeUnawaited(
-        FirebaseFirestore.instance.runTransaction((Transaction tx) async {
-      result = 9929;
-      var msgSnapshot = await tx.get<Map<String, dynamic>>(docRef);
-      Map<String, dynamic> updateMsg = {};
-      result = 9930;
-      // Only write a real token. This ran unguarded, so any start that reached
-      // here before setUpFirebase had dispatched #FCM_TOKEN (getToken() null,
-      // or the static _isSetUp guard short-circuiting a later call in a process
-      // where the dispatch never happened) wrote `f: null` and WIPED the stored
-      // token -- after which the sender has no target and nobody gets a push.
-      final fcmToken = state['#FCM_TOKEN'];
-      if (fcmToken != null && fcmToken.toString().isNotEmpty) {
-        updateMsg["f"] = fcmToken;
-      }
-      result = 9931;
-      if (msgSnapshot.exists) {
-        result = 9932;
-        if (msgSnapshot.data()!["n"] == null) {
-          updateMsg["n"] = cUser.displayName ?? '';
-          result = 9933;
+    // getVidData() dispatches #MSG_REF ONLY when its Future.wait(...) 12s block
+    // succeeds; on a pre-login cold start / timeout / offline it throws, its
+    // catch sets ref = null and dispatches NOTHING, so #MSG_REF is still null
+    // here. tx.get(null) then throws "type 'Null' is not a subtype of type
+    // 'DocumentReference<Map<String, dynamic>>'" from inside the transaction
+    // callback. Skip the write — the next launchCheck retries it. (The #FS_REF
+    // update above survives the same hole only because safeFsUpdate guards the
+    // cast itself.)
+    if (docRef is! DocumentReference) {
+      devPrint('launchCheck: #MSG_REF not ready — msgDoc transaction skipped');
+    } else {
+      // A transaction NEVER works offline — unlike the plain update above it
+      // cannot be queued by Firestore persistence, it needs a server round-trip.
+      // Un-awaited and unguarded, its rejection ([cloud_firestore/unavailable]
+      // "Unable to resolve host") escaped the surrounding (synchronous) try to
+      // platformDispatcher.onError and was recorded as a FATAL. Awaiting instead
+      // would block login on that round-trip, so keep it fire-and-forget and
+      // guard it. The write is retried by the next launchCheck.
+      safeUnawaited(
+          FirebaseFirestore.instance.runTransaction((Transaction tx) async {
+        result = 9929;
+        var msgSnapshot = await tx.get<Map<String, dynamic>>(docRef);
+        Map<String, dynamic> updateMsg = {};
+        result = 9930;
+        // Only write a real token. This ran unguarded, so any start that reached
+        // here before setUpFirebase had dispatched #FCM_TOKEN (getToken() null,
+        // or the static _isSetUp guard short-circuiting a later call in a process
+        // where the dispatch never happened) wrote `f: null` and WIPED the stored
+        // token -- after which the sender has no target and nobody gets a push.
+        final fcmToken = state['#FCM_TOKEN'];
+        if (fcmToken != null && fcmToken.toString().isNotEmpty) {
+          updateMsg["f"] = fcmToken;
         }
-        if (msgSnapshot.data()!["p"] == null) {
-          updateMsg["p"] = cUser.photoURL ?? '';
-          result = 9934;
+        result = 9931;
+        if (msgSnapshot.exists) {
+          result = 9932;
+          if (msgSnapshot.data()!["n"] == null) {
+            updateMsg["n"] = cUser.displayName ?? '';
+            result = 9933;
+          }
+          if (msgSnapshot.data()!["p"] == null) {
+            updateMsg["p"] = cUser.photoURL ?? '';
+            result = 9934;
+          }
+          //await tx.update(docRef, updateMsg);
         }
-        //await tx.update(docRef, updateMsg);
-      }
-      result = 9935;
-      // updateMsg can now be empty (no token yet, nothing else to backfill);
-      // skip the write rather than issue a pointless transaction update.
-      if (updateMsg.isNotEmpty) tx.update(docRef, updateMsg);
-      result = 9936;
-    }), 'launchCheck msgDoc'); // end of firebase transaction
+        result = 9935;
+        // updateMsg can now be empty (no token yet, nothing else to backfill);
+        // skip the write rather than issue a pointless transaction update.
+        if (updateMsg.isNotEmpty) tx.update(docRef, updateMsg);
+        result = 9936;
+      }), 'launchCheck msgDoc'); // end of firebase transaction
+    }
     //    docRef.updateData(updateData); //= write updated data to message doc
     // write user qr seed to secure storage
     final sw4 = _loginPerfTrace ? (Stopwatch()..start()) : null;
