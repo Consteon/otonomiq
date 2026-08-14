@@ -30,10 +30,12 @@ Provides the top-bar context for workspace screens. Two rendering modes:
 
 Step mode renders **title + step subtitle only** (no in-header back arrow) — back navigation is handled by the app bar (pops `routeStack`).
 
+**No-data diagnostic (driver-stop):** when no task doc matches (`monoText` and customer both empty) the header still renders — the left title falls back to text slot **[0]** (uppercased), the chip keeps slot **[1]**. Before the fix the fallback reused slot [1], so both sides printed the same string.
+
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `variant` | string | No | `"step"` for admin step header; absent/other = driver-stop |
-| `text` | diamond `◆` | Rec. | Step: slot 0 = title (bold), slot 1 = step subtitle (grey). Absent = renders empty (safe). |
+| `text` | diamond `◆` | Rec. | Step: slot 0 = title (bold), slot 1 = step subtitle (grey). Driver-stop: slot 0 = stop prefix (default `Stop`), slot 1 = chip label (default `Berjalan`). Absent = renders empty (safe). |
 | `backRoute` | string | No | Driver-stop only. Ignored in step mode (app bar handles back). |
 
 ## Data Source

@@ -37,6 +37,8 @@ export 'executor_designate_card.dart';
 // development
 export 'do_otq_bottom_sheet.dart';
 export 'do_otq_dialog.dart';
+export 'doc_download.dart';
+export 'doc_viewer.dart';
 export 'ftz_autonumber.dart';
 export 'ftz_checker.dart';
 export 'ftz_display_images.dart';

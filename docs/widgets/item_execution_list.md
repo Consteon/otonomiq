@@ -1,6 +1,6 @@
 # ItemExecutionList
 
-Per-item execution list for P11 DeliveryWorkspace. Supports four transaction types: deliver (editable steppers), sale, purchase, refill (read-only cards).
+Per-item execution list for P11 DeliveryWorkspace. Supports four transaction types: deliver (editable steppers with optional stock cap), sale (editable stepper with optional stock cap via `saleCapSearch`), purchase (editable stepper, uncapped), refill (static card, stepper deferred).
 
 - **File:** [lib/widget/item_execution_list.dart](../../lib/widget/item_execution_list.dart)
 - **Class:** `ItemExecutionList` (StatefulWidget)
@@ -44,6 +44,11 @@ Items without a `tx` field (or `tx` empty) render as deliver for backward compat
 | editDrop | `"true"` | Edit lock for **returnable** deliver rows. `"false"` (case-insensitive) removes +/- buttons and locks drop at seeded value (plan, or min(plan, cap) when `dropCapTable` is configured). Any other value or absent = editable (backward-compatible default). Pickup is gated separately by `editPickup`. Applies to the default (`fields`) variant only — `variant:pivot` renders custody-count slots and is unaffected. |
 | editPickup | `"true"` | Edit lock for **returnable** pickup cells. `"false"` (case-insensitive) removes +/- buttons and locks pickup at seeded value (`ap` = `pp`). Pickup is never capped, so the lock always produces `ap` = `pp` exactly. Any other value or absent = editable (backward-compatible default). Consumable rows have no pickup cell — the flag is a silent no-op. Applies to the default (`fields`) variant only — `variant:pivot` renders custody-count slots and is unaffected. Locking pickup makes the **Opportunistic** and **Partial** pickup states unreachable (`_cellStatus` always returns `complete`); the cell permanently renders `✓ Sesuai`. This is why spec §2 defaults pickup to `TRUE` — the opportunistic empty-return count is only known at the customer site. |
 | editConsumable | `"true"` | Edit lock for **consumable** rows. Governs: (a) non-returnable deliver rows (stepper hidden, actual = plan) and (b) sale/purchase cards (stepper shown when true, static qty frame when false). Same parse rule as `editDrop`. Refill is always static (no stepper regardless of this flag). Applies to the default (`fields`) variant only -- `variant:pivot` renders custody-count slots and is unaffected. **Edge case:** `putIfAbsent` seeds sale/buy once per session. A mid-session flip to `"false"` (requires page-JSON reload) leaves an already-adjusted entry at its driver-set value. Same property as `editDrop`. |
+| saleCapSearch | `''` (no cap) | Search filter for **sale** stock cap. When non-empty, sale rows (`as`) are capped at the item's stock in the vehicle's `asset_cache`, mirroring `dropCap` for returnable drop. Example: `lv◼{vehicleId}⭘cd◼full`. `{vehicleId}` resolves from the task doc's `vehicleField` (default `vv`). Note: `cd` is fill-state (`empty`/`full`), NOT item category -- category lives in the `item` table's `ic` field, so sale and drop searches legitimately use the same `cd◼full` filter and are separated per-row by item id. Requires a cap-table subscription (`dropCapTable` or `saleCapTable`). Uses `saleCapKey` for item id, `saleCapField` for qty, `saleCapLabel` for status label (each with fallback chain -- see those rows). Absent/blank = no sale cap (backward-compatible default). |
+| saleCapTable | `''` | Firestore table path for sale cap subscription. Activates the `_capCode` subscription when `dropCapTable` is blank, enabling sale cap for tenants that sell consumables but do no returnable drop. When BOTH `dropCapTable` and `saleCapTable` are non-blank, `dropCapTable` wins (the subscription is shared; precedence is deliberately opposite from `saleCapKey`/`saleCapField`/`saleCapLabel` where sale overrides drop). Resolved by `resolveCapTable`. |
+| saleCapKey | `''` | Item id field for sale cap map lookup. Fallback: `dropCapKey` -> hard default `'ii'`. Resolved by `resolveCapFields`. |
+| saleCapField | `''` | Quantity field for sale cap map lookup. Fallback: `dropCapField` -> hard default `'qt'`. Resolved by `resolveCapFields`. |
+| saleCapLabel | `''` | Status label for capped sale rows. Fallback: `capLabel` -> hard default `'Maks <max>'`. `<max>` is replaced with the cap value at render time. Resolved by `resolveCapFields`. |
 | `variant` | `"fields"` (default) or `"pivot"` | Structural variant. `fields` = existing behavior (1 record/item, field-pair steppers). `pivot` = N records/item grouped by `groupKey`, stepper per `pivotField` value. |
 
 ### Pivot-specific config (variant:"pivot")
@@ -133,16 +138,25 @@ Best-guess mapping (schema/CF not yet defined):
 |----------|----------|
 | `editPickup:"false"` | Pickup cell has no +/- buttons and is pinned at plan seed. `_cellStatus` returns `complete` always, so the **Opportunistic** (violet) and **Partial** (amber) pickup states are unreachable — the cell permanently renders `✓ Sesuai`. `ap` == `pp` on submit. Drop and consumable rows are unaffected. |
 | All three keys absent | All steppers present and editable: deliver drop/pickup, sale, purchase. Refill stays static. Byte-identical to the new default behavior. |
-| `editConsumable:"false"` | Sale and purchase cards show static qty frame (no stepper). Consumable deliver row locked. Returnable rows unaffected. On submit: `as`=`ps`, `ab`=`pb`. |
-| `editConsumable:"true"` (or absent) | Sale and purchase cards show `- [n] +` stepper. Driver can adjust qty. Status line shows `✓ Sesuai` when actual == plan, `Partial` when under, `+N extra` when over. On submit: `as`/`ab` = driver-adjusted value. |
+| `editConsumable:"false"` | Sale and purchase cards show static qty frame (no stepper). Consumable deliver row locked. Returnable rows unaffected. On submit: `ab`=`pb`; `as`=`ps` **unless `saleCapSearch` is active**, in which case `as`=`min(ps, stock)` -- cap wins over lock (D5, same contract as `ad` < `pd` under drop lock + cap). |
+| `editConsumable:"true"` (or absent) | Sale and purchase cards show `- [n] +` stepper. Driver can adjust qty. Status line shows `✓ Sesuai` when actual == plan, `Partial` when under, `+N extra` when over. On submit: `as`/`ab` = driver-adjusted value (capped at vehicle stock when `saleCapSearch` is active). |
 | Sale stepper + driver changes qty | Tap `+` on a sale card: value increments, status updates. Tap `-`: value decrements (min 0). Submit writes the adjusted value to `as`. |
 | Refill row (any flag combo) | Always static. No stepper regardless of `editConsumable`. `ar` = `pr` on submit. |
 | `editConsumable:"false"` + `editDrop:"false"` | All consumable rows locked (sale, purchase, consumable deliver). Returnable drop also locked. Pickup editable. |
 | Sale stepper sub-label | Condition badge (Penuh/Kosong) appears below the stepper (deliberate: stepper is full-width), not beside it as in the static frame. |
+| `saleCapSearch` set + item stock < plan | Sale stepper shows stock as max. `[+]` dead at stock. Orange "Maks N" status line. Submit writes `as` = stock. |
+| `saleCapSearch` set + item stock >= plan | Sale stepper at plan. `[+]` enabled beyond plan (up to stock). No cap label unless `actual == stock`. |
+| `saleCapSearch` set + item NOT in asset_cache | Sale stepper dead at 0. Cap 0 (D4). |
+| `saleCapSearch` blank/absent | No sale cap. Sale stepper freely adjustable. Byte-identical to pre-change behavior. |
+| `saleCapSearch` set + both `dropCapTable` and `saleCapTable` absent | No sale cap (`saleCapSearch` requires a cap-table subscription from either param). |
+| `saleCapSearch` set + `editConsumable:"false"` | Static qty frame shows plan. Submit writes `min(ps, stock)`. |
+| Purchase row with `saleCapSearch` active | Purchase stepper uncapped. `[+]` enabled. D3 holds. |
 
 ### Edge cases
 
 - **Mid-session `editConsumable` flip:** `putIfAbsent` seeds sale/buy once per session. If the config changes to `"false"` mid-session (requires page-JSON reload/proxy refresh), an already-adjusted entry retains its driver-set value, so `as` may differ from `ps`. Same behaviour as `editDrop` with deliver rows. Extremely unlikely in practice.
+- **Wrong `cd` value in `saleCapSearch`:** if `saleCapSearch` filters to zero matching docs, every sale row gets cap 0 (item missing from map = `saleCapMap[ii] ?? 0`). Every sale stepper is dead at 0 and the driver cannot sell anything. Fix: blank `saleCapSearch` to disable sale cap entirely, or correct the filter value (the `saleCapSearch` config row documents the correct `cd◼full` example). The blast radius is intentional -- a wrong search is worse than no cap.
+- **`editConsumable:"false"` + `saleCapSearch` active:** cap wins. The sale row seeds at `min(ps, stock)`, so `as` can be `< ps` on submit. The static frame displays plan (`ps`), but the submitted value is the capped seed. Same contract as `editDrop:"false"` + `dropCap` where `ad` can be `< pd`. Reconciled by admin.
 
 ## See Also
 

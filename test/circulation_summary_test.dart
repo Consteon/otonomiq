@@ -2,8 +2,13 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otonomiq/global.dart';
 import 'package:otonomiq/widget/driver_home_support.dart';
+import 'package:otonomiq/widget/circulation_summary.dart';
 
 void main() {
+  setUpAll(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
+  });
+
   // ── circulationSummary text parsing ─────────────────────────────────────
 
   group('circulationSummary text parsing', () {
@@ -366,6 +371,119 @@ void main() {
       add('Tukar', item.refill);
       add('Beli', item.buy);
       expect(chips, ['Jual 8']);
+    });
+  });
+
+  // ── isPerTxConfig gate (D1: dead-config prevention) ────────────────────
+
+  group('isPerTxConfig gate', () {
+    test('nameField arms perTx (regression)', () {
+      expect(CirculationSummary.isPerTxConfig({'nameField': 'in'}), isTrue);
+    });
+
+    test('txField alone arms perTx', () {
+      expect(CirculationSummary.isPerTxConfig({'txField': 'tx'}), isTrue);
+    });
+
+    test('saleField alone arms perTx', () {
+      expect(CirculationSummary.isPerTxConfig({'saleField': 'ps'}), isTrue);
+    });
+
+    test('buyField alone arms perTx', () {
+      expect(CirculationSummary.isPerTxConfig({'buyField': 'pb'}), isTrue);
+    });
+
+    test('refillField alone arms perTx', () {
+      expect(CirculationSummary.isPerTxConfig({'refillField': 'pr'}), isTrue);
+    });
+
+    test('actualSaleField alone arms perTx', () {
+      expect(
+          CirculationSummary.isPerTxConfig({'actualSaleField': 'as'}), isTrue);
+    });
+
+    test('actualRefillField alone arms perTx', () {
+      expect(
+          CirculationSummary.isPerTxConfig({'actualRefillField': 'ar'}), isTrue);
+    });
+
+    test('actualBuyField alone arms perTx', () {
+      expect(
+          CirculationSummary.isPerTxConfig({'actualBuyField': 'ab'}), isTrue);
+    });
+
+    test('no per-tx keys -> false (legacy path)', () {
+      expect(CirculationSummary.isPerTxConfig({'dropField': 'pd'}), isFalse);
+    });
+
+    test('empty component -> false', () {
+      expect(CirculationSummary.isPerTxConfig({}), isFalse);
+    });
+
+    test('whitespace-only nameField -> false', () {
+      expect(CirculationSummary.isPerTxConfig({'nameField': '  '}), isFalse);
+    });
+
+    test('non-Map component -> false (Convention #7)', () {
+      expect(CirculationSummary.isPerTxConfig('not a map'), isFalse);
+      expect(CirculationSummary.isPerTxConfig(null), isFalse);
+    });
+  });
+
+  // ── resolveLabel (C1: blank nameField -> 'in' fallback) ────────────────
+
+  group('resolveLabel', () {
+    test('non-empty nameField used as-is', () {
+      expect(CirculationSummary.resolveLabel({'nameField': 'nm'}), 'nm');
+    });
+
+    test('nameField "in" -> "in"', () {
+      expect(CirculationSummary.resolveLabel({'nameField': 'in'}), 'in');
+    });
+
+    test('blank nameField defaults to "in" (C1)', () {
+      expect(
+          CirculationSummary.resolveLabel({'saleField': 'ps', 'nameField': ''}),
+          'in');
+    });
+
+    test('whitespace nameField defaults to "in"', () {
+      expect(CirculationSummary.resolveLabel({'nameField': '  '}), 'in');
+    });
+
+    test('absent nameField defaults to "in"', () {
+      expect(CirculationSummary.resolveLabel({'saleField': 'ps'}), 'in');
+    });
+
+    test('non-Map component defaults to "in" (Convention #7)', () {
+      expect(CirculationSummary.resolveLabel(null), 'in');
+    });
+  });
+
+  // ── C1 end-to-end: blank nameField + saleField -> rows aggregate ───────
+
+  group('C1 end-to-end: resolveLabel + aggregateTxCirculation', () {
+    test('saleField present, nameField blank -> items aggregate under "in"', () {
+      // Simulates the widget's resolution: resolveLabel -> labelField for
+      // aggregateTxCirculation. With the old ?? 'in' guard, a blank nameField
+      // would pass '' as labelField, and aggregateTxCirculation would skip
+      // every row (entry[''] is null -> label '' -> continue).
+      final comp = {'saleField': 'ps', 'nameField': ''};
+      final String labelField = CirculationSummary.resolveLabel(comp);
+
+      final r = aggregateTxCirculation(
+        [
+          {
+            'it': [
+              {'in': 'Amidis 330ml', 'tx': 'sale', 'ps': '5'}
+            ]
+          },
+        ],
+        labelField: labelField,
+      );
+      expect(r.items, isNotEmpty);
+      expect(r.items.single.itemName, 'Amidis 330ml');
+      expect(r.items.single.sale, 5);
     });
   });
 }

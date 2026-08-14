@@ -197,6 +197,27 @@ class MainPageState extends State<MainPage> {
   // });
   // }
 
+  /// Route of bottom-bar slot [i] in [sysUI], or `''` when that slot no longer
+  /// exists.
+  ///
+  /// The navbar PAINTS from the bottomBar live at build time, but a tap reads
+  /// that list again LATER. In between, a guest-scoped readSettings / proxy
+  /// refresh can revert the global to the guest bar (home-only, 1 item) without
+  /// an intervening rebuild, so the bar on screen still shows 4 icons while the
+  /// list behind it holds 1. The unguarded `bottomBar[i]['route']` then threw
+  /// (Crashlytics: `handleNavTap`, "RangeError ... Only valid value is 0: 3").
+  static String navRouteAt(dynamic sysUI, int i) {
+    try {
+      final dynamic bar = sysUI?[mobile]?['bottomBar'];
+      if (bar is! List || i < 0 || i >= bar.length) return '';
+      final dynamic item = bar[i];
+      if (item is! Map) return '';
+      return (item['route'] ?? '').toString();
+    } catch (_) {
+      return '';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     double lPad = (systemUIComponent['Mobile']['leftPad'] ?? 0.0).toDouble();
@@ -236,7 +257,13 @@ class MainPageState extends State<MainPage> {
         if (byPass != 0) {
           changePage = false;
         }
-        var pgName = systemUIComponent[mobile]['bottomBar'][0]['route'];
+        final String pgName = navRouteAt(systemUIComponent, 0);
+        if (pgName.isEmpty) {
+          // Live bar no longer has this slot. Rebuild so the build-time
+          // @authedSystemUI restore repaints the real bar; drop this tap.
+          setState(() {});
+          return;
+        }
         if (pgName != pageName) {
           var state = transactionStore.state.screenTx;
           if (state['#REFRESH']) {
@@ -292,7 +319,13 @@ class MainPageState extends State<MainPage> {
             byPass = 1;
           });
         } else {
-          var pgName = systemUIComponent[mobile]['bottomBar'][i]['route'];
+          final String pgName = navRouteAt(systemUIComponent, i);
+          if (pgName.isEmpty) {
+            // Tapped slot is gone from the live bar (guest-bar clobber after
+            // the navbar painted the authed bar) -- rebuild, drop the tap.
+            setState(() {});
+            return;
+          }
           if (pgName != pageName) {
             var state = transactionStore.state.screenTx;
             if (state['#REFRESH']) {

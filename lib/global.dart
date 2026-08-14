@@ -1945,10 +1945,17 @@ String phoneCanonical62(String inp) {
 /// `getLqrList`, which busy-waits on `locRange` (api.dart:1420) before posting
 /// to readSS. By post time the flag is routinely stale, so the AND-gate in
 /// [errorReport] leaked "readSS Network is unreachable" back into Crashlytics.
+///
+/// `Unable to resolve host` is the SAME DNS failure as `Failed host lookup`,
+/// worded by the native gRPC stack instead of dart:io — it arrives as
+/// `[cloud_firestore/unavailable] UNAVAILABLE: Unable to resolve host
+/// firestore.googleapis.com`. Matching only the dart:io wording meant every
+/// Firestore call made offline still reported.
 bool isNoRouteError(dynamic e) {
   final String s = e.toString();
   return s.contains('Network is unreachable') ||
-      s.contains('Failed host lookup');
+      s.contains('Failed host lookup') ||
+      s.contains('Unable to resolve host');
 } // end of isNoRouteError
 
 /// True when [e] is the shape a call gets when the radio is simply down:
@@ -1961,18 +1968,47 @@ bool isNetworkDownError(dynamic e) {
       isNoRouteError(e);
 } // end of isNetworkDownError
 
+/// True when [e] is a mid-flight teardown by the DEVICE's own network stack:
+/// the socket was established, then killed — `Software caused connection
+/// abort` (ECONNABORTED). On Android that is a Wi-Fi↔cellular handoff, a radio
+/// flap, or doze reaping a long-lived socket. The app neither causes it nor
+/// can act on it.
+///
+/// Deliberately narrower than "any aborted request": `Connection reset by
+/// peer` (ECONNRESET) comes from the FAR end, so a server / TLS fault stays
+/// reportable. ECONNABORTED is local-only.
+///
+/// Distinct from [isNoRouteError] — here there WAS a route, which is exactly
+/// why [internetConnectionFlag] is true and the flag half of the [errorReport]
+/// gate never fires. `getLqrList` posts to readSS (median ~19s, tail ~79s)
+/// with no timeout, so it holds one socket open across the widest handoff
+/// window in the app — that call site is where this shape shows up.
+bool isConnectionAbortError(dynamic e) =>
+    e.toString().contains('Software caused connection abort');
+
+/// Whether [errorReport] should DROP [e] instead of recording a Crashlytics
+/// non-fatal, given whether the app currently believes it is [online].
+///
+/// Offline is a NORMAL state in this offline-first app — every http / Cloud
+/// Function call made with no network throws, and reporting each one made
+/// "readSS Network is unreachable" the top non-fatal. Drop a network-shaped
+/// error when ANY of: the app knows it is offline; the error itself proves
+/// there was no route ([isNoRouteError]); the transport was aborted under the
+/// request ([isConnectionAbortError]). A generic SocketException /
+/// ClientException while the app believes it is online (TLS, server reset, …)
+/// is still a real failure and still reported, and a non-network error while
+/// offline (RangeError, cast, …) still reports.
+///
+/// Pure, and separate from [errorReport], because the field failure was in the
+/// AND/OR wiring rather than in any single predicate: `readSS Software caused
+/// connection abort` is network-shaped AND arrives with [online] true, so both
+/// the flag half and [isNoRouteError] voted "report".
+bool skipCrashReport(dynamic e, bool online) =>
+    isNetworkDownError(e) &&
+    (!online || isNoRouteError(e) || isConnectionAbortError(e));
+
 void errorReport(dynamic e, [StackTrace? stack]) {
-  // Offline is a NORMAL state in this offline-first app — every http / Cloud
-  // Function call made with no network throws, and reporting each one made
-  // "readSS Network is unreachable" the top non-fatal. Skip a network-shaped
-  // error when EITHER the app knows it is offline, OR the error itself proves
-  // there was no route ([isNoRouteError]) — the flag alone was not enough, it
-  // lags the radio and let the readSS noise through. A generic
-  // SocketException / ClientException while the app believes it is online
-  // (TLS, server reset, …) is still a real failure and still reported, and a
-  // non-network error while offline (RangeError, cast, …) still reports.
-  if (isNetworkDownError(e) &&
-      (!internetConnectionFlag.value || isNoRouteError(e))) {
+  if (skipCrashReport(e, internetConnectionFlag.value)) {
     debugPrint('offline (crash report skipped): ${e.toString()}');
     return;
   }

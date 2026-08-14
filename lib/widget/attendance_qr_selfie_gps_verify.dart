@@ -718,8 +718,16 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
           actions: <Widget>[
             TextButton(
               child: Text(textList["OK"]),
+              // Get.back(), NOT Navigator.of(context).pop(): `context` here is
+              // this State's context (Get.dialog takes a widget, not a
+              // `builder:` that would shadow it), and `setDataOK('1')` two
+              // lines up replaces rootThis.pageElements — which unmounts this
+              // State before the dialog is even shown. Tapping OK then walked
+              // a defunct element and threw "Null check operator used on a
+              // null value" at StatefulElement.state. Get.dialog is closed by
+              // Get.back() everywhere else in this file anyway.
               onPressed: () {
-                Navigator.of(context).pop();
+                Get.back();
               },
             ),
           ],
@@ -845,7 +853,10 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                           dialogText1 = tArray[5] ??
                               "--Bad GPS_SEND Text#6--"; // scenario 4
                           fromLinkOption = 'clock-out-overtime';
-                          Navigator.of(context).pop();
+                          // Same stale-context trap as the dialog in
+                          // qrDataProcess: Get.dialog takes a widget, so
+                          // `context` is this State's, not the dialog's.
+                          Get.back();
                         },
                       ),
                       TextButton(
@@ -854,7 +865,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                           dialogText1 = tArray[6] ??
                               "--Bad GPS_SEND Text#7--"; // scenario 3
                           fromLinkOption = 'forgot-clock-out';
-                          Navigator.of(context).pop();
+                          Get.back();
                         },
                       ),
                     ],

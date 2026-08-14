@@ -71,8 +71,9 @@ void main() async {
   // queue offline writes and serve offline queries. persistenceEnabled:true
   // matches the mobile SDK default, so a hot-restart re-assignment is a
   // no-op (no settings-mismatch throw). Cache size stays default.
-  FirebaseFirestore.instance.settings =
-      const Settings(persistenceEnabled: true);
+  FirebaseFirestore.instance.settings = const Settings(
+    persistenceEnabled: true,
+  );
 
   // Crash reporting. Disabled in debug so dev runs don't pollute the console.
   // Captures uncaught Flutter framework errors and async/platform errors;
@@ -113,7 +114,7 @@ void main() async {
     // int? lastGTime = prefs.getInt('@lastGpsTime');
     // if (lastGTime == null) {
     //   lastGTime = 0;
-    //   await prefs.setInt('@lastGpsTime', lastGTime);
+    //   await prefs.setInt('@lastGpsTime', l astGTime);
     // }
     // setTransactionNotOK('main');
     // setTransactionOK('main');

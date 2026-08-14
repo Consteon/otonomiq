@@ -1491,13 +1491,20 @@ Future setStatus(msgId, status) async {
   );
 
   final notifRef = FirebaseFirestore.instance.doc(firestoreNotif);
-  await FirebaseFirestore.instance.runTransaction((Transaction tx) async {
+  // Guarded HERE, not per caller: a transaction cannot run offline (no
+  // queueing, it needs a server round-trip), and `setStatus` is called
+  // fire-and-forget from message_list.dart — an un-awaited rejection there
+  // escapes to platformDispatcher.onError as a FATAL. notification_list.dart
+  // had its own `.catchError`; its sibling did not. Nobody consumes the
+  // return value, so never rejecting is the whole contract.
+  safeUnawaited(
+      FirebaseFirestore.instance.runTransaction((Transaction tx) async {
     final docSnapshot = await tx.get<Map<String, dynamic>>(notifRef);
     // A thread doc can exist without `urd` (server CF, half-applied offline
     // write) or not exist at all — either way tx.update would throw here.
     if (!docSnapshot.exists) return;
     tx.update(notifRef, {"urd": decUnread(docSnapshot.data()?['urd'])});
-  }); // end of firebase transaction
+  }), 'setStatus urd'); // end of firebase transaction
 }
 
 Future sendMessage(mTo, mFrom, mDisplay, mData, mIn, mStatus) async {
@@ -1544,7 +1551,10 @@ Future sendMessage(mTo, mFrom, mDisplay, mData, mIn, mStatus) async {
         tx.update(postRef, updateData);
       }); // end of firebase transaction
     } catch (eTrans) {
-      errorReport(e);
+      // Was `errorReport(e)`: there is no `e` in scope here, so it silently
+      // resolved to dart:math's Euler constant and every failed transaction
+      // reported "2.718281828459045" to Crashlytics instead of the error.
+      errorReport(eTrans);
     }
   }
 } // end of sendMessage
@@ -3970,7 +3980,15 @@ Future<int> launchCheck() async {
     ); //= write updated data to user dpc
     result = 9928;
     docRef = state['#MSG_REF']; //= get message doc reference for firestore
-    FirebaseFirestore.instance.runTransaction((Transaction tx) async {
+    // A transaction NEVER works offline — unlike the plain update above it
+    // cannot be queued by Firestore persistence, it needs a server round-trip.
+    // Un-awaited and unguarded, its rejection ([cloud_firestore/unavailable]
+    // "Unable to resolve host") escaped the surrounding (synchronous) try to
+    // platformDispatcher.onError and was recorded as a FATAL. Awaiting instead
+    // would block login on that round-trip, so keep it fire-and-forget and
+    // guard it. The write is retried by the next launchCheck.
+    safeUnawaited(
+        FirebaseFirestore.instance.runTransaction((Transaction tx) async {
       result = 9929;
       var msgSnapshot = await tx.get<Map<String, dynamic>>(docRef);
       Map<String, dynamic> updateMsg = {};
@@ -4002,7 +4020,7 @@ Future<int> launchCheck() async {
       // skip the write rather than issue a pointless transaction update.
       if (updateMsg.isNotEmpty) tx.update(docRef, updateMsg);
       result = 9936;
-    }); // end of firebase transaction
+    }), 'launchCheck msgDoc'); // end of firebase transaction
     //    docRef.updateData(updateData); //= write updated data to message doc
     // write user qr seed to secure storage
     final sw4 = _loginPerfTrace ? (Stopwatch()..start()) : null;

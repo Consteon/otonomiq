@@ -52,7 +52,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | CustodyStepHeader | [custody_step_header.md](custody_step_header.md) | draft | Title + plate + STEP badge header and vehicleId publisher for P6 CustodyCount |
 | CustodyCountSubmit | [custody_count_submit.md](custody_count_submit.md) | draft | P6 send-button: writes ip[] natively then navigates to custodyReveal |
 | CustodyReveal | [custody_reveal.md](custody_reveal.md) | draft | STEP 2/2 reveal + compare + branch (match/mismatch/recount) |
-| CustodyConfirmedList | [custody_confirmed_list.md](custody_confirmed_list.md) | draft | P7 read-only list of driver-confirmed items (ip[] + item JOIN) |
+| CustodyConfirmedList | [custody_confirmed_list.md](custody_confirmed_list.md) | draft | P7 / C1 read-only list of confirmed items (ip[] + item JOIN) + optional Antar/Ambil movement badges |
 | CustodyDiscrepancyList | [custody_discrepancy_list.md](custody_discrepancy_list.md) | draft | P8 read-only discrepancy grid (dp[] Warehouse/Lo Hitung/Selisih) |
 | CustodyEventSubmit | [custody_event_submit.md](custody_event_submit.md) | draft | P7/P8 pre-resolve submit (curly tokens) then updateEventRow/addToEvent |
 | EvidenceRow | [evidence_row.md](evidence_row.md) | draft | Two toggle buttons (note/photo) for P11 DeliveryWorkspace |
@@ -61,6 +61,8 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | DisplayList | [display_list.md](display_list.md) | todo | List display |
 | DisplayList2 | [display_list_2.md](display_list_2.md) | todo | List display v2 (source file currently empty — doc is a placeholder) |
 | DisplayCard | [display_card.md](display_card.md) | todo | Card display |
+| DocDownload | [doc_download.md](doc_download.md) | draft | Download button (`DOC_DOWNLOAD`); fetches file from URL/Storage path, presents OS share sheet; optional biometric gate |
+| DocViewer | [doc_viewer.md](doc_viewer.md) | draft | Inline PDF viewer (`DOC_VIEWER`); renders PDF from URL or Storage path with optional fullscreen icon |
 | DriverStopCard | [driver_stop_card.md](driver_stop_card.md) | draft | Stop list + progress card (pending locked-preview / confirmed active) for DriverHome P4 |
 | InventoryBucketCard | [inventory_bucket_card.md](inventory_bucket_card.md) | draft | Vehicle stock per condition bucket for DriverHome P4 |
 | ItemExecutionList | [item_execution_list.md](item_execution_list.md) | draft | Per-item drop/pickup stepper list with status state-machine for P11 DeliveryWorkspace |

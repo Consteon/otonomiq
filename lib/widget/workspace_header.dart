@@ -87,10 +87,10 @@ class _WorkspaceHeaderState extends State<WorkspaceHeader> {
 
   void _subscribe() {
     if (_variant == 'step') return; // step header reads no collection
-    final String appVid = resolveAppVid(widget.component);
     final String rawTable =
         (widget.component['table'] ?? '').toString().trim();
     if (rawTable.isNotEmpty) {
+      final String appVid = resolveAppVid(widget.component);
       final TablePath tp = parseTablePath(rawTable);
       if (tp.tableDocId.isNotEmpty) {
         // vid-scoped: mapTableContent/_mapSubscribed key omits vid; another tenant's same tableDocId/subColl would dedup our stream away.
@@ -299,10 +299,13 @@ class _WorkspaceHeaderState extends State<WorkspaceHeader> {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ],
-                          // Render title unconditionally for diagnostic
+                          // Render title unconditionally for diagnostic.
+                          // Uses text slot [0] -- slot [1] belongs to the chip
+                          // on the right; reusing it here printed the same
+                          // string on both sides.
                           if (monoText.isEmpty && customer.isEmpty)
                             Text(
-                              chipLabel.toUpperCase(),
+                              stopLabel.toUpperCase(),
                               style: const TextStyle(
                                 fontSize: 15,
                                 fontWeight: FontWeight.w700,

@@ -63,6 +63,126 @@ R4 reverses the write from `writeNativeFields` to the spec(2) `updateEventRow` D
 - `final String scrName;` field + `required this.scrName` constructor param + the `scrName:` argument to the old write (the constructor block / Parameters row / Usage example above still showing `scrName` are pre-R4 and superseded by this section).
 - The direct `writeNativeFields` dependency (the function itself is NOT deleted — still used by other modules).
 
+### Config params (R5 — busy-vehicle guard)
+
+Three OPTIONAL params, read by the caller widget (not the sheet itself) and
+forwarded as constructor args. All absent = guard off, unchanged behavior.
+
+| Caller config key | Sheet param | Type | Description |
+|---|---|---|---|
+| `assignBusySearch` | `busySearch` | `String` | Gate-DSL busy query with row token `{lv}`, evaluated against `busyDocs`. Canonical: `vv◼{lv}⭘cty◼opening⭘cdt◼{today}⭘rt◼pending`. Empty = guard off. |
+| `assignBusyTable` | _(resolved by caller → `busyDocs`)_ | `String` | Table the query runs against. Normally `<docId>//vehicle_check`. The caller subscribes it in `_subscribe()` and passes the docs. Empty = query the caller's own `table` docs. |
+| `assignBusyLabel` | `busyLabel` | `String` | Badge text on busy rows (e.g. "Lagi Jalan"). Empty = row still disabled, no badge text. |
+
+**Static helpers (public, for testability):**
+
+- `VehiclePickerSheet.busyPoolCode({assignBusySearch, assignBusyTable, appVid})` — vid-scoped `mapTableContent` key for the busy pool, or `''` when the caller should use its own docs.
+- `VehiclePickerSheet.isVehicleBusy(docs, busySearch, lv)` — delegates to `PickerList.countForRow`; returns `bool`.
+
+**Busy row visual:** `Opacity(0.45)` + `onTap: null` + subtitle appends ` · {busyLabel}` in red-500 (`#EF4444`).
+
+#### R5.1 — the busy source is `vehicle_check`, NOT `task.tst`
+
+R5 shipped with `assignBusySearch: "vv◼{lv}⭘tst◼on_delivery"` (straight from the
+spec) and a resolver that turned the guard **off** whenever `assignBusyTable`
+differed from `component['table']`. Both were wrong, and together they made the
+guard a no-op that looked configured:
+
+- **`tst` never becomes `on_delivery`.** Verified against tenant `20342033315492`
+  on 2026-08-11: 22 `task` docs, statuses only `unassigned` / `assigned` /
+  `completed` / `failed`. Nothing in `lib/` or in `op1Screen` writes
+  `on_delivery` — all 16 occurrences are read-side searches.
+- **"Lagi jalan" is derived from `vehicle_check`.** `deriveVehicleTier`
+  (`vehicle_feed_support.dart:154-178`) returns `VehicleTier.inRoute` when the
+  opening doc has `cst == 'custody_confirmed'` and any task is still open. A
+  vehicle on the road keeps `tst == 'assigned'` — and `assigned` must stay
+  selectable (spec §3: loaded-but-not-departed can take a joined trip).
+
+So the guard has to query a **different table than the caller's own**. R5.1
+replaces `effectiveBusySearch` (deleted) with `busyPoolCode` + a `busyDocs`
+constructor param: the caller resolves `assignBusyTable` to a vid-scoped
+`mapTableContent` code, subscribes it in `_subscribe()`
+(`subscribeToMapCollection` dedups, so overlapping with a sibling widget on the
+same screen is a no-op), and passes that doc list in.
+
+Live config (`op1Screen!AK759` / `!W766` feed `[ASSIGNBUSYSEARCH]`) must move to:
+
+```
+"assignBusyTable":"84214220504259//vehicle_check"
+"assignBusySearch":"vv◼{lv}⭘cty◼opening⭘cdt◼{today}⭘rt◼pending"
+```
+
+Two segments beyond `cst`, both load-bearing (backend spec rev4, verified
+against live docs):
+
+- **`rt◼pending`** — ReturnVehicle flips `rt` to `returned` and **never resets
+  `cst`**. Without this segment a vehicle stays "Lagi Jalan" from its first
+  trip onward, until the warehouse closing sets `cst=closed`.
+- **`cdt◼{today}`** — scopes to today's check, so one stuck doc from a previous
+  day cannot pin a vehicle busy forever. Requires `PickerList.resolveTimeTokens`
+  (added the same day) — before it, `{today}` tripped `countForRow`'s
+  leftover-`{` bail and the whole guard counted 0.
+
+State walk for one trip, and why only the middle row matches:
+
+| stage | `cst` | `rt` | assignable? |
+|---|---|---|---|
+| loaded, driver has not accepted | `awaiting_custody` | `pending` | ✅ joined-trip flow |
+| driver accepted, departed | `custody_confirmed` | `pending` | ❌ **on the road** |
+| handed back to the warehouse | `custody_confirmed` | `returned` | ✅ idle again |
+
+Ordering: ship this renderer first, then flip the config — the reverse leaves
+the guard querying `task` for a status that does not exist.
+
+Side effect of the same wrong query: `PICKER_LIST`@CreateTaskVehicle(790)
+`statusSearch` and `LIST_CARD`@AssignVehicle(1181) `statusSearch` carry the
+identical `tst◼on_delivery` string and are equally dead — they need the same
+config change (the LIST_CARD renderer support is still unbuilt, spec §2B).
+
+**Snapshot semantics (I1):** both callers freeze `busyDocs` via
+`List<Map<String, dynamic>>.from(mapTableContent[_busyCode] ?? const [])` at
+sheet-launch time, so the guard runs against a **frozen snapshot**, not a live
+`Obx` view — a vehicle that departs while the sheet is open stays selectable
+until the sheet is reopened (correct for a short-lived modal).
+
+#### R5.2 — `busySelfField`, the second (wider) guard
+
+Backend spec rev3 asked for the mechanism `PICKER_LIST` already ships: the
+vehicle row's **own** field marks it busy, no cross-table query.
+
+| Caller config key | Sheet param | Description |
+|---|---|---|
+| `busySelfField` | `busySelfField` | Row field that means busy when non-empty. `dv` = a driver holds the vehicle. Empty = self-guard off. |
+| `busySelfLabelField` | `busySelfLabelField` | Field supplying the badge name (`dn`). Empty = disabled, no name. |
+
+Same key names as `PICKER_LIST` (`picker_list.dart:384-406`), read from the
+**caller** component (`COORDINATION_SIGNAL_LIST` / `UPCOMING_TASK_LIST`) — the
+sheet never reads a template. Statics: `isVehicleSelfBusy(veh, busySelfField)`
+and `busyBadgeText({busyLabel, selfLabel})`.
+
+**The two guards are independent — a row is busy when EITHER fires.** Badge =
+`busyLabel · selfLabel`, either part optional.
+
+★ They are NOT interchangeable. `dv` is set from warehouse designation until
+the closing check clears it, so it also blocks a vehicle that is still
+**loading**: MBL-01 in production has `dv` filled while its opening check is
+`awaiting_custody` — the admin feed shows it as CUSTODY PENDING, not IN ROUTE.
+Enabling `busySelfField` therefore reverses spec rev1 §3 ("`assigned` stays
+selectable") and contradicts the NOTICE_BAR at AssignVehicle(975) that
+advertises joined trips. Ship the knob, but default config should use the
+`vehicle_check` search alone until that trade-off is decided.
+
+**Not expressible in config alone:** `evaluateGate`
+(`admin_home_support.dart:486-492`) has no negation — an empty expected value
+means "field must be empty", so `assignBusySearch` cannot say "`dv` is set".
+That is why this needed Dart, not another gate string.
+
+**Fail-open by design:** an unsubscribed/empty pool or a typo'd row token
+(`{vv}` instead of `{lv}`, which leaves `{` unresolved and makes
+`countForRow` bail to 0) blocks nothing and logs a devPrint. Never make this
+fail-closed — it gates *availability*, not permission, and a fail-closed
+version would block the entire fleet and stop dispatch.
+
 ## Usage
 
 ```dart

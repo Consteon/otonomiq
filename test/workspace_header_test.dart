@@ -1,6 +1,8 @@
 // test/workspace_header_test.dart
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otonomiq/global.dart';
+import 'package:otonomiq/widget/workspace_header.dart';
 
 void main() {
   // ── stopNumber derivation (pure function) ─────────────────────────────
@@ -76,5 +78,34 @@ void main() {
       expect(arr.isNotEmpty ? arr[0] : '', 'OnlyOne');
       expect(arr.length > 1 ? arr[1] : 'fallback', 'fallback');
     });
+  });
+
+  // ── no-data diagnostic title uses slot [0], chip uses slot [1] ────────────
+  // Regression: the fallback title rendered chipLabel (slot [1]), so a header
+  // with no task doc printed the SAME string on the left and in the chip.
+  // No `table` key -> no Firestore subscription, so this pumps offline.
+
+  testWidgets('empty-data header renders slot[0] left, slot[1] in chip',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: WorkspaceHeader(
+          component: const <String, dynamic>{
+            'type': 'WORKSPACE_HEADER',
+            'table': '',
+            'text': 'Slip Gaji\u{25C6}Dokumen dari perusahaan Anda',
+          },
+          scrName: 'wh_test',
+          lPad: 0,
+          tPad: 0,
+          rPad: 0,
+          bPad: 0,
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    expect(find.text('SLIP GAJI'), findsOneWidget);
+    expect(find.text('DOKUMEN DARI PERUSAHAAN ANDA'), findsOneWidget);
   });
 }

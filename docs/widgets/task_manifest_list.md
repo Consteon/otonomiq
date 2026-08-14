@@ -44,13 +44,17 @@ Per-task accordion list with item-level detail and aggregate drop/pickup badges.
 | `excludeStatus` | String | Task status to exclude from list/counts (e.g. `"load_rejected"`) |
 | `hideQty` | String | `"TRUE"` to suppress drop/pickup pills on task rows (O1) |
 | `collapsible` | String | `"TRUE"` to start all tasks collapsed (O1) |
+| `txField` | String | Transaction type field in it[] (e.g. `"tx"`). When absent but `saleField`/`buyField`/`refillField` are set, defaults to `"tx"` via `isTxAwareConfig` gate. |
+| `saleField` | String | Sale qty field in it[] (e.g. `"ps"`) |
+| `buyField` | String | Purchase qty field in it[] (e.g. `"pb"`) |
+| `refillField` | String | Refill qty field in it[] (e.g. `"pr"`) |
 
 ### Draft-mode fields
 
 | Field | Type | Description |
 |---|---|---|
 | `wizardKey` | String | Draft holder key (default `admin_create_task`). Shared with `task_item_builder`, `task_create_submit`, `task_draft_summary`. |
-| `txField` | String | Transaction type field in it[] (e.g. `"tx"`). Enables tx-aware annotations. |
+| `txField` | String | Transaction type field in it[] (e.g. `"tx"`). Enables tx-aware annotations. Also used in collection mode when present (see isTxAwareConfig). |
 | `saleField` | String | Sale qty field in it[] (e.g. `"ps"`) |
 | `buyField` | String | Purchase qty field in it[] (e.g. `"pb"`) |
 | `refillField` | String | Refill qty field in it[] (e.g. `"pr"`) |
@@ -59,7 +63,7 @@ Per-task accordion list with item-level detail and aggregate drop/pickup badges.
 
 ### Text slots
 
-**Collection mode (6 slots):**
+**Collection mode (9 slots):**
 
 | Index | Usage | Default |
 |-------|-------|---------|
@@ -69,6 +73,9 @@ Per-task accordion list with item-level detail and aggregate drop/pickup badges.
 | 3 | Drop pill label | `drop` |
 | 4 | Pickup pill label | `pickup` |
 | 5 | Hint text | `tap untuk lihat detail` |
+| 6 | Sale label | `Jual` |
+| 7 | Purchase label | `Beli` |
+| 8 | Refill label | `Tukar` |
 
 **Draft mode (7 slots):**
 
@@ -105,6 +112,7 @@ back to plan by the same mechanism).
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | `clearExpandState` | `static void clearExpandState(String scrName)` | Clear accordion state on route change |
+| `isTxAwareConfig` | `static bool isTxAwareConfig(dynamic component)` | Whether component is configured for tx-aware display (any of txField/saleField/buyField/refillField non-empty) |
 | `buildItemAnnotations` | `static List<String> buildItemAnnotations(Map entry, {...})` | Build per-item annotation strings; tx-aware when `txField` non-empty; sale/buy/refill labels supplied via `saleLabel`/`buyLabel`/`refillLabel` params (all default `''`) |
 
 ## See Also

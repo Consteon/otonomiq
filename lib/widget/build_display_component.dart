@@ -949,6 +949,36 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     } // end of try
+  } else if (tip == 'doc_viewer' || tip == 'docviewer') {
+    // Inline PDF viewer
+    try {
+      result = Builder(
+        builder: (BuildContext context) {
+          return DocViewer(
+            key: txfKey,
+            component: component,
+            scrName: scrName,
+          );
+        },
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'doc_download' || tip == 'docdownload') {
+    // Download button — fetch URL to device, present share sheet.
+    try {
+      result = Builder(
+        builder: (BuildContext context) {
+          return DocDownload(
+            key: txfKey,
+            component: component,
+            scrName: scrName,
+          );
+        },
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
   } else if (tip == 'pdf_view') {
     // Pdf
     try {

@@ -28,6 +28,24 @@ Column headers "Item"/"↓Drop"/"↑Pick" are intentionally hardcoded (not serve
 | `text` | String | 5-slot diamond: title, muat label, drop footer label, pickup footer label, italic note |
 | `excludeStatus` | String | Task status to exclude from totals (e.g. `"load_rejected"`). Empty/absent = no exclusion. |
 
+### Per-tx gate
+
+The per-tx render path (flow-typed metric chips: Drop/Pickup/Jual/Tukar/Beli)
+arms when ANY of these 8 flow-typed keys are present and non-empty in the
+component config: `nameField`, `txField`, `saleField`, `buyField`,
+`refillField`, `actualSaleField`, `actualRefillField`, `actualBuyField`.
+`_buildPerTx` reads 13 config keys total; the remaining 5 (`itemsField`,
+`dropField`, `pickupField`, `actualDropField`, `actualPickupField`) are shared
+with the legacy path and do not distinguish per-tx intent.
+
+When none of the 8 keys are present, the legacy drop/pickup columnar table
+renders. Logic: `CirculationSummary.isPerTxConfig(component)`.
+
+The label field (`nameField`) is resolved with trim + fallback: a blank or
+whitespace `nameField` cell defaults to `'in'` rather than passing an empty
+string to the aggregator (which would skip every row).
+Logic: `CirculationSummary.resolveLabel(component)`.
+
 ### Actual-over-plan semantics (post-execution)
 
 After task execution, all it[] lines carry actual quantities (`ad`, `ap`, `as`,

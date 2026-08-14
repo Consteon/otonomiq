@@ -35,6 +35,45 @@ class CirculationSummary extends StatefulWidget {
   final String scrName;
   final double lPad, tPad, rPad, bPad;
 
+  /// Whether [component] config arms the per-tx render path.
+  ///
+  /// Arms on ANY per-tx flow key (not just nameField) to prevent
+  /// silent dead-config fallback to the legacy drop/pickup table.
+  /// Checks 8 flow-typed keys; _buildPerTx reads 13 config keys total --
+  /// the remaining 5 (itemsField, dropField, pickupField, actualDropField,
+  /// actualPickupField) are shared with the legacy path and do not
+  /// distinguish per-tx intent.
+  static bool isPerTxConfig(dynamic component) {
+    if (component is! Map) return false;
+    const List<String> keys = <String>[
+      'nameField',
+      'txField',
+      'saleField',
+      'buyField',
+      'refillField',
+      'actualSaleField',
+      'actualRefillField',
+      'actualBuyField',
+    ];
+    for (final String key in keys) {
+      if ((component[key] ?? '').toString().trim().isNotEmpty) return true;
+    }
+    return false;
+  }
+
+  /// Resolve the per-tx label field from component config.
+  ///
+  /// Falls back to `'in'` when nameField is absent, null, empty, or
+  /// whitespace. The `??` in `component['nameField'] ?? 'in'` guards null
+  /// only -- a blank spreadsheet cell yields `''` which passes through and
+  /// causes aggregateTxCirculation to skip every row (C1). This method
+  /// applies the same trim discipline as isPerTxConfig.
+  static String resolveLabel(dynamic component) {
+    if (component is! Map) return 'in';
+    final String v = (component['nameField'] ?? '').toString().trim();
+    return v.isEmpty ? 'in' : v;
+  }
+
   @override
   State<CirculationSummary> createState() => _CirculationSummaryState();
 }
@@ -106,11 +145,14 @@ class _CirculationSummaryState extends State<CirculationSummary> {
 
       // Opsi A (spec (2).md §3): per-item, tx-driven metrics (deliver->Drop+
       // Pickup, sale->Jual, refill->Tukar, purchase->Beli) so sale/purchase
-      // items stop rendering 0/0/0. Opt-in: enabled when the config carries
-      // `nameField` (the denormalised it[].in). Without it, the legacy
-      // drop/pickup totals table renders unchanged (P5 1016).
-      final bool perTx =
-          (widget.component['nameField'] ?? '').toString().trim().isNotEmpty;
+      // items stop rendering 0/0/0. Opt-in: armed by ANY of the 8 flow-typed
+      // keys checked in [isPerTxConfig] -- NOT by `nameField` alone. Gating on
+      // `nameField` alone was the D1 dead-config bug: a config that set
+      // `saleField` but left `nameField` blank fell back to the legacy table
+      // and silently dropped every consumable row. Do not narrow this back.
+      // With none of the 8 keys, the legacy drop/pickup totals table renders
+      // unchanged (P5, op1Screen row 631).
+      final bool perTx = CirculationSummary.isPerTxConfig(widget.component);
       final String actualDropField =
           (widget.component['actualDropField'] ?? 'ad').toString();
       final String actualPickupField =
@@ -388,7 +430,7 @@ class _CirculationSummaryState extends State<CirculationSummary> {
     final TxCirculationResult result = aggregateTxCirculation(
       tasks,
       itemsField: (widget.component['itemsField'] ?? 'it').toString(),
-      labelField: (widget.component['nameField'] ?? 'in').toString(),
+      labelField: CirculationSummary.resolveLabel(widget.component),
       txField: (widget.component['txField'] ?? 'tx').toString(),
       dropField: (widget.component['dropField'] ?? 'pd').toString(),
       pickupField: (widget.component['pickupField'] ?? 'pp').toString(),

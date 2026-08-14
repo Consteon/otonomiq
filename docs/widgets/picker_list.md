@@ -44,8 +44,10 @@ One renderer for every single-select picker. The picker **never writes Firestore
 | `metaField` | — | row 3rd line. Configured but doc value empty → placeholder `—`; not configured → no line |
 | `idField` | `lv` | doc field whose value is **captured** and substituted for `{idField}` in `countSearch` |
 | `countTable` + `countSearch` | — | per-row badge "{N} {countSuffix}". Counts `countTable` docs where `countSearch` matches, with `{idField}` (e.g. `{lv}`) → this row's id |
-| `statusSearch` | — | per-row status pill (reuses `countForRow` over `countTable`; gated on `countTable` set). `{idField}` substituted (e.g. `vv◼{lv}⭘tst◼on_delivery`). >0 matches → `statusOnLabel` (amber); else `statusOffLabel` (emerald). Empty → no pill |
+| `statusSearch` | — | per-row status pill. Counts against `statusTable` when configured, otherwise `countTable` (gated on at least one being set). `{idField}` substituted (e.g. `vv◼{lv}⭘tst◼on_delivery`). >0 matches -> `statusOnLabel` (amber); else `statusOffLabel` (emerald). Empty -> no pill |
 | `statusOnLabel` / `statusOffLabel` | — | pill text for the on/off state (e.g. `On Route` / `Available`) |
+| `statusTable` | — | Optional. Table for status counting (separate from `countTable`). When set, `statusSearch` counts against this table's docs. When absent, `statusSearch` counts against `countTable` (backward-compatible, no regression). Format: `<docId>//<subColl>`. The guard is fail-open during subscription warm-up (empty pool -> count 0 -> row tappable). |
+| `disableWhenStatusOn` | `false` | When `TRUE` (or `1`) and status is on (count > 0), the row is **locked** (greyed, un-tappable) -- same visual channel as `busySelfField` busy. Absent/false -> pill is display-only, row remains tappable. |
 | `busySelfField` | *(empty)* | Optional. Row field; non-empty value = row is busy (disabled, un-tappable). Self-field case: the picker's own table carries the busy signal (e.g. `dv` on a `stock_location` vehicle row). Empty/absent = no busy guard. |
 | `busySelfLabelField` | *(empty)* | Optional. Row field for the busy subtitle label (e.g. `dn` = driver name). Rendered as `text[3]` + field value. |
 | `rowIcon` | — | **entity-card mode gate.** Non-empty icon name (resolved via `panelIcon`, e.g. `truck`/`vehicle`) → renders the ENTITY card: 40×40 icon-avatar + title + sub + inline `[status pill + count]` + selected-only check. Empty → legacy radio card (byte-identical). NOTE: entity mode **drops `metaField`** (no 3rd line) and moves the count badge inline. |
@@ -85,8 +87,10 @@ navigate: tap row → screenTx[captureToken] = row[idField] → routeStack.push(
 When `busySelfField` is configured, each row's own field is checked: non-empty
 (trimmed) = the row is busy. The row renders DISABLED (grayed, un-tappable) with
 a distinct subtitle = `text[3]` + `row[busySelfLabelField]` (e.g. "Sedang jalan
-· Agenia Demo-3"). This is separate from the `statusSearch` pill (label-only,
-never blocks selection) -- both can coexist on the same row config. When a row
+· Agenia Demo-3"). The `statusSearch` pill is label-only by default, but
+when `disableWhenStatusOn` is set it also locks the row (same visual
+channel). The two guards are independent (D3) -- either firing locks the
+row; both firing joins the labels with ` · `.  When a row
 is busy its trailing affordance (count badge + "Pilih" label / check icon) is
 hidden in BOTH the radio and entity layouts, so an inert row never shows a
 selectable cue.
@@ -99,7 +103,11 @@ busy (no crash).
 
 - `resolveCaptureToken(component)` / `resolveIdField(component)` — degrade-safe config resolution.
 - `filterRows(docs, rawSearch)` — generic gate filter; empty search → all docs.
-- `countForRow(countDocs, rawCountSearch, idField, rowId)` — per-row count; `{idField}` substitution; bails to 0 on empty rowId or leftover unresolved `{token}` (guards against accidental count-all).
+- `resolveTimeTokens(dsl)` — replaces `{today}` with `todayEpochMidnightWib()`. Nothing else. **Not** `resolveDriverCurlyTokens`: that one's `default:` branch substitutes any unknown `{name}` from screen-tx bare keys, which would eat a per-row `{lv}` the moment some route published a bare `lv`.
+- `countForRow(countDocs, rawCountSearch, idField, rowId)` — per-row count; decode → `resolveTimeTokens` → `{idField}` substitution; bails to 0 on empty rowId or leftover unresolved `{token}` (guards against accidental count-all).
+- `deriveRowLock({row, busySelfField, busySelfLabelField, busyPrefix, statusOn, statusOnLabel, disableWhenStatusOn})` — row-field extraction + combined lock from two independent guards (busySelf OR status-lock) into a single `(isBusy, busyLabel)`. Labels joined with ` · ` when both fire. Handles null/missing/whitespace field values.
+
+★ `{today}` resolution was added late (2026-08-11). Before it, **any** search carrying `{today}` hit the leftover-`{` bail and counted 0 — indistinguishable from "nothing matched". That is what kept the admin on-duty vehicle guard silently dead; see `docs/widgets/admin_vehicle_picker_sheet.md` §R5.1. Callers of `countForRow` inherit the fix: `PickerList` itself, `VehiclePickerSheet`, and `ListCard`'s status guard.
 
 ## Tests
 

@@ -1362,6 +1362,308 @@ void main() {
           true);
     });
   });
+
+  // ── SALE CAP: resolveSaleCap static helper ─────────────────────────
+
+  group('resolveSaleCap', () {
+    test('sale + resolved + item in map -> returns stock qty', () {
+      expect(
+          ItemExecutionList.resolveSaleCap(
+            txKind: 'sale',
+            saleCapResolved: true,
+            saleCapMap: {'galon330': 5},
+            itemIi: 'galon330',
+          ),
+          5);
+    });
+
+    test('sale + resolved + item NOT in map -> returns 0 (D4)', () {
+      expect(
+          ItemExecutionList.resolveSaleCap(
+            txKind: 'sale',
+            saleCapResolved: true,
+            saleCapMap: <String, int>{},
+            itemIi: 'galon330',
+          ),
+          0);
+    });
+
+    test('purchase + resolved -> null (uncapped, D3)', () {
+      expect(
+          ItemExecutionList.resolveSaleCap(
+            txKind: 'purchase',
+            saleCapResolved: true,
+            saleCapMap: {'galon330': 5},
+            itemIi: 'galon330',
+          ),
+          null);
+    });
+
+    test('refill + resolved -> null (no stepper)', () {
+      expect(
+          ItemExecutionList.resolveSaleCap(
+            txKind: 'refill',
+            saleCapResolved: true,
+            saleCapMap: {'galon330': 5},
+            itemIi: 'galon330',
+          ),
+          null);
+    });
+
+    test('deliver + resolved -> null (uses capStore not saleCapStore)', () {
+      expect(
+          ItemExecutionList.resolveSaleCap(
+            txKind: 'deliver',
+            saleCapResolved: true,
+            saleCapMap: {'galon330': 5},
+            itemIi: 'galon330',
+          ),
+          null);
+    });
+
+    test('sale + unresolved -> null', () {
+      expect(
+          ItemExecutionList.resolveSaleCap(
+            txKind: 'sale',
+            saleCapResolved: false,
+            saleCapMap: {'galon330': 5},
+            itemIi: 'galon330',
+          ),
+          null);
+    });
+
+    test('sale + resolved + empty itemIi -> 0 (falls through ?? 0)', () {
+      expect(
+          ItemExecutionList.resolveSaleCap(
+            txKind: 'sale',
+            saleCapResolved: true,
+            saleCapMap: {'galon330': 5},
+            itemIi: '',
+          ),
+          0);
+    });
+  });
+
+  // ── SALE CAP: capSeed (seed + clamp-down) ─────────────────────────
+
+  group('capSeed', () {
+    test('plan 5, cap 3 -> 3 (cap limits)', () {
+      expect(ItemExecutionList.capSeed(5, 3), 3);
+    });
+
+    test('plan 3, cap 5 -> 3 (plan < cap)', () {
+      expect(ItemExecutionList.capSeed(3, 5), 3);
+    });
+
+    test('plan == cap -> plan (exact match)', () {
+      expect(ItemExecutionList.capSeed(3, 3), 3);
+    });
+
+    test('cap 0 -> 0 (item not in truck, D4)', () {
+      expect(ItemExecutionList.capSeed(5, 0), 0);
+    });
+
+    test('cap null -> plan (uncapped/unresolved)', () {
+      expect(ItemExecutionList.capSeed(5, null), 5);
+    });
+
+    test('clamp-down: stored 5, cap 2 -> 2', () {
+      expect(ItemExecutionList.capSeed(5, 2), 2);
+    });
+
+    test('clamp-down: stored 2, cap 5 -> 2 (below cap)', () {
+      expect(ItemExecutionList.capSeed(2, 5), 2);
+    });
+  });
+
+  // ── SALE CAP: atCap ([+]-dead + capped status) ────────────────────
+
+  group('atCap', () {
+    test('actual == cap -> true (at cap)', () {
+      expect(ItemExecutionList.atCap(3, 3), true);
+    });
+
+    test('actual > cap -> true (defense, over cap)', () {
+      expect(ItemExecutionList.atCap(4, 3), true);
+    });
+
+    test('actual < cap -> false', () {
+      expect(ItemExecutionList.atCap(2, 3), false);
+    });
+
+    test('cap null -> false (no cap)', () {
+      expect(ItemExecutionList.atCap(100, null), false);
+    });
+  });
+
+  // ── SALE CAP: saleCapStore isolation + cross-store ────────────────
+
+  group('saleCapStore isolation', () {
+    setUp(() {
+      ItemExecutionList.capStore.clear();
+      ItemExecutionList.saleCapStore.clear();
+    });
+
+    test('different screens get different sale cap maps', () {
+      ItemExecutionList.saleCapStore['screenA'] = {'galon330': 5};
+      ItemExecutionList.saleCapStore['screenB'] = {'galon330': 10};
+      expect(ItemExecutionList.saleCapStore['screenA']!['galon330'], 5);
+      expect(ItemExecutionList.saleCapStore['screenB']!['galon330'], 10);
+    });
+
+    test('clearExecutionStore removes saleCapStore entry', () {
+      ItemExecutionList.saleCapStore['screenA'] = {'galon330': 5};
+      ItemExecutionList.clearExecutionStore('screenA');
+      expect(
+          ItemExecutionList.saleCapStore.containsKey('screenA'), false);
+    });
+
+    test('drop cap and sale cap for same ii on same screen stay separate', () {
+      ItemExecutionList.capStore['s'] = {'x': 2};
+      ItemExecutionList.saleCapStore['s'] = {'x': 9};
+      expect(ItemExecutionList.capStore['s']!['x'], 2);
+      expect(ItemExecutionList.saleCapStore['s']!['x'], 9);
+    });
+
+    test('clearExecutionStore empties both capStore and saleCapStore', () {
+      ItemExecutionList.capStore['s'] = {'x': 2};
+      ItemExecutionList.saleCapStore['s'] = {'x': 9};
+      ItemExecutionList.clearExecutionStore('s');
+      expect(ItemExecutionList.capStore.containsKey('s'), false);
+      expect(ItemExecutionList.saleCapStore.containsKey('s'), false);
+    });
+  });
+
+  // ── SALE CAP: resolveCapFields fallback chain (D1) ──────────────────
+
+  group('resolveCapFields', () {
+    test('all sale params set -> returns sale values', () {
+      final result = ItemExecutionList.resolveCapFields({
+        'saleCapKey': 'sk',
+        'saleCapField': 'sf',
+        'saleCapLabel': 'Limit <max>',
+        'dropCapKey': 'dk',
+        'dropCapField': 'df',
+        'capLabel': 'Drop <max>',
+      });
+      expect(result.key, 'sk');
+      expect(result.field, 'sf');
+      expect(result.label, 'Limit <max>');
+    });
+
+    test('all sale params absent + all drop params absent -> hard defaults', () {
+      final result = ItemExecutionList.resolveCapFields({});
+      expect(result.key, 'ii');
+      expect(result.field, 'qt');
+      expect(result.label, 'Maks <max>');
+    });
+
+    test('sale absent + drop present -> returns drop values', () {
+      final result = ItemExecutionList.resolveCapFields({
+        'dropCapKey': 'dk',
+        'dropCapField': 'df',
+        'capLabel': 'Drop <max>',
+      });
+      expect(result.key, 'dk');
+      expect(result.field, 'df');
+      expect(result.label, 'Drop <max>');
+    });
+
+    test('sale present + drop absent -> returns sale values', () {
+      final result = ItemExecutionList.resolveCapFields({
+        'saleCapKey': 'sk',
+        'saleCapField': 'sf',
+        'saleCapLabel': 'Sale <max>',
+      });
+      expect(result.key, 'sk');
+      expect(result.field, 'sf');
+      expect(result.label, 'Sale <max>');
+    });
+
+    test('blank/whitespace sale param falls through to drop', () {
+      final result = ItemExecutionList.resolveCapFields({
+        'saleCapKey': '  ',
+        'saleCapField': '',
+        'saleCapLabel': ' \t ',
+        'dropCapKey': 'dk',
+        'dropCapField': 'df',
+        'capLabel': 'Drop <max>',
+      });
+      expect(result.key, 'dk');
+      expect(result.field, 'df');
+      expect(result.label, 'Drop <max>');
+    });
+
+    test('blank drop param falls through to hard default', () {
+      final result = ItemExecutionList.resolveCapFields({
+        'saleCapKey': '',
+        'dropCapKey': '  ',
+      });
+      expect(result.key, 'ii');
+    });
+
+    test('mixed: sale key set, sale field blank + drop field set, label all blank', () {
+      final result = ItemExecutionList.resolveCapFields({
+        'saleCapKey': 'sk',
+        'saleCapField': '',
+        'saleCapLabel': '',
+        'dropCapField': 'df',
+      });
+      expect(result.key, 'sk');
+      expect(result.field, 'df');
+      expect(result.label, 'Maks <max>');
+    });
+
+    test('non-Map null -> hard defaults', () {
+      final result = ItemExecutionList.resolveCapFields(null);
+      expect(result.key, 'ii');
+      expect(result.field, 'qt');
+      expect(result.label, 'Maks <max>');
+    });
+
+    test('non-Map string -> hard defaults', () {
+      final result = ItemExecutionList.resolveCapFields('junk');
+      expect(result.key, 'ii');
+      expect(result.field, 'qt');
+      expect(result.label, 'Maks <max>');
+    });
+  });
+
+  // ── SALE CAP: resolveCapTable subscription precedence (D2) ─────────
+
+  group('resolveCapTable', () {
+    test('drop only -> returns drop value', () {
+      final result = ItemExecutionList.resolveCapTable({
+        'dropCapTable': 'drop_table_path',
+      });
+      expect(result, 'drop_table_path');
+    });
+
+    test('sale only -> returns sale value', () {
+      final result = ItemExecutionList.resolveCapTable({
+        'saleCapTable': 'sale_table_path',
+      });
+      expect(result, 'sale_table_path');
+    });
+
+    test('both set to different values -> drop wins', () {
+      final result = ItemExecutionList.resolveCapTable({
+        'dropCapTable': 'drop_table_path',
+        'saleCapTable': 'sale_table_path',
+      });
+      expect(result, 'drop_table_path');
+    });
+
+    test('neither set -> empty string', () {
+      final result = ItemExecutionList.resolveCapTable({});
+      expect(result, '');
+    });
+
+    test('non-Map input -> empty string', () {
+      final result = ItemExecutionList.resolveCapTable(null);
+      expect(result, '');
+    });
+  });
 }
 
 /// Test-only stand-in for ExecutionEntry (avoids importing widget file

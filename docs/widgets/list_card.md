@@ -61,6 +61,9 @@ All separators are server-encoded and `autheniumDecode`-d before splitting: `◼
 | `gateSearch` | Search DSL to find the current user's grant docs (passed raw to `filterDriverHomeDocs`). Example: `ty◼approver⭘vid◼{userVid}`. **Required whenever `gateTable` is set** — leaving it empty does NOT disable gating, it yields an empty list. **Must identify the user by the `{userVid}` token, never a literal vid** — see "Identity" below. |
 | `gateSlot` | `slotField◆pointerField◆levelField` — names the fields in the grant doc (slot assignments) and request doc (pointer + level). Example: `sc◆ak◆cl`. **Required whenever `gateTable` is set** — empty/unparseable yields an empty list, not "gating off". |
 | `text` | Static labels, `◆`-joined: `headerTitle◆headerSubtitle◆countLabel◆searchHint◆emptyText`. Any empty segment hides its element. |
+| `biometrik` | `"true"` (string; bool `true` also accepted) activates a biometric gate on card tap. Absent or any non-`"true"` value = gate OFF (byte-identical to pre-gate behavior). See `biometric_gate.dart` for the full truth table. |
+| `biometrikPin` | `"true"` allows PIN/pattern/passcode alongside biometrics (`biometricOnly: false`). Absent = biometric-only. Only honored when `biometrik` is truthy. |
+| `biometrikText` | `reason◆failTitle◆failMessage` — 3 diamond-separated slots for the OS prompt reason string and the failure dialog title/message. Missing or blank parts fall back to Indonesian defaults (`Verifikasi identitas Anda` / `Autentikasi Gagal` / `Verifikasi biometrik gagal. Coba lagi.`). Only honored when `biometrik` is truthy. |
 
 ## Templates use `<field>` angle syntax
 
@@ -119,6 +122,47 @@ There are exactly two states, and they are deliberately not symmetric:
 **Scale ceiling:** client-side filter (v1). Fetches all docs matching `search`, then filters in-memory. Server-side `where ak in [...]` with composite index is the upgrade path.
 
 **Cross-reference:** The ApproverStickyBar (detail page) uses the same gate infrastructure with a sibling key `gateRowSlot` (numeric row indexes instead of field names). See `docs/widgets/approval_detail.md` "Slot gate on ApproverStickyBar" for details. The RBT's `gateTable` MUST use the fully-qualified `{docId}//subColl` format (bare-name resolution is not available on the RBT). The RBT and list components SHOULD carry the same `vidtable`/`com` so they share a subscription key.
+
+## Row status guard (`statusSearch` — availability, fail-OPEN)
+
+A per-row count against a **second** table, rendered as a pill and optionally
+locking the tap. Built for AssignVehicle: the list is `stock_location`, but
+"is this vehicle on the road" lives in `vehicle_check`.
+
+| key | default | meaning |
+|---|---|---|
+| `statusSearch` | — | gate DSL with a per-row token. Absent = no pill, no lock, zero listeners. |
+| `statusTable` | — | table the search runs against, `<docId>//<subColl>`. Subscribed only when `statusSearch` is authored. |
+| `statusIdField` | `lv` | row field supplying the token value; the token is `{<statusIdField>}`. |
+| `statusOnLabel` | — | pill text when count > 0 (amber). |
+| `statusOffLabel` | — | pill text when count == 0 (emerald). |
+| `disableWhenStatusOn` | `FALSE` | `TRUE` → matching rows are not tappable and render on a muted background. |
+
+Live config (AssignVehicle):
+
+```json
+"statusTable":"84214220504259//vehicle_check",
+"statusSearch":"vv◼{lv}⭘cty◼opening⭘cdt◼{today}⭘rt◼pending",
+"statusOnLabel":"Lagi Jalan","statusOffLabel":"Nganggur","disableWhenStatusOn":"TRUE"
+```
+
+Why this guard is a correctness fix, not cosmetics: AssignConfirm writes
+`vv` + `tst=assigned` onto the task. Do that to a vehicle whose custody is
+already confirmed and the warehouse has counted `ie`, and the task joins the
+driver's manifest for cargo that was never loaded — `asset_cache` goes negative
+and the closing count comes out short.
+
+**Delegates to `PickerList.countForRow`** (decode → `{today}` → row token →
+`evaluateGate`), same engine as the picker pill and the vehiclePicker sheet.
+`{today}` matters: without it a stale doc from a previous day would pin a
+vehicle as busy forever. `rt◼pending` matters too — ReturnVehicle only flips
+`rt`, it never resets `cst`.
+
+★ **Opposite failure direction from the slot gate above.** `gateTable` fails
+CLOSED because it gates *permission*. This one fails OPEN — an unusable
+`statusTable` logs a devPrint and leaves every row selectable. A fail-closed
+version would lock the whole fleet and stop dispatch, which is worse than the
+bug it guards.
 
 ## Notes / gotchas
 

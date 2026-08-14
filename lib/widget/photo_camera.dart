@@ -107,17 +107,52 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
     super.initState();
   }
 
+  /// `CameraController.dispose()` NEVER rejects through this.
+  ///
+  /// camera_android_camerax throws `IllegalStateException:
+  /// releaseFlutterSurfaceTexture() cannot be called if the
+  /// flutterSurfaceProducer for the camera preview has not yet been
+  /// initialized` whenever the controller is torn down before the preview's
+  /// surface producer exists — `initialize()` still in flight, OR
+  /// `CameraPreview` never rendered a frame (app backgrounded right after the
+  /// camera opened). `value.isInitialized` does NOT cover the second case: it
+  /// flips on `initialize()`, while the surface producer is created later by
+  /// the preview widget.
+  ///
+  /// Every dispose site here is either fire-and-forget or reached from an
+  /// un-awaited caller, so a rejection escapes to platformDispatcher.onError
+  /// as a FATAL with no app frames. Guarded once, here, rather than per call
+  /// site. There is nothing to recover — the controller is being thrown away.
+  ///
+  /// It also records [c] in [_disposedController] so `build()` can refuse to
+  /// render a preview on it — see that field.
+  Future<void> _safeDisposeCamera(CameraController? c) async {
+    if (c == null) return;
+    _disposedController = c;
+    try {
+      await c.dispose();
+    } catch (e) {
+      devPrint('camera dispose (uninitialized?): $e');
+    }
+  }
+
+  /// The most recent controller handed to [_safeDisposeCamera].
+  ///
+  /// ★ `CameraController.dispose()` does NOT reset `value.isInitialized` — it
+  /// only flips a private `_isDisposed`. So the build guard's
+  /// `controller!.value.isInitialized` cannot tell a live controller from a
+  /// dead one, and any frame drawn after the lifecycle observer disposed on
+  /// `inactive` (which leaves the `controller` field pointing at the corpse)
+  /// mounted `CameraPreview` → `buildPreview()` →
+  /// `CameraException(Disposed CameraController)` during drawFrame = fatal.
+  ///
+  /// Identity comparison rather than a bool so the three controller-creation
+  /// sites need no bookkeeping: a fresh controller is never identical to this.
+  CameraController? _disposedController;
+
   @override
   void dispose() {
-    // camera plugin's dispose() rejects with IllegalStateException
-    // (releaseFlutterSurfaceTexture ... not yet initialized) when the screen is
-    // closed while initialize() is still in flight — the preview surface
-    // producer was never built. Unawaited in a sync dispose(), the rejected
-    // Future is otherwise unhandled → platformDispatcher → fatal. Swallow it;
-    // there is nothing to recover here.
-    controller?.dispose().catchError((e) {
-      devPrint('camera dispose (uninitialized?): $e');
-    });
+    _safeDisposeCamera(controller); // never rejects — see helper
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -133,9 +168,13 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
     }
 
     if (state == AppLifecycleState.inactive) {
-      cameraController.dispose();
+      _safeDisposeCamera(cameraController);
     } else if (state == AppLifecycleState.resumed) {
-      onNewCameraSelected(cameraController.description);
+      // Un-awaited from a void callback: onNewCameraSelected still awaits
+      // initialize(), whose PlatformException is NOT caught by its
+      // `on CameraException` clause. Route the rejection to a non-fatal.
+      safeUnawaited(onNewCameraSelected(cameraController.description),
+          'photoCamera resumed');
     }
   } // end of didChangeAppLifecycleState
   // #enddocregion AppLifecycle
@@ -158,7 +197,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
   File? currentImage;
 
   Future<void> _doInitializeCamera(int cameraIndex, int flashIndex) async {
-    await controller?.dispose();
+    await _safeDisposeCamera(controller);
     controller = CameraController(
       widget.cameras[cameraIndex],
       ResolutionPreset.medium,
@@ -175,7 +214,9 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
       } catch (e) {
         if (attempt >= 3) rethrow;
         await Future.delayed(const Duration(milliseconds: 300));
-        await controller?.dispose();
+        // A controller whose initialize() just failed has no surface producer,
+        // so a raw dispose() here would throw OUT of this catch block.
+        await _safeDisposeCamera(controller);
         controller = CameraController(
           widget.cameras[cameraIndex],
           ResolutionPreset.medium,
@@ -212,7 +253,10 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
       // which triggers `didChangeAppLifecycleState`, which disposes and
       // re-creates the controller.
       controller = null;
-      await oldController.dispose();
+      // Reached from the resumed branch above with an ALREADY-disposed
+      // controller (the inactive branch disposed it and left the field set),
+      // so this dispose is exactly the throwing case.
+      await _safeDisposeCamera(oldController);
     }
     bool kIsWeb = false;
     final CameraController cameraController = CameraController(
@@ -325,10 +369,13 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                   if (snapshot.connectionState == ConnectionState.done &&
                       !snapshot.hasError &&
                       controller != null &&
+                      !identical(controller, _disposedController) &&
                       controller!.value.isInitialized) {
                     // Only show the preview when the camera is really live —
                     // rendering CameraPreview on a failed/half-initialized
-                    // controller is exactly what produced the blank white frame.
+                    // controller is exactly what produced the blank white frame,
+                    // and on a DISPOSED one it throws inside drawFrame (see
+                    // _disposedController — isInitialized stays true there).
                     return Container(
                         //width: pictureWidth,
                         height: pictureHeight,

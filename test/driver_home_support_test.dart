@@ -2454,11 +2454,12 @@ void main() {
       expect(result, 'tr\u{25FC}DOC_ABC');
     });
 
-    test('{activeTrip} uses state value when already published', () {
-      getDriverHomeState('trip_scr').activeTrip.value = 'EXISTING';
+    test('{activeTrip} compute overrides stale cache when data available', () {
+      getDriverHomeState('trip_scr').activeTrip.value = 'STALE_TRIP';
+      // setUp seeds DOC_ABC for V1 — compute wins over cache.
       final result = resolveDriverCurlyTokens(
           'tr\u{25FC}{activeTrip}', 'trip_scr');
-      expect(result, 'tr\u{25FC}EXISTING');
+      expect(result, 'tr\u{25FC}DOC_ABC');
     });
 
     test('{activeTrip} fallback with no vehicle_check key -> literal', () {
@@ -2512,6 +2513,41 @@ void main() {
       final result = resolveDriverCurlyTokens(
           'tr\u{25FC}{activeTrip}\u{2B58}vv\u{25FC}{vehicleId}', 'trip_scr');
       expect(result, 'tr\u{25FC}DOC_ABC\u{2B58}vv\u{25FC}V1');
+    });
+
+    test('{activeTrip} stale cache for closed trip -> literal (fail-closed)', () {
+      getDriverHomeState('trip_scr').activeTrip.value = 'OLD_CLOSED';
+      mapTableContent['99/vehicle_check'] = [
+        {
+          'cty': 'opening',
+          'vv': 'V1',
+          'cst': 'closed',
+          't': 100,
+          '__docId': 'OLD_CLOSED',
+        },
+      ];
+      final result = resolveDriverCurlyTokens(
+          'tr\u{25FC}{activeTrip}', 'trip_scr');
+      // Compute says all openings are closed -> fail-closed, NOT stale cache.
+      expect(result, 'tr\u{25FC}{activeTrip}');
+    });
+
+    test('{activeTrip} cache used when no vehicle_check keys (inconclusive)', () {
+      getDriverHomeState('trip_scr').activeTrip.value = 'CACHED';
+      mapTableContent.remove('99/vehicle_check');
+      final result = resolveDriverCurlyTokens(
+          'tr\u{25FC}{activeTrip}', 'trip_scr');
+      // No vehicle_check data -> compute inconclusive -> fall back to cache.
+      expect(result, 'tr\u{25FC}CACHED');
+    });
+
+    test('{activeTrip} cache used when vehicleId empty', () {
+      getDriverHomeState('trip_scr').vehicleId.value = '';
+      getDriverHomeState('trip_scr').activeTrip.value = 'CACHED';
+      final result = resolveDriverCurlyTokens(
+          'tr\u{25FC}{activeTrip}', 'trip_scr');
+      // No vehicle context -> fall back to cache.
+      expect(result, 'tr\u{25FC}CACHED');
     });
   });
 

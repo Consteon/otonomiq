@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otonomiq/widget/picker_list.dart';
 import 'package:otonomiq/widget/panel_card_support.dart'; // panelIcon
+import 'package:otonomiq/widget/driver_home_support.dart'; // todayEpochMidnightWib
 
 void main() {
   // Sample stock_location docs: 3 vehicles (1 inactive) + 1 client + warehouse.
@@ -53,6 +54,115 @@ void main() {
 
     test('empty source returns empty', () {
       expect(PickerList.filterRows([], 'lt\u{25FC}vehicle'), isEmpty);
+    });
+  });
+
+  // ── {today} resolution inside gate searches ─────────────────────────────
+  //
+  // Before this existed, any search carrying {today} hit the leftover-"{"
+  // bail in countForRow and silently counted 0 -- indistinguishable from
+  // "nothing matched". That is what kept the on-duty guard dead.
+  group('PickerList.resolveTimeTokens', () {
+    test('{today} is replaced', () {
+      final String out = PickerList.resolveTimeTokens('cdt\u{25FC}{today}');
+      expect(out.contains('{today}'), false);
+      expect(out, 'cdt\u{25FC}${todayEpochMidnightWib()}');
+    });
+
+    test('row tokens are left alone', () {
+      // Critical: this must NOT behave like resolveDriverCurlyTokens, whose
+      // default branch would substitute {lv} from a screen-tx bare key.
+      final String out =
+          PickerList.resolveTimeTokens('vv\u{25FC}{lv}\u{2B58}cdt\u{25FC}{today}');
+      expect(out.contains('{lv}'), true);
+      expect(out.contains('{today}'), false);
+    });
+
+    test('no time token -> string returned untouched', () {
+      const String s = 'vv\u{25FC}{lv}\u{2B58}tst\u{25FC}assigned';
+      expect(PickerList.resolveTimeTokens(s), s);
+    });
+  });
+
+  group('countForRow with the on-duty guard search', () {
+    // Shape copied from a live vehicle_check doc (qxgYPZroZ5ALhfdISaFV).
+    final String today = todayEpochMidnightWib();
+    final String yesterday = (int.parse(today) - 86400000).toString();
+
+    // Rev5: vv◼{lv}⭘cty◼opening⭘cdt◼{today}⭘rt◼pending
+    // cst◼custody_confirmed DROPPED -- lock starts at warehouse submit, not
+    // driver custody confirmation (spec rev5 §1).
+    const String guard = 'vv\u{25FC}{lv}\u{2B58}cty\u{25FC}opening'
+        '\u{2B58}cdt\u{25FC}{today}\u{2B58}rt\u{25FC}pending';
+
+    List<Map<String, dynamic>> checksFor(String cdt) => [
+          // on the road
+          {
+            'vv': 'MBL-02',
+            'cty': 'opening',
+            'cdt': cdt,
+            'cst': 'custody_confirmed',
+            'rt': 'pending'
+          },
+          // loaded, driver has not taken custody -> joined trip still allowed
+          {
+            'vv': 'MBL-01',
+            'cty': 'opening',
+            'cdt': cdt,
+            'cst': 'awaiting_custody',
+            'rt': 'pending'
+          },
+          // handed back to the warehouse; cst is never reset, only rt flips
+          {
+            'vv': 'MBL-03',
+            'cty': 'opening',
+            'cdt': cdt,
+            'cst': 'custody_confirmed',
+            'rt': 'returned'
+          },
+        ];
+
+    test('counts the vehicle that is actually on the road', () {
+      expect(PickerList.countForRow(checksFor(today), guard, 'lv', 'MBL-02'), 1);
+    });
+
+    test('awaiting_custody IS counted -- rev5 locks at warehouse submit, '
+        'not driver custody (spec rev5 §1, one-trip table)', () {
+      // MBL-01 has cst:awaiting_custody. Rev4 excluded it (required
+      // cst=custody_confirmed). Rev5 drops the cst segment entirely --
+      // the lock fires the moment the warehouse submits the opening check,
+      // regardless of driver custody state.
+      expect(PickerList.countForRow(checksFor(today), guard, 'lv', 'MBL-01'), 1);
+    });
+
+    test('rt=returned is not counted -- vehicle handed back, available again', () {
+      expect(PickerList.countForRow(checksFor(today), guard, 'lv', 'MBL-03'), 0);
+    });
+
+    test("yesterday's doc is not counted (cdt scopes the guard to today)", () {
+      expect(
+          PickerList.countForRow(checksFor(yesterday), guard, 'lv', 'MBL-02'), 0);
+    });
+
+    test('integer cdt matches the string token (eq is type-tolerant)', () {
+      final docs = [
+        {
+          'vv': 'MBL-02',
+          'cty': 'opening',
+          'cdt': int.parse(today), // Firestore stores this as an integer
+          'cst': 'custody_confirmed',
+          'rt': 'pending'
+        },
+      ];
+      expect(PickerList.countForRow(docs, guard, 'lv', 'MBL-02'), 1);
+    });
+
+    test('server-encoded guard decodes, resolves, then counts', () {
+      // Rev5 encoded form (no cst segment).
+      const String encoded = 'vv_25FC_{lv}_u2B58_cty_25FC_opening'
+          '_u2B58_cdt_25FC_{today}_u2B58_rt_25FC_pending';
+      expect(
+          PickerList.countForRow(checksFor(today), encoded, 'lv', 'MBL-02'), 1);
     });
   });
 
@@ -401,94 +511,221 @@ void main() {
     });
   });
 
-  group('busy-self field derivation', () {
-    // Mirrors the _rowTile logic: read busySelfField from the row itself.
-    // Pure extraction -- no widget pump needed.
+  // ── deriveRowLock (combined lock derivation + row-field extraction) ──────
 
-    /// Replicates the busy derivation in _rowTile.
-    ({bool isBusy, String busyLabel}) deriveBusy(
-      Map<String, dynamic> row,
-      String busySelfField,
-      String busySelfLabelField,
-      String busyPrefix,
-    ) {
-      final String busyVal = busySelfField.isEmpty
-          ? ''
-          : (row[busySelfField] ?? '').toString().trim();
-      final bool isBusy = busyVal.isNotEmpty;
-      final String busyLabel = isBusy
-          ? '$busyPrefix${(row[busySelfLabelField] ?? '').toString().trim()}'
-          : '';
-      return (isBusy: isBusy, busyLabel: busyLabel);
-    }
+  group('PickerList.deriveRowLock', () {
+    // ── busySelf field-extraction cases (ported from deriveBusy, C1) ──────
 
     test('non-empty busySelfField value -> busy with label', () {
-      final r = deriveBusy(
-        {'dv': 'wf-1', 'dn': 'Agenia Demo-3'},
-        'dv', 'dn', 'Sedang jalan \u{00B7} ',
+      final r = PickerList.deriveRowLock(
+        row: {'dv': 'wf-1', 'dn': 'Agenia Demo-3'},
+        busySelfField: 'dv',
+        busySelfLabelField: 'dn',
+        busyPrefix: 'Sedang jalan \u{00B7} ',
+        statusOn: false,
+        statusOnLabel: '',
+        disableWhenStatusOn: false,
       );
-      expect(r.isBusy, isTrue);
+      expect(r.isBusy, true);
       expect(r.busyLabel, 'Sedang jalan \u{00B7} Agenia Demo-3');
     });
 
     test('empty busySelfField value -> not busy', () {
-      final r = deriveBusy(
-        {'dv': '', 'dn': 'Agenia Demo-3'},
-        'dv', 'dn', 'Sedang jalan \u{00B7} ',
+      final r = PickerList.deriveRowLock(
+        row: {'dv': '', 'dn': 'Agenia Demo-3'},
+        busySelfField: 'dv',
+        busySelfLabelField: 'dn',
+        busyPrefix: 'Sedang jalan \u{00B7} ',
+        statusOn: false,
+        statusOnLabel: '',
+        disableWhenStatusOn: false,
       );
-      expect(r.isBusy, isFalse);
+      expect(r.isBusy, false);
       expect(r.busyLabel, '');
     });
 
     test('busySelfField not configured (empty string) -> never busy', () {
-      final r = deriveBusy(
-        {'dv': 'wf-1', 'dn': 'Agenia Demo-3'},
-        '', 'dn', 'Sedang jalan \u{00B7} ',
+      final r = PickerList.deriveRowLock(
+        row: {'dv': 'wf-1', 'dn': 'Agenia Demo-3'},
+        busySelfField: '',
+        busySelfLabelField: 'dn',
+        busyPrefix: 'Sedang jalan \u{00B7} ',
+        statusOn: false,
+        statusOnLabel: '',
+        disableWhenStatusOn: false,
       );
-      expect(r.isBusy, isFalse);
+      expect(r.isBusy, false);
     });
 
     test('missing busySelfField key in row -> not busy (no crash)', () {
-      final r = deriveBusy(
-        <String, dynamic>{}, // sparse row
-        'dv', 'dn', 'Sedang jalan \u{00B7} ',
+      final r = PickerList.deriveRowLock(
+        row: <String, dynamic>{}, // sparse row
+        busySelfField: 'dv',
+        busySelfLabelField: 'dn',
+        busyPrefix: 'Sedang jalan \u{00B7} ',
+        statusOn: false,
+        statusOnLabel: '',
+        disableWhenStatusOn: false,
       );
-      expect(r.isBusy, isFalse);
+      expect(r.isBusy, false);
     });
 
     test('null field value -> not busy (no crash)', () {
-      final r = deriveBusy(
-        {'dv': null, 'dn': null},
-        'dv', 'dn', 'Sedang jalan \u{00B7} ',
+      final r = PickerList.deriveRowLock(
+        row: {'dv': null, 'dn': null},
+        busySelfField: 'dv',
+        busySelfLabelField: 'dn',
+        busyPrefix: 'Sedang jalan \u{00B7} ',
+        statusOn: false,
+        statusOnLabel: '',
+        disableWhenStatusOn: false,
       );
-      expect(r.isBusy, isFalse);
+      expect(r.isBusy, false);
     });
 
     test('whitespace-only busySelfField value -> not busy', () {
-      final r = deriveBusy(
-        {'dv': '   ', 'dn': 'Driver X'},
-        'dv', 'dn', 'Prefix ',
+      final r = PickerList.deriveRowLock(
+        row: {'dv': '   ', 'dn': 'Driver X'},
+        busySelfField: 'dv',
+        busySelfLabelField: 'dn',
+        busyPrefix: 'Prefix ',
+        statusOn: false,
+        statusOnLabel: '',
+        disableWhenStatusOn: false,
       );
-      expect(r.isBusy, isFalse);
+      expect(r.isBusy, false);
     });
 
     test('missing busySelfLabelField key -> label is prefix only', () {
-      final r = deriveBusy(
-        {'dv': 'wf-5'},  // no 'dn' key
-        'dv', 'dn', 'Sedang jalan \u{00B7} ',
+      final r = PickerList.deriveRowLock(
+        row: {'dv': 'wf-5'}, // no 'dn' key
+        busySelfField: 'dv',
+        busySelfLabelField: 'dn',
+        busyPrefix: 'Sedang jalan \u{00B7} ',
+        statusOn: false,
+        statusOnLabel: '',
+        disableWhenStatusOn: false,
       );
-      expect(r.isBusy, isTrue);
+      expect(r.isBusy, true);
       expect(r.busyLabel, 'Sedang jalan \u{00B7} ');
     });
 
-    test('empty text array -> busyPrefix defaults to empty via _t(3)', () {
+    test('empty busyPrefix -> label is just the label field value', () {
       // Simulates _t(3) on an empty/short text array returning ''.
-      final r = deriveBusy(
-        {'dv': 'wf-1', 'dn': 'Driver Y'},
-        'dv', 'dn', '', // empty prefix (what _t(3) returns when text[3] absent)
+      final r = PickerList.deriveRowLock(
+        row: {'dv': 'wf-1', 'dn': 'Driver Y'},
+        busySelfField: 'dv',
+        busySelfLabelField: 'dn',
+        busyPrefix: '', // what _t(3) returns when text[3] absent
+        statusOn: false,
+        statusOnLabel: '',
+        disableWhenStatusOn: false,
       );
-      expect(r.isBusy, isTrue);
+      expect(r.isBusy, true);
       expect(r.busyLabel, 'Driver Y'); // just the label field, no prefix
+    });
+
+    // ── lock combination cases (new) ─────────────────────────────────────
+
+    test('both guards off -> not busy', () {
+      final r = PickerList.deriveRowLock(
+        row: <String, dynamic>{},
+        busySelfField: '',
+        busySelfLabelField: '',
+        busyPrefix: '',
+        statusOn: false,
+        statusOnLabel: '',
+        disableWhenStatusOn: false,
+      );
+      expect(r.isBusy, false);
+      expect(r.busyLabel, '');
+    });
+
+    test('status lock only -> busy with statusOnLabel', () {
+      final r = PickerList.deriveRowLock(
+        row: <String, dynamic>{},
+        busySelfField: '',
+        busySelfLabelField: '',
+        busyPrefix: '',
+        statusOn: true,
+        statusOnLabel: 'Lagi Jalan',
+        disableWhenStatusOn: true,
+      );
+      expect(r.isBusy, true);
+      expect(r.busyLabel, 'Lagi Jalan');
+    });
+
+    test('both guards fire -> labels joined with middle dot (D7)', () {
+      final r = PickerList.deriveRowLock(
+        row: {'dv': 'wf-1', 'dn': 'Agenia Demo-3'},
+        busySelfField: 'dv',
+        busySelfLabelField: 'dn',
+        busyPrefix: 'Lagi jalan \u{00B7} ',
+        statusOn: true,
+        statusOnLabel: 'Lagi Jalan',
+        disableWhenStatusOn: true,
+      );
+      expect(r.isBusy, true);
+      expect(r.busyLabel,
+          'Lagi jalan \u{00B7} Agenia Demo-3 \u{00B7} Lagi Jalan');
+    });
+
+    test('statusOn but disableWhenStatusOn=false -> not busy (pill only, '
+        'regression guard for every existing tenant)', () {
+      final r = PickerList.deriveRowLock(
+        row: <String, dynamic>{},
+        busySelfField: '',
+        busySelfLabelField: '',
+        busyPrefix: '',
+        statusOn: true,
+        statusOnLabel: 'Lagi Jalan',
+        disableWhenStatusOn: false,
+      );
+      expect(r.isBusy, false);
+      expect(r.busyLabel, '');
+    });
+
+    test('status locked with empty statusOnLabel -> locked, label empty', () {
+      final r = PickerList.deriveRowLock(
+        row: <String, dynamic>{},
+        busySelfField: '',
+        busySelfLabelField: '',
+        busyPrefix: '',
+        statusOn: true,
+        statusOnLabel: '',
+        disableWhenStatusOn: true,
+      );
+      expect(r.isBusy, true);
+      expect(r.busyLabel, '');
+    });
+
+    test('busySelf busy (empty label) + status locked -> statusOnLabel only', () {
+      final r = PickerList.deriveRowLock(
+        row: {'dv': 'wf-1'},
+        busySelfField: 'dv',
+        busySelfLabelField: 'dn', // missing in row -> prefix only
+        busyPrefix: '', // empty prefix -> busySelfLabel = '' (empty)
+        statusOn: true,
+        statusOnLabel: 'Lagi Jalan',
+        disableWhenStatusOn: true,
+      );
+      expect(r.isBusy, true);
+      expect(r.busyLabel, 'Lagi Jalan');
+    });
+
+    test('busySelf on + status on but disable=false -> only busySelf locks', () {
+      final r = PickerList.deriveRowLock(
+        row: {'dv': 'wf-1', 'dn': 'Driver A'},
+        busySelfField: 'dv',
+        busySelfLabelField: 'dn',
+        busyPrefix: 'Prefix ',
+        statusOn: true,
+        statusOnLabel: 'Lagi Jalan',
+        disableWhenStatusOn: false,
+      );
+      expect(r.isBusy, true);
+      // statusOnLabel NOT included because disableWhenStatusOn is false
+      expect(r.busyLabel, 'Prefix Driver A');
     });
   });
 }

@@ -48,6 +48,28 @@ class TaskManifestList extends StatefulWidget {
     );
   }
 
+  /// Whether the component is configured for tx-aware display.
+  ///
+  /// Arms on ANY of txField / saleField / buyField / refillField being
+  /// non-empty in the component map. When armed, the caller defaults
+  /// txField to 'tx' if absent (safe: buildItemAnnotations default: case
+  /// falls back to drop/pickup for items without a tx value).
+  ///
+  /// Mirrors [CirculationSummary.isPerTxConfig] pattern.
+  static bool isTxAwareConfig(dynamic component) {
+    if (component is! Map) return false;
+    const List<String> keys = <String>[
+      'txField',
+      'saleField',
+      'buyField',
+      'refillField',
+    ];
+    for (final String key in keys) {
+      if ((component[key] ?? '').toString().trim().isNotEmpty) return true;
+    }
+    return false;
+  }
+
   /// Clear expand state for a screen (e.g. on route change).
   static void clearExpandState(String scrName) {
     _expandedTasks.remove(scrName);
@@ -98,19 +120,19 @@ class TaskManifestList extends StatefulWidget {
         case 'sale':
           if (saleField.isNotEmpty) {
             final int ps = resolveItemQty(entry, saleField, actualSaleField);
-            if (ps > 0) annotations.add('$ps $saleLabel');
+            if (ps > 0) annotations.add('\u{2192} $ps $saleLabel');
           }
           break;
         case 'purchase':
           if (buyField.isNotEmpty) {
             final int pb = resolveItemQty(entry, buyField, actualBuyField);
-            if (pb > 0) annotations.add('$pb $buyLabel');
+            if (pb > 0) annotations.add('\u{2192} $pb $buyLabel');
           }
           break;
         case 'refill':
           if (refillField.isNotEmpty) {
             final int pr = resolveItemQty(entry, refillField, actualRefillField);
-            if (pr > 0) annotations.add('$pr $refillLabel');
+            if (pr > 0) annotations.add('\u{2192} $pr $refillLabel');
           }
           break;
         default:
@@ -247,6 +269,28 @@ class _TaskManifestListState extends State<TaskManifestList> {
           (widget.component['collapsible'] ?? '').toString().toUpperCase() ==
               'TRUE';
 
+      // Tx-aware config (sale/buy/refill). Armed when ANY of the four
+      // keys is present; txField defaults to 'tx' when armed so tenants
+      // that set only saleField/buyField/refillField get the tx branch.
+      final bool txAware = TaskManifestList.isTxAwareConfig(widget.component);
+      final String rawTx =
+          (widget.component['txField'] ?? '').toString().trim();
+      final String txField = txAware ? (rawTx.isEmpty ? 'tx' : rawTx) : '';
+      final String saleField = txAware
+          ? (widget.component['saleField'] ?? '').toString().trim()
+          : '';
+      final String buyField = txAware
+          ? (widget.component['buyField'] ?? '').toString().trim()
+          : '';
+      final String refillField = txAware
+          ? (widget.component['refillField'] ?? '').toString().trim()
+          : '';
+
+      // Collection-mode text slots [6][7][8]: sale/buy/refill labels.
+      final String saleLabel = _tOr(6, 'Jual');
+      final String buyLabel = _tOr(7, 'Beli');
+      final String refillLabel = _tOr(8, 'Tukar');
+
       // Compute aggregates for header
       int totalItemLines = 0;
       final List<TaskAggregate> aggregates = [];
@@ -257,7 +301,11 @@ class _TaskManifestListState extends State<TaskManifestList> {
             dropField:
                 (widget.component['dropField'] ?? 'pd').toString(),
             pickupField:
-                (widget.component['pickupField'] ?? 'pp').toString());
+                (widget.component['pickupField'] ?? 'pp').toString(),
+            txField: txField,
+            saleField: saleField,
+            buyField: buyField,
+            refillField: refillField);
         aggregates.add(agg);
         totalItemLines += agg.itemLineCount;
       }
@@ -369,6 +417,13 @@ class _TaskManifestListState extends State<TaskManifestList> {
                     isFirst: i == 0,
                     expandSet: expandSet,
                     hideQty: hideQty,
+                    txField: txField,
+                    saleField: saleField,
+                    buyField: buyField,
+                    refillField: refillField,
+                    saleLabel: saleLabel,
+                    buyLabel: buyLabel,
+                    refillLabel: refillLabel,
                   ),
               ],
             ],
@@ -511,6 +566,13 @@ class _TaskManifestListState extends State<TaskManifestList> {
     required bool isFirst,
     required Set<String> expandSet,
     bool hideQty = false,
+    String txField = '',
+    String saleField = '',
+    String buyField = '',
+    String refillField = '',
+    String saleLabel = '',
+    String buyLabel = '',
+    String refillLabel = '',
   }) {
     final String tnm = (task[idField] ?? '').toString().trim();
     final String name = (task[titleField] ?? '').toString().trim();
@@ -598,7 +660,7 @@ class _TaskManifestListState extends State<TaskManifestList> {
                   ),
                 ),
                 const SizedBox(width: 6),
-                // Drop/pickup pills (O1 hideQty suppresses them)
+                // Drop/pickup/sale/buy/refill pills (O1 hideQty suppresses all)
                 if (!hideQty) ...[
                   if (agg.totalDrop > 0)
                     _pill('\u{2193}${agg.totalDrop}',
@@ -607,6 +669,21 @@ class _TaskManifestListState extends State<TaskManifestList> {
                     const SizedBox(width: 4),
                     _pill('\u{2191}${agg.totalPickup}',
                         const Color(0xFFEEF2FF), const Color(0xFF4338CA)),
+                  ],
+                  if (agg.totalSale > 0) ...[
+                    const SizedBox(width: 4),
+                    _pill('\u{2192}${agg.totalSale}',
+                        const Color(0xFFFEF3C7), const Color(0xFFD97706)),
+                  ],
+                  if (agg.totalBuy > 0) ...[
+                    const SizedBox(width: 4),
+                    _pill('\u{2190}${agg.totalBuy}',
+                        const Color(0xFFDBEAFE), const Color(0xFF2563EB)),
+                  ],
+                  if (agg.totalRefill > 0) ...[
+                    const SizedBox(width: 4),
+                    _pill('\u{21BB}${agg.totalRefill}',
+                        const Color(0xFFE0E7FF), const Color(0xFF6366F1)),
                   ],
                 ],
                 const SizedBox(width: 4),
@@ -625,7 +702,14 @@ class _TaskManifestListState extends State<TaskManifestList> {
         // Expanded item lines (accordion)
         if (isExpanded)
           _buildItemLines(task, itemsField, dropField, pickupField,
-              dropLabel, pickupLabel),
+              dropLabel, pickupLabel,
+              txField: txField,
+              saleField: saleField,
+              buyField: buyField,
+              refillField: refillField,
+              saleLabel: saleLabel,
+              buyLabel: buyLabel,
+              refillLabel: refillLabel),
       ],
     );
   }

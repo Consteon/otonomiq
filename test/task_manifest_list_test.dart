@@ -27,6 +27,9 @@ void main() {
       expect(agg.itemLineCount, 0);
       expect(agg.totalDrop, 0);
       expect(agg.totalPickup, 0);
+      expect(agg.totalSale, 0);
+      expect(agg.totalBuy, 0);
+      expect(agg.totalRefill, 0);
     });
 
     test('non-List it field returns zeros', () {
@@ -34,6 +37,9 @@ void main() {
       expect(agg.itemLineCount, 0);
       expect(agg.totalDrop, 0);
       expect(agg.totalPickup, 0);
+      expect(agg.totalSale, 0);
+      expect(agg.totalBuy, 0);
+      expect(agg.totalRefill, 0);
     });
 
     test('non-Map entries inside it[] are skipped', () {
@@ -102,6 +108,122 @@ void main() {
       expect(agg.itemLineCount, 0);
       expect(agg.totalDrop, 0);
       expect(agg.totalPickup, 0);
+    });
+  });
+
+  // ── aggregateTaskDropPickup tx-aware ───────────────────────────────────
+
+  group('aggregateTaskDropPickup tx-aware', () {
+    test('mixed task sums per type', () {
+      final doc = {
+        'it': [
+          {'in': 'Galon', 'tx': 'deliver', 'pd': '8', 'pp': '2'},
+          {'in': 'Aqua 330ml', 'tx': 'sale', 'ps': '5'},
+          {'in': 'Tabung', 'tx': 'purchase', 'pb': '3'},
+          {'in': 'Botol', 'tx': 'refill', 'pr': '4'},
+        ],
+      };
+      final agg = aggregateTaskDropPickup(doc,
+          txField: 'tx',
+          saleField: 'ps',
+          buyField: 'pb',
+          refillField: 'pr');
+      expect(agg.itemLineCount, 4);
+      expect(agg.totalDrop, 8);
+      expect(agg.totalPickup, 2);
+      expect(agg.totalSale, 5);
+      expect(agg.totalBuy, 3);
+      expect(agg.totalRefill, 4);
+    });
+
+    test('all-sale task produces zero drop/pickup', () {
+      final doc = {
+        'it': [
+          {'in': 'Aqua 330ml', 'tx': 'sale', 'ps': '10'},
+          {'in': 'Aqua 1500ml', 'tx': 'sale', 'ps': '5'},
+        ],
+      };
+      final agg = aggregateTaskDropPickup(doc,
+          txField: 'tx', saleField: 'ps');
+      expect(agg.itemLineCount, 2);
+      expect(agg.totalDrop, 0);
+      expect(agg.totalPickup, 0);
+      expect(agg.totalSale, 15);
+    });
+
+    test('unknown tx falls to drop/pickup', () {
+      final doc = {
+        'it': [
+          {'in': 'Mystery', 'tx': 'unknown_type', 'pd': '7', 'pp': '3'},
+        ],
+      };
+      final agg = aggregateTaskDropPickup(doc, txField: 'tx');
+      expect(agg.totalDrop, 7);
+      expect(agg.totalPickup, 3);
+      expect(agg.totalSale, 0);
+    });
+
+    test('absent tx value falls to drop/pickup', () {
+      // Item has no tx field at all -- default: case triggers.
+      final doc = {
+        'it': [
+          {'in': 'NoTx', 'pd': '6', 'pp': '1'},
+        ],
+      };
+      final agg = aggregateTaskDropPickup(doc, txField: 'tx');
+      expect(agg.totalDrop, 6);
+      expect(agg.totalPickup, 1);
+      expect(agg.totalSale, 0);
+    });
+
+    test('legacy mode (txField empty) sums all pd/pp, sale/buy/refill stay zero', () {
+      final doc = {
+        'it': [
+          {'in': 'A', 'tx': 'sale', 'pd': '0', 'pp': '0', 'ps': '5'},
+          {'in': 'B', 'tx': 'deliver', 'pd': '3', 'pp': '1'},
+        ],
+      };
+      // No txField -> legacy mode
+      final agg = aggregateTaskDropPickup(doc);
+      expect(agg.totalDrop, 3); // pd from both items (0 + 3)
+      expect(agg.totalPickup, 1);
+      expect(agg.totalSale, 0); // not computed in legacy mode
+    });
+
+    test('sale with empty saleField is ignored', () {
+      final doc = {
+        'it': [
+          {'in': 'Aqua', 'tx': 'sale', 'ps': '5'},
+        ],
+      };
+      // txField set but saleField empty -> sale qty not summed
+      final agg = aggregateTaskDropPickup(doc, txField: 'tx');
+      expect(agg.totalSale, 0);
+    });
+
+    test('actual-over-plan works for sale fields', () {
+      final doc = {
+        'it': [
+          {'in': 'Aqua', 'tx': 'sale', 'ps': '10', 'as': '7'},
+        ],
+      };
+      final agg = aggregateTaskDropPickup(doc,
+          txField: 'tx', saleField: 'ps');
+      // resolveItemQty prefers actual (as=7) over plan (ps=10)
+      expect(agg.totalSale, 7);
+    });
+
+    test('integer qty values work in tx-aware mode', () {
+      final doc = {
+        'it': [
+          {'in': 'Aqua', 'tx': 'deliver', 'pd': 8, 'pp': 3},
+          {'in': 'Cola', 'tx': 'sale', 'ps': 5},
+        ],
+      };
+      final agg = aggregateTaskDropPickup(doc,
+          txField: 'tx', saleField: 'ps');
+      expect(agg.totalDrop, 8);
+      expect(agg.totalSale, 5);
     });
   });
 
@@ -494,7 +616,7 @@ void main() {
         saleField: 'ps',
         saleLabel: 'Jual',
       );
-      expect(result, ['3 Jual']);
+      expect(result, ['\u{2192} 3 Jual']);
     });
 
     test('purchase entry shows qty with config buy label (Beli)', () {
@@ -510,7 +632,7 @@ void main() {
         buyField: 'pb',
         buyLabel: 'Beli',
       );
-      expect(result, ['7 Beli']);
+      expect(result, ['\u{2192} 7 Beli']);
     });
 
     test('refill entry shows qty with config refill label (Refill)', () {
@@ -526,7 +648,7 @@ void main() {
         refillField: 'pr',
         refillLabel: 'Refill',
       );
-      expect(result, ['4 Refill']);
+      expect(result, ['\u{2192} 4 Refill']);
     });
 
     test('unknown tx falls through to drop/pickup', () {
@@ -650,6 +772,84 @@ void main() {
     });
   });
 
+  // ── collection-mode annotation rendering ───────────────────────────────
+
+  group('collection-mode annotation rendering', () {
+    test('sale entry with arrow prefix and Jual label', () {
+      final entry = {'tx': 'sale', 'ps': '3'};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'antar',
+        pickupLabel: 'ambil',
+        txField: 'tx',
+        saleField: 'ps',
+        saleLabel: 'Jual',
+      );
+      expect(result, ['\u{2192} 3 Jual']);
+    });
+
+    test('buy entry with arrow prefix and Beli label', () {
+      final entry = {'tx': 'purchase', 'pb': '7'};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'antar',
+        pickupLabel: 'ambil',
+        txField: 'tx',
+        buyField: 'pb',
+        buyLabel: 'Beli',
+      );
+      expect(result, ['\u{2192} 7 Beli']);
+    });
+
+    test('refill entry with arrow prefix and Tukar label', () {
+      final entry = {'tx': 'refill', 'pr': '4'};
+      final result = TaskManifestList.buildItemAnnotations(
+        entry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'antar',
+        pickupLabel: 'ambil',
+        txField: 'tx',
+        refillField: 'pr',
+        refillLabel: 'Tukar',
+      );
+      expect(result, ['\u{2192} 4 Tukar']);
+    });
+
+    test('mixed task: deliver + sale items produce correct annotations', () {
+      final deliverEntry = {'tx': 'deliver', 'pd': '4', 'pp': '4'};
+      final saleEntry = {'tx': 'sale', 'ps': '3'};
+
+      final deliverResult = TaskManifestList.buildItemAnnotations(
+        deliverEntry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'antar',
+        pickupLabel: 'ambil',
+        txField: 'tx',
+        saleField: 'ps',
+        saleLabel: 'jual',
+      );
+      expect(deliverResult, ['\u{2193} 4 antar', '\u{2191} 4 ambil']);
+
+      final saleResult = TaskManifestList.buildItemAnnotations(
+        saleEntry,
+        dropField: 'pd',
+        pickupField: 'pp',
+        dropLabel: 'antar',
+        pickupLabel: 'ambil',
+        txField: 'tx',
+        saleField: 'ps',
+        saleLabel: 'jual',
+      );
+      expect(saleResult, ['\u{2192} 3 jual']);
+    });
+  });
+
   // ── draft source: text slot mapping ─────────────────────────────────────
 
   group('draft source: text slot mapping', () {
@@ -722,7 +922,67 @@ void main() {
         saleField: 'ps',
         saleLabel: saleLabel,
       );
-      expect(result, ['3 Jual']);
+      expect(result, ['\u{2192} 3 Jual']);
+    });
+  });
+
+  // ── isTxAwareConfig ────────────────────────────────────────────────────
+
+  group('isTxAwareConfig', () {
+    test('returns false for null component', () {
+      expect(TaskManifestList.isTxAwareConfig(null), false);
+    });
+
+    test('returns false for non-Map component', () {
+      expect(TaskManifestList.isTxAwareConfig('string'), false);
+    });
+
+    test('returns false when none of the four keys are present', () {
+      expect(TaskManifestList.isTxAwareConfig({'type': 'task_manifest_list'}), false);
+    });
+
+    test('returns false when all four keys are empty strings', () {
+      expect(TaskManifestList.isTxAwareConfig({
+        'txField': '',
+        'saleField': '',
+        'buyField': '',
+        'refillField': '',
+      }), false);
+    });
+
+    test('returns false when all four keys are whitespace-only', () {
+      expect(TaskManifestList.isTxAwareConfig({
+        'txField': '  ',
+        'saleField': ' ',
+        'buyField': '   ',
+        'refillField': '\t',
+      }), false);
+    });
+
+    test('returns true when only saleField is set', () {
+      expect(TaskManifestList.isTxAwareConfig({'saleField': 'ps'}), true);
+    });
+
+    test('returns true when only buyField is set', () {
+      expect(TaskManifestList.isTxAwareConfig({'buyField': 'pb'}), true);
+    });
+
+    test('returns true when only refillField is set', () {
+      expect(TaskManifestList.isTxAwareConfig({'refillField': 'pr'}), true);
+    });
+
+    test('returns true when only txField is set', () {
+      expect(TaskManifestList.isTxAwareConfig({'txField': 'tx'}), true);
+    });
+
+    test('returns true when saleField + buyField + refillField set (no txField)', () {
+      // This is the D1348 config shape: saleField/buyField/refillField
+      // without txField. The gate must still arm.
+      expect(TaskManifestList.isTxAwareConfig({
+        'saleField': 'ps',
+        'buyField': 'pb',
+        'refillField': 'pr',
+      }), true);
     });
   });
 }
