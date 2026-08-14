@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:otonomiq/page/lib/page/otq_pdf_viewer.dart';
 
 import '../api.dart';
 import '../global.dart';
+import '../page/lib/page/otq_pdf_viewer.dart';
 import '../sdui_spec.dart';
 
 /*

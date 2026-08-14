@@ -1,9 +1,9 @@
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
-import 'package:otonomiq/page/lib/page/otq_pdf_viewer.dart';
 
 import '../global.dart';
+import '../page/lib/page/otq_pdf_viewer.dart';
 import '../sdui_spec.dart';
 import '../token_resolver.dart';
 

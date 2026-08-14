@@ -1,10 +1,10 @@
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
-import 'package:otonomiq/page/lib/page/otq_pdf_viewer.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../global.dart';
 import '../global2.dart';
+import '../page/lib/page/otq_pdf_viewer.dart';
 import '../sdui_spec.dart';
 import '../token_resolver.dart';
 import 'biometric_gate.dart';
