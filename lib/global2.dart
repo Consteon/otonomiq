@@ -678,6 +678,7 @@ IconData stringToIconData(String? iconName) {
     'g_translate': Icons.g_translate,
     'gavel': Icons.gavel,
     'get_app': Icons.get_app,
+    'download': Icons.download,
     'gif': Icons.gif,
     'grade': Icons.grade,
     'group_work': Icons.group_work,

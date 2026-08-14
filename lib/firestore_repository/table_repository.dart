@@ -2630,7 +2630,14 @@ Future saveHistory() async {
     errorReport('Cannot save history to secure storage $e');
   } // end try (e)
   // update transactionStore['#TABLE_HISTORY']
-  Map<String, dynamic>? table = {historyName: sha3_256(historyStr)};
+  // The entry keyed by the table name is a placeholder that tableToArray()
+  // explicitly skips (global.dart) — nothing in the app reads its value. It used
+  // to hold sha3_256(historyStr): a pure-Dart SHA3-256 over the WHOLE history
+  // JSON, recomputed on every saveHistory (twice per record during a sync run).
+  // Since Flutter 3.27 the Android UI thread is merged into the platform/main
+  // thread, so that hash burns the main looper directly → ANR. Length is O(1)
+  // and keeps the map shape identical.
+  Map<String, dynamic>? table = {historyName: historyStr.length};
   await historyLock(functionName);
   for (int i = 0; i < tableContent[historyName].length; i++) {
     table[tableContent[historyName][i][0].toString()] =
@@ -2640,24 +2647,50 @@ Future saveHistory() async {
   transactionStore.dispatch(
     UpdateScreenTxAction(ScreenTransaction({'#TABLE$historyName': table})),
   );
-  if (internetConnected()) {
-    String ssid = (await waitUntilNotNullScreenTx(
-      functionName,
-      '#INTERFACE_KEY',
-      20,
-    )).toString();
+  _scheduleProxyBackup(historyStr);
+  //historyUnLock('saveHistory');
+} // end of saveHistory
+
+Timer? _proxyBackupTimer;
+String? _proxyBackupHistory;
+
+/// Debounced cloud backup of the history queue + imageMap into `Proxy/<ssid>`.
+///
+/// saveHistory() runs on EVERY queue mutation — twice per record during a sync
+/// run — and `Proxy/<ssid>` is the very document main_page subscribes to
+/// (subscribeToProxy, `docRef.snapshots()`). So each backup write echoes the
+/// WHOLE proxy doc (history JSON + imageMap JSON + screen JSON) straight back
+/// through the Firestore EventChannel, and that delivery happens on the Android
+/// MAIN thread (DocumentSnapshotsStreamHandler → DartMessenger.send). Syncing a
+/// long queue turns it into a main-thread hammer — the shape of the ANR dump.
+/// Secure storage is the local source of truth, so the cloud copy only has to
+/// be eventually current: collapse a burst into one trailing write.
+void _scheduleProxyBackup(String historyStr) {
+  _proxyBackupHistory = historyStr;
+  _proxyBackupTimer?.cancel();
+  _proxyBackupTimer = Timer(const Duration(seconds: 5), () async {
+    _proxyBackupTimer = null;
+    final String? pending = _proxyBackupHistory;
+    _proxyBackupHistory = null;
+    if (pending == null || !internetConnected()) return;
     try {
-      dynamic docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
+      final String ssid = (await waitUntilNotNullScreenTx(
+        'saveHistory',
+        '#INTERFACE_KEY',
+        20,
+      )).toString();
+      final dynamic docRef = firestoreDb
+          .collection(proxyCollectionName)
+          .doc(ssid);
       safeFsUpdate(docRef, {
-        'h': historyStr,
+        'h': pending,
         'i': jsonEncode(imageMap),
       }, 'saveHistory-proxy'); // saving to proxy field 'h' in firestore
     } catch (e) {
       devPrint('Cannot save history to firestore $e');
     } // end try (e)
-  } // end if (!internetConnected())
-  //historyUnLock('saveHistory');
-} // end of saveHistory
+  });
+} // end of _scheduleProxyBackup
 
 Future archiveHistory() async {
   // archive current history and imageMap to firestore proxy['h2'], proxy[i2

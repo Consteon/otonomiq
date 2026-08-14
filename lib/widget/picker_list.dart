@@ -70,8 +70,30 @@ class PickerList extends StatefulWidget {
     return docs.where((d) => evaluateGate(d, gate)).toList();
   }
 
+  /// DSLs already logged for unresolved-token bail. Prevents per-row-per-build
+  /// flood: countForRow runs N-rows x every Obx repaint (W1).
+  static final Set<String> _loggedUnresolved = <String>{};
+
+  /// Resolve time tokens in a gate DSL: `{today}` -> WIB epoch-midnight ms.
+  ///
+  /// Deliberately NOT [resolveDriverCurlyTokens]: that resolver's `default:`
+  /// branch substitutes ANY unknown `{name}` from screen-tx bare keys, which
+  /// would eat a per-row token like `{lv}` the moment some route published a
+  /// bare `lv`. This one touches the time tokens and nothing else.
+  ///
+  /// Called per evaluation, not at config-parse: a screen left open past
+  /// midnight must roll over to the new day.
+  static String resolveTimeTokens(String dsl) {
+    if (!dsl.contains('{today}')) return dsl;
+    return dsl.replaceAll('{today}', todayEpochMidnightWib());
+  }
+
   /// Count docs in [countDocs] matching [rawCountSearch] after substituting the
   /// per-row token `{idField}` -> [rowId]. Empty count config -> 0 (no badge).
+  ///
+  /// `{today}` is resolved first — without that, a dated search silently
+  /// counts 0 (the `contains('{')` bail below), which reads as "nothing is
+  /// busy" rather than as a misconfiguration.
   static int countForRow(
     List<Map<String, dynamic>> countDocs,
     String rawCountSearch,
@@ -81,10 +103,54 @@ class PickerList extends StatefulWidget {
     final String trimmed = rawCountSearch.trim();
     if (trimmed.isEmpty) return 0;
     final String decoded = autheniumDecode(trimmed) ?? trimmed;
-    final String resolved = decoded.replaceAll('{$idField}', rowId);
+    final String resolved = resolveTimeTokens(
+      decoded,
+    ).replaceAll('{$idField}', rowId);
     // Unresolved row token (or empty rowId) -> a meaningless count; bail to 0.
-    if (resolved.contains('{') || rowId.isEmpty) return 0;
+    if (resolved.contains('{') || rowId.isEmpty) {
+      if (resolved.contains('{') && _loggedUnresolved.add(resolved)) {
+        devPrint(
+          '[pickerList] countForRow: unresolved token in DSL '
+          '"$resolved" (idField=$idField, rowId=$rowId) -- bailing to 0',
+        );
+      }
+      return 0;
+    }
     return countDocs.where((d) => evaluateGate(d, resolved)).length;
+  }
+
+  /// Derive the combined lock state from two independent guards (D3):
+  ///   1. busySelf  -- row's own field is non-empty (driver assigned)
+  ///   2. statusLock -- statusSearch matched AND disableWhenStatusOn
+  ///
+  /// Either guard firing -> row locked (isBusy, onTap:null).
+  /// Both firing -> labels joined with ' · ' (D7).
+  ///
+  /// The row-field extraction (null, missing key, whitespace) is owned by
+  /// this static so callers and tests exercise the same code path (C1).
+  static ({bool isBusy, String busyLabel}) deriveRowLock({
+    required Map<String, dynamic> row,
+    required String busySelfField,
+    required String busySelfLabelField,
+    required String busyPrefix,
+    required bool statusOn,
+    required String statusOnLabel,
+    required bool disableWhenStatusOn,
+  }) {
+    final String busyVal = busySelfField.isEmpty
+        ? ''
+        : (row[busySelfField] ?? '').toString().trim();
+    final bool busySelfBusy = busyVal.isNotEmpty;
+    final bool statusLocked = statusOn && disableWhenStatusOn;
+    if (!busySelfBusy && !statusLocked) return (isBusy: false, busyLabel: '');
+    final String busySelfLabel = busySelfBusy
+        ? '$busyPrefix${(row[busySelfLabelField] ?? '').toString().trim()}'
+        : '';
+    final List<String> parts = [
+      if (busySelfLabel.isNotEmpty) busySelfLabel,
+      if (statusLocked && statusOnLabel.isNotEmpty) statusOnLabel,
+    ];
+    return (isBusy: true, busyLabel: parts.join(' \u{00B7} '));
   }
 
   /// Parse a hex color string from component config.
@@ -144,6 +210,8 @@ class PickerList extends StatefulWidget {
 class _PickerListState extends State<PickerList> {
   String _code = ''; // source-collection subscription code
   String _countCode = ''; // count-collection subscription code
+  String _statusCode =
+      ''; // status-table subscription code (separate from count)
   List<String> _textArray = [];
 
   /// Locally-tracked selection (the captured id). Re-derived from
@@ -202,6 +270,14 @@ class _PickerListState extends State<PickerList> {
       (widget.component['busySelfField'] ?? '').toString().trim();
   String get _busySelfLabelField =>
       (widget.component['busySelfLabelField'] ?? '').toString().trim();
+  bool get _disableWhenStatusOn {
+    final String raw = (widget.component['disableWhenStatusOn'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    return raw == 'true' || raw == '1';
+  }
+
   String get _rowIcon => (widget.component['rowIcon'] ?? '').toString().trim();
   bool get _titleMono {
     final String raw = (widget.component['titleMono'] ?? '')
@@ -232,6 +308,34 @@ class _PickerListState extends State<PickerList> {
       if (cp.tableDocId.isNotEmpty) {
         _countCode = '$appVid/${cp.tableDocId}/${cp.subColl}';
         subscribeToMapCollection(appVid, cp.tableDocId, cp.subColl, _countCode);
+      }
+    }
+
+    // Status table subscription (optional, separate from countTable).
+    // Gated on BOTH statusSearch (the intent switch) AND statusTable being
+    // authored -- mirrors list_card.dart:223-238 (W2). No listener opened
+    // when there is no consumer.
+    // When absent: status counts against countTable pool (D4, no regression).
+    if (_statusSearch.isNotEmpty) {
+      final String rawStatusTable = (widget.component['statusTable'] ?? '')
+          .toString()
+          .trim();
+      if (rawStatusTable.isNotEmpty) {
+        final TablePath stp = parseTablePath(rawStatusTable);
+        if (stp.tableDocId.isNotEmpty) {
+          _statusCode = '$appVid/${stp.tableDocId}/${stp.subColl}';
+          subscribeToMapCollection(
+            appVid,
+            stp.tableDocId,
+            stp.subColl,
+            _statusCode,
+          );
+        } else {
+          devPrint(
+            '[pickerList] statusTable "$rawStatusTable" unparseable '
+            '-- status counts against countTable pool',
+          );
+        }
       }
     }
   }
@@ -304,6 +408,14 @@ class _PickerListState extends State<PickerList> {
           List<Map<String, dynamic>>.from(
             mapTableContent[_countCode] ?? const [],
           );
+      // Status pool: unconditional read so the observable is registered even
+      // when the row list is empty and _rowTile never runs (D6 zero-obs).
+      // During subscription warm-up this is empty -> count 0 -> row tappable
+      // (fail-open by design, same as count badge warm-up; W4).
+      final List<Map<String, dynamic>> statusDocs =
+          List<Map<String, dynamic>>.from(
+            mapTableContent[_statusCode] ?? const [],
+          );
 
       // Re-derive selection from screenTx on every build -- the token is the
       // single source of truth. Cached State + one-shot seed caused stale
@@ -330,7 +442,7 @@ class _PickerListState extends State<PickerList> {
               _emptyState()
             else ...[
               for (final Map<String, dynamic> r in rows) ...[
-                _rowTile(context, r, countDocs),
+                _rowTile(context, r, countDocs, statusDocs),
                 const SizedBox(height: 8),
               ],
               if (showAdhoc) _adhocTile(context, adhocLabel),
@@ -357,6 +469,7 @@ class _PickerListState extends State<PickerList> {
     BuildContext context,
     Map<String, dynamic> r,
     List<Map<String, dynamic>> countDocs,
+    List<Map<String, dynamic>> statusDocs,
   ) {
     final String id = (r[_idField] ?? '').toString().trim();
     final String title = (r[_titleField] ?? '').toString().trim();
@@ -389,27 +502,31 @@ class _PickerListState extends State<PickerList> {
     // Per-row status pill (only when statusSearch configured).
     String? statusLabel;
     bool statusIsOn = false;
-    if (_statusSearch.isNotEmpty && _countCode.isNotEmpty) {
-      final int sn = PickerList.countForRow(
-        countDocs,
-        _statusSearch,
-        _idField,
-        id,
-      );
+    if (_statusSearch.isNotEmpty &&
+        (_statusCode.isNotEmpty || _countCode.isNotEmpty)) {
+      // statusTable configured -> its own pool; absent -> countTable pool (D4).
+      final List<Map<String, dynamic>> pool = _statusCode.isNotEmpty
+          ? statusDocs
+          : countDocs;
+      final int sn = PickerList.countForRow(pool, _statusSearch, _idField, id);
       statusIsOn = sn > 0;
       final String label = statusIsOn ? _statusOnLabel : _statusOffLabel;
       statusLabel = label.isNotEmpty ? label : null;
     }
 
-    // Busy-self guard (S2.1): row's own field signals busy.
-    final String busySelfField = _busySelfField;
-    final String busyVal = busySelfField.isEmpty
-        ? ''
-        : (r[busySelfField] ?? '').toString().trim();
-    final bool isBusy = busyVal.isNotEmpty;
-    final String busyLabel = isBusy
-        ? '${_t(3)}${(r[_busySelfLabelField] ?? '').toString().trim()}'
-        : '';
+    // Combined lock: busySelf OR status-lock (D3). The static owns the
+    // row-field extraction so tests exercise the same code path (C1).
+    final ({bool isBusy, String busyLabel}) lock = PickerList.deriveRowLock(
+      row: r,
+      busySelfField: _busySelfField,
+      busySelfLabelField: _busySelfLabelField,
+      busyPrefix: _t(3),
+      statusOn: statusIsOn,
+      statusOnLabel: _statusOnLabel,
+      disableWhenStatusOn: _disableWhenStatusOn,
+    );
+    final bool isBusy = lock.isBusy;
+    final String busyLabel = lock.busyLabel;
 
     return _selectableRow(
       title: title.isNotEmpty ? title : id,

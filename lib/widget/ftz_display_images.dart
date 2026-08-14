@@ -1,7 +1,9 @@
 import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+
 // import '../global.dart';
 import '../global2.dart';
 
@@ -64,24 +66,26 @@ class _FtzDisplayImagesState extends State<FtzDisplayImages> {
       _titleSize = 16.0;
     }
 
-    _titleColor =
-        stringToColor(widget.component['textColor'] as String? ?? 'black');
+    _titleColor = stringToColor(
+      widget.component['textColor'] as String? ?? 'black',
+    );
     final String imageString = widget.component['images'] as String? ?? '';
 
     // Initialize the controller. The GetBuilder will read from this.
     if (_position != null) {
       // txfControllerCheck(widget.scrName, _position);
       // Use controller.text as the state holder for the image string.
-      txfController[widget.scrName]![_position]!.controller.text =
-          imageString;
+      txfController[widget.scrName]![_position]!.controller.text = imageString;
     }
   }
 
   /// Navigates to a new page to show the selected image in full-screen.
   void _showFullScreenImage(BuildContext context, String imageUrl) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (context) => FullScreenImageView(imageUrl: imageUrl),
-    ));
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => FullScreenImageView(imageUrl: imageUrl),
+      ),
+    );
   }
 
   @override
@@ -161,25 +165,28 @@ class _FtzDisplayImagesState extends State<FtzDisplayImages> {
                                 fit: BoxFit.contain,
                                 loadingBuilder:
                                     (context, child, loadingProgress) {
-                                  if (loadingProgress == null) return child;
-                                  return Center(
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2.0,
-                                      value:
-                                      loadingProgress.expectedTotalBytes !=
-                                          null
-                                          ? loadingProgress
-                                          .cumulativeBytesLoaded /
-                                          loadingProgress
-                                              .expectedTotalBytes!
-                                          : null,
-                                    ),
-                                  );
-                                },
+                                      if (loadingProgress == null) return child;
+                                      return Center(
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.0,
+                                          value:
+                                              loadingProgress
+                                                      .expectedTotalBytes !=
+                                                  null
+                                              ? loadingProgress
+                                                        .cumulativeBytesLoaded /
+                                                    loadingProgress
+                                                        .expectedTotalBytes!
+                                              : null,
+                                        ),
+                                      );
+                                    },
                                 errorBuilder: (context, error, stackTrace) {
                                   return const Center(
-                                    child: Icon(Icons.error_outline,
-                                        color: Colors.redAccent),
+                                    child: Icon(
+                                      Icons.error_outline,
+                                      color: Colors.redAccent,
+                                    ),
                                   );
                                 },
                               ),
@@ -210,7 +217,7 @@ class FullScreenImageView extends StatefulWidget {
 
 class _FullScreenImageViewState extends State<FullScreenImageView> {
   final TransformationController _transformationController =
-  TransformationController();
+      TransformationController();
   ImageStream? _imageStream;
   Size _imageSize = Size.zero;
   late ImageStreamListener _imageListener;
@@ -219,7 +226,12 @@ class _FullScreenImageViewState extends State<FullScreenImageView> {
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    _imageListener = ImageStreamListener(_onImageLoad);
+    // onError marks a failed load as HANDLED. Without an error listener the
+    // framework routes the failure to FlutterError.onError, which main.dart
+    // reports as a FATAL crash (Crashlytics: NetworkImage._loadAsync, HTTP
+    // 403/404/offline) even though nothing actually died. The user-visible
+    // fallback is the errorBuilder on the image in build().
+    _imageListener = ImageStreamListener(_onImageLoad, onError: (_, _) {});
   }
 
   @override
@@ -286,10 +298,24 @@ class _FullScreenImageViewState extends State<FullScreenImageView> {
           maxScale: 5.0,
           boundaryMargin: const EdgeInsets.all(100.0),
           constrained: false,
-          child: Image.network(widget.imageUrl),
+          child: Image.network(
+            widget.imageUrl,
+            // No errorBuilder ⇒ Image registers no error listener in release,
+            // so a dead url becomes a Crashlytics fatal instead of an icon.
+            errorBuilder: (_, _, _) => const SizedBox(
+              width: 200,
+              height: 200,
+              child: Center(
+                child: Icon(
+                  Icons.broken_image_outlined,
+                  size: 48,
+                  color: Colors.white54,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
   }
 }
-

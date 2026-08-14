@@ -51,6 +51,14 @@ class _AdminUpcomingTaskListState extends State<AdminUpcomingTaskList> {
   String _vehicleNameField = 'ln';
   // updateEventRow DSL template (raw -- executeUpdateEventRow decodes at write-time)
   String _updateEventRowDsl = '';
+  // Busy-vehicle guard for vehiclePicker (raw config + resolved pool code)
+  String _assignBusySearch = '';
+  String _assignBusyLabel = '';
+  String _assignBusyTable = '';
+  String _busyCode = '';
+  // Self-field busy guard (mirrors PICKER_LIST): row's own field non-empty
+  String _busySelfField = '';
+  String _busySelfLabelField = '';
   // Config-driven empty-state text (spec section 5.2: never hide section silently)
   String _emptyText = 'Tidak ada order terjadwal hari ini';
 
@@ -86,6 +94,29 @@ class _AdminUpcomingTaskListState extends State<AdminUpcomingTaskList> {
         .toString()
         .trim();
     _emptyText = cfgStr('emptyText', 'Tidak ada order terjadwal hari ini');
+
+    // Busy-vehicle guard for vehiclePicker (assignBusySearch/Table/Label).
+    // Absent -> guard off (all vehicles selectable, unchanged behavior).
+    // assignBusyTable normally points at a DIFFERENT table than `table`:
+    // "lagi jalan" lives in vehicle_check (cty=opening + cst=custody_confirmed),
+    // never in task.tst. _subscribe() subscribes that pool.
+    _assignBusyLabel = (widget.component['assignBusyLabel'] ?? '')
+        .toString()
+        .trim();
+    _assignBusySearch = (widget.component['assignBusySearch'] ?? '')
+        .toString()
+        .trim();
+    _assignBusyTable = (widget.component['assignBusyTable'] ?? '')
+        .toString()
+        .trim();
+    // Self-field guard, same key names as PICKER_LIST. Independent of the
+    // search guard above -- a vehicle is busy when either fires.
+    _busySelfField = (widget.component['busySelfField'] ?? '')
+        .toString()
+        .trim();
+    _busySelfLabelField = (widget.component['busySelfLabelField'] ?? '')
+        .toString()
+        .trim();
   }
 
   /// Text slot accessors:
@@ -128,6 +159,20 @@ class _AdminUpcomingTaskListState extends State<AdminUpcomingTaskList> {
         subscribeToMapCollection(appVid, slp.tableDocId, slp.subColl, _slCode);
       }
     }
+
+    // Busy-guard pool (assignBusyTable) -- usually vehicle_check, which this
+    // widget subscribes to for no other reason. Subscribed here rather than
+    // leaning on a sibling widget on the same screen: subscribeToMapCollection
+    // dedups by code, so the overlap with CoordinationSignalList is a no-op.
+    _busyCode = VehiclePickerSheet.busyPoolCode(
+      assignBusySearch: _assignBusySearch,
+      assignBusyTable: _assignBusyTable,
+      appVid: appVid,
+    );
+    if (_busyCode.isNotEmpty) {
+      final TablePath bp = parseTablePath(_assignBusyTable);
+      subscribeToMapCollection(appVid, bp.tableDocId, bp.subColl, _busyCode);
+    }
   }
 
   void _onAssignTap(String taskVid) {
@@ -136,6 +181,19 @@ class _AdminUpcomingTaskListState extends State<AdminUpcomingTaskList> {
     final List<Map<String, dynamic>> tasks = List<Map<String, dynamic>>.from(
       mapTableContent[_taskCode] ?? const [],
     );
+    // Busy-guard pool: the assignBusyTable docs, or our own tasks when no
+    // separate table is configured.
+    final List<Map<String, dynamic>> busyDocs = _busyCode.isEmpty
+        ? tasks
+        : List<Map<String, dynamic>>.from(
+            mapTableContent[_busyCode] ?? const [],
+          );
+    if (_assignBusySearch.isNotEmpty && busyDocs.isEmpty) {
+      devPrint(
+        '[adminUpcomingTaskList] busy-guard pool empty for '
+        '"$_busyCode" -- no vehicle will be blocked',
+      );
+    }
 
     showModalBottomSheet(
       context: context,
@@ -156,6 +214,11 @@ class _AdminUpcomingTaskListState extends State<AdminUpcomingTaskList> {
         activeTaskSuffix: _t(6, 'task aktif'),
         offlineError: _t(7, 'Perlu koneksi internet'),
         writeFailError: _t(8, 'Gagal menyimpan'),
+        busySearch: _assignBusySearch,
+        busyLabel: _assignBusyLabel,
+        busyDocs: busyDocs,
+        busySelfField: _busySelfField,
+        busySelfLabelField: _busySelfLabelField,
       ),
     );
   }

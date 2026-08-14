@@ -376,15 +376,15 @@ String resolveDriverCurlyTokens(String raw, String scrName) {
         final String v = (screenTx['#ACTIVE_WAREHOUSE'] ?? '').toString();
         return v.isNotEmpty ? v : m.group(0)!;
       case 'activeTrip':
-        final String v = state.activeTrip.value;
-        if (v.isNotEmpty) return v;
-        // Compute-on-read fallback: scan mapTableContent for vehicle_check
-        // tables when the deferred publisher hasn't fired yet (GAP A fix).
-        // Pages without a gate widget pointing at vehicle_check never call
-        // resolveAndPublishActiveTrip, so activeTrip stays empty. This
-        // fallback computes the docId directly from the subscription data.
         final String vid = state.vehicleId.value;
-        if (vid.isEmpty) return m.group(0)!;
+        if (vid.isEmpty) {
+          // No vehicle context — use cached value if available.
+          final String cached = state.activeTrip.value;
+          return cached.isNotEmpty ? cached : m.group(0)!;
+        }
+        // Vehicle known: compute from vehicle_check data (authoritative).
+        // Does NOT trust the cached activeTrip blindly; the cache may
+        // hold a stale trip from a previous vehicle or a closed trip.
         for (final String key in mapTableContent.keys) {
           if (!key.endsWith('/vehicle_check')) continue;
           final List<Map<String, dynamic>> checkDocs =
@@ -393,14 +393,17 @@ String resolveDriverCurlyTokens(String raw, String scrName) {
           if (result == null) continue; // no openings in this key
           if (result.isNotEmpty) {
             // Schedule deferred publish so state converges for Obx
-            // consumers that touch activeTrip (Part 3).
+            // consumers that touch activeTrip.
             _deferActiveTripPublish(scrName, result);
             return result;
           }
           // result == '' -> openings exist but none active -> fail-closed
           return m.group(0)!;
         }
-        return m.group(0)!;
+        // Compute inconclusive (no vehicle_check data loaded) —
+        // fall back to cached value.
+        final String v = state.activeTrip.value;
+        return v.isNotEmpty ? v : m.group(0)!;
       case 'now':
         return getNowMillisecondFromEpoch().toString();
       case 'today':
@@ -1292,6 +1295,53 @@ List<BucketDef> parseBuckets(String? raw) {
   return out;
 }
 
+/// Strict truthy whitelist for SDUI toggle keys (D-D).
+///
+/// [SduiSpec] has no bool accessor; [SduiSpec.has] only tests non-empty, so
+/// `groupByItem: FALSE` would switch grouping ON. Accept only these values
+/// (case-insensitive, trimmed); everything else is OFF.
+bool sduiBool(String value) {
+  const Set<String> truthy = <String>{'true', '1', 'yes', 'ya'};
+  return truthy.contains(value.trim().toLowerCase());
+}
+
+/// Parse a `condLabels` config string into a `{rawCd: displayLabel}` map.
+///
+/// Format: `full◼Penuh⭘empty◼Kosong` -- entries separated by `⭘` (U+2B58),
+/// each entry is `rawCdValue◼displayLabel` (U+25FC). Reuses [parseBuckets]
+/// which parses the identical `⭘`/`◼` format into `List<BucketDef>`.
+///
+/// **`'ok'` filter (W2):** [parseBuckets] substitutes `'ok'` when the second
+/// segment is empty (its domain is `inventoryBucketCard` visual variants).
+/// A label map must not leak that vocabulary: `condLabels: "full◼⭘…"` should
+/// fall back to the raw `cd` (`full`), not display `ok`. Pairs whose
+/// `BucketDef.status` is `'ok'` are therefore **skipped** here -- the caller's
+/// `condLabels[cd] ?? cd` produces the honest raw value instead. A builder who
+/// genuinely wants the literal label `'ok'` can write `full◼ok` and
+/// `parseBuckets` returns it with `status.isEmpty == false`, but since we
+/// cannot distinguish that case from the default, `'ok'` as a display label
+/// is unsupported. This is documented in section 8 Open Risks.
+///
+/// Caller MUST pass a string already decoded by [autheniumDecode] (or
+/// [SduiSpec.str], which calls it). `_25FC_` (◼) is decoded by
+/// `autheniumDecode` (global.dart:1152); `_2B58_` (⭘) is NOT decoded
+/// (line 1159 commented out) -- the sheet cell must carry a literal `⭘`,
+/// same constraint as `search` and `flowSearch`.
+Map<String, String> parseCondLabels(String raw) {
+  if (raw.isEmpty) return const <String, String>{};
+  final List<BucketDef> buckets = parseBuckets(raw);
+  if (buckets.isEmpty) return const <String, String>{};
+  final Map<String, String> map = <String, String>{};
+  for (final BucketDef b in buckets) {
+    // Skip the 'ok' default that parseBuckets substitutes for an empty
+    // second segment. A genuine 'ok' label is indistinguishable and
+    // therefore unsupported (see doc comment).
+    if (b.status == 'ok') continue;
+    map[b.label] = b.status;
+  }
+  return map;
+}
+
 // ─── Stop progress computation (driverStopCard + navActionCard) ───────────
 
 /// Centralized stop-status mapping. The `tst` field on a task doc holds a
@@ -1409,10 +1459,22 @@ class TaskAggregate {
   /// Sum of planned_pickup (pp) across all item lines.
   final int totalPickup;
 
+  /// Sum of sale qty (ps) across all item lines. Zero when not tx-aware.
+  final int totalSale;
+
+  /// Sum of buy qty (pb) across all item lines. Zero when not tx-aware.
+  final int totalBuy;
+
+  /// Sum of refill qty (pr) across all item lines. Zero when not tx-aware.
+  final int totalRefill;
+
   const TaskAggregate({
     required this.itemLineCount,
     required this.totalDrop,
     required this.totalPickup,
+    this.totalSale = 0,
+    this.totalBuy = 0,
+    this.totalRefill = 0,
   });
 }
 
@@ -1435,6 +1497,13 @@ TaskAggregate aggregateTaskDropPickup(
   String pickupField = 'pp',
   String actualDropField = 'ad',
   String actualPickupField = 'ap',
+  String txField = '',
+  String saleField = '',
+  String buyField = '',
+  String refillField = '',
+  String actualSaleField = 'as',
+  String actualBuyField = 'ab',
+  String actualRefillField = 'ar',
 }) {
   final dynamic rawItems = doc[itemsField];
   if (rawItems is! List) {
@@ -1443,16 +1512,52 @@ TaskAggregate aggregateTaskDropPickup(
   int lineCount = 0;
   int dropSum = 0;
   int pickupSum = 0;
+  int saleSum = 0;
+  int buySum = 0;
+  int refillSum = 0;
   for (final dynamic entry in rawItems) {
     if (entry is! Map) continue;
     lineCount++;
-    dropSum += resolveItemQty(entry, dropField, actualDropField);
-    pickupSum += resolveItemQty(entry, pickupField, actualPickupField);
+    if (txField.isNotEmpty) {
+      final String tx = (entry[txField] ?? '').toString().trim();
+      switch (tx) {
+        case 'deliver':
+          dropSum += resolveItemQty(entry, dropField, actualDropField);
+          pickupSum += resolveItemQty(entry, pickupField, actualPickupField);
+          break;
+        case 'sale':
+          if (saleField.isNotEmpty) {
+            saleSum += resolveItemQty(entry, saleField, actualSaleField);
+          }
+          break;
+        case 'purchase':
+          if (buyField.isNotEmpty) {
+            buySum += resolveItemQty(entry, buyField, actualBuyField);
+          }
+          break;
+        case 'refill':
+          if (refillField.isNotEmpty) {
+            refillSum += resolveItemQty(entry, refillField, actualRefillField);
+          }
+          break;
+        default:
+          // Unknown tx: fall through to drop/pickup (safe default).
+          dropSum += resolveItemQty(entry, dropField, actualDropField);
+          pickupSum += resolveItemQty(entry, pickupField, actualPickupField);
+      }
+    } else {
+      // Legacy mode: sum all items' drop/pickup.
+      dropSum += resolveItemQty(entry, dropField, actualDropField);
+      pickupSum += resolveItemQty(entry, pickupField, actualPickupField);
+    }
   }
   return TaskAggregate(
     itemLineCount: lineCount,
     totalDrop: dropSum,
     totalPickup: pickupSum,
+    totalSale: saleSum,
+    totalBuy: buySum,
+    totalRefill: refillSum,
   );
 }
 
@@ -1835,6 +1940,221 @@ Map<String, ItemDetail> buildItemDetailMap(
     map[id] = ItemDetail(name: name, category: category);
   }
   return map;
+}
+
+/// One condition-quantity pair for a grouped CUSTODY_CONFIRMED_LIST row.
+///
+/// In grouped mode, a single item's `ip[]` entries (one per condition) are
+/// merged. Each entry becomes a [ConditionQty] carrying the display [label]
+/// (mapped from the raw `cd` value via the `condLabels` config) and the
+/// per-condition [qty]. The list is empty for consumable items (condition
+/// breakdown suppressed) and for non-grouped rows.
+class ConditionQty {
+  final String label;
+  final int qty;
+  const ConditionQty({required this.label, required this.qty});
+}
+
+// ─── Confirmed-list rows (CUSTODY_CONFIRMED_LIST) ──────────────────────────
+
+/// One rendered row of CUSTODY_CONFIRMED_LIST.
+///
+/// Carries the recount line (name / category / qty from `ip[]` + the item
+/// JOIN) plus the OPTIONAL movement badge numbers aggregated from task
+/// `it[]`. [drop] / [pickup] are 0 whenever the `flow*` config is absent --
+/// the backward-compatible default that renders exactly today's row.
+class ConfirmedRow {
+  /// Raw `ip[]` item id (`ii`).
+  final String itemId;
+
+  /// Display name from the item JOIN; falls back to [itemId].
+  final String name;
+
+  /// Category from the item JOIN; falls back to the `ip[]` `cd`.
+  final String category;
+
+  /// Counted quantity from `ip[]` `qt`.
+  final int qty;
+
+  /// Sum of actual drop (antar) for [itemId]. 0 => hide the badge.
+  final int drop;
+
+  /// Sum of actual pickup (ambil) for [itemId]. 0 => hide the badge.
+  final int pickup;
+
+  /// Per-condition breakdown. Populated ONLY in grouped mode for non-consumable
+  /// items; empty otherwise (the default). The render checks
+  /// `conditions.isNotEmpty` to decide whether to show the breakdown line.
+  final List<ConditionQty> conditions;
+
+  const ConfirmedRow({
+    required this.itemId,
+    required this.name,
+    required this.category,
+    required this.qty,
+    this.drop = 0,
+    this.pickup = 0,
+    this.conditions = const <ConditionQty>[],
+  });
+}
+
+/// Transform `ip[]` entries into display rows, JOINing item detail and
+/// OPTIONALLY attaching per-item movement badges from [flowMap].
+///
+/// [ipEntries] -- the `ip[]` array off the vehicle_check doc. Each entry is
+///   `{ii, cd, qt}` (CountEntry.toIpMap). Entries with an empty `ii` are
+///   skipped; `qt` parses via int.tryParse with a 0 default.
+/// [itemDetailMap] -- from [buildItemDetailMap]; missing entries fall back to
+///   the raw `ii` / `cd`.
+/// [flowMap] -- per-item drop/pickup totals keyed by whatever `flowKeyField`
+///   produced (item id `ii`, or item name `in`). Defaults to `const {}`, which
+///   yields drop = pickup = 0 on every row -- i.e. the pre-badge output.
+/// [groupByItem] -- merge entries sharing an `ii` into one row (spec 3b).
+/// [condLabels] -- `{rawCd: displayLabel}` from `parseCondLabels`; an unmapped
+///   `cd` falls back to its raw value.
+/// [condField] -- which entry field carries the condition (default `cd`).
+/// [consumableCategory] -- category value whose items skip the condition
+///   breakdown (D-A). Empty disables the suppression entirely.
+///
+/// When [groupByItem] is true, entries sharing the same `ii` are merged into
+/// one row: [ConfirmedRow.qty] becomes the sum, [ConfirmedRow.conditions]
+/// carries the per-condition breakdown, and badges attach directly (no twin
+/// dedup needed). Condition breakdown is suppressed for items whose category
+/// matches [consumableCategory] (case-insensitive, D-A).
+///
+/// Category fallback differs by mode: non-grouped keeps `detail?.category ?? cd`
+/// (round 1 behaviour); grouped uses `detail?.category ?? ''` (blank chip
+/// hidden) because the raw `cd` now appears in the condition breakdown line
+/// and echoing it in the chip would duplicate it.
+///
+/// When [groupByItem] is false (the default), behaviour is identical to
+/// round 1: one row per ip[] entry, first-row-only badge via the [badged]
+/// seen-set, [conditions] stays empty on every row.
+///
+/// FIRST-ROW-ONLY badges (non-grouped branch only): `ip[]` carries one entry
+/// per (item, condition), so a single item can occupy two rows (isi + kosong)
+/// with the same `ii`. Badges attach to the FIRST row per `ii` in first-seen
+/// order; later rows keep 0 so the caller's hide-zero rule suppresses them.
+/// Without this, the same sum would read twice as a doubled total. The grouped
+/// branch needs no such guard -- one row per `ii` means there is no twin.
+///
+/// JOIN-KEY TOLERANCE: the spec allows `flowKeyField` to be `ii` OR `in`, so
+/// the lookup tries the item id first, then the resolved display name. One
+/// lookup pair covers both contract spellings without a config branch.
+///
+/// CAVEAT (accepted, NOT guarded): the name fallback can cross-match in
+/// theory. If a row's own `ii` is absent from [flowMap] AND some OTHER item's
+/// `ii` happens to equal that row's resolved display name, the wrong sums
+/// attach. Removing the risk would need a config branch on `flowKeyField`;
+/// that costs more than the contrived failure is worth in this data.
+/// Documented deliberately -- do not add the branch. NOTE: BOTH branches now
+/// perform this `flowMap[ii] ?? flowMap[name]` lookup (round 2 added the
+/// grouped one), so a future "fix" would have two call sites, not one.
+///
+/// Pure function -- no Flutter widgets, no Obx, no Firestore. Directly testable.
+List<ConfirmedRow> buildConfirmedRows(
+  List<Map<String, dynamic>> ipEntries,
+  Map<String, ItemDetail> itemDetailMap, {
+  Map<String, ItemCirculation> flowMap = const <String, ItemCirculation>{},
+  bool groupByItem = false,
+  Map<String, String> condLabels = const <String, String>{},
+  String condField = 'cd',
+  String consumableCategory = '',
+}) {
+  final List<ConfirmedRow> rows = <ConfirmedRow>[];
+
+  if (groupByItem) {
+    // ── Grouped mode: one row per unique ii ──────────────────────────────
+    // Dart Map preserves insertion order (LinkedHashMap), so first-seen
+    // order of items in ip[] is preserved in the output.
+    final Map<String, List<Map<String, dynamic>>> groups =
+        <String, List<Map<String, dynamic>>>{};
+    for (final Map<String, dynamic> entry in ipEntries) {
+      final String ii = (entry['ii'] ?? '').toString().trim();
+      if (ii.isEmpty) continue;
+      groups.putIfAbsent(ii, () => <Map<String, dynamic>>[]).add(entry);
+    }
+
+    for (final MapEntry<String, List<Map<String, dynamic>>> g
+        in groups.entries) {
+      final String ii = g.key;
+      final ItemDetail? detail = itemDetailMap[ii];
+      final String name = detail?.name ?? ii;
+      // Category fallback: '' (not the raw cd). In grouped mode the raw cd
+      // appears in the condition breakdown line; echoing it in the category
+      // chip would duplicate it. A blank chip is hidden by the render.
+      final String category = detail?.category ?? '';
+
+      int totalQt = 0;
+      final List<ConditionQty> conds = <ConditionQty>[];
+      for (final Map<String, dynamic> entry in g.value) {
+        final String cd = (entry[condField] ?? '').toString().trim();
+        final int qt =
+            int.tryParse((entry['qt'] ?? '0').toString().trim()) ?? 0;
+        totalQt += qt;
+        conds.add(ConditionQty(label: condLabels[cd] ?? cd, qty: qt));
+      }
+
+      // Suppress condition breakdown for consumable items (D-A).
+      // Compare case-insensitively against the consumable category value
+      // from _t(2). When consumableCategory is empty (P7 / unconfigured),
+      // the comparison always fails and conditions are shown -- which is
+      // the correct default for a widget that has no text slot 2.
+      final bool isConsumable =
+          consumableCategory.isNotEmpty &&
+          category.toLowerCase() == consumableCategory.toLowerCase();
+
+      // Badges attach directly -- one row per ii, no twin dedup needed.
+      final ItemCirculation? flow = flowMap[ii] ?? flowMap[name];
+
+      rows.add(
+        ConfirmedRow(
+          itemId: ii,
+          name: name,
+          category: category,
+          qty: totalQt,
+          drop: flow?.totalDrop ?? 0,
+          pickup: flow?.totalPickup ?? 0,
+          conditions: isConsumable ? const <ConditionQty>[] : conds,
+        ),
+      );
+    }
+  } else {
+    // ── Non-grouped mode (unchanged from round 1) ────────────────────────
+    final Set<String> badged = <String>{};
+    for (final Map<String, dynamic> entry in ipEntries) {
+      final String ii = (entry['ii'] ?? '').toString().trim();
+      final String cd = (entry['cd'] ?? '').toString().trim();
+      final int qt = int.tryParse((entry['qt'] ?? '0').toString().trim()) ?? 0;
+      if (ii.isEmpty) continue;
+      final ItemDetail? detail = itemDetailMap[ii];
+      final String name = detail?.name ?? ii;
+
+      int drop = 0;
+      int pickup = 0;
+      // Set.add returns false for an `ii` already badged on an earlier row.
+      if (badged.add(ii)) {
+        final ItemCirculation? flow = flowMap[ii] ?? flowMap[name];
+        if (flow != null) {
+          drop = flow.totalDrop;
+          pickup = flow.totalPickup;
+        }
+      }
+
+      rows.add(
+        ConfirmedRow(
+          itemId: ii,
+          name: name,
+          category: detail?.category ?? cd,
+          qty: qt,
+          drop: drop,
+          pickup: pickup,
+        ),
+      );
+    }
+  }
+
+  return rows;
 }
 
 // ─── Custody count entry (reactive store payload) ──────────────────────────

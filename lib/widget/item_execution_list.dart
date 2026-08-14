@@ -62,9 +62,30 @@ class ItemExecutionList extends StatefulWidget {
   static final Map<String, Map<String, int>> capStore =
       <String, Map<String, int>>{};
 
+  /// Per-scrName sale cap map: `{scrName: {itemId: capQty}}`.
+  /// Built from asset_cache docs filtered by saleCapSearch.
+  /// SEPARATE from [capStore] (drop cap) because the two maps are built from
+  /// independent config: dropCapSearch/dropCapKey/dropCapField vs
+  /// saleCapSearch/saleCapKey/saleCapField. A tenant can point them at
+  /// different doc sets, so the same item id may carry a different cap in each.
+  /// (There is no `cd=consumable`: asset_cache `cd` is fill-state, only
+  /// `empty`/`full`. Item category lives in the `item` table's `ic` field, so
+  /// for the reference tenant both searches resolve to `cd◼full` and the
+  /// drop/sale split is per-item, not per-`cd`.)
+  /// Cleared alongside capStore on route change via [clearExecutionStore].
+  /// Note: intentionally NOT emptied when saleCapSearch is blanked mid-session;
+  /// resolveSaleCap gates on saleCapActive (reads live config), so stale store
+  /// contents are harmless.
+  static final Map<String, Map<String, int>> saleCapStore =
+      <String, Map<String, int>>{};
+
   /// Guards one-shot devPrint per scrName when cap mode is active but
   /// unresolved. Cleared on route change via [clearExecutionStore].
   static final Set<String> _capUnresolvedLogged = <String>{};
+
+  /// Guards one-shot devPrint per scrName when dropCapTable and saleCapTable
+  /// are both set to different non-blank values. Cleared via [clearExecutionStore].
+  static final Set<String> _capTableMismatchLogged = <String>{};
 
   /// Per-scrName LIST component reference for the saveSend actual-write hook.
   /// The saveSend RBT reads this to decide whether actual-write is needed
@@ -92,7 +113,9 @@ class ItemExecutionList extends StatefulWidget {
   static void clearExecutionStore(String scrName) {
     executionStore.remove(scrName);
     capStore.remove(scrName);
+    saleCapStore.remove(scrName);
     _capUnresolvedLogged.remove(scrName);
+    _capTableMismatchLogged.remove(scrName);
     submitComponentByScr.remove(scrName);
     executionRev.value++;
   }
@@ -141,6 +164,87 @@ class ItemExecutionList extends StatefulWidget {
   static bool parseConsumableStepperEditable(dynamic component, String txKind) {
     if (txKind != 'sale' && txKind != 'purchase') return false;
     return parseEditFlag(component is Map ? component['editConsumable'] : null);
+  }
+
+  /// Resolve the sale cap for a single item row.
+  ///
+  /// Returns the cap quantity (possibly 0) for sale rows when cap is resolved,
+  /// or `null` for non-sale rows or unresolved cap. Purchase is uncapped (D3);
+  /// refill has no stepper; deliver uses [capStore] via a separate path.
+  ///
+  /// Extracted as a static helper so both the widget and tests call the same
+  /// branching rule (PC2).
+  static int? resolveSaleCap({
+    required String txKind,
+    required bool saleCapResolved,
+    required Map<String, int> saleCapMap,
+    required String itemIi,
+  }) {
+    if (txKind != 'sale') return null;
+    if (!saleCapResolved) return null;
+    return saleCapMap[itemIi] ?? 0;
+  }
+
+  /// Seed or clamp a value against a cap. Returns `min(plan, cap)` when
+  /// [cap] is non-null, or [plan] unchanged when [cap] is null.
+  ///
+  /// Used for: initial seed in [_buildRows], build-time clamp-down, and
+  /// defense clamp in [_onConsumableQtyChanged]. One symbol for all three
+  /// sites so a mutation in the formula is caught by tests (PC2).
+  static int capSeed(int plan, int? cap) =>
+      (cap == null || plan < cap) ? plan : cap;
+
+  /// True when the stepper's `[+]` must be dead (value is at or above cap).
+  /// Also used for the capped-status display override.
+  /// Returns `false` when [cap] is null (no-cap / unresolved).
+  static bool atCap(int actual, int? cap) => cap != null && actual >= cap;
+
+  /// Resolve sale-cap config fields with fallback chain (D1).
+  ///
+  /// Each sale-specific param falls back to its drop-side counterpart,
+  /// then to a hard default:
+  /// - `saleCapKey`   -> `dropCapKey`   -> `'ii'`
+  /// - `saleCapField` -> `dropCapField` -> `'qt'`
+  /// - `saleCapLabel` -> `capLabel`     -> `'Maks <max>'`
+  ///
+  /// Blank/whitespace-only is treated as absent (matches existing `.trim()`
+  /// convention). Extracted as a static helper so both production code and
+  /// tests call the same branching rule (PC1).
+  ///
+  /// Precedence is sale-overrides-drop, deliberately OPPOSITE from
+  /// [resolveCapTable] subscription precedence (D2) where drop wins.
+  static ({String key, String field, String label}) resolveCapFields(
+    dynamic component,
+  ) {
+    String pick(String primary, String fallback, String hard) {
+      String read(String k) =>
+          (component is Map ? (component[k] ?? '') : '').toString().trim();
+      final String p = read(primary);
+      if (p.isNotEmpty) return p;
+      final String f = read(fallback);
+      if (f.isNotEmpty) return f;
+      return hard;
+    }
+
+    return (
+      key: pick('saleCapKey', 'dropCapKey', 'ii'),
+      field: pick('saleCapField', 'dropCapField', 'qt'),
+      label: pick('saleCapLabel', 'capLabel', 'Maks <max>'),
+    );
+  }
+
+  /// Effective cap-table path for the shared `_capCode` subscription (D2).
+  ///
+  /// `dropCapTable` wins; `saleCapTable` is the fallback. Precedence is
+  /// deliberately OPPOSITE from [resolveCapFields] because `_capCode` is a
+  /// SINGLE shared subscription that the already-shipped drop cap depends on;
+  /// letting `saleCapTable` override it could silently repoint the drop cap
+  /// at a different collection.
+  static String resolveCapTable(dynamic component) {
+    String read(String k) =>
+        (component is Map ? (component[k] ?? '') : '').toString().trim();
+    final String drop = read('dropCapTable');
+    return drop.isNotEmpty ? drop : read('saleCapTable');
   }
 
   @override
@@ -252,16 +356,38 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
       }
     }
 
-    // Cap table subscription (asset_cache for drop stock-cap)
-    final String rawCapTable = (widget.component['dropCapTable'] ?? '')
-        .toString()
-        .trim();
-    if (rawCapTable.isNotEmpty) {
-      final TablePath ctp = parseTablePath(rawCapTable);
+    // Cap table subscription (asset_cache for drop/sale stock-cap).
+    // Precedence: dropCapTable FIRST, saleCapTable as fallback (D2).
+    // See ItemExecutionList.resolveCapTable for the rationale.
+    final String effectiveCapTable = ItemExecutionList.resolveCapTable(
+      widget.component,
+    );
+
+    if (effectiveCapTable.isNotEmpty) {
+      final TablePath ctp = parseTablePath(effectiveCapTable);
       if (ctp.tableDocId.isNotEmpty) {
         _capCode = '$appVid/${ctp.tableDocId}/${ctp.subColl}';
         subscribeToMapCollection(appVid, ctp.tableDocId, ctp.subColl, _capCode);
       }
+    }
+
+    // One-shot log when both cap tables are set to DIFFERENT non-blank values.
+    final String rawDropCapTable = (widget.component['dropCapTable'] ?? '')
+        .toString()
+        .trim();
+    final String rawSaleCapTable = (widget.component['saleCapTable'] ?? '')
+        .toString()
+        .trim();
+    if (rawDropCapTable.isNotEmpty &&
+        rawSaleCapTable.isNotEmpty &&
+        rawDropCapTable != rawSaleCapTable &&
+        !ItemExecutionList._capTableMismatchLogged.contains(widget.scrName)) {
+      ItemExecutionList._capTableMismatchLogged.add(widget.scrName);
+      devPrint(
+        'ITEM_EXECUTION_LIST: dropCapTable and saleCapTable differ for '
+        '${widget.scrName}: drop="$rawDropCapTable" '
+        'sale="$rawSaleCapTable" -- using dropCapTable (D2)',
+      );
     }
   }
 
@@ -392,6 +518,10 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
     final String rawCapSearch = (widget.component['dropCapSearch'] ?? '')
         .toString()
         .trim();
+    final String rawSaleCapSearch = (widget.component['saleCapSearch'] ?? '')
+        .toString()
+        .trim();
+    final saleCapFields = ItemExecutionList.resolveCapFields(widget.component);
 
     final bool capModeActive = _capCode.isNotEmpty;
 
@@ -440,6 +570,26 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
         );
         // Store for access by _buildItemCard (per-row cap lookup).
         ItemExecutionList.capStore[widget.scrName] = capMap;
+
+        // Sale cap map: same subscription, different search filter (D1).
+        if (rawSaleCapSearch.isNotEmpty) {
+          final String resolvedSaleCapSearch = rawSaleCapSearch.replaceAll(
+            '{vehicleId}',
+            taskVv,
+          );
+          final List<Map<String, dynamic>> filteredSaleCapDocs =
+              filterDriverHomeDocs(
+                allCapDocs,
+                resolvedSaleCapSearch,
+                widget.scrName,
+              );
+          final Map<String, int> saleCapMap = buildDropCapMap(
+            filteredSaleCapDocs,
+            capKeyField: saleCapFields.key,
+            capValueField: saleCapFields.field,
+          );
+          ItemExecutionList.saleCapStore[widget.scrName] = saleCapMap;
+        }
       }
       if (!capResolved &&
           !ItemExecutionList._capUnresolvedLogged.contains(widget.scrName)) {
@@ -552,20 +702,45 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
           );
         }
 
+        // ── Sale cap resolution (sale only; purchase/refill uncapped D3) ──
+        final String saleItemIi = (item[saleCapFields.key] ?? '')
+            .toString()
+            .trim();
+        final bool saleCapActive = rawSaleCapSearch.isNotEmpty && capModeActive;
+        final Map<String, int> saleCapMap =
+            ItemExecutionList.saleCapStore[widget.scrName] ??
+            const <String, int>{};
+        final int? saleCap = ItemExecutionList.resolveSaleCap(
+          txKind: txKind,
+          saleCapResolved: saleCapActive && capResolved,
+          saleCapMap: saleCapMap,
+          itemIi: saleItemIi,
+        );
+
         // Seed sale/purchase in executionStore. Uses dropActual/dropPlan
         // for the single qty (see ExecutionEntry doc). Refill stays
         // unseeded (ar = pr always, decision 2).
-        // ponytail: no cap logic for sale/buy, upgrade path = dropCapTable
         if (txKind == 'sale' || txKind == 'purchase') {
           execMap.putIfAbsent(
             key,
             () => ExecutionEntry(
-              dropActual: txQty,
+              dropActual: ItemExecutionList.capSeed(txQty, saleCap),
               pickupActual: 0,
               dropPlan: txQty,
               pickupPlan: 0,
             ),
           );
+
+          // Clamp-down: re-correct stale plan-seed once sale cap resolves
+          // (mirrors deliver clamp-down). Plain-Map mutate; value read
+          // later THIS build; NO executionRev bump, NO setState.
+          final ExecutionEntry? seededSale = execMap[key];
+          if (seededSale != null) {
+            seededSale.dropActual = ItemExecutionList.capSeed(
+              seededSale.dropActual,
+              saleCap,
+            );
+          }
         }
 
         rows.add(
@@ -576,6 +751,7 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
             txKind: txKind,
             txQty: txQty,
             subLabel: subLabel,
+            saleCap: saleCap,
           ),
         );
       }
@@ -638,15 +814,17 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
 
   /// Stepper tap callback for sale/buy items.
   ///
-  /// Unlike [_onDropChanged], there is NO cap clamping -- sale/buy quantities
-  /// are freely adjustable (decision 3: no stock cap on sale).
-  void _onConsumableQtyChanged(String key, int newValue) {
+  /// [saleCap] is the already-resolved cap from [_ItemRow.saleCap].
+  /// When non-null, [capSeed] clamps [newValue] to cap.
+  /// When null (purchase rows, unresolved cap, no saleCapSearch),
+  /// [capSeed] returns [newValue] unchanged — no branch needed.
+  void _onConsumableQtyChanged(String key, int newValue, int? saleCap) {
     final Map<String, ExecutionEntry> map = ItemExecutionList.getExecMap(
       widget.scrName,
     );
     final ExecutionEntry? entry = map[key];
     if (entry != null) {
-      entry.dropActual = newValue;
+      entry.dropActual = ItemExecutionList.capSeed(newValue, saleCap);
       ItemExecutionList.executionRev.value++;
       setState(() {});
     }
@@ -1565,9 +1743,24 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
         ? execMap[row.key]
         : null;
     final int consumableActual = consumableEntry?.dropActual ?? row.txQty;
-    final _CellStatus consumableStatus = isConsumableEditable
-        ? _cellStatus(consumableActual, row.txQty, false)
-        : const _CellStatus('complete', '');
+    // Sale cap status override (mirrors _buildItemCard drop cap display).
+    final int? saleCap = row.saleCap;
+    final _CellStatus consumableStatus;
+    if (isConsumableEditable) {
+      if (ItemExecutionList.atCap(consumableActual, saleCap)) {
+        final String rawCapLabel = ItemExecutionList.resolveCapFields(
+          widget.component,
+        ).label;
+        consumableStatus = _CellStatus(
+          'capped',
+          rawCapLabel.replaceAll('<max>', '$saleCap'),
+        );
+      } else {
+        consumableStatus = _cellStatus(consumableActual, row.txQty, false);
+      }
+    } else {
+      consumableStatus = const _CellStatus('complete', '');
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -1658,10 +1851,19 @@ class _ItemExecutionListState extends State<ItemExecutionList> {
               planLabel: planLabel,
               isPickup: false,
               onDecrement: consumableActual > 0
-                  ? () => _onConsumableQtyChanged(row.key, consumableActual - 1)
+                  ? () => _onConsumableQtyChanged(
+                      row.key,
+                      consumableActual - 1,
+                      saleCap,
+                    )
                   : null,
-              onIncrement: () =>
-                  _onConsumableQtyChanged(row.key, consumableActual + 1),
+              onIncrement: ItemExecutionList.atCap(consumableActual, saleCap)
+                  ? null
+                  : () => _onConsumableQtyChanged(
+                      row.key,
+                      consumableActual + 1,
+                      saleCap,
+                    ),
             ),
             if (row.subLabel.isNotEmpty)
               Padding(
@@ -1773,6 +1975,8 @@ class _ItemRow {
   final int planPickup;
   final String itemIi; // item id for cap lookup
   final int? dropCap; // resolved cap (null = no cap / unresolved)
+  final int?
+  saleCap; // resolved sale cap (null = no cap / unresolved / non-sale)
   // sale/purchase/refill-specific (read-only qty + sub-label)
   final int txQty; // ps/pb/pr depending on txKind
   final String subLabel; // condition or water display label (may be '')
@@ -1786,6 +1990,7 @@ class _ItemRow {
     this.planPickup = 0,
     this.itemIi = '',
     this.dropCap,
+    this.saleCap,
     this.txQty = 0,
     this.subLabel = '',
   });

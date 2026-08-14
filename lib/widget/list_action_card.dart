@@ -1105,9 +1105,13 @@ class _ListActionCardState extends State<ListActionCard> {
         : null;
 
     // Thumbnail
-    final String imageUrl = _fields.imageField.isNotEmpty
-        ? (doc[_fields.imageField] ?? '').toString().trim()
-        : '';
+    // A multi-image field holds its urls joined by ◇; the row thumb shows the
+    // first. The joined string must not reach Image.network — see
+    // splitImageUrls.
+    final List<String> imageUrls = _fields.imageField.isNotEmpty
+        ? splitImageUrls((doc[_fields.imageField] ?? '').toString())
+        : const <String>[];
+    final String imageUrl = imageUrls.isEmpty ? '' : imageUrls.first;
     // W1: only hand a parseable absolute URL to Image.network — a malformed URL
     // throws inside _Uri.resolve at paint time, which errorBuilder cannot
     // reliably intercept (live crash class in this repo).

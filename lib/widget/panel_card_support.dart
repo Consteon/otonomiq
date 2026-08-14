@@ -331,6 +331,18 @@ int llCount(Map<String, dynamic> doc) {
   return ll is List ? ll.length : 0;
 }
 
+/// Split a card image field into its individual urls (blanks dropped).
+///
+/// One field can hold several urls joined by ◇ — that is how timeline
+/// attachments are written (`uploadedUrls.join('◇')`). Handing the joined
+/// string to Image.network makes Firebase Storage answer 403: url #2 ends up
+/// inside url #1's `?token=` parameter, so the token no longer matches.
+List<String> splitImageUrls(String raw) => raw
+    .split(whiteDiamond)
+    .map((String url) => url.trim())
+    .where((String url) => url.isNotEmpty)
+    .toList();
+
 final RegExp _angleToken = RegExp(r'<([a-zA-Z][a-zA-Z0-9]*)>');
 
 /// Resolve `<charcode>` tokens against the site doc map (value stringified;

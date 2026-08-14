@@ -56,15 +56,14 @@ class OtqGetImages2State extends State<OtqGetImages2>
         imgParameter = [400, 400, 80];
       }
 
-      final String source = component['source']?.toString().toLowerCase() ?? '';
+      final String source =
+          component['source']?.toString().toLowerCase() ?? '';
       // maxSize collapses width/height into one dimension (the larger) so
       // image_picker preserves aspect ratio — matches the camera path behavior.
-      final int maxSize = (imgParameter[0] > imgParameter[1])
-          ? imgParameter[0]
-          : imgParameter[1];
+      final int maxSize =
+          (imgParameter[0] > imgParameter[1]) ? imgParameter[0] : imgParameter[1];
       final String folderName = component['folder'] ?? 'default';
-      final String fileNameBase =
-          (component['filename'] ?? 'file') +
+      final String fileNameBase = (component['filename'] ?? 'file') +
           '_' +
           const Uuid().v4().replaceAll('-', '').substring(2, 7);
 
@@ -82,10 +81,8 @@ class OtqGetImages2State extends State<OtqGetImages2>
         // Note: fileNameBase is computed above unconditionally; in camera mode
         // on a device with empty #CAMS, the UUID is generated and discarded.
         // This is harmless and keeps the code flat.
-        List<CameraDescription>? cams =
-            transactionStore.state.screenTx['#CAMS']
-                as List<CameraDescription>?;
-        if (cams == null || cams.isEmpty) return;
+        final List<CameraDescription> cams = await ensureCams();
+        if (cams.isEmpty) return;
 
         imgUrl = await getPhotoCameraImage(
           cams,

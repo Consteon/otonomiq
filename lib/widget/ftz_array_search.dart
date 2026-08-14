@@ -62,6 +62,15 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
   /// In PICKER mode, use the existing autheniumDecode + separator[8] split
   /// result (finalFilter). The autheniumDecode asymmetry is deliberate:
   /// display-mode filters are raw free-text, not server-encoded search fields.
+  /// Still true now that searchTable is multi-clause: searchTable normalizes
+  /// ONLY the ◆ clause separator (real ◆, `_u25C6_`, `_25C6_`) and decodes
+  /// nothing else. What changed for BOTH modes is that ◆ is now reserved — a
+  /// filter containing ◆ is an OR of its clauses. See searchTable, global.dart.
+  /// Mind the split personality of ◆ in a PICKER filter: LEFT of the ⭘ it
+  /// separates the indexTableString conditions that createInternalTableDynamic
+  /// applies as successive `query.where(...)` — i.e. AND (see
+  /// table_repository.dart) — while RIGHT of the ⭘ it is searchTable's OR.
+  /// Two parsers, never the same string, opposite meanings.
   String get _activeFilter => widget.resultController == null
       ? (widget.component['filter'] ?? '').toString()
       : (finalFilter ?? '');

@@ -78,6 +78,14 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
   String _blockedGate = '';
   // updateEventRow DSL template (raw -- executeUpdateEventRow decodes at write-time)
   String _updateEventRowDsl = '';
+  // Busy-vehicle guard for vehiclePicker (raw config + resolved pool code)
+  String _assignBusySearch = '';
+  String _assignBusyLabel = '';
+  String _assignBusyTable = '';
+  String _busyCode = '';
+  // Self-field busy guard (mirrors PICKER_LIST): row's own field non-empty
+  String _busySelfField = '';
+  String _busySelfLabelField = '';
   // Invoice tier config
   String _invoiceGate = '';
   String _invoiceRoute = '';
@@ -134,6 +142,29 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
     _evidenceTypeField = cfgStr('evidenceTypeField', 'ept');
     _evidenceRefField = cfgStr('evidenceRefField', 'erf');
     _reasonNoteField = cfgStr('reasonNoteField', 'd');
+
+    // Busy-vehicle guard for vehiclePicker (assignBusySearch/Table/Label).
+    // Absent -> guard off (all vehicles selectable, unchanged behavior).
+    // assignBusyTable normally points at a DIFFERENT table than `table`:
+    // "lagi jalan" lives in vehicle_check (cty=opening + cst=custody_confirmed),
+    // never in task.tst. _subscribe() subscribes that pool.
+    _assignBusyLabel = (widget.component['assignBusyLabel'] ?? '')
+        .toString()
+        .trim();
+    _assignBusySearch = (widget.component['assignBusySearch'] ?? '')
+        .toString()
+        .trim();
+    _assignBusyTable = (widget.component['assignBusyTable'] ?? '')
+        .toString()
+        .trim();
+    // Self-field guard, same key names as PICKER_LIST. Independent of the
+    // search guard above -- a vehicle is busy when either fires.
+    _busySelfField = (widget.component['busySelfField'] ?? '')
+        .toString()
+        .trim();
+    _busySelfLabelField = (widget.component['busySelfLabelField'] ?? '')
+        .toString()
+        .trim();
 
     // Gate DSLs -- autheniumDecode before storing (server sends _25FC_/_2B58_)
     final String rawUG = (widget.component['unassignedGate'] ?? '')
@@ -254,6 +285,19 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
       }
     }
 
+    // Busy-guard pool (assignBusyTable) -- usually vehicle_check, i.e. a table
+    // none of the blocks above subscribe under this component's own keys.
+    // subscribeToMapCollection dedups by code, so an overlap is a no-op.
+    _busyCode = VehiclePickerSheet.busyPoolCode(
+      assignBusySearch: _assignBusySearch,
+      assignBusyTable: _assignBusyTable,
+      appVid: appVid,
+    );
+    if (_busyCode.isNotEmpty) {
+      final TablePath bp = parseTablePath(_assignBusyTable);
+      subscribeToMapCollection(appVid, bp.tableDocId, bp.subColl, _busyCode);
+    }
+
     // Asset_cache (subscribed but not consumed by signals in slice 1)
     final String rawAcTable = (widget.component['assetTable'] ?? '')
         .toString()
@@ -293,6 +337,19 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
     final List<Map<String, dynamic>> tasks = List<Map<String, dynamic>>.from(
       mapTableContent[_taskCode] ?? const [],
     );
+    // Busy-guard pool: the assignBusyTable docs, or our own tasks when no
+    // separate table is configured.
+    final List<Map<String, dynamic>> busyDocs = _busyCode.isEmpty
+        ? tasks
+        : List<Map<String, dynamic>>.from(
+            mapTableContent[_busyCode] ?? const [],
+          );
+    if (_assignBusySearch.isNotEmpty && busyDocs.isEmpty) {
+      devPrint(
+        '[coordinationSignalList] busy-guard pool empty for '
+        '"$_busyCode" -- no vehicle will be blocked',
+      );
+    }
 
     // The base DSL from config already has vv and tst in the body.
     // The spec(2) DSL includes tst=assigned:
@@ -319,6 +376,11 @@ class _CoordinationSignalListState extends State<CoordinationSignalList> {
         activeTaskSuffix: _t(12, 'task aktif'),
         offlineError: _t(13, 'Perlu koneksi internet'),
         writeFailError: _t(14, 'Gagal menyimpan'),
+        busySearch: _assignBusySearch,
+        busyLabel: _assignBusyLabel,
+        busyDocs: busyDocs,
+        busySelfField: _busySelfField,
+        busySelfLabelField: _busySelfLabelField,
       ),
     );
   }

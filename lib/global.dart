@@ -211,6 +211,7 @@ import 'widget/driver_home_support.dart';
   0.9.88.01 (260805) OO : add feature adhoc in driver runtime, redesign report, log, improve login and mobile refresh
   0.9.89.01 (260810) OO : toggle for driver module, signature store to firebase storage, crash hardening, screen session, token resolver
   0.9.103.01 (260811) HH : version update
+  0.9.104.01 (260814) OO : add otqPdfViewer remote and local pdf, fix crashlytics, multiclause search table
 */
 
 // ========= Constants ==========================
@@ -221,7 +222,7 @@ const clearHistory =
 int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
-const String version = '0.9.103';
+const String version = '0.9.104';
 const String subVersion = '.01';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
@@ -610,6 +611,33 @@ const a64 = [
 const proxyCollectionName = 'Proxy';
 const eventCollectionName = 'Event';
 
+/// Cameras for `#CAMS` — fetched on first camera use, then cached in the store.
+///
+/// Deliberately NOT fetched during globalInit: `availableCameras()` starts
+/// CameraX (`ProcessCameraProvider.getInstance()`), and if the Flutter engine
+/// detaches while that call is still in flight, camera_android_camerax replies
+/// to a dead Dart isolate and its pigeon codec throws
+/// `IllegalArgumentException: Unsupported value` on the Android main thread —
+/// an uncatchable fatal (Crashlytics: CameraXLibrary.g.kt:1219). Fetching on
+/// demand keeps that window out of every cold start, and also removes the old
+/// race where a camera screen opened before boot finished saw `#CAMS` null.
+Future<List<CameraDescription>> ensureCams() async {
+  final Object? cached = transactionStore.state.screenTx['#CAMS'];
+  if (cached is List && cached.isNotEmpty) {
+    return cached.cast<CameraDescription>();
+  }
+  try {
+    final List<CameraDescription> cams = await availableCameras();
+    transactionStore.dispatch(
+      UpdateScreenTxAction(ScreenTransaction({'#CAMS': cams})),
+    );
+    return cams;
+  } catch (e) {
+    devPrint('ensureCams error: $e');
+    return const <CameraDescription>[];
+  }
+}
+
 Future<int> globalInit() async {
   setMe();
   debugCount = -21;
@@ -868,11 +896,7 @@ Future<int> globalInit() async {
     transactionReducer,
     initialState: ScreenTransaction(initTransactionStore()),
   );
-  availableCameras().then((value) {
-    transactionStore.dispatch(
-      UpdateScreenTxAction(ScreenTransaction({'#CAMS': value})),
-    );
-  });
+  // #CAMS is filled lazily by ensureCams() on first camera use — see its doc.
   // ---- Restore persisted driver login (secure storage -> Redux) ----
   // I2: placed strictly AFTER transactionStore is non-null (created just
   // above). Read the driverLogin key; if non-empty, seed #has_user_login so the
@@ -1992,10 +2016,17 @@ String phoneCanonical62(String inp) {
 /// `getLqrList`, which busy-waits on `locRange` (api.dart:1420) before posting
 /// to readSS. By post time the flag is routinely stale, so the AND-gate in
 /// [errorReport] leaked "readSS Network is unreachable" back into Crashlytics.
+///
+/// `Unable to resolve host` is the SAME DNS failure as `Failed host lookup`,
+/// worded by the native gRPC stack instead of dart:io — it arrives as
+/// `[cloud_firestore/unavailable] UNAVAILABLE: Unable to resolve host
+/// firestore.googleapis.com`. Matching only the dart:io wording meant every
+/// Firestore call made offline still reported.
 bool isNoRouteError(dynamic e) {
   final String s = e.toString();
   return s.contains('Network is unreachable') ||
-      s.contains('Failed host lookup');
+      s.contains('Failed host lookup') ||
+      s.contains('Unable to resolve host');
 } // end of isNoRouteError
 
 /// True when [e] is the shape a call gets when the radio is simply down:
@@ -2008,18 +2039,47 @@ bool isNetworkDownError(dynamic e) {
       isNoRouteError(e);
 } // end of isNetworkDownError
 
+/// True when [e] is a mid-flight teardown by the DEVICE's own network stack:
+/// the socket was established, then killed — `Software caused connection
+/// abort` (ECONNABORTED). On Android that is a Wi-Fi↔cellular handoff, a radio
+/// flap, or doze reaping a long-lived socket. The app neither causes it nor
+/// can act on it.
+///
+/// Deliberately narrower than "any aborted request": `Connection reset by
+/// peer` (ECONNRESET) comes from the FAR end, so a server / TLS fault stays
+/// reportable. ECONNABORTED is local-only.
+///
+/// Distinct from [isNoRouteError] — here there WAS a route, which is exactly
+/// why [internetConnectionFlag] is true and the flag half of the [errorReport]
+/// gate never fires. `getLqrList` posts to readSS (median ~19s, tail ~79s)
+/// with no timeout, so it holds one socket open across the widest handoff
+/// window in the app — that call site is where this shape shows up.
+bool isConnectionAbortError(dynamic e) =>
+    e.toString().contains('Software caused connection abort');
+
+/// Whether [errorReport] should DROP [e] instead of recording a Crashlytics
+/// non-fatal, given whether the app currently believes it is [online].
+///
+/// Offline is a NORMAL state in this offline-first app — every http / Cloud
+/// Function call made with no network throws, and reporting each one made
+/// "readSS Network is unreachable" the top non-fatal. Drop a network-shaped
+/// error when ANY of: the app knows it is offline; the error itself proves
+/// there was no route ([isNoRouteError]); the transport was aborted under the
+/// request ([isConnectionAbortError]). A generic SocketException /
+/// ClientException while the app believes it is online (TLS, server reset, …)
+/// is still a real failure and still reported, and a non-network error while
+/// offline (RangeError, cast, …) still reports.
+///
+/// Pure, and separate from [errorReport], because the field failure was in the
+/// AND/OR wiring rather than in any single predicate: `readSS Software caused
+/// connection abort` is network-shaped AND arrives with [online] true, so both
+/// the flag half and [isNoRouteError] voted "report".
+bool skipCrashReport(dynamic e, bool online) =>
+    isNetworkDownError(e) &&
+    (!online || isNoRouteError(e) || isConnectionAbortError(e));
+
 void errorReport(dynamic e, [StackTrace? stack]) {
-  // Offline is a NORMAL state in this offline-first app — every http / Cloud
-  // Function call made with no network throws, and reporting each one made
-  // "readSS Network is unreachable" the top non-fatal. Skip a network-shaped
-  // error when EITHER the app knows it is offline, OR the error itself proves
-  // there was no route ([isNoRouteError]) — the flag alone was not enough, it
-  // lags the radio and let the readSS noise through. A generic
-  // SocketException / ClientException while the app believes it is online
-  // (TLS, server reset, …) is still a real failure and still reported, and a
-  // non-network error while offline (RangeError, cast, …) still reports.
-  if (isNetworkDownError(e) &&
-      (!internetConnectionFlag.value || isNoRouteError(e))) {
+  if (skipCrashReport(e, internetConnectionFlag.value)) {
     debugPrint('offline (crash report skipped): ${e.toString()}');
     return;
   }
@@ -2133,40 +2193,127 @@ int otqRandom(int minInt) {
   return result;
 } // end of otqRandom
 
+/// Compile ONE clause into its AND-ed term regexps.
+///
+/// Terms are the clause's whitespace-separated words, lowercased. Compiling
+/// here — once per clause, never per row — is deliberate: a fresh RegExp per
+/// (row x term) was the main cost of search lag on large tables.
+List<RegExp> _searchTableTerms(String clause) {
+  final List<String> rList = clause
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r"\s+\b|\b\s"), ' ')
+      .split(' ');
+  return rList.map((rg) => RegExp(rg.toLowerCase())).toList();
+}
+
+/// True when EVERY regexp in [regexps] matches SOME cell of row [c].
+///
+/// [c] is a dynamic row of dynamic cells (server data by design): each cell is
+/// compared as `toString().toLowerCase()`, so nulls and numbers are tolerated.
+bool _searchTableRowMatches(dynamic c, List<RegExp> regexps) {
+  bool? finalResult;
+  for (final regexp in regexps) {
+    bool result = false;
+    for (var e in c) {
+      if (regexp.hasMatch(e.toString().toLowerCase())) {
+        result = true;
+        break;
+      }
+    }
+    finalResult = finalResult == null ? result : (finalResult && result);
+  } // end of regexps
+  return finalResult ?? false;
+}
+
+/// Filter [myList] by ONE clause — the whole grammar as it stood before
+/// multi-clause ◆ support: whitespace-split terms, all AND-ed, blank clause
+/// keeps every row.
+///
+/// Split out of [searchTable] so the multi-clause path can fall back to it
+/// verbatim when splitting on ◆ leaves a term that no longer compiles.
+List<dynamic> _searchTableSingle(String clause, var myList) {
+  if (clause.trim().isEmpty) {
+    return List<dynamic>.from(myList);
+  }
+  final List<RegExp> regexps = _searchTableTerms(clause);
+  return myList.where((c) => _searchTableRowMatches(c, regexps)).toList();
+}
+
+/// Filter the rows of [myList] by the search string [rx].
+///
+/// GRAMMAR
+///   filter := clause ( ◆ clause )*        ◆ = separator[1] = U+25C6
+///   clause := term ( whitespace term )*
+///
+/// * CLAUSES ARE OR-ed. A row is kept when it matches ANY clause. Source order
+///   is preserved and a row matching two clauses still appears once.
+/// * TERMS INSIDE ONE CLAUSE ARE AND-ed. Every term must regex-match SOME cell
+///   of the row, so "Kantor Pusat" needs both words; a row holding only
+///   "Kantor" is not a match.
+/// * Empty clauses are dropped: "A◆" == "A". A filter that is only separators
+///   ("◆", "◆◆") or blank returns ALL rows — fail-open, same as filter:"".
+/// * The ◆ separator is accepted as the real character or as either server
+///   escape form, `_u25C6_` or the bare `_25C6_`. autheniumDecode covers only
+///   the first (it has no `_25C6_` line), so the separator is normalized here,
+///   locally.
+/// * If splitting on ◆ leaves a clause that is no longer a valid RegExp — a ◆
+///   sitting inside a group or a character class, e.g. "Kantor (Pusat◆Cabang)"
+///   — the filter is retried UNSPLIT, as the single clause it was before ◆
+///   became a separator. Not fail-open: a broken filter keeps its old result
+///   rather than starting to match every row.
+///
+/// NOTHING ELSE IS DECODED HERE. This is not autheniumDecode: a caller that
+/// needs the full decode still does it itself (see the caller's own
+/// autheniumDecode in FtzArraySearch.initState). Keeping it to the one
+/// separator is what makes a ◆-free filter byte-identical to its
+/// pre-multi-clause behavior, and preserves the deliberate "display mode does
+/// NOT autheniumDecode" asymmetry at `_activeFilter` in ftz_array_search.dart.
+///
+/// Matching is case-insensitive; each cell is compared as `e.toString()`.
+
 List<dynamic> searchTable(String rx, var myList) {
-  // search rx as or regex in myList.
-  // return all match elements
-  List<dynamic> res = [];
-  if (rx.trim().isNotEmpty) {
-    List<String> rList = rx
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r"\s+\b|\b\s"), ' ')
-        .split(' ');
-    // Compile each search term's RegExp ONCE up front. Previously a fresh
-    // RegExp was compiled per (row x term) inside the loop, i.e. on every
-    // keystroke for every row — the main cost of search lag on large tables.
-    final List<RegExp> regexps = rList
-        .map((rg) => RegExp(rg.toLowerCase()))
-        .toList();
-    res = myList.where((c) {
-      bool? finalResult;
-      for (final regexp in regexps) {
-        bool result = false;
-        for (var e in c) {
-          if (regexp.hasMatch(e.toString().toLowerCase())) {
-            result = true;
-            break;
-          }
-        }
-        finalResult = finalResult == null ? result : (finalResult && result);
-      } // end of regexps
-      return finalResult ?? false;
-    }).toList();
-  } else {
-    res = List<dynamic>.from(myList);
-  } // end if (rx.isNotEmpty)
-  return res;
+  // Normalize ONLY the clause separator's two escape forms, and do it BEFORE
+  // any lowercasing (after toLowerCase the escape reads `_u25c6_` and would no
+  // longer match). A string holding neither escape nor a real ◆ comes out
+  // unchanged, so it takes the single-clause path below with exactly the
+  // behavior this function had before multi-clause support.
+  final String norm = rx
+      .replaceAll('_u25C6_', blackDiamond)
+      .replaceAll('_25C6_', blackDiamond);
+
+  if (!norm.contains(blackDiamond)) {
+    // Single clause — the original path.
+    return _searchTableSingle(norm, myList);
+  }
+
+  // Multi-clause OR. Compile every clause ONCE, before the row scan: doing it
+  // as `rows.where((r) => clauses.any((p) => searchTable(p, [r]).isNotEmpty))`
+  // would recompile every clause for every row and bring back the search lag.
+  final List<List<RegExp>> clauses = [];
+  try {
+    for (final String clause in norm.split(blackDiamond)) {
+      if (clause.trim().isEmpty) continue; // "A◆" == "A" ; "◆◆" drops both
+      clauses.add(_searchTableTerms(clause));
+    }
+  } on FormatException {
+    // The split can cut a BALANCED regex in half: "Kantor (Pusat◆Cabang)" gives
+    // the clause "Kantor (Pusat", whose term "(pusat" does not compile. Re-run
+    // the UNSPLIT, un-normalized rx as one clause — byte-for-byte what this
+    // filter did before ◆ meant "clause separator". Deliberately NOT fail-open:
+    // a malformed filter keeps its old (usually empty) result instead of
+    // suddenly matching every row. If the unsplit form is invalid too it throws,
+    // exactly as a ◆-free filter with the same defect already does today.
+    return _searchTableSingle(rx, myList);
+  }
+  if (clauses.isEmpty) {
+    return List<dynamic>.from(myList); // "◆", "◆◆" behave like ""
+  }
+  // `where` visits each row once in source order => order preserved and no
+  // duplicates, by construction. No Set, no manual de-dup needed.
+  return myList
+      .where((c) => clauses.any((terms) => _searchTableRowMatches(c, terms)))
+      .toList();
 } // end of searchTable
 
 int binarySearch2DDesc(dynamic arr, int column, int target) {

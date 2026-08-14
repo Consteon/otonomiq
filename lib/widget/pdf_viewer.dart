@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import '../global.dart';
-// import '../page/otq_pdf_viewer.dartdisabled';
+import 'package:otonomiq/page/lib/page/otq_pdf_viewer.dart';
 
 import '../api.dart';
+import '../global.dart';
+import '../sdui_spec.dart';
 
 /*
   launch otq pdf viewer
@@ -30,28 +31,31 @@ class _PdfViewerState extends State<PdfViewer> {
     const double defaultAspectRatio = 18 / 12;
     var topPad = 6.0;
     double fontSize = (widget.component['fontSize'] ?? 14.0).toDouble();
-    var textArray = diamondTextToList(widget.component['text']);
+    // on-touch SduiSpec migration: `?? default` only catches a MISSING key, but
+    // the sheet ships `"path":""` / `"url":""` for unfilled slots — an empty
+    // string sailed through and reached the network layer. str() defaults on
+    // blank too.
+    final spec = SduiSpec(widget.component);
     Widget button;
 
     button = Center(
       child: Container(
         // if single
         alignment: Alignment.center,
-//      color: Colors.red,
+        //      color: Colors.red,
         width: (widget.component['width'] ?? 90).toDouble(),
         child: Card(
           child: InkWell(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: <Widget>[
-                Container(
-                  height: topPad,
-                ),
+                Container(height: topPad),
                 AspectRatio(
                   aspectRatio: defaultAspectRatio,
                   child: displayImage(
-                      imageUrl: widget.component['url'] ?? defaultImage,
-                      cached: true),
+                    imageUrl: spec.str('url', defaultImage),
+                    cached: true,
+                  ),
                   // child: FadeInImage.memoryNetwork(
                   //   placeholder: kTransparentImage,
                   //   image: widget.component['url'] ?? defaultImage,
@@ -60,7 +64,7 @@ class _PdfViewerState extends State<PdfViewer> {
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   child: Text(
-                    getText(textArray, 0),
+                    spec.text(0),
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: fontSize),
                   ),
@@ -71,26 +75,14 @@ class _PdfViewerState extends State<PdfViewer> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => const Text(
-                      'PDF Viewer temporarily disabled, due to ios18 incompatibility'),
-                  // builder: (context) => OtqPdfViewer(
-                  //   urlPath: widget.component['path'] ?? defaultPdf,
-                  //   remote: true,
-                  //   password: widget.component['password'] ?? '',
-                  //   linkNavigation: widget.component['linkNavigation'] == null
-                  //       ? false
-                  //       : widget.component['linkNavigation']
-                  //               .toString()
-                  //               .trim()
-                  //               .toLowerCase() ==
-                  //           'true',
-                  //   swipe: widget.component['swipe'] == null
-                  //       ? 'vertical'
-                  //       : widget.component['swipe']
-                  //           .toString()
-                  //           .trim()
-                  //           .toLowerCase(),
-                  // ),
+                  builder: (context) => OtqPdfViewer(
+                    urlPath: spec.str('path', defaultPdf),
+                    remote: true,
+                    password: spec.str('password'),
+                    linkNavigation:
+                        spec.str('linkNavigation').toLowerCase() == 'true',
+                    swipe: spec.str('swipe', 'vertical').toLowerCase(),
+                  ),
                 ),
               );
             },

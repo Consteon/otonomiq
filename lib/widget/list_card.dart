@@ -3,9 +3,11 @@ import 'package:get/get.dart';
 
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
+import 'biometric_gate.dart'; // bioGate — tap gate for biometrik-flagged components
 import 'driver_home_support.dart';
 import 'list_card_support.dart';
 import 'panel_card_support.dart';
+import 'picker_list.dart'; // PickerList.countForRow (static reuse, no coupling)
 
 /// LIST_CARD -- universal config-driven keyed list renderer.
 ///
@@ -68,6 +70,20 @@ class _ListCardState extends State<ListCard> {
   String _trailingLabelTpl = '';
   String _routeStr = '';
   Map<String, String> _groupRoutes = const {};
+
+  // Row status guard: per-row count against a SECOND table -> label + optional
+  // tap lock. Used to stop an admin assigning a task to a vehicle already on
+  // the road (statusSearch hits vehicle_check, the list itself is
+  // stock_location). All keys optional; absent = no pill, no lock.
+  String _statusCode = '';
+  String _rawStatusSearch = '';
+  String _statusIdField = 'lv';
+  String _statusOnLabel = '';
+  String _statusOffLabel = '';
+  bool _disableWhenStatusOn = false;
+
+  /// Status-pool docs, refreshed once per build inside the Obx.
+  List<Map<String, dynamic>> _statusDocs = const [];
 
   // Local UI state
   String _searchQuery = '';
@@ -156,6 +172,18 @@ class _ListCardState extends State<ListCard> {
         .toString()
         .trim()
         .isNotEmpty;
+
+    // Row status guard. statusSearch is stored raw -- PickerList.countForRow
+    // decodes, resolves {today}, then substitutes the row token.
+    _rawStatusSearch = (widget.component['statusSearch'] ?? '')
+        .toString()
+        .trim();
+    final String idf = _cfg('statusIdField').trim();
+    _statusIdField = idf.isNotEmpty ? idf : 'lv';
+    _statusOnLabel = _cfg('statusOnLabel').trim();
+    _statusOffLabel = _cfg('statusOffLabel').trim();
+    _disableWhenStatusOn =
+        _cfg('disableWhenStatusOn').trim().toUpperCase() == 'TRUE';
   }
 
   void _subscribe() {
@@ -202,6 +230,31 @@ class _ListCardState extends State<ListCard> {
             );
           }
         }
+      }
+    }
+
+    // Status table subscription. Only when statusSearch is authored -- no
+    // consumer, no listener. Unlike the slot gate this is fail-OPEN: it gates
+    // availability, not permission, so a missing table must never hide or
+    // lock every row.
+    if (_rawStatusSearch.isNotEmpty) {
+      final String rawStatusTable = (widget.component['statusTable'] ?? '')
+          .toString()
+          .trim();
+      final TablePath stp = parseTablePath(rawStatusTable);
+      if (rawStatusTable.isNotEmpty && stp.tableDocId.isNotEmpty) {
+        _statusCode = '$appVid/${stp.tableDocId}/${stp.subColl}';
+        subscribeToMapCollection(
+          appVid,
+          stp.tableDocId,
+          stp.subColl,
+          _statusCode,
+        );
+      } else {
+        devPrint(
+          '[listCard] statusSearch set but statusTable "$rawStatusTable" '
+          'is unusable -- status pill/lock OFF',
+        );
       }
     }
   }
@@ -385,9 +438,20 @@ class _ListCardState extends State<ListCard> {
     }).toList();
   }
 
-  void _onCardTap(Map<String, dynamic> doc, [String? routeOverride]) {
+  Future<void> _onCardTap(
+    Map<String, dynamic> doc, [
+    String? routeOverride,
+  ]) async {
     final String route = routeOverride ?? _routeStr;
     if (route.isEmpty) return;
+    // I1: validate the route BEFORE the biometric prompt so a misconfigured
+    // route does not prompt for auth pointlessly (behaviour-identical for a
+    // correct route). Single check — no double routeExist below.
+    if (!routeExist(route)) return;
+    // Biometric gate: blocks tap until auth succeeds. Gate runs BEFORE
+    // routeStack.push — no routeStack.pop() compensation is needed on failure.
+    if (!await bioGate(widget.component, context)) return;
+    if (!mounted) return;
     // Dispatch routeParams: row-first resolution, session fallback.
     // writeRouteParamsFromRow handles autheniumDecode + parse + resolve + dispatch.
     writeRouteParamsFromRow(
@@ -396,10 +460,8 @@ class _ListCardState extends State<ListCard> {
       widget.scrName,
     );
     // routeStack.push BEFORE gotoRoute (back-nav uses routeStack)
-    if (routeExist(route)) {
-      routeStack.push(route);
-      gotoRoute(route);
-    }
+    routeStack.push(route);
+    gotoRoute(route);
   }
 
   /// Resolve `<field>` template tokens from a doc. No computed values in v1.
@@ -410,6 +472,12 @@ class _ListCardState extends State<ListCard> {
   Widget build(BuildContext context) {
     return Obx(() {
       final List<Map<String, dynamic>> serverFiltered = _getServerFiltered();
+
+      // Status pool: read here, unconditionally, so the observable is
+      // registered even when the list renders empty and no card is built.
+      _statusDocs = List<Map<String, dynamic>>.from(
+        mapTableContent[_statusCode] ?? const [],
+      );
 
       // Stats: count from server-filtered set (before search bar filter)
       final List<int> statsCounts = _statsDefs.isNotEmpty
@@ -692,7 +760,23 @@ class _ListCardState extends State<ListCard> {
     // '' = read-only group -> onTap: null (kills ripple).
     // non-empty = per-group route.
     final String effectiveRoute = groupRoute ?? _routeStr;
-    final bool tappable = effectiveRoute.isNotEmpty;
+
+    // Row status guard: count the status pool for this row's id.
+    final bool statusOn =
+        _rawStatusSearch.isNotEmpty &&
+        PickerList.countForRow(
+              _statusDocs,
+              _rawStatusSearch,
+              _statusIdField,
+              (doc[_statusIdField] ?? '').toString().trim(),
+            ) >
+            0;
+    final String statusLabel = _rawStatusSearch.isEmpty
+        ? ''
+        : (statusOn ? _statusOnLabel : _statusOffLabel);
+    final bool statusLocked = statusOn && _disableWhenStatusOn;
+
+    final bool tappable = effectiveRoute.isNotEmpty && !statusLocked;
 
     // Lead widget
     Widget? lead;
@@ -724,7 +808,9 @@ class _ListCardState extends State<ListCard> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Material(
-        color: Colors.white,
+        // Locked rows read as muted rather than dimmed: a global Opacity would
+        // wash out the status pill that explains WHY the row is locked.
+        color: statusLocked ? const Color(0xFFF9FAFB) : Colors.white,
         borderRadius: BorderRadius.circular(14),
         elevation: 0,
         child: InkWell(
@@ -776,6 +862,32 @@ class _ListCardState extends State<ListCard> {
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
                                   color: statusColor(badge.tier),
+                                ),
+                              ),
+                            ),
+                          ],
+                          if (statusLabel.isNotEmpty) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                // Same palette as PickerList's status pill.
+                                color: statusOn
+                                    ? const Color(0xFFFEF3C7) // amber-100
+                                    : const Color(0xFFD1FAE5), // emerald-100
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                statusLabel,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: statusOn
+                                      ? const Color(0xFFB45309) // amber-700
+                                      : const Color(0xFF047857), // emerald-700
                                 ),
                               ),
                             ),

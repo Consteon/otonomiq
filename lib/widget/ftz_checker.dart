@@ -61,7 +61,7 @@ part '../part/build_part/ftz_checker_part.dart';
 class Controller extends GetxController {
   var count = 10.obs;
   var message = ''.obs;
-  RxInt decrease() => count--;
+  decrease() => count--;
 }
 
 class FtzChecker extends StatefulWidget {
@@ -307,8 +307,7 @@ class FtzCheckerState extends State<FtzChecker> {
 
     Future<String> checkerTakePicture(String lens, String? title) async {
       // get selfie, save to firebase, then return url to selfie image
-      List<CameraDescription> cameras =
-          transactionStore.state.screenTx['#CAMS'];
+      final List<CameraDescription> cameras = await ensureCams();
       int imgSize =
           (widget.component['imgWidth'] ?? 540) >
               (widget.component['imgHeight'] ?? 540)
@@ -512,7 +511,7 @@ class FtzCheckerState extends State<FtzChecker> {
             resultOk = errorString;
           } // end if position
         } catch (e) {
-          // display dialog fail, and play wrong beep
+          // TODO display dialog fail, and play wrong beep
           errorReport(e);
           setDataOK(
             '1',
@@ -657,7 +656,7 @@ class FtzCheckerState extends State<FtzChecker> {
           num finalTolerance = 0;
           String lqrText =
               await checkerTakeQR(
-                newArray[4],
+                newArray[4] ?? 'LQR',
                 widget.scrName,
                 widget.component,
                 'loc',
@@ -738,7 +737,7 @@ class FtzCheckerState extends State<FtzChecker> {
             newArray = List<String>.from(tArray);
             String qrText =
                 await checkerTakeQR(
-                  newArray[9],
+                  newArray[9] ?? 'QR',
                   widget.scrName,
                   widget.component,
                   'loc',
@@ -776,7 +775,8 @@ class FtzCheckerState extends State<FtzChecker> {
                   if (takePicture) {
                     try {
                       BuildContext pContext = context;
-                      photoUrl = await checkerTakePicture(lens, newArray[10]);
+                      photoUrl =
+                          await checkerTakePicture(lens, newArray[10]) ?? '';
                     } catch (ep) {
                       photoUrl = '';
                     }
@@ -899,7 +899,7 @@ class FtzCheckerState extends State<FtzChecker> {
           setDataOK('2'); // display green
         } // end if (checkies.isNotEmpty)
       } on PlatformException catch (err) {
-        // play wrong beep
+        // TODO  play wrong beep
         setDataOK('2'); // display green without do anything
         errorReport(err);
         await showDialog(
@@ -917,7 +917,7 @@ class FtzCheckerState extends State<FtzChecker> {
 
               actions: <Widget>[
                 TextButton(
-                  child: Text(newArray[3]),
+                  child: Text(newArray[3] ?? "--Bad GPS_SEND --"),
                   onPressed: () {
                     Navigator.of(context).pop();
                   },

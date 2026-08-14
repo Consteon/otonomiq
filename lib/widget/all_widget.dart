@@ -32,6 +32,8 @@ export 'do_chain.dart';
 // development
 export 'do_otq_bottom_sheet.dart';
 export 'do_otq_dialog.dart';
+export 'doc_download.dart';
+export 'doc_viewer.dart';
 export 'driver_home_support.dart';
 export 'driver_stop_card.dart';
 export 'dsl_eq.dart';

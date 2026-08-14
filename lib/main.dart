@@ -41,6 +41,17 @@ final navigatorKey = GlobalKey<NavigatorState>();
 // https://flutter.dev/desktop#target-platform-override for more info.
 
 void main() async {
+  // TODO put runZonedGuarded before WidgetFlutterBinding
+  //   https://flutter.dev/docs/testing/errors
+  /*
+    like:
+    runZonedGuarded(() async {
+      WidgetsFlutterBinding.ensureInitialized();
+      await Firebase.initializeApp();
+      runApp(MyApp());
+    }
+   */
+
   debugCount = -1;
   trace(debugCount);
   WidgetsFlutterBinding.ensureInitialized(); // needed by flutter error message
@@ -103,7 +114,7 @@ void main() async {
     // int? lastGTime = prefs.getInt('@lastGpsTime');
     // if (lastGTime == null) {
     //   lastGTime = 0;
-    //   await prefs.setInt('@lastGpsTime', lastGTime);
+    //   await prefs.setInt('@lastGpsTime', l astGTime);
     // }
     // setTransactionNotOK('main');
     // setTransactionOK('main');
@@ -596,6 +607,8 @@ class _MyHomePageState extends State<MyHomePage> {
             child: Image.network(
               'https://firebasestorage.googleapis.com/v0/b/otq-01-ase2/o/c%2Fautsorz%2Fimage%2Fautsorz-signup-300x70.png?alt=media&token=fdf74314-429c-4c1e-bd31-a857e6f4b744',
               width: 400,
+              // Offline here would otherwise report a fatal via onError above.
+              errorBuilder: (_, _, _) => const SizedBox(height: 80),
               // height: 80,
               // alignment: Alignment.center,
             ),
@@ -625,3 +638,6 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 }
+
+//======== end of IOS
+// TODO internationalization

@@ -216,9 +216,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
 
     Future<String> takePicture(String lens) async {
       // get selfie, save to firebase, then return url to selfie image
-      List<CameraDescription>? cams =
-          transactionStore.state.screenTx['#CAMS'] as List<CameraDescription>?;
-      if (cams == null || cams.isEmpty) return emptyImageUrl;
+      final List<CameraDescription> cams = await ensureCams();
+      if (cams.isEmpty) return emptyImageUrl;
       String selfieUrl = await getPhotoCameraImage(
         cams,
         widget.component['label'] ?? 'Camera',
@@ -757,7 +756,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
           } // end if position
         } // end if (resultOk == empty || resultOk == errorString)
       } catch (e) {
-        // display dialog fail, and play wrong beep
+        // TODO display dialog fail, and play wrong beep
         errorReport(e);
         setDataOK(
           '1',
@@ -780,8 +779,16 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
             actions: <Widget>[
               TextButton(
                 child: Text(textList["OK"]),
+                // Get.back(), NOT Navigator.of(context).pop(): `context` here is
+                // this State's context (Get.dialog takes a widget, not a
+                // `builder:` that would shadow it), and `setDataOK('1')` two
+                // lines up replaces rootThis.pageElements — which unmounts this
+                // State before the dialog is even shown. Tapping OK then walked
+                // a defunct element and threw "Null check operator used on a
+                // null value" at StatefulElement.state. Get.dialog is closed by
+                // Get.back() everywhere else in this file anyway.
                 onPressed: () {
-                  Navigator.of(context).pop();
+                  Get.back();
                 },
               ),
             ],
@@ -842,11 +849,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
               lens = 'back';
             }
             try {
-              List<CameraDescription>? cams =
-                  transactionStore.state.screenTx['#CAMS']
-                      as List<CameraDescription>?;
-              if (cams == null || cams.isEmpty)
-                throw Exception('No cameras available');
+              final List<CameraDescription> cams = await ensureCams();
+              if (cams.isEmpty) throw Exception('No cameras available');
               transactionStore.dispatch(
                 UpdateScreenTxAction(ScreenTransaction({'#CAMERA': true})),
               );
@@ -921,7 +925,10 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                 tArray[5] ??
                                 "--Bad GPS_SEND Text#6--"; // scenario 4
                             fromLinkOption = 'clock-out-overtime';
-                            Navigator.of(context).pop();
+                            // Same stale-context trap as the dialog in
+                            // qrDataProcess: Get.dialog takes a widget, so
+                            // `context` is this State's, not the dialog's.
+                            Get.back();
                           },
                         ),
                         TextButton(
@@ -931,7 +938,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                 tArray[6] ??
                                 "--Bad GPS_SEND Text#7--"; // scenario 3
                             fromLinkOption = 'forgot-clock-out';
-                            Navigator.of(context).pop();
+                            Get.back();
                           },
                         ),
                       ],
@@ -987,7 +994,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
           } // end if ((actionType == 'selfie' && !cameraCancel)
         } // end if ((actionType != 'selfie') &&...
       } on PlatformException catch (err) {
-        // play wrong beep
+        // TODO  play wrong beep
         setDataOK('2'); // display green without do anything
         errorReport(err);
         await attendanceDialog(
@@ -1337,10 +1344,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
         await Future.delayed(const Duration(milliseconds: 500));
 
         // --- §3 step 3→4 transition: Front-camera selfie ---
-        List<CameraDescription>? cams =
-            transactionStore.state.screenTx['#CAMS']
-                as List<CameraDescription>?;
-        if (cams == null || cams.isEmpty) {
+        final List<CameraDescription> cams = await ensureCams();
+        if (cams.isEmpty) {
           setDataOK('2');
           return;
         }
@@ -2637,7 +2642,10 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                     setDataOK('2');
                     errorReport(e);
                   } // end of try
-                }
+                } else {
+                  setDataOK('2');
+                } // end if internetOK
+                // } // end if dataOk
                 if (mounted) {
                   setState(() {
                     tapped = false;
