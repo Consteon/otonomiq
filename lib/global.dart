@@ -2140,39 +2140,125 @@ int otqRandom(int minInt) {
   return result;
 } // end of otqRandom
 
+/// Compile ONE clause into its AND-ed term regexps.
+///
+/// Terms are the clause's whitespace-separated words, lowercased. Compiling
+/// here — once per clause, never per row — is deliberate: a fresh RegExp per
+/// (row x term) was the main cost of search lag on large tables.
+List<RegExp> _searchTableTerms(String clause) {
+  final List<String> rList = clause
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r"\s+\b|\b\s"), ' ')
+      .split(' ');
+  return rList.map((rg) => RegExp(rg.toLowerCase())).toList();
+}
+
+/// True when EVERY regexp in [regexps] matches SOME cell of row [c].
+///
+/// [c] is a dynamic row of dynamic cells (server data by design): each cell is
+/// compared as `toString().toLowerCase()`, so nulls and numbers are tolerated.
+bool _searchTableRowMatches(dynamic c, List<RegExp> regexps) {
+  bool? finalResult;
+  for (final regexp in regexps) {
+    bool result = false;
+    for (var e in c) {
+      if (regexp.hasMatch(e.toString().toLowerCase())) {
+        result = true;
+        break;
+      }
+    }
+    finalResult = finalResult == null ? result : (finalResult && result);
+  } // end of regexps
+  return finalResult ?? false;
+}
+
+/// Filter [myList] by ONE clause — the whole grammar as it stood before
+/// multi-clause ◆ support: whitespace-split terms, all AND-ed, blank clause
+/// keeps every row.
+///
+/// Split out of [searchTable] so the multi-clause path can fall back to it
+/// verbatim when splitting on ◆ leaves a term that no longer compiles.
+List<dynamic> _searchTableSingle(String clause, var myList) {
+  if (clause.trim().isEmpty) {
+    return List<dynamic>.from(myList);
+  }
+  final List<RegExp> regexps = _searchTableTerms(clause);
+  return myList.where((c) => _searchTableRowMatches(c, regexps)).toList();
+}
+
+/// Filter the rows of [myList] by the search string [rx].
+///
+/// GRAMMAR
+///   filter := clause ( ◆ clause )*        ◆ = separator[1] = U+25C6
+///   clause := term ( whitespace term )*
+///
+/// * CLAUSES ARE OR-ed. A row is kept when it matches ANY clause. Source order
+///   is preserved and a row matching two clauses still appears once.
+/// * TERMS INSIDE ONE CLAUSE ARE AND-ed. Every term must regex-match SOME cell
+///   of the row, so "Kantor Pusat" needs both words; a row holding only
+///   "Kantor" is not a match.
+/// * Empty clauses are dropped: "A◆" == "A". A filter that is only separators
+///   ("◆", "◆◆") or blank returns ALL rows — fail-open, same as filter:"".
+/// * The ◆ separator is accepted as the real character or as either server
+///   escape form, `_u25C6_` or the bare `_25C6_`. autheniumDecode covers only
+///   the first (it has no `_25C6_` line), so the separator is normalized here,
+///   locally.
+/// * If splitting on ◆ leaves a clause that is no longer a valid RegExp — a ◆
+///   sitting inside a group or a character class, e.g. "Kantor (Pusat◆Cabang)"
+///   — the filter is retried UNSPLIT, as the single clause it was before ◆
+///   became a separator. Not fail-open: a broken filter keeps its old result
+///   rather than starting to match every row.
+///
+/// NOTHING ELSE IS DECODED HERE. This is not autheniumDecode: a caller that
+/// needs the full decode still does it itself (see the caller's own
+/// autheniumDecode in FtzArraySearch.initState). Keeping it to the one
+/// separator is what makes a ◆-free filter byte-identical to its
+/// pre-multi-clause behavior, and preserves the deliberate "display mode does
+/// NOT autheniumDecode" asymmetry at `_activeFilter` in ftz_array_search.dart.
+///
+/// Matching is case-insensitive; each cell is compared as `e.toString()`.
 List<dynamic> searchTable(String rx, var myList) {
-  // search rx as or regex in myList.
-  // return all match elements
-  List<dynamic> res = [];
-  if (rx.trim().isNotEmpty) {
-    List<String> rList = rx
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r"\s+\b|\b\s"), ' ')
-        .split(' ');
-    // Compile each search term's RegExp ONCE up front. Previously a fresh
-    // RegExp was compiled per (row x term) inside the loop, i.e. on every
-    // keystroke for every row — the main cost of search lag on large tables.
-    final List<RegExp> regexps =
-        rList.map((rg) => RegExp(rg.toLowerCase())).toList();
-    res = myList.where((c) {
-      bool? finalResult;
-      for (final regexp in regexps) {
-        bool result = false;
-        for (var e in c) {
-          if (regexp.hasMatch(e.toString().toLowerCase())) {
-            result = true;
-            break;
-          }
-        }
-        finalResult = finalResult == null ? result : (finalResult && result);
-      } // end of regexps
-      return finalResult ?? false;
-    }).toList();
-  } else {
-    res = List<dynamic>.from(myList);
-  } // end if (rx.isNotEmpty)
-  return res;
+  // Normalize ONLY the clause separator's two escape forms, and do it BEFORE
+  // any lowercasing (after toLowerCase the escape reads `_u25c6_` and would no
+  // longer match). A string holding neither escape nor a real ◆ comes out
+  // unchanged, so it takes the single-clause path below with exactly the
+  // behavior this function had before multi-clause support.
+  final String norm =
+      rx.replaceAll('_u25C6_', blackDiamond).replaceAll('_25C6_', blackDiamond);
+
+  if (!norm.contains(blackDiamond)) {
+    // Single clause — the original path.
+    return _searchTableSingle(norm, myList);
+  }
+
+  // Multi-clause OR. Compile every clause ONCE, before the row scan: doing it
+  // as `rows.where((r) => clauses.any((p) => searchTable(p, [r]).isNotEmpty))`
+  // would recompile every clause for every row and bring back the search lag.
+  final List<List<RegExp>> clauses = [];
+  try {
+    for (final String clause in norm.split(blackDiamond)) {
+      if (clause.trim().isEmpty) continue; // "A◆" == "A" ; "◆◆" drops both
+      clauses.add(_searchTableTerms(clause));
+    }
+  } on FormatException {
+    // The split can cut a BALANCED regex in half: "Kantor (Pusat◆Cabang)" gives
+    // the clause "Kantor (Pusat", whose term "(pusat" does not compile. Re-run
+    // the UNSPLIT, un-normalized rx as one clause — byte-for-byte what this
+    // filter did before ◆ meant "clause separator". Deliberately NOT fail-open:
+    // a malformed filter keeps its old (usually empty) result instead of
+    // suddenly matching every row. If the unsplit form is invalid too it throws,
+    // exactly as a ◆-free filter with the same defect already does today.
+    return _searchTableSingle(rx, myList);
+  }
+  if (clauses.isEmpty) {
+    return List<dynamic>.from(myList); // "◆", "◆◆" behave like ""
+  }
+  // `where` visits each row once in source order => order preserved and no
+  // duplicates, by construction. No Set, no manual de-dup needed.
+  return myList
+      .where((c) => clauses.any((terms) => _searchTableRowMatches(c, terms)))
+      .toList();
 } // end of searchTable
 
 int binarySearch2DDesc(dynamic arr, int column, int target) {

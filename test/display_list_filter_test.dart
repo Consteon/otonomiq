@@ -209,4 +209,150 @@ void main() {
       expect(rows.map((r) => r[0]).toList(), ['300', '100']);
     });
   });
+
+  // ── Multi-clause ◆ filter: OR / union across clauses ──────────────────
+  //
+  // Grammar: filter := clause (◆ clause)* ; clause := term (WS term)*
+  // A row is kept when it matches ANY clause; within ONE clause every term
+  // must match. ◆ is separator[1] and may arrive as the real character or as
+  // the server escapes _u25C6_ / _25C6_.
+
+  group('searchTable multi-clause OR filter', () {
+    // Mirrors the real config "Product Group◆Kantor Pusat".
+    // id3 carries 'kantor' but NOT 'pusat' -> proves within-clause AND.
+    // id4 matches BOTH clauses -> proves de-duplication.
+    final orRows = <List<dynamic>>[
+      ['id1', 'Product Group', 'Samarinda'],
+      ['id2', 'Kantor Pusat', 'Balikpapan'],
+      ['id3', 'Cabang Kantor', 'Bandung'],
+      ['id4', 'Product Group', 'Kantor Pusat'],
+      ['id5', 'PT Consteon', 'Jakarta'],
+    ];
+
+    List<dynamic> idsOf(List<dynamic> rows) => rows.map((r) => r[0]).toList();
+
+    test('two clauses keep rows matching EITHER clause', () {
+      final result = searchTable(
+        'Product Group${separator[1]}Kantor Pusat',
+        List.from(orRows),
+      );
+      expect(idsOf(result), ['id1', 'id2', 'id4']);
+    });
+
+    test('union keeps SOURCE order and never duplicates a row', () {
+      // Clause order reversed: the output must still follow row order,
+      // and id4 (matches both clauses) must appear exactly once.
+      final result = searchTable(
+        'Kantor Pusat${separator[1]}Product Group',
+        List.from(orRows),
+      );
+      expect(idsOf(result), ['id1', 'id2', 'id4']);
+      expect(idsOf(result).where((id) => id == 'id4').length, 1);
+    });
+
+    test('within one clause the words are ANDed', () {
+      // id3 has 'Cabang Kantor' but no 'pusat' -> must be excluded.
+      final result = searchTable('Kantor Pusat', List.from(orRows));
+      expect(idsOf(result), ['id2', 'id4']);
+    });
+
+    test('single clause behaves exactly as before', () {
+      final result = searchTable('Product Group', List.from(orRows));
+      expect(idsOf(result), ['id1', 'id4']);
+    });
+
+    test('trailing empty clause is dropped: "A◆" == "A"', () {
+      final withSep =
+          searchTable('Product Group${separator[1]}', List.from(orRows));
+      final without = searchTable('Product Group', List.from(orRows));
+      expect(idsOf(withSep), idsOf(without));
+      expect(idsOf(withSep), ['id1', 'id4']);
+    });
+
+    test('separator-only filter returns ALL rows (fail-open)', () {
+      expect(searchTable(separator[1], List.from(orRows)).length, orRows.length);
+      expect(
+        searchTable('${separator[1]}${separator[1]}', List.from(orRows)).length,
+        orRows.length,
+      );
+    });
+
+    test('escape form _u25C6_ splits into clauses', () {
+      final result =
+          searchTable('Product Group_u25C6_Kantor Pusat', List.from(orRows));
+      expect(idsOf(result), ['id1', 'id2', 'id4']);
+    });
+
+    test('bare escape form _25C6_ splits into clauses', () {
+      // autheniumDecode has NO _25C6_ line (it covers only the _u25C6_ form),
+      // so searchTable must normalize this form itself.
+      final result =
+          searchTable('Product Group_25C6_Kantor Pusat', List.from(orRows));
+      expect(idsOf(result), ['id1', 'id2', 'id4']);
+    });
+
+    test('ragged rows and null/int cells are non-matches', () {
+      final sparse = <List<dynamic>>[
+        ['id1'],
+        ['id2', null, 7],
+        ['id3', 'Kantor Pusat'],
+      ];
+      final result = searchTable(
+        'Product Group${separator[1]}Kantor Pusat',
+        List.from(sparse),
+      );
+      expect(idsOf(result), ['id3']);
+    });
+
+    test('normalization touches the ◆ escapes ONLY, not autheniumDecode', () {
+      // Pins the design decision: searchTable must NOT run autheniumDecode.
+      // If it did, '_u25FC_' would become ◼ and match id2 instead of id1.
+      final escRows = <List<dynamic>>[
+        ['id1', 'has literal _u25FC_ here'],
+        ['id2', 'has real \u{25FC} here'],
+      ];
+      final result = searchTable('_u25FC_', List.from(escRows));
+      expect(idsOf(result), ['id1']);
+    });
+
+    test('clause split that breaks a group falls back to the unsplit filter',
+        () {
+      // Splitting on ◆ can cut a BALANCED regex in half: "Kantor (Pusat◆Cabang)"
+      // gives the clause "Kantor (Pusat" -> term "(pusat" -> FormatException:
+      // Unterminated group. The fallback re-runs the UNSPLIT string, which is
+      // what this filter did before ◆ was a clause separator: one clause, term
+      // "(pusat◆cabang)", matching nothing because ◆ is forbiddenCharacter[0]
+      // and cannot survive in a cell. Expect 0 rows, NOT all rows — a broken
+      // filter must not silently start matching everything.
+      final result = searchTable(
+        'Kantor (Pusat${separator[1]}Cabang)',
+        List.from(orRows),
+      );
+      expect(idsOf(result), <dynamic>[]);
+    });
+
+    test('clause split that breaks a character class does not throw', () {
+      // "[A◆B]" -> clause "[A" -> RegExp: Unterminated character class.
+      // Fallback compiles the unsplit "[a◆b]", a class of a / ◆ / b.
+      final classRows = <List<dynamic>>[
+        ['id1', 'Alpha'],
+        ['id2', 'Bravo'],
+        ['id3', 'Zulu'],
+      ];
+      final result =
+          searchTable('[A${separator[1]}B]', List.from(classRows));
+      expect(idsOf(result), ['id1', 'id2']); // id3 has neither a nor b
+    });
+
+    test('valid regex clauses still OR normally (fallback swallows nothing)',
+        () {
+      // Balanced groups on BOTH sides of ◆: the happy path must stay on the
+      // multi-clause branch and must NOT be diverted into the fallback.
+      final result = searchTable(
+        '(Product|PT)${separator[1]}Kantor Pusat',
+        List.from(orRows),
+      );
+      expect(idsOf(result), ['id1', 'id2', 'id4', 'id5']);
+    });
+  });
 }
