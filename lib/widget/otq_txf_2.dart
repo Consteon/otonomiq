@@ -54,6 +54,48 @@ String sttCompose(String base, String words, int maxLength) {
   return t;
 } // end of sttCompose
 
+/// Null-safe cell-to-text conversion for a value read out of a server reference
+/// table row (`#TABLE<code>` / `#LQR_LIST`), which is a `List<dynamic>` whose
+/// blank cells are real Dart nulls.
+///
+/// `null.toString()` is the four-character string "null". Written into
+/// [InputController.finalData] it survives `stringCleanUp` (not a forbidden
+/// character) and lands in the ★ section of Event C, where the report renders
+/// the word "null" to the user. Convert at the PRODUCER; never filter the text
+/// "null" at the sink - a user may legitimately type it.
+String txfCellText(dynamic v) => v == null ? '' : v.toString();
+// end of txfCellText
+
+/// Joins a reference-table row into the ati-coded, `separator[6]` (☆) separated
+/// bundle written to `mainRef`'s [InputController.finalData].
+///
+/// Arity is STRUCTURAL: N cells always produce N-1 `separator[6]` marks, whatever
+/// the cells contain. The previous inline form chose the separator by content
+/// (`if (contentResult != atiCode)`), so a null or empty FIRST cell suppressed
+/// the next separator and shifted every following field one position left in the
+/// downstream ☆-split, silently misaligning the report columns. Cell text goes
+/// through [txfCellText], so a null cell is '' and never the literal "null".
+///
+/// The per-cell try/catch is kept from the inline form: a cell whose `toString()`
+/// throws contributes an empty section and must NOT abort the row. Because the
+/// separator is index-driven, that cell still occupies its own slot.
+String atiJoinRow(Iterable<dynamic> content) {
+  String result = atiCode;
+  bool first = true;
+  for (final dynamic e in content) {
+    if (!first) {
+      result += separator[6];
+    }
+    first = false;
+    try {
+      result += txfCellText(e);
+    } catch (err) {
+      // do nothing - empty section, arity already secured by the separator above
+    }
+  }
+  return result;
+} // end of atiJoinRow
+
 class OtqTxf2 extends StatefulWidget {
   /*
     Full blown txf widget
@@ -1004,9 +1046,9 @@ class OtqTxf2State extends State<OtqTxf2>
                             txfControllerCheck(widget.scrName, position);
                             txfController[widget.scrName]![position]!
                                 .controller
-                                .text = elementArray[index].toString();
+                                .text = txfCellText(elementArray[index]);
                             txfController[widget.scrName]![position]!
-                                .finalData = elementArray[index].toString();
+                                .finalData = txfCellText(elementArray[index]);
                             idsToUpdate.add(GeneralGetXController.to
                                 .getWidgetId(widget.scrName, position));
                             devPrint('$position:$index updated.');
@@ -1043,16 +1085,7 @@ class OtqTxf2State extends State<OtqTxf2>
                             .finalData = myController.text;
                         var content = transactionStore.state
                             .screenTx['#TABLE$tableCode'][myController.text];
-                        for (dynamic e in content) {
-                          if (contentResult != atiCode) {
-                            contentResult += separator[6];
-                          }
-                          try {
-                            contentResult += e.toString();
-                          } catch (err) {
-                            // do nothing
-                          }
-                        }
+                        contentResult = atiJoinRow(content);
                       } else {
                         try {
                           contentResult += separator[6] *
@@ -1470,10 +1503,10 @@ class OtqTxf2State extends State<OtqTxf2>
                                           if (errorHappened) {
                                             myController.text = qrResult;
                                           } else {
-                                            myController.text = (table
+                                            myController.text = txfCellText(
+                                                table
                                                     ? refTable[qrResult][2]
-                                                    : refTable[qrResult][0])
-                                                .toString(); // location name
+                                                    : refTable[qrResult][0]); // location name
                                           } // end if (qrResult.substring(0, 6)
                                         } else if (qrType == 'U') {
                                           myController.text = qrResult; // vid
@@ -1509,17 +1542,8 @@ class OtqTxf2State extends State<OtqTxf2>
                                                       0;
                                               var content = refTable[qrResult];
                                               // String contentResult = '';
-                                              String contentResult = atiCode;
-                                              for (dynamic e in content) {
-                                                if (contentResult != atiCode) {
-                                                  contentResult += separator[6];
-                                                } // end if (contentResult != '')
-                                                try {
-                                                  contentResult += e.toString();
-                                                } catch (err) {
-                                                  // do nothing
-                                                }
-                                              } // end for (dynamic e in content)
+                                              String contentResult =
+                                                  atiJoinRow(content);
                                               if (mainRef > 0) {
                                                 txfControllerCheck(
                                                     widget.scrName, mainRef);
@@ -1578,16 +1602,16 @@ class OtqTxf2State extends State<OtqTxf2>
                                                                   .scrName]![
                                                               position]!
                                                           .controller
-                                                          .text = elementArray[
-                                                              index]
-                                                          .toString();
+                                                          .text = txfCellText(
+                                                          elementArray[index]);
                                                       // Update the final data as well
                                                       txfController[widget
                                                                       .scrName]![
                                                                   position]!
                                                               .finalData =
-                                                          elementArray[index]
-                                                              .toString();
+                                                          txfCellText(
+                                                              elementArray[
+                                                                  index]);
 
                                                       // Add the target widget's ID to our notification list.
                                                       idsToUpdate.add(
@@ -1920,8 +1944,8 @@ class OtqTxf2State extends State<OtqTxf2>
                                           setState(() {
                                             if (refTable[qrResult] != null) {
                                               myController.text =
-                                                  refTable[qrResult][0]
-                                                      .toString();
+                                                  txfCellText(
+                                                      refTable[qrResult][0]);
                                               txfController[widget.scrName]![
                                                       component['position']]!
                                                   .finalData = qrResult;
@@ -1942,9 +1966,9 @@ class OtqTxf2State extends State<OtqTxf2>
                                                           widget
                                                               .scrName]![component[
                                                           'locationNamePosition']]!
-                                                      .finalData = refTable[
-                                                          qrResult][0]
-                                                      .toString();
+                                                      .finalData = txfCellText(
+                                                          refTable[qrResult]
+                                                              [0]);
                                                 } catch (e) {
                                                   // do nothing
                                                   devPrint(e);

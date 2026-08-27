@@ -317,11 +317,19 @@ class UserRepository {
     );
   }
 
-  Future<List<void>> systemSignOut() async {
-    return Future.wait([
-      _firebaseAuth.signOut(),
-      _googleSignIn.signOut(),
-    ]);
+  /// Tear down the auth session. NEVER throws.
+  ///
+  /// Both call sites (authentication_bloc `_mapLoggedOutToState`, login_form
+  /// `state.isFailure`) fire-and-forget this future, so an escaping rejection
+  /// lands on `platformDispatcher.onError` (main.dart:90) and is recorded as a
+  /// FATAL with no app frames. google_sign_in 7.x routes signOut through
+  /// Android CredentialManager, which throws `clearCredentialState no provider
+  /// dependencies found` on a device with no credential provider — device
+  /// state, not an app fault, and local logout does not depend on it. Same
+  /// hardening as [kickedOut]'s legs in api.dart. See [safeUnawaited].
+  void systemSignOut() {
+    safeUnawaited(_firebaseAuth.signOut(), 'systemSignOut FirebaseAuth');
+    safeUnawaited(_googleSignIn.signOut(), 'systemSignOut GoogleSignIn');
   }
 
   Future<bool> isSignedIn() async {

@@ -106,6 +106,25 @@ FtzRowOfButton2(
 - `rootThis.wait = true` is toggled before the timer starts — the wait screen reads this flag.
 - `updateTable.table` and `updateTable.update` go through `autheniumDecode(...)` (proprietary encoding) before being parsed with `separator[1]` (black diamond `◼`) and `:` for `valueSep`.
 - `dialog: true` mode is a hint for downstream save logic so it pops the dialog instead of routing.
+- **`case 'savesend':` opens with the GET_IMAGES required-photo gate.** If the page carries a
+  `GET_IMAGES` component with `optional:"FALSE"` whose record slot holds no photo, an `AlertDialog`
+  is shown and the closure returns — before `dataOk`, before `actionLock`, before `doSaveProcedure`,
+  so no event is written, no route is pushed and no chain runs. Title comes from the component's
+  `label`, body from its `text` ◆ segment 1; both fall back to constants in
+  [`get_images_required_support.dart`](../../lib/widget/get_images_required_support.dart), and a
+  missing message never unblocks the submit. Components with no parseable `position`, and components
+  whose slot is disabled at press time, are skipped so the gate always has a reachable exit.
+  `case 'update':` is deliberately NOT gated. See [otq_get_images_2.md](otq_get_images_2.md).
+- **A refused press inside a `DO_BOTTOM_SHEET` leaves the sheet OPEN.** The gate's `return` also
+  skips the post-switch `if (dialog ?? false) { Get.back(); }`, so the sheet stays up with every
+  input the officer already filled — deliberate, so the refusal is read in the sheet's own
+  context and the officer presses again after taking the photo. It is the same shape as the
+  existing `if (outBlocked) return;` refusal in this case, which skips that same `Get.back()`.
+  A `dataOk` refusal differs: it falls through to `break` and closes the sheet.
+- **A refused savesend is not a no-op.** The `run:` command block and `writeRouteParams` both execute
+  BEFORE the `action` switch, so a press blocked by the gate has already applied any
+  `enable`/`disable`/`toggle`, already consumed a `generate_number`, and already dispatched
+  `routeParams` into `screenTx`. Only the event write, the route change and the chain are prevented.
 
 > See the source for the full chain (`do_chain`) and GPS-gated save paths — too long to inline here.
 
@@ -134,7 +153,7 @@ When a button is pressed, data flows through six layers. The "submit point" is `
 - `⬤` = `separator[0]` (black circle) — boundary between location string and form data
 - `★` = `separator[3]` — separator between form fields
 - `row[15]` corresponds to `position 1`, `row[16]` to `position 2`, etc. (offset by `sheetSystemLength = 15`)
-- Empty Dart `null` slots emit nothing between `★`s; literal string `"null"` slots emit the word `null` — see the [`getInitialValue` fix in `init_values.dart`](../../lib/init_values.dart) which prevents `currentValue: null` from becoming `"null"`.
+- Empty Dart `null` slots emit nothing between `★`s; literal string `"null"` slots emit the word `null`. **`getInitialValue` does NOT prevent this** — [`init_values.dart:11`](../../lib/init_values.dart) gates on `component['currentValue'].toString().trim().isNotEmpty`, and `null.toString()` is the four-character string `"null"`, which passes. An absent `currentValue` therefore reaches `finalData` as `"null"` and is submitted verbatim. Widgets that must detect an empty slot treat `'null'` as an explicit empty sentinel (see `digitPadNormalizeSeed`, `getImagesSlotHasPhoto`).
 
 ### Implication for new widgets
 

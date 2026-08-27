@@ -247,13 +247,21 @@ class AdminCreateTaskSupport {
       {required String kl,
       required String kn,
       required String al,
-      String pic = ''}) {
+      String pic = '',
+      String la = '',
+      String lo = ''}) {
     registerScreenSession();
     draftCustomer[wizardKey] = <String, String>{
       'kl': kl,
       'kn': kn,
       'al': al,
       'pic': pic,
+      // Customer coordinate, denormalised onto the task doc at submit time so
+      // the driver card can open a maps app without a second query on a bad
+      // signal. Empty when the customer has no point yet -- callers that do not
+      // pass them keep today's behavior.
+      'la': la,
+      'lo': lo,
     };
   }
 
@@ -615,6 +623,8 @@ class AdminCreateTaskSupport {
     required String kn,
     required String al,
     required String vv,
+    String la = '',
+    String lo = '',
     required String gl,
     required String cv,
     required String cn,
@@ -632,6 +642,12 @@ class AdminCreateTaskSupport {
       'kl': kl,
       'kn': kn,
       'al': al,
+      // la/lo mirror kn/al: ALWAYS present, empty string when the customer has
+      // no coordinate. Deliberately NOT the omit-when-empty idiom used for
+      // vv/ln/tdt -- absence there means "invisible to every driver feed",
+      // load-bearing semantics that do not apply to a coordinate.
+      'la': la,
+      'lo': lo,
       'gl': gl,
       'cv': cv,
       'cn': cn,

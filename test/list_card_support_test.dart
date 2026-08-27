@@ -382,11 +382,32 @@ void main() {
       expect(defs[0].template, '');
     });
 
-    test('no separator = label only, empty template', () {
+    test('no separator = empty label, whole entry is the template', () {
+      // D3: a no-◼ entry is a TEMPLATE, not a label. Accepted consequence —
+      // a literal bare entry like `Ringkasan` now renders as a plain value row.
       final defs = parseRowDefs('Label');
       expect(defs.length, 1);
-      expect(defs[0].label, 'Label');
-      expect(defs[0].template, '');
+      expect(defs[0].label, '');
+      expect(defs[0].template, 'Label');
+    });
+
+    test('no separator, angle template = empty label + template', () {
+      final defs = parseRowDefs('<ck1>');
+      expect(defs.length, 1);
+      expect(defs[0].label, '');
+      expect(defs[0].template, '<ck1>');
+    });
+
+    test('mixed shapes: labelled rows and label-less templates coexist', () {
+      final defs = parseRowDefs(
+          'Kategori\u{25FC}<cat>\u{2605}<ck1>\u{2605}<ck2>');
+      expect(defs.length, 3);
+      expect(defs[0].label, 'Kategori');
+      expect(defs[0].template, '<cat>');
+      expect(defs[1].label, '');
+      expect(defs[1].template, '<ck1>');
+      expect(defs[2].label, '');
+      expect(defs[2].template, '<ck2>');
     });
 
     test('multiple rows separated by star', () {
@@ -453,6 +474,160 @@ void main() {
 
     test('all optional rows empty -> renders no rows (empty list)', () {
       expect(parseRowDefs(''), isEmpty);
+    });
+  });
+
+  // ── buildImageBlocks ────────────────────────────────────────────────
+
+  group('buildImageBlocks', () {
+    const String d = '\u{25C6}'; // ◆ config separator
+
+    test('images + images2 with distinct labels = two ordered blocks', () {
+      final b = buildImageBlocks('<ia>', 'Foto Awal', '<ib>', 'Foto Akhir');
+      expect(b.length, 2);
+      expect(b[0].label, 'Foto Awal');
+      expect(b[0].templates, ['<ia>']);
+      expect(b[1].label, 'Foto Akhir');
+      expect(b[1].templates, ['<ib>']);
+    });
+
+    test('images2 absent (empty strings) = exactly one block', () {
+      final b = buildImageBlocks('<ia>', 'Foto Awal', '', '');
+      expect(b.length, 1);
+      expect(b[0].label, 'Foto Awal');
+      expect(b[0].templates, ['<ia>']);
+    });
+
+    test('empty images2 produces NO phantom block, even with a labels2 set',
+        () {
+      // diamondTextToList('') returns [''], NOT [] — the empty template must
+      // be dropped, not turned into a block. imageLabels2 is deliberately
+      // NON-empty here: a label with no template must not conjure a block of
+      // its own.
+      //
+      // Both group-1 templates carry the SAME label on purpose, so this
+      // fixture isolates the phantom question. Giving them ONE label instead
+      // would ALSO trip the length guard (template 2 gets '') and correctly
+      // yield TWO blocks — that is the separate 'missing label index' test
+      // further down, which expects exactly that.
+      final b =
+          buildImageBlocks('<ia>$d<ib>', 'Foto${d}Foto', '', 'Foto Akhir');
+      expect(b.length, 1);
+      expect(b[0].label, 'Foto');
+      expect(b[0].templates.length, 2);
+      expect(b.any((e) => e.label == 'Foto Akhir'), isFalse);
+    });
+
+    test('consecutive EQUAL labels merge into one block', () {
+      final b = buildImageBlocks('<ia>$d<ib>', 'Foto${d}Foto', '', '');
+      expect(b.length, 1);
+      expect(b[0].label, 'Foto');
+      expect(b[0].templates, ['<ia>', '<ib>']);
+    });
+
+    test('consecutive EMPTY labels merge into one unlabelled block', () {
+      final b = buildImageBlocks('<ia>$d<ib>', '', '', '');
+      expect(b.length, 1);
+      expect(b[0].label, '');
+      expect(b[0].templates, ['<ia>', '<ib>']);
+    });
+
+    test('boundary between two different labels opens a new block', () {
+      final b = buildImageBlocks('<ia>$d<ib>', 'A${d}B', '', '');
+      expect(b.length, 2);
+      expect(b[0].label, 'A');
+      expect(b[1].label, 'B');
+    });
+
+    test('template<->label alignment survives a dropped empty template', () {
+      // images = "◆<ib>" -> ['', '<ib>']; labels = "◆Foto Akhir".
+      // Filtering templates ALONE would give <ib> the label '' — the pair must
+      // be dropped whole.
+      final b = buildImageBlocks('$d<ib>', '${d}Foto Akhir', '', '');
+      expect(b.length, 1);
+      expect(b[0].label, 'Foto Akhir');
+      expect(b[0].templates, ['<ib>']);
+    });
+
+    test('missing label index length-guards to an empty label', () {
+      final b = buildImageBlocks('<ia>$d<ib>', 'Foto Awal', '', '');
+      expect(b.length, 2);
+      expect(b[0].label, 'Foto Awal');
+      expect(b[1].label, '');
+    });
+
+    test('emptyString sentinel (--) yields no blocks', () {
+      // diamondTextToList('--') returns [] (the `input != empty` guard).
+      expect(buildImageBlocks('--', 'Foto', '--', 'Foto2'), isEmpty);
+    });
+
+    test('all-blank config yields no blocks', () {
+      expect(buildImageBlocks('', '', '', ''), isEmpty);
+    });
+
+    test('unlabelled group1 followed by labelled group2 = two blocks', () {
+      final b = buildImageBlocks('<ia>', '', '<ib>', 'Foto Akhir');
+      expect(b.length, 2);
+      expect(b[0].label, '');
+      expect(b[1].label, 'Foto Akhir');
+    });
+
+    test('labels are trimmed before comparison (whitespace still merges)', () {
+      final b = buildImageBlocks('<ia>$d<ib>', 'Foto$d Foto', '', '');
+      expect(b.length, 1);
+      expect(b[0].templates.length, 2);
+    });
+  });
+
+  // ── splitPipeValue ──────────────────────────────────────────────────
+
+  group('splitPipeValue', () {
+    test('splits a task | status value, both sides trimmed', () {
+      final s = splitPipeValue('Bersihkan sink & keran | Selesai');
+      expect(s.title, 'Bersihkan sink & keran');
+      expect(s.value, 'Selesai');
+    });
+
+    test('splits at the LAST occurrence (title may contain a pipe)', () {
+      final s = splitPipeValue('Cuci | rapikan | Selesai');
+      expect(s.title, 'Cuci | rapikan');
+      expect(s.value, 'Selesai');
+    });
+
+    test('unspaced pipe is NOT a separator', () {
+      final s = splitPipeValue('Bersihkan|Selesai');
+      expect(s.title, '');
+      expect(s.value, 'Bersihkan|Selesai');
+    });
+
+    test('no pipe at all = plain value, empty title', () {
+      final s = splitPipeValue('Pantry');
+      expect(s.title, '');
+      expect(s.value, 'Pantry');
+    });
+
+    test('empty value = empty title and empty value', () {
+      final s = splitPipeValue('');
+      expect(s.title, '');
+      expect(s.value, '');
+    });
+
+    test('trims whitespace on both sides of the split', () {
+      final s = splitPipeValue('  Tugas   |   Selesai  ');
+      expect(s.title, 'Tugas');
+      expect(s.value, 'Selesai');
+    });
+
+    test('empty right side keeps the title', () {
+      final s = splitPipeValue('Tugas | ');
+      expect(s.title, 'Tugas');
+      expect(s.value, '');
+    });
+
+    test('empty left side keeps the value', () {
+      final s = splitPipeValue(' | Selesai');
+      expect(s.title, '');
+      expect(s.value, 'Selesai');
     });
   });
 

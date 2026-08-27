@@ -49,6 +49,9 @@ const OtqGetImages2({
 | `filename` | `String?` | Filename prefix; a 5-char UUID slice is appended. Defaults to `'file'`. |
 | `source` | `String?` | `"gallery"` opens device gallery picker instead of camera. Absent or unknown = camera (default). `"both"` is reserved but not yet implemented. |
 | `currentValue` | `String?` | Pre-existing image URL list (will seed the preview thumbs). |
+| `max` | `int?` | Maximum number of photos. **Ships as a String (`"1"`) from the sheet, which throws and falls back to `9999`** — a pre-existing quirk, unrelated to `optional`. |
+| `text` | `String?` | ◆-separated. Segment `0` is unread. Segment **`1` is the refusal message** shown when `optional:"FALSE"` blocks a submit — never rendered in the form. Segment `2` = counter noun (default `foto`), segment `3` = add-button label (default `Tambah Foto`). |
+| `optional` | `String?` | `"TRUE"` / `"FALSE"` (String, not bool — matches `SIGNATURE_PAD`). `"FALSE"` = at least one photo is required before any `savesend` on the page succeeds. **Absent, blank, `"TRUE"`, or an unresolved `[OPTIONAL]` placeholder all mean "not required" = today's behavior.** |
 
 ## Usage Example
 
@@ -84,6 +87,40 @@ OtqGetImages2(
 - After a successful capture, the controller's `text` is replaced with the joined URL list (`processData(...)`) so the field's `finalData` reflects every captured image.
 - When the widget is mounted with `isEnabled == false`, pressing the button calls `redraw(...)` instead of capturing — the field becomes a read-only thumbnail list.
 - Errors from the controller-write block are routed through `errorReport(e)`.
+- **`optional:"FALSE"` = required photo.** The check is NOT in this widget. It runs in
+  [`ftz_row_of_button_2.dart`](../../lib/widget/ftz_row_of_button_2.dart) as the first statement of
+  `case 'savesend':`, using the pure helpers in
+  [`get_images_required_support.dart`](../../lib/widget/get_images_required_support.dart). A blocked
+  press writes no event, changes no route and runs no chain; every other field keeps its value.
+- **Scope of the gate:** `case 'savesend':` only. `case 'update':` is deliberately NOT gated — it is
+  a direct table-update path with different semantics. The gate also covers a `savesend` button
+  inside a `DO_BOTTOM_SHEET`, because the sheet is built with the same `scrName`
+  ([`do_otq_bottom_sheet.dart`](../../lib/widget/do_otq_bottom_sheet.dart) →
+  `buildPage(..., scrName, dialog: true, clear: false)`).
+- **A refused save inside a `DO_BOTTOM_SHEET` leaves the sheet open by design.** The blocked
+  press also skips the sheet's own `Get.back()`, so "Simpan alasan" keeps the sheet and its
+  inputs on screen behind the refusal dialog: the officer takes the photo and presses again.
+  (A `dataOk` refusal, by contrast, closes the sheet.)
+- **A slot counts as "no photo" for FIVE values**, not one: `''`, whitespace, `'--'` (`emptyString`
+  — `'--'.isEmpty` is FALSE), `'aum__--__mua'` (`emptyImageUrl`), and the literal string `'null'`
+  (an absent `currentValue` becomes `"null"` in `init_values.dart` — a known repo-wide bug this gate
+  defends against). Multi-photo slots are `separator[5]` (`◇`) joined; ANY surviving segment counts.
+- **The gate always has a reachable exit.** Two components are skipped rather than enforced: one with
+  no parseable `position` (it writes to no record slot, so nothing could satisfy it), and one whose
+  record slot is **disabled at press time** (a disabled field cannot be tapped, so the officer could
+  not produce a photo). A component whose slot does not exist yet is NOT treated as disabled — it is
+  still enforced.
+- **Config note — `optional:"FALSE"` + `isEnabled:"FALSE"` is not enforced.** The pairing is
+  tolerated (the page stays submittable) but the field still shows the red `wajib` chip, so it reads
+  as a requirement while behaving as an option. Pick one.
+- **Config note — a refused save has already run the button's `run:` commands and `routeParams`.**
+  Do not pair a required `GET_IMAGES` with a `generate_number` run-command on the same savesend
+  button unless gaps in the generated sequence are acceptable: each refused press consumes a number.
+  No event is written, no route is pushed and no chain runs — but those two side effects happen
+  before the gate is reached.
+- When required, the header renders a red **`wajib`** chip beside the label (same styling as the
+  `SELECTABLE_BTN` badge). It is suppressed for a component with no `position`, so the badge cannot
+  advertise a requirement the gate skips.
 - When `source == "gallery"`, the `#CAMS` transactionStore check is bypassed (gallery does not need camera hardware). The icon changes to `Icons.photo_library_outlined` in both the header and empty-state areas. Upload pipeline is identical — the picked file goes through `prepareImageAsLocal(forceRename: true)` → `saveImagePutInImageMap` like a camera capture, ensuring the file is moved out of the OS cache dir into `<appSupport>/otq_images` with the correct `FTZIMG%2F<folder>___<fileName>.jpg` name.
 
 ## See Also

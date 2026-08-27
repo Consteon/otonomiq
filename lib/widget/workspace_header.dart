@@ -58,12 +58,22 @@ class _WorkspaceHeaderState extends State<WorkspaceHeader> {
   static const Color _accentBg = Color(0xFFEEF2FF); // indigo-50 (chip/band bg)
 
   List<String> _textArray = [];
+
+  /// mapsUrl keyed-DSL config: {url, fallback, empty, label}. Empty when the
+  /// feature is off OR the DSL was unparseable -- see [_parseMapsCfg].
+  Map<String, String> _mapsCfg = const <String, String>{};
+
+  /// Feature gate: raw `mapsUrl` non-empty. This widget is shared with
+  /// NewCustomer and the admin wizard pages, so an unmigrated component must
+  /// render byte-identically to today.
+  bool _hasMaps = false;
   String _taskCode = '';
 
   @override
   void initState() {
     super.initState();
     _parseText();
+    _parseMapsCfg();
     _subscribe();
   }
 
@@ -74,6 +84,27 @@ class _WorkspaceHeaderState extends State<WorkspaceHeader> {
       _textArray = [];
     }
   }
+
+  /// Parse `component['mapsUrl']` once. `component` is immutable for the life
+  /// of this State -- same lifetime as `_textArray`, nothing per-screen to key
+  /// or clear.
+  ///
+  /// `_hasMaps` is read off the RAW field, not off `_mapsCfg`: "absent" (render
+  /// nothing) and "present but unparseable" (render a DISABLED button with its
+  /// reason) are different outcomes.
+  void _parseMapsCfg() {
+    final String raw = (widget.component['mapsUrl'] ?? '').toString().trim();
+    _hasMaps = raw.isNotEmpty;
+    _mapsCfg = parseMapsCfg(raw);
+  }
+
+  /// Maps button caption. This widget has NO legacy `text` slot for it -- slot
+  /// 0 is the stop prefix and slot 1 the chip label, and live configs already
+  /// put other content at slots 2/3 (`docs/admin_runtime/admin-create-task-op1screen.md`
+  /// records `Langkah 2/4◆Pilih Item◆{kn}◆{al}`). The caption comes from
+  /// `mapsUrl`'s `label◼` key or the hardcoded default. Deliberately not a
+  /// `text` segment 3 (spec 13.3): see resolveMapsLabel.
+  String get _mapsLabel => resolveMapsLabel(_mapsCfg);
 
   /// text slot accessors (2 slots):
   ///  driver-stop: [0] "Stop" (stopNumber prefix) · [1] "Berjalan" (chip label)
@@ -352,7 +383,20 @@ class _WorkspaceHeaderState extends State<WorkspaceHeader> {
               ),
 
               // ── Address band ──────────────────────────────────
-              if (address.isNotEmpty)
+              //
+              // D6: with `mapsUrl` ABSENT this condition collapses to
+              // `address.isNotEmpty` -- the exact gate this widget has always
+              // used -- and the collection-if below contributes nothing. This
+              // widget is shared with NewCustomer and the admin wizard, so that
+              // byte-identity is the contract.
+              //
+              // The band is allowed to render with an EMPTY address only when a
+              // task doc really resolved AND the feature is on: a customer with
+              // a coordinate but no address still needs the button, and a
+              // customer with neither still gets the VISIBLE disabled button
+              // plus its reason (spec 6.6). With no task doc at all there is
+              // nothing to navigate to, so nothing renders.
+              if (address.isNotEmpty || (_hasMaps && taskDoc != null))
                 Container(
                   width: double.infinity,
                   padding:
@@ -363,30 +407,69 @@ class _WorkspaceHeaderState extends State<WorkspaceHeader> {
                       top: BorderSide(color: Color(0xFFE0E7FF)), // indigo-100
                     ),
                   ),
-                  child: Row(
+                  // The button sits on its OWN line UNDER the address, not
+                  // beside it. In a Row, `Expanded(address)` (tight) and
+                  // `Flexible(button)` (loose) both default to flex 1, and
+                  // RenderFlex splits the free space 50/50 BEFORE either child
+                  // is measured -- so the address was halved on EVERY band that
+                  // rendered the button (749px -> 370.5px at 800dp, 309 ->
+                  // 150.5 at 360dp), the loose button never handed its unused
+                  // share back, and nothing overflowed to make it visible.
+                  // Weighting the flexes only moves the arbitrary cut; dropping
+                  // `Flexible` leaves the button unbounded on the main axis and
+                  // a long tenant `empty` message then overflows the Row.
+                  // Stacking removes the contention: the address keeps the full
+                  // band width (spec 13.5.2), and the button -- as a Column
+                  // child -- is bounded by that same width, so a long message
+                  // wraps instead of overflowing. This is the shape
+                  // TASK_FEED_LIST's GROUPED card already uses.
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Padding(
-                        padding: EdgeInsets.only(top: 1),
-                        child: Icon(
-                          Icons.location_on_rounded,
-                          size: 15,
-                          color: _accent,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          address,
-                          style: const TextStyle(
-                            fontSize: 12.5,
-                            height: 1.3,
-                            color: _accent,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.only(top: 1),
+                            child: Icon(
+                              Icons.location_on_rounded,
+                              size: 15,
+                              color: _accent,
+                            ),
                           ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              address,
+                              style: const TextStyle(
+                                fontSize: 12.5,
+                                height: 1.3,
+                                color: _accent,
+                              ),
+                              // Already 2 before this round -- spec 13.5.2 is
+                              // a no-op here. Left as-is deliberately.
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
+                      // `taskDoc != null` written inline (not via a bool local)
+                      // so Dart promotes it to a non-nullable Map for `row:`.
+                      if (_hasMaps && taskDoc != null) ...[
+                        const SizedBox(height: 6),
+                        MapsButton(
+                          cfg: _mapsCfg,
+                          row: taskDoc,
+                          label: _mapsLabel,
+                          // OUTLINE, not filled: this band is ALREADY
+                          // indigo-50, so a tint of the same colour would be
+                          // invisible on it (spec 13.5.3's intent, inverted
+                          // host). Indigo-700 on indigo-50 = 7.07:1.
+                          filled: false,
+                        ),
+                      ],
                     ],
                   ),
                 ),

@@ -16,6 +16,7 @@ import '../model/otq_state.dart';
 import '../redux/screen_transaction.dart';
 import 'biometric_gate.dart';
 import 'ftz_scanner_screen.dart';
+import 'menu_icon_card.dart';
 import 'photo_camera.dart';
 import '../firestore_repository/firestore_generic_repository.dart';
 
@@ -1399,8 +1400,6 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
     media = MediaQuery.maybeOf(context);
     h = media?.size.height - 20;
     w = media.size.width - 20;
-    const double defaultAspectRatio = 18 / 12;
-    var topPad = 6.0;
     double fontSize = (widget.component['fontSize'] ?? 14.0).toDouble();
     // ponytail: ?? '' is intentional — diamondTextToList(String) would TypeError
     // on a null text; old code had no guard here at all
@@ -1408,43 +1407,14 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
     Widget button1;
     if (widget.single) {
       button1 = Center(
-        child: Column(
-          children: [
-            Container(
-              // display single icon
-              alignment: Alignment.center,
-              width: (widget.component['width'] ?? 90).toDouble(),
-              child: Card(
-                child: InkWell(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: <Widget>[
-                      Container(
-                        height: topPad,
-                      ),
-                      AspectRatio(
-                        aspectRatio: defaultAspectRatio,
-                        child: displayImage(
-                            imageUrl: widget.component['url'] ?? defaultImage,
-                            cached: true),
-                        // child: FadeInImage.memoryNetwork(
-                        //   placeholder: kTransparentImage,
-                        //   image: widget.component['url'] ?? defaultImage,
-                        // ),
-                      ),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          textArray[0],
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: fontSize),
-                        ),
-                      ),
-                    ],
-                  ),
-                  onTap: () async {
+        child: SizedBox(
+          // display single icon
+          width: (widget.component['width'] ?? 90).toDouble(),
+          child: menuIconCard(
+            imageUrl: widget.component['url'] ?? defaultImage,
+            label: textArray[0],
+            fontSize: fontSize,
+            onTap: () async {
                     if (!await bioGate(widget.component, context)) return;
                     if (!mounted) return;
                     if (!tapped) {
@@ -1894,46 +1864,17 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                         }
                       }
                     } // end if !tapped
-                  }, // end of onTap
-                ),
-              ),
-            ),
-          ],
+            }, // end of onTap
+          ),
         ),
       );
     } else {
       // else if (widget.single)
-      button1 = Container(
-        alignment: const Alignment(0.0, 0.0),
-        child: Card(
-          child: InkWell(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: <Widget>[
-                Container(
-                  height: topPad,
-                ),
-                AspectRatio(
-                  aspectRatio: defaultAspectRatio,
-                  child: displayImage(
-                      imageUrl: widget.component['url'] ?? defaultImage,
-                      cached: true),
-                  // child: FadeInImage.memoryNetwork(
-                  //   placeholder: kTransparentImage,
-                  //   image: widget.component['url'] ?? defaultImage,
-                  // ),
-                ),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    textArray[0],
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: fontSize),
-                  ),
-                ),
-              ],
-            ),
-            onTap: () async {
+      button1 = menuIconCard(
+        imageUrl: widget.component['url'] ?? defaultImage,
+        label: textArray[0],
+        fontSize: fontSize,
+        onTap: () async {
               if (!await bioGate(widget.component, context)) return;
               if (!mounted) return;
               if (!tapped) {
@@ -2398,9 +2339,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                   });
                 }
               } // end if ! tapped
-            }, // end of onTap
-          ),
-        ),
+        }, // end of onTap
       );
     } // end if (widget.single)
     return button1;

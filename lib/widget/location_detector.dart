@@ -245,13 +245,6 @@ class _LocationDetectorState extends State<LocationDetector> {
       decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(_borderRadius),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 12,
-              offset: const Offset(0, 2),
-            ),
-          ],
           border: Border.all(color: Color(0xffE2E8F0))),
       padding: const EdgeInsets.all(16),
       child: Column(

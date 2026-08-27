@@ -13,13 +13,25 @@ untouched by the variants below.
 
 ## `variant: "section"`
 
-Styled section header: accent bar + uppercase small caps at 75% opacity.
-Ignores `size`/`style` (the variant owns its typography); `color` is unused —
-the bar takes `colorScheme.primary`.
+Styled section header, two tiers keyed off how the sheet writes the title:
+ALL-CAPS data (`ABSEN MASUK`) → compact overline (13.5px w800, wide
+tracking); mixed case (`Laporan`) → large bold title (19px w800), rendered
+as-is (no forced uppercase). Ignores `size`/`style`/`color` — the variant
+owns its typography.
 
 ```json
 { "type": "txt", "variant": "section", "data": "Riwayat Absensi" }
 ```
+
+### Trailing meta (date/time)
+
+If `data` contains `" -- "` (what `replaceMarker` in `global.dart` turns a
+sheet-side `\n` into), the part after the **first** `" -- "` renders as muted
+meta on the RIGHT of the header row instead of inline: dashes become spaces
+and the last space becomes `" · "`, so
+`"ABSEN MASUK -- 18-Aug 8:34"` renders `ABSEN MASUK` left and `18 Aug · 8:34`
+right. Split logic: `OtqTxt.splitSectionMeta()` (tested in
+[test/section_meta_split_test.dart](../../test/section_meta_split_test.dart)).
 
 ## `variant: "history"`
 

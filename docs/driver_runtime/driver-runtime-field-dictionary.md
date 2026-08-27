@@ -74,6 +74,7 @@ Yg dulu dipakai ulang (`ty`,`st`,`nm`,`rf`,`dt`,`ce`) sekarang dipecah:
 | `kl` | ✚ | lokasi customer (FK id) | →stock_location |
 | `kn` | ✚ | nama customer (denorm, buat tampil) | Honda Bintaro |
 | `al` | ✚ | alamat (denorm) | Jl. Sudirman 54 |
+| `la`/`lo` | ✓ | geo customer (denorm dari stock_location) | -6.302154 / 106.653428 |
 | `gl` | ✚ | gudang asal (FK id) | →stock_location |
 | `vv` | ✚ | mobil | →stock_location |
 | `cv`/`cn` | ✓ | dibuat oleh (admin) | — |

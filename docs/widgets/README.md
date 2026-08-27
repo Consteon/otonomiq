@@ -29,6 +29,8 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | OtqCheckbox | [otq_checkbox.md](otq_checkbox.md) | todo | Checkbox |
 | OtqSwitch | [otq_switch.md](otq_switch.md) | todo | On/off switch |
 | OtqPin | [otq_pin.md](otq_pin.md) | todo | PIN input |
+| OcrCapture | [ocr_capture.md](ocr_capture.md) | draft | Photo → on-device ML Kit OCR (`ocr_capture`); own position = photo URL, recognised values written to `ocrTargets`; variants `auto` / `tap` |
+| DigitPad | [digit_pad.md](digit_pad.md) | draft | Locked digit boxes + own numpad (`DIGIT_PAD`); black + red groups with a visible comma, per-point count with an inline picker written back to three widget-owned output slots, 3-tier verdict against a `meter` doc surfaced as a bottom sheet, backward-only + unfilled-picker submit gate, plus an on-device ML Kit **serial-number identity check** (`serialField`) that catches an officer standing at the wrong meter. spec rev 2026-08-20f + meter-serial-verify 2026-08-25 (§7.8 cancelled, `ocrPattern` retired) |
 
 ### Display
 | Widget | File | Status | Description |
@@ -58,7 +60,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | EvidenceRow | [evidence_row.md](evidence_row.md) | draft | Two toggle buttons (note/photo) for P11 DeliveryWorkspace |
 | ExecutorDesignateCard | [executor_designate_card.md](executor_designate_card.md) | draft | O1 driver-picker card (amber unset / teal set + workforce bottom-sheet) for WarehouseOpeningCheck |
 | GroupPicker | [group_picker.md](group_picker.md) | draft | Multi-group single/multi-select picker with internal toggle; emits key+value(+label) to form positions. SDUI `group_picker` |
-| DisplayList | [display_list.md](display_list.md) | todo | List display |
+| DisplayList | [display_list.md](display_list.md) | draft | Bordered list frame; variants `widget` (children), `tablecard1` (plain ListTile cards), `tableCardInteractive` (search + cards + detail popup via FtzArraySearch). Optional `rowSplit` splits bare `<N>` lines into stacked header/value |
 | DisplayList2 | [display_list_2.md](display_list_2.md) | todo | List display v2 (source file currently empty — doc is a placeholder) |
 | DisplayCard | [display_card.md](display_card.md) | todo | Card display |
 | DocDownload | [doc_download.md](doc_download.md) | draft | Download button (`DOC_DOWNLOAD`); fetches file from URL/Storage path, presents OS share sheet; optional biometric gate |
@@ -129,6 +131,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 ### Action / Button
 | Widget | File | Status | Description |
 |---|---|---|---|
+| menuIconCard | [menu_icon_card.md](menu_icon_card.md) | done | Shared white-card shell for home-menu icon buttons (`horizontal_icon` children + single modes) |
 | FtzRowOfButton | [ftz_row_of_button.md](ftz_row_of_button.md) | todo | Button row |
 | FtzRowOfButton2 | [ftz_row_of_button_2.md](ftz_row_of_button_2.md) | draft | Button row v2 |
 | ChoiceButtonGroup | [choice_button_group.md](choice_button_group.md) | done | Selectable button grid with chain actions (navigation, dialog, API call) |
@@ -138,6 +141,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | Widget | File | Status | Description |
 |---|---|---|---|
 | Tasklist | [tasklist.md](tasklist.md) | draft | Single checklist task with bottom-sheet status picker; writes `title:value` to its own `txfController` slot |
+| ChecklistDynamic | [checklist_dynamic.md](checklist_dynamic.md) | draft | DB-driven checklist (`CHECKLIST_DYNAMIC`): N task rows from a Firestore sub-collection scoped by a `{template}` routeParam, TASKLIST-identical rows + status sheet, ONE FORM SLOT PER TASK (`<task> \| <status>`) across a contiguous block from `position` |
 | ProgressBar | [progress_bar.md](progress_bar.md) | draft | Visual aggregator over multiple `Tasklist` positions (no `position` field, no submit) |
 | TaskProgressStore | [task_progress_store.md](task_progress_store.md) | todo | Singleton `ChangeNotifier` registry shared by `Tasklist` ↔ `ProgressBar` |
 

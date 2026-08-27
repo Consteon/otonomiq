@@ -9,7 +9,7 @@ Single checklist task rendered as a card — user picks a status from a bottom s
 
 ## Purpose
 
-Use one `Tasklist` per checklist item on a screen. Each instance is a self-contained card with a title, optional subtitles, and a status picker. On submit, the slot at `position` in the screen's `txfController` is written as `title:statusLabel`, so the server receives a self-describing entry like `"Bersihkan meja:Selesai"`.
+Use one `Tasklist` per checklist item on a screen. Each instance is a self-contained card with a title, optional subtitles, and a status picker. On submit, the slot at `position` in the screen's `txfController` is written as `title|statusLabel`, so the server receives a self-describing entry like `"Bersihkan meja|Selesai"`. The delimiter is a plain ASCII pipe `|`: not `:`, because task titles and timestamps legitimately contain colons (`"Cek jam: shift pagi"`, `"08:31"`) and a colon is ambiguous to split on; and not `☆`/`★`/`◆` or any other geometric-or-star glyph, because every entry in `forbiddenCharacter` (except `separator[5]` `◇`) is replaced with a **space** by `stringCleanUp`, which `saveSend` runs over both `controller.text` and `finalData` before the value leaves the device. That alphabet is the structural-delimiter set and is stripped from user payload by design — a TASKLIST slot is user payload, so it can never carry one. Because `|` itself survives `stringCleanUp`, the serializer **strips `|` from both the title and the status label** (replacing it with a space) before joining, so a delivered value always contains exactly one `|` and downstream may split naively; the accepted cost is that a literal pipe typed into a task title renders as a space. The guarantee is one of **arity, not whitespace** — a title that ended in a pipe delivers as `"abc "`, and `stringCleanUp`'s formula guard prepends a space to a value starting with `=` or `@` — so the consuming op1Script should `TRIM` each part after splitting.
 
 A page typically has many `Tasklist` instances + one [`ProgressBar`](progress_bar.md) whose `positionId` lists the task positions to aggregate.
 
@@ -85,11 +85,11 @@ The widget tracks one of: `pending`, `done`, `not_available`, `skipped`, `issue`
 
 - `_position` is read once in `initState`. If `> 0`, two side effects happen:
   1. **`TaskProgressStore.register`** is queued via `addPostFrameCallback` so [`ProgressBar`](progress_bar.md) can pick up the new entry once registered.
-  2. **`txfControllerCheck` + seed** — when `canInitializePage(scrName)` is true, the controller is seeded with `'$title:$_pendingLabel'` (e.g. `"Bersihkan meja:belum"`), so a submit before the user touches anything still produces a meaningful payload (not `null` and not empty).
+  2. **`txfControllerCheck` + seed** — when `canInitializePage(scrName)` is true, the controller is seeded with `'$title|$_pendingLabel'` (e.g. `"Bersihkan meja|belum"`), so a submit before the user touches anything still produces a meaningful payload (not `null` and not empty).
 - On selection (`_updateStore(status)`), the widget:
   - Pushes the status key into `TaskProgressStore` so [`ProgressBar`](progress_bar.md) updates.
-  - Writes `'$title:$label'` to `txfController[scrName][position].finalData` and `controller.text` (both, so `saveSend`'s `finalData == emptyString` fallback works either way).
-- `pending` status keeps the placeholder label (`pendingLabel`) — re-toggling from `done` back to `pending` writes `'$title:belum'` again.
+  - Writes `'$title|$label'` to `txfController[scrName][position].finalData` and `controller.text` (both, so `saveSend`'s `finalData == emptyString` fallback works either way).
+- `pending` status keeps the placeholder label (`pendingLabel`) — re-toggling from `done` back to `pending` writes `'$title|belum'` again.
 - `dispose` calls `TaskProgressStore.unregister` (with `addPostFrameCallback`) to keep the aggregate count accurate when navigating away.
 - The bottom-sheet picker is built from `_options`. If `options` has fewer than 4 triplets, the missing status keys still work but fall back to English defaults (`Done`, `Not Available`, `Skipped`, `Issue`).
 

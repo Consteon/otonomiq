@@ -155,6 +155,99 @@ ContentRoles splitContentRoles(List<ContentLine> lines, String chipLabel) {
   );
 }
 
+/// The rendered value of a `rowSplit` slot the source row never filled.
+///
+/// `CHECKLIST_DYNAMIC` writes `*` into a checklist slot it did not use, so on a
+/// `rowSplit` line the star is bookkeeping, not a status. Only an exact match
+/// after trimming counts — `*Selesai` is real data and is kept.
+const String emptyRowSlotMarker = '*';
+
+/// A template line (or a rendered value) that is nothing but one `<N>` marker.
+final RegExp _bareMarkerLine = RegExp(r'^<\d+>$');
+
+/// True when [text] is a bare `<N>` placeholder once trimmed.
+///
+/// [parseContentLinesSplit] asks this twice. On the TEMPLATE line it decides
+/// whether `rowSplit` applies at all — `Tanggal: <2>` and `Catatan <9>` both
+/// carry literal text and are refused, which is the spec's non-breaking
+/// promise. On the RENDERED value it catches a marker `replaceMarker` never
+/// substituted: that loop runs only while `i < ref.length` (global.dart:1300),
+/// so `<19>` on a short row reaches us verbatim as the text `<19>`.
+bool isBareMarkerLine(String text) => _bareMarkerLine.hasMatch(text.trim());
+
+/// Parse a `content`/`detail` template into label/value lines with the
+/// component's optional `rowSplit` [separator] applied.
+///
+/// Provenance is the whole point. "Was this line a bare `<N>`?" is a property
+/// of the TEMPLATE, and the fully rendered blob no longer knows — worse,
+/// template-line and rendered-line indexes diverge, because a substituted value
+/// may itself contain a line break. So the template is split into lines FIRST
+/// and [render] substitutes one line at a time. [render] is the caller's
+/// `replaceMarker(...)` + literal-`\n` fold, injected rather than imported so
+/// this file stays free of global.dart and stays unit-testable.
+///
+/// Per template line:
+/// * blank                       -> dropped, as [parseContentLines] already does
+/// * NOT a bare `<N>`            -> handed to [parseContentLines] verbatim, so
+///                                  `Label: value` keeps its existing path and a
+///                                  value that merely contains [separator] is
+///                                  NOT split
+/// * bare `<N>`, empty value     -> dropped (empty / whitespace /
+///                                  [emptyRowSlotMarker] / unsubstituted `<N>`)
+/// * bare `<N>`, no [separator]  -> one plain line, label `''`
+/// * bare `<N>`, has [separator] -> split at the FIRST occurrence, both sides
+///                                  trimmed: left = label, right = value
+///
+/// A blank [separator] means the caller wants the pre-`rowSplit` behaviour, so
+/// the whole template is rendered in ONE pass and handed to
+/// [parseContentLines] — byte-identical to the old path.
+///
+/// The label produced here is deliberately NOT capped at
+/// [maxContentLabelLength]: that cap stops a sentence containing a ':' from
+/// masquerading as a label, whereas a `rowSplit` header is an explicit field
+/// name ("Sapu halaman dan area pedestrian" is 32 chars and legitimate).
+///
+/// Cost: one [render] pass per template line instead of one per blob. Only
+/// screens that author `rowSplit` pay it.
+List<ContentLine> parseContentLinesSplit(
+  String template,
+  String separator,
+  String Function(String templateLine) render,
+) {
+  if (separator.trim().isEmpty) return parseContentLines(render(template));
+  final List<ContentLine> out = [];
+  // Fold a sheet-authored literal `\n` before splitting, so both spellings of a
+  // line break yield the same set of template lines.
+  for (final String rawLine in template.replaceAll('\\n', '\n').split('\n')) {
+    if (rawLine.trim().isEmpty) continue;
+    final String rendered = render(rawLine);
+    if (!isBareMarkerLine(rawLine)) {
+      out.addAll(parseContentLines(rendered));
+      continue;
+    }
+    final String value = rendered.trim();
+    if (value.isEmpty ||
+        value == emptyRowSlotMarker ||
+        isBareMarkerLine(value)) {
+      continue;
+    }
+    // indexOf, not RegExp: the separator is arbitrary config text and task
+    // names legitimately contain '/', '(' and ')'.
+    final int cut = value.indexOf(separator);
+    if (cut < 0) {
+      out.add(ContentLine('', value));
+      continue;
+    }
+    out.add(
+      ContentLine(
+        value.substring(0, cut).trim(),
+        value.substring(cut + separator.length).trim(),
+      ),
+    );
+  }
+  return out;
+}
+
 /// Icon for a field label, matched on Indonesian/English keywords.
 ///
 /// Returns null when nothing matches — the caller then falls back to printing

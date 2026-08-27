@@ -8,6 +8,7 @@ import '../global.dart';
 import '../global2.dart';
 import '../init_values.dart';
 import '../model/general_get_controller.dart';
+import 'get_images_required_support.dart';
 
 class OtqGetImages2 extends StatefulWidget {
   const OtqGetImages2({
@@ -240,6 +241,15 @@ class OtqGetImages2State extends State<OtqGetImages2>
     final String emptySubtitle = 'Ambil foto untuk melengkapi data';
     final String fotoLabel = texts.length > 2 ? texts[2] : 'foto';
     final String addLabel = texts.length > 3 ? texts[3] : 'Tambah Foto';
+    // Spec get-images-required §2 / D6. `getImagesIsRequired` is the SAME
+    // predicate the savesend gate uses (get_images_required_support.dart), and
+    // the `_position != null` term repeats the gate's own position condition —
+    // the gate skips a component that writes to no record slot, so a badge
+    // without one would advertise a requirement nothing enforces.
+    // `text` segment 1 is the REFUSAL MESSAGE and is deliberately not rendered
+    // here — it belongs to the dialog only.
+    final bool isRequired =
+        getImagesIsRequired(widget.component) && _position != null;
 
     final String headerLabel = (widget.component['label'] ?? '')
         .toString()
@@ -299,6 +309,29 @@ class OtqGetImages2State extends State<OtqGetImages2>
                   ),
                 ),
               ),
+              if (isRequired) ...[
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF2F2),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: const Color(0xFFFECACA),
+                      width: 0.8,
+                    ),
+                  ),
+                  child: const Text(
+                    'wajib',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFFDC2626),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
               Text(
                 '${imageUrls.length} / $maxImages $fotoLabel',
                 style: const TextStyle(

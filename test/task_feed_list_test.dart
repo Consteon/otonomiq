@@ -1,8 +1,14 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // MethodChannel (url_launcher mock)
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otonomiq/global.dart';
+import 'package:otonomiq/redux/screen_transaction.dart';
+import 'package:otonomiq/redux/screen_transaction_reducers.dart';
+import 'package:otonomiq/widget/admin_create_task_support.dart';
 import 'package:otonomiq/widget/driver_home_support.dart';
 import 'package:otonomiq/widget/receipt_doc.dart';
 import 'package:otonomiq/widget/task_feed_list.dart';
+import 'package:redux_dev_tools/redux_dev_tools.dart';
 
 void main() {
   // ── P10 tst vocabulary via stopStatusOf ─────────────────────────────────
@@ -984,6 +990,338 @@ void main() {
       expect(allDone, true);
       // Banner gate: allDone && tasks.isNotEmpty (widget line 524)
       expect(filtered.isNotEmpty, true);
+    });
+  });
+
+  // ── FLAT customer tap -> wizard draft (la/lo passthrough) ────────────────
+  //
+  // `_onFlatCardTap` is the SECOND writer into `draftCustomer` (the first is
+  // `_republishClient` in task_item_builder.dart), and `setCustomer` REPLACES
+  // the whole record. Omitting `la`/`lo` here therefore blanks a good customer
+  // coordinate on every customer tap, and `_republishClient` does not refill it
+  // on a same-customer re-tap -- its `_lastPublishedKl` latch already holds
+  // that `kl`. These two tests pump the real widget and tap the real card, so
+  // they exercise the handler rather than re-implementing its expressions.
+  //
+  // Harness (no Firebase): `vidtable` is set, so `_subscribe()`'s leading
+  // `resolveAppVid` never falls through to `getTableVid` (a `late` global);
+  // `table` is OMITTED, so `subscribeToMapCollection` is never reached and
+  // `_taskCode` stays `''` -- the rows are seeded into `mapTableContent['']`
+  // directly. `route` names a page that does not exist, so `routeStack.push`
+  // (guarded on `linkElement[scrName]`) and `gotoRoute` (guarded on
+  // `routeExist`) are both no-ops and the tap ends inside the handler.
+  // The Redux store is null in a bare test, so it is built here -- same
+  // pattern as rbt_route_params_test.dart.
+  group('FLAT customer tap writes the coordinate into the wizard draft', () {
+    const String kScrName = 'tfl_maps_draft_01';
+    const String kWizardKey = 'tfl_maps_draft_wizard';
+
+    setUpAll(() {
+      transactionStore = DevToolsStore<ScreenTransaction>(
+        transactionReducer,
+        initialState: ScreenTransaction(initTransactionStore()),
+      );
+    });
+
+    tearDown(() {
+      mapTableContent.remove('');
+      clearDriverHomeState(kScrName);
+      TaskFeedList.clearFlatSearch(kScrName);
+      AdminCreateTaskSupport.clearDraft(kWizardKey);
+    });
+
+    Map<String, dynamic> customerRow(String lv, String la, String lo) =>
+        <String, dynamic>{
+          'lv': lv,
+          'ln': 'Toko $lv',
+          'al': 'Jl. $lv',
+          'pic': 'PIC $lv',
+          'la': la,
+          'lo': lo,
+        };
+
+    Future<void> pumpFeed(WidgetTester tester) async {
+      final Map<String, dynamic> component = <String, dynamic>{
+        'type': 'TASK_FEED_LIST',
+        'vidtable': '20342033315492',
+        'groupField': '', // FLAT mode -- the only mode with _onFlatCardTap
+        'idField': 'lv',
+        'titleField': 'ln',
+        'wizardKey': kWizardKey,
+        'route': 'tflMapsDraftRouteThatDoesNotExist',
+        'text': '',
+      };
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: TaskFeedList(
+              component: component,
+              scrName: kScrName,
+              lPad: 0,
+              tPad: 0,
+              rPad: 0,
+              bPad: 0,
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('tapping a customer card carries la/lo, not just kl/kn/al/pic',
+        (WidgetTester tester) async {
+      mapTableContent[''] = <Map<String, dynamic>>[
+        customerRow('CUST-001', '-6.302154', '106.653428'),
+      ];
+      await pumpFeed(tester);
+
+      // Fixture sanity: the row really rendered, so the tap below lands on the
+      // real card and not on nothing.
+      expect(find.text('Toko CUST-001'), findsOneWidget);
+
+      await tester.tap(find.text('Toko CUST-001'));
+      await tester.pumpAndSettle();
+
+      final Map<String, String>? draft =
+          AdminCreateTaskSupport.getCustomer(kWizardKey);
+      expect(draft, isNotNull);
+      expect(draft!['kl'], 'CUST-001'); // the tapped row, not a neighbour
+      // Strings all the way -- MAP_POINT_PICKER writes toStringAsFixed(6) and
+      // nothing on this path may parse them to double.
+      expect(draft['la'], '-6.302154');
+      expect(draft['lo'], '106.653428');
+    });
+
+    testWidgets('same-customer re-tap keeps the coordinate (clearDraft skipped)',
+        (WidgetTester tester) async {
+      mapTableContent[''] = <Map<String, dynamic>>[
+        customerRow('CUST-001', '-6.302154', '106.653428'),
+      ];
+      await pumpFeed(tester);
+
+      await tester.tap(find.text('Toko CUST-001')); // first pick
+      await tester.pumpAndSettle();
+
+      // Something in-progress that ONLY survives the same-customer branch:
+      // a different-customer tap runs clearDraft, which removes draftVehicle.
+      AdminCreateTaskSupport.setVehicle(kWizardKey, vv: 'V-1', vn: 'Truk 1');
+
+      await tester.tap(find.text('Toko CUST-001')); // re-tap, same customer
+      await tester.pumpAndSettle();
+
+      // Anti-vacuity: proves the re-tap really took the same-customer branch
+      // (priorKl == kl), the branch that does NOT clear the draft -- which is
+      // exactly the branch where a blanked coordinate would never be refilled.
+      expect(AdminCreateTaskSupport.getVehicle(kWizardKey), isNotNull);
+
+      final Map<String, String>? draft =
+          AdminCreateTaskSupport.getCustomer(kWizardKey);
+      expect(draft, isNotNull);
+      expect(draft!['la'], '-6.302154');
+      expect(draft['lo'], '106.653428');
+    });
+  });
+
+  // ── GROUPED-mode maps button (Bagian C, spec 13.2) ──────────────────────
+  //
+  // Harness (no Firebase): `vidtable` is set so `_subscribe()`'s leading
+  // `resolveAppVid` never falls through to `getTableVid` (a `late` global);
+  // `table` is OMITTED so `subscribeToMapCollection` is never reached and
+  // `_taskCode` stays `''` -- rows are seeded into `mapTableContent['']`
+  // directly. `returnGateSearch` is omitted so the return-CTA gate is open by
+  // default and no second subscription is needed.
+  //
+  // `launchUrl` reaches a real MethodChannel. Unmocked it throws
+  // MissingPluginException, which MapsButton catches and answers with a
+  // SnackBar -- whose 2-second Timer then trips the "a Timer is still pending"
+  // teardown check. Mocking the channel makes the launch deterministic AND lets
+  // the test assert the URL that was actually handed to the platform.
+  group('GROUPED maps button', () {
+    const String kScrName = 'tfl_maps_grouped_01';
+    const MethodChannel kUrlChannel =
+        MethodChannel('plugins.flutter.io/url_launcher');
+    final List<String> launched = <String>[];
+
+    // The earlier group's `setUpAll` is scoped to THAT group, so this one
+    // builds its own store. `transactionStore` is null in a bare test and
+    // `_onCardTap` dispatches into it.
+    setUpAll(() {
+      transactionStore = DevToolsStore<ScreenTransaction>(
+        transactionReducer,
+        initialState: ScreenTransaction(initTransactionStore()),
+      );
+    });
+
+    setUp(() {
+      launched.clear();
+      TestWidgetsFlutterBinding.ensureInitialized();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(kUrlChannel, (MethodCall call) async {
+        if (call.method == 'launch') {
+          launched.add(
+              ((call.arguments as Map)['url'] ?? '').toString());
+          return true;
+        }
+        return null;
+      });
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(kUrlChannel, null);
+      mapTableContent.remove('');
+      clearDriverHomeState(kScrName);
+      // #ACTIVE_TASK is never cleared by the app, so a leaked 'T001' would let
+      // the arena test pass for the wrong reason on a re-run.
+      transactionStore.dispatch(
+          UpdateScreenTxAction(ScreenTransaction({'#ACTIVE_TASK': ''})));
+    });
+
+    // One card per status bucket: pending / completed / failed. The uniform
+    // rule (spec 6.4) says all three get the button.
+    void seedThreeStatuses() {
+      mapTableContent[''] = <Map<String, dynamic>>[
+        {
+          'tnm': 'T001',
+          'kn': 'Toko A',
+          'al': 'Jl. X',
+          'tst': 'assigned',
+          'la': '-6.302154',
+          'lo': '106.653428',
+        },
+        {
+          'tnm': 'T002',
+          'kn': 'Toko B',
+          'al': 'Jl. Y',
+          'tst': 'completed',
+          'la': '-6.175392',
+          'lo': '106.827153',
+        },
+        {
+          'tnm': 'T003',
+          'kn': 'Toko C',
+          'al': 'Jl. Z',
+          'tst': 'failed',
+          'la': '-6.200000',
+          'lo': '106.800000',
+        },
+      ];
+    }
+
+    Future<void> pumpGrouped(
+      WidgetTester tester, {
+      required bool withMaps,
+    }) async {
+      final Map<String, dynamic> component = <String, dynamic>{
+        'type': 'TASK_FEED_LIST',
+        'vidtable': '20342033315492',
+        // groupField omitted -> defaults to 'tst' -> GROUPED mode.
+        'idField': 'tnm',
+        'titleField': 'kn',
+        'addressField': 'al',
+        'route': 'tflMapsRouteThatDoesNotExist',
+        if (withMaps)
+          'mapsUrl': 'url\u{25FC}https://www.google.com/maps/search/'
+              '?api=1&query=<la>,<lo>',
+        'text': '',
+      };
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: TaskFeedList(
+              component: component,
+              scrName: kScrName,
+              lPad: 0,
+              tPad: 0,
+              rPad: 0,
+              bPad: 0,
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('renders on EVERY card -- pending, completed and failed',
+        (WidgetTester tester) async {
+      seedThreeStatuses();
+      await pumpGrouped(tester, withMaps: true);
+
+      // Fixture sanity FIRST: all three cards really rendered, in all three
+      // status groups. Without this the count below could be green on a feed
+      // that rendered nothing.
+      expect(find.text('Toko A'), findsOneWidget);
+      expect(find.text('Toko B'), findsOneWidget);
+      expect(find.text('Toko C'), findsOneWidget);
+
+      expect(find.text(kMapsLabelDefault), findsNWidgets(3));
+
+      // Spec 13.5.3: the safe action is a filled tint, visually heavier than
+      // the destructive outline `Tolak` it sits beside on the driver card.
+      // Asserting the decoration is the only way this is testable -- a colour
+      // regression is invisible to find.text().
+      final BoxDecoration deco = tester
+          .widget<Container>(find
+              .descendant(
+                of: find.byType(MapsButton).first,
+                matching: find.byType(Container),
+              )
+              .first)
+          .decoration! as BoxDecoration;
+      expect(deco.color, const Color(0xFFEEF2FF)); // indigo-50 tint
+      expect(deco.border, isNull); // filled, not outlined
+    });
+
+    testWidgets('mapsUrl absent -> no button anywhere (backward compat)',
+        (WidgetTester tester) async {
+      seedThreeStatuses();
+      await pumpGrouped(tester, withMaps: false);
+
+      // Same anti-vacuity guard: the cards ARE on screen, the button is not.
+      expect(find.text('Toko A'), findsOneWidget);
+      expect(find.text('Toko C'), findsOneWidget);
+      expect(find.text(kMapsLabelDefault), findsNothing);
+    });
+
+    testWidgets('maps tap does not navigate the card (gesture arena)',
+        (WidgetTester tester) async {
+      // The pending card is itself a GestureDetector(onTap: _onCardTap), which
+      // dispatches #ACTIVE_TASK. Tapping the maps button INSIDE it must not
+      // fire that handler: hit testing adds recognizers deepest-first and the
+      // arena awards the tap to members.first.
+      mapTableContent[''] = <Map<String, dynamic>>[
+        {
+          'tnm': 'T001',
+          'kn': 'Toko A',
+          'al': 'Jl. X',
+          'tst': 'assigned',
+          'la': '-6.302154',
+          'lo': '106.653428',
+        },
+      ];
+      await pumpGrouped(tester, withMaps: true);
+
+      expect(find.text(kMapsLabelDefault), findsOneWidget);
+      expect(
+          transactionStore.state.screenTx['#ACTIVE_TASK'] ?? '', isNot('T001'),
+          reason: 'precondition: the card has not been tapped yet');
+
+      await tester.tap(find.text(kMapsLabelDefault));
+      await tester.pumpAndSettle();
+
+      // The maps launch happened...
+      expect(launched, hasLength(1));
+      expect(launched.single, contains('-6.302154,106.653428'));
+      // ...and the card's own handler did NOT.
+      expect(transactionStore.state.screenTx['#ACTIVE_TASK'] ?? '',
+          isNot('T001'),
+          reason: 'the inner maps button must win the gesture arena');
+
+      // Anti-vacuity: the card IS tappable in this harness, so the assertion
+      // above is about the arena and not about a dead GestureDetector.
+      await tester.tap(find.text('Toko A'));
+      await tester.pumpAndSettle();
+      expect(transactionStore.state.screenTx['#ACTIVE_TASK'], 'T001');
     });
   });
 }

@@ -330,12 +330,23 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
     String kn = '';
     String al = '';
     String pic = '';
+    // Customer coordinate. Field codes are FIXED, not component-configurable:
+    // the mapsUrl template on the driver card names <la>/<lo> itself, so a
+    // second layer of indirection could only ever drift out of sync with it.
+    // Read as Strings and kept as Strings all the way to Firestore --
+    // MAP_POINT_PICKER writes toStringAsFixed(6), locale-independent dot
+    // decimals; parsing them to double would reintroduce the comma-vs-dot bug
+    // the picker exists to prevent.
+    String la = '';
+    String lo = '';
     bool found = false;
     for (final Map<String, dynamic> doc in clientDocs) {
       if ((doc[lvField] ?? '').toString().trim() == kl) {
         kn = (doc[nameField] ?? '').toString().trim();
         al = (doc[addrField] ?? '').toString().trim();
         pic = (doc[picField] ?? '').toString().trim();
+        la = (doc['la'] ?? '').toString().trim();
+        lo = (doc['lo'] ?? '').toString().trim();
         found = true;
         break;
       }
@@ -365,6 +376,8 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
           kn: kn,
           al: al,
           pic: pic,
+          la: la,
+          lo: lo,
         );
         TaskItemBuilder.draftRev.value++;
       }

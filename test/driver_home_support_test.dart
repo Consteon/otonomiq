@@ -2592,4 +2592,277 @@ void main() {
       expect(hideZeroEnabled('x'), isFalse);
     });
   });
+
+  // ── mapsUrl helpers (DRIVER_STOP_CARD spec 6.1) ─────────────────────
+  //
+  // The live DSL from the spec's resolved DRIVER_STOP_CARD example. Written
+  // with \u escapes so the separators survive any editor/copy round-trip.
+  const String kMapsDsl =
+      'url\u{25FC}https://www.google.com/maps/dir/?api=1&destination=<la>,<lo>&travelmode=driving'
+      '\u{2B58}fallback\u{25FC}https://www.google.com/maps/search/?api=1&query=<al>'
+      '\u{2B58}empty\u{25FC}Alamat belum lengkap';
+
+  group('fillAngleTemplate', () {
+    test('all tokens filled -> substituted template', () {
+      expect(
+        fillAngleTemplate('d=<la>,<lo>', {'la': '-6.302154', 'lo': '106.653428'}),
+        'd=-6.302154,106.653428',
+      );
+    });
+
+    test('empty-string token value -> null', () {
+      expect(fillAngleTemplate('d=<la>,<lo>', {'la': '', 'lo': '106.6'}), isNull);
+    });
+
+    test('whitespace-only token value -> null', () {
+      expect(fillAngleTemplate('d=<la>', {'la': '   '}), isNull);
+    });
+
+    test('absent field -> null', () {
+      expect(fillAngleTemplate('d=<la>', <String, dynamic>{}), isNull);
+    });
+
+    test('null field value -> null', () {
+      expect(fillAngleTemplate('d=<la>', {'la': null}), isNull);
+    });
+
+    test('url-encodes spaces and commas in a value', () {
+      expect(
+        fillAngleTemplate('q=<al>', {'al': 'Jl. Merdeka No. 5, Bintaro'}),
+        'q=Jl.%20Merdeka%20No.%205%2C%20Bintaro',
+      );
+    });
+
+    test('literal comma BETWEEN two tokens is not encoded', () {
+      // The Maps URLs API requires a raw comma between lat and lng. Only the
+      // token VALUES are encoded, never the template's own punctuation.
+      final String? out =
+          fillAngleTemplate('destination=<la>,<lo>', {'la': '-6.3', 'lo': '106.6'});
+      expect(out, 'destination=-6.3,106.6');
+      expect(out, isNot(contains('%2C')));
+    });
+
+    test('no-token template -> returned trimmed, not null', () {
+      expect(fillAngleTemplate('  https://maps.example/x  ', <String, dynamic>{}),
+          'https://maps.example/x');
+    });
+
+    test('blank template -> null', () {
+      expect(fillAngleTemplate('', {'la': '1'}), isNull);
+    });
+
+    test('whitespace-only template -> null', () {
+      expect(fillAngleTemplate('   ', {'la': '1'}), isNull);
+    });
+
+    test('non-String (double) field value stringifies', () {
+      // Convention #7: Firestore rows are dynamic. A tenant storing la/lo as
+      // Numbers must still render -- no cast, no double.parse.
+      expect(
+        fillAngleTemplate('d=<la>,<lo>', {'la': -6.302154, 'lo': 106.653428}),
+        'd=-6.302154,106.653428',
+      );
+    });
+
+    test('repeated token is filled at every occurrence', () {
+      expect(fillAngleTemplate('a=<la>&b=<la>', {'la': 'Z Z'}), 'a=Z%20Z&b=Z%20Z');
+    });
+
+    test('underscore token is NOT a token (same dialect as resolveMapTokens)', () {
+      expect(fillAngleTemplate('q=<a_b>', {'a_b': 'v'}), 'q=<a_b>');
+    });
+  });
+
+  group('parseKeyedDsl', () {
+    test('full url/fallback/empty DSL -> three keys', () {
+      final cfg = parseKeyedDsl(kMapsDsl);
+      expect(cfg.keys.toList(), ['url', 'fallback', 'empty']);
+      expect(
+        cfg['url'],
+        'https://www.google.com/maps/dir/?api=1&destination=<la>,<lo>&travelmode=driving',
+      );
+      expect(cfg['fallback'],
+          'https://www.google.com/maps/search/?api=1&query=<al>');
+      expect(cfg['empty'], 'Alamat belum lengkap');
+    });
+
+    test('_u25FC_ / _u2B58_ escapes are decoded before the split', () {
+      expect(parseKeyedDsl('url_u25FC_A<la>_u2B58_empty_u25FC_none'),
+          {'url': 'A<la>', 'empty': 'none'});
+    });
+
+    test('legacy _25FC_ / _2B58_ escapes are decoded before the split', () {
+      // autheniumDecode's _2B58_ line is commented out; parseKeyedDsl closes
+      // that gap locally. Without the guard the whole DSL collapses into one
+      // pair and the url silently carries "_2B58_empty..." into launchUrl.
+      expect(parseKeyedDsl('url_25FC_A<la>_2B58_empty_25FC_none'),
+          {'url': 'A<la>', 'empty': 'none'});
+    });
+
+    test('mixed _u2B58_ and _2B58_ dialects both decode', () {
+      expect(
+        parseKeyedDsl('url_u25FC_A_u2B58_fallback_25FC_B_2B58_empty_25FC_C'),
+        {'url': 'A', 'fallback': 'B', 'empty': 'C'},
+      );
+    });
+
+    test('missing optional keys are simply absent', () {
+      final cfg = parseKeyedDsl('url\u{25FC}https://x/<la>');
+      expect(cfg['url'], 'https://x/<la>');
+      expect(cfg.containsKey('fallback'), isFalse);
+      expect(cfg.containsKey('empty'), isFalse);
+    });
+
+    test('pair without the ◼ separator is skipped', () {
+      expect(parseKeyedDsl('urlNOSEP\u{2B58}empty\u{25FC}m'), {'empty': 'm'});
+    });
+
+    test('empty key is skipped', () {
+      expect(parseKeyedDsl('\u{25FC}v\u{2B58}url\u{25FC}u'), {'url': 'u'});
+    });
+
+    test('null raw -> empty map', () {
+      expect(parseKeyedDsl(null), isEmpty);
+    });
+
+    test('blank raw -> empty map', () {
+      expect(parseKeyedDsl('   '), isEmpty);
+    });
+
+    test('duplicate key -> last wins', () {
+      expect(parseKeyedDsl('url\u{25FC}A\u{2B58}url\u{25FC}B'), {'url': 'B'});
+    });
+
+    test('value keeps everything after the FIRST ◼', () {
+      expect(parseKeyedDsl('url\u{25FC}a\u{25FC}b'), {'url': 'a\u{25FC}b'});
+    });
+  });
+
+  group('resolveMapsUrl (spec 6.1 three-step rule)', () {
+    final Map<String, String> cfg = parseKeyedDsl(kMapsDsl);
+
+    test('step 1 -- all url tokens filled -> url template', () {
+      expect(
+        resolveMapsUrl(cfg, {
+          'la': '-6.302154',
+          'lo': '106.653428',
+          'al': 'Jl. Merdeka No. 5, Bintaro',
+        }),
+        'https://www.google.com/maps/dir/?api=1&destination=-6.302154,106.653428&travelmode=driving',
+      );
+    });
+
+    test('step 2 -- coordinates empty -> fallback on the address', () {
+      expect(
+        resolveMapsUrl(cfg, {
+          'la': '',
+          'lo': '',
+          'al': 'Jl. Merdeka No. 5, Bintaro',
+        }),
+        'https://www.google.com/maps/search/?api=1&query=Jl.%20Merdeka%20No.%205%2C%20Bintaro',
+      );
+    });
+
+    test('step 2 -- coordinates absent entirely -> fallback', () {
+      expect(
+        resolveMapsUrl(cfg, {'al': 'X Y'}),
+        'https://www.google.com/maps/search/?api=1&query=X%20Y',
+      );
+    });
+
+    test('step 3 -- coordinates AND address blank -> null (button disabled)', () {
+      expect(resolveMapsUrl(cfg, {'la': '', 'lo': '', 'al': '   '}), isNull);
+    });
+
+    test('no fallback configured + incomplete url -> null', () {
+      final only = parseKeyedDsl('url\u{25FC}https://x/?d=<la>');
+      expect(resolveMapsUrl(only, {'la': ''}), isNull);
+    });
+
+    test('cfg with no url key at all -> null (visible disabled, not silent)', () {
+      expect(resolveMapsUrl(const <String, String>{}, {'la': '1', 'lo': '2'}),
+          isNull);
+    });
+  });
+
+  // ── label precedence + cfg parsing (Bagian C) ────────────────────────
+  //
+  // The label is a DSL key, NOT a new `text` slot. See resolveMapsLabel's doc
+  // comment for why: a hand-counted ◆ append already destroyed a live segment
+  // on this feature, silently.
+
+  group('resolveMapsLabel', () {
+    test('cfg label wins over the legacy slot', () {
+      expect(
+        resolveMapsLabel(const {'label': 'Buka Peta'}, 'SLOT-20'),
+        'Buka Peta',
+      );
+    });
+
+    test('absent cfg label falls through to the legacy slot', () {
+      expect(resolveMapsLabel(const <String, String>{}, 'SLOT-20'), 'SLOT-20');
+    });
+
+    test('blank cfg label falls through to the legacy slot', () {
+      expect(resolveMapsLabel(const {'label': ''}, 'SLOT-20'), 'SLOT-20');
+    });
+
+    test('whitespace-only cfg label falls through to the legacy slot', () {
+      expect(resolveMapsLabel(const {'label': '   '}, 'SLOT-20'), 'SLOT-20');
+    });
+
+    test('no cfg label and no slot -> hardcoded default', () {
+      expect(resolveMapsLabel(const <String, String>{}, ''),
+          kMapsLabelDefault);
+    });
+
+    test('whitespace-only slot -> hardcoded default', () {
+      expect(resolveMapsLabel(const <String, String>{}, '   '),
+          kMapsLabelDefault);
+    });
+
+    test('legacySlot omitted entirely -> hardcoded default', () {
+      // TASK_FEED_LIST and WORKSPACE_HEADER call it this way: they have no
+      // legacy slot at all, by design.
+      expect(resolveMapsLabel(const <String, String>{}), kMapsLabelDefault);
+    });
+
+    test('cfg label is trimmed', () {
+      expect(resolveMapsLabel(const {'label': '  Buka Peta  '}), 'Buka Peta');
+    });
+  });
+
+  group('parseMapsCfg', () {
+    test('absent field -> empty map (feature OFF)', () {
+      expect(parseMapsCfg(null), isEmpty);
+    });
+
+    test('blank field -> empty map', () {
+      expect(parseMapsCfg('   '), isEmpty);
+    });
+
+    test('full DSL including label -> four keys', () {
+      final Map<String, String> cfg = parseMapsCfg(
+        'url\u{25FC}https://x/?d=<la>,<lo>'
+        '\u{2B58}fallback\u{25FC}https://x/?q=<al>'
+        '\u{2B58}empty\u{25FC}Alamat belum lengkap'
+        '\u{2B58}label\u{25FC}\u{1F4CD} Lihat Lokasi',
+      );
+      expect(cfg.keys.toList(), ['url', 'fallback', 'empty', 'label']);
+      expect(cfg['label'], '\u{1F4CD} Lihat Lokasi');
+      expect(cfg['empty'], 'Alamat belum lengkap');
+    });
+
+    test('non-String field is stringified, not cast (Convention #7)', () {
+      // Server JSON is dynamic. A tenant that stored the DSL as some other
+      // scalar must degrade, not throw.
+      expect(parseMapsCfg(42), isEmpty);
+    });
+
+    test('legacy _25FC_ / _2B58_ dialect still decodes through this entry point',
+        () {
+      expect(parseMapsCfg('url_25FC_A<la>_2B58_label_25FC_Peta'),
+          {'url': 'A<la>', 'label': 'Peta'});
+    });
+  });
 }

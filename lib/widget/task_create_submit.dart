@@ -330,6 +330,14 @@ class _TaskCreateSubmitState extends State<TaskCreateSubmit> {
       final String al = hasDraftCust
           ? (draftCust['al'] ?? '')
           : (screenTx[alKey] ?? '').toString().trim();
+      // Customer coordinate (spec section 7 denorm). DRAFT-ONLY on purpose:
+      // there is no screenTx fallback, because bare screenTx keys are never
+      // cleared and two new never-cleared globals named la/lo would be a stale
+      // -coordinate trap for any future {la} config. On the legacy
+      // wizardKey-absent path these stay empty and the driver card falls back
+      // to its <al> template -- spec 6.1 step 2, by design.
+      final String la = hasDraftCust ? (draftCust['la'] ?? '') : '';
+      final String lo = hasDraftCust ? (draftCust['lo'] ?? '') : '';
 
       final Map<String, String>? draftVeh =
           AdminCreateTaskSupport.getVehicle(_wizardKey);
@@ -460,6 +468,8 @@ class _TaskCreateSubmitState extends State<TaskCreateSubmit> {
         kl: kl,
         kn: kn,
         al: al,
+        la: la,
+        lo: lo,
         // adhocNoVehicle implies vv.isEmpty (it is part of the condition),
         // so this is always the resolved vv -- no ternary needed.
         vv: vv,

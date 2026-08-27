@@ -83,7 +83,7 @@ void main() {
       expect(find.text('Sekuriti - absen masuk'), findsNWidgets(3));
     });
 
-    testWidgets('section header renders upper-case', (tester) async {
+    testWidgets('section header renders mixed-case title as-is', (tester) async {
       await tester.pumpWidget(const MaterialApp(
         home: Scaffold(
           body: OtqTxt(
@@ -100,7 +100,29 @@ void main() {
           ),
         ),
       ));
-      expect(find.text('RIWAYAT ABSENSI'), findsOneWidget);
+      expect(find.text('Riwayat Absensi'), findsOneWidget);
+    });
+
+    testWidgets('section header splits " -- " meta to its own right-side text',
+        (tester) async {
+      await tester.pumpWidget(const MaterialApp(
+        home: Scaffold(
+          body: OtqTxt(
+            component: <String, dynamic>{
+              'type': 'txt',
+              'variant': 'section',
+              'data': 'ABSEN MASUK -- 18-Aug 8:34',
+            },
+            scrName: 'home',
+            lPad: 16,
+            tPad: 0,
+            rPad: 16,
+            bPad: 0,
+          ),
+        ),
+      ));
+      expect(find.text('ABSEN MASUK'), findsOneWidget);
+      expect(find.text('18 Aug · 8:34'), findsOneWidget);
     });
   });
 }

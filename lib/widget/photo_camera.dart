@@ -9,6 +9,7 @@ import 'package:image/image.dart' as img;
 import 'package:intl/intl.dart';
 
 import '../global.dart';
+import 'ocr_capture_support.dart'; // ocrGuideRect -- shared geometry, see OcrGuidePainter
 
 String inputPath = emptyString; // temporary path variable
 
@@ -86,6 +87,17 @@ class PhotoCamera extends StatefulWidget {
   final double? height;
   final double? width;
   final List<String> imageUrl;
+
+  /// Capture resolution. DEFAULT `ResolutionPreset.medium` -- every existing
+  /// caller keeps the exact behaviour it has today (720x480 camerax /
+  /// 480x360 avfoundation). OCR_CAPTURE passes `high` (1280x720) because
+  /// `medium` makes a 0.35 MP frame that no OCR can read reliably.
+  final ResolutionPreset? preset;
+
+  /// Aspect ratio of an optional centred guide box drawn OVER the preview
+  /// (`"4:1"` -> 4.0). null = no overlay = today's behaviour.
+  final double? guideRatio;
+
   const PhotoCamera({
     super.key,
     //this.context,
@@ -97,6 +109,8 @@ class PhotoCamera extends StatefulWidget {
     this.height,
     this.width,
     required this.imageUrl,
+    this.preset,
+    this.guideRatio,
   });
 
   @override
@@ -224,7 +238,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
     await _safeDisposeCamera(controller);
     controller = CameraController(
       widget.cameras[cameraIndex],
-      ResolutionPreset.medium,
+      widget.preset ?? ResolutionPreset.medium,
     );
 
     // The previous camera owner (QR scanner via mobile_scanner) may still be
@@ -243,7 +257,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
         await _safeDisposeCamera(controller);
         controller = CameraController(
           widget.cameras[cameraIndex],
-          ResolutionPreset.medium,
+          widget.preset ?? ResolutionPreset.medium,
         );
       }
     }
@@ -293,7 +307,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
     bool kIsWeb = false;
     final CameraController cameraController = CameraController(
       cameraDescription,
-      kIsWeb ? ResolutionPreset.max : ResolutionPreset.medium,
+      kIsWeb ? ResolutionPreset.max : (widget.preset ?? ResolutionPreset.medium),
       // enableAudio: enableAudio,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );
@@ -470,7 +484,27 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
                         height: pictureHeight,
                         //width: MediaQuery.of(context).size.width * picFactor,
                         alignment: Alignment.center,
-                        child: CameraPreview(controller!));
+                        child: widget.guideRatio == null
+                            ? CameraPreview(controller!)
+                            : Stack(
+                                alignment: Alignment.center,
+                                children: <Widget>[
+                                  // The Stack's ONLY non-positioned child, so
+                                  // the Stack sizes to the preview and the
+                                  // Positioned.fill below maps 1:1 onto the
+                                  // frame the sensor is delivering.
+                                  CameraPreview(controller!),
+                                  Positioned.fill(
+                                    child: IgnorePointer(
+                                      child: CustomPaint(
+                                        painter: OcrGuidePainter(
+                                          ratio: widget.guideRatio!,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ));
                   } else {
                     // Otherwise, display a loading indicator.
                     return const Center(child: CircularProgressIndicator());
@@ -689,6 +723,8 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
   }
 }
 
+/// [preset] and [guideRatio] are OPTIONAL and default-off: a call site that
+/// passes neither behaves EXACTLY as it did before they existed.
 Future<String> acquireCamera(
   List<CameraDescription> cameras,
   String label,
@@ -696,8 +732,10 @@ Future<String> acquireCamera(
   int maxSize,
   int quality,
   double? height,
-  double? width,
-) async {
+  double? width, {
+  ResolutionPreset? preset,
+  double? guideRatio,
+}) async {
   // inputPath = emptyString;
   FocusManager.instance.primaryFocus?.unfocus();
   await Future.delayed(const Duration(milliseconds: 300));
@@ -709,6 +747,8 @@ Future<String> acquireCamera(
       textAlign: TextAlign.center,
     ),
     content: PhotoCamera(
+      preset: preset,
+      guideRatio: guideRatio,
       cameras: cameras,
       label: label,
       direction: getCameraIndex(cameras, direction),
@@ -737,3 +777,49 @@ int getCameraIndex(List<CameraDescription> cameras, String lensFacing) {
   } // end for i
   return result;
 } //getCameraIndex
+
+/// The centred guide box drawn over the camera preview.
+///
+/// Geometry comes from the SAME [ocrGuideRect] the ML Kit crop uses, called with
+/// `pad: 0` -- the agent sees the tight box, the crop takes 8% slack on each
+/// side. One function, two consumers: the drawn box and the cropped box can
+/// never drift apart.
+class OcrGuidePainter extends CustomPainter {
+  const OcrGuidePainter({required this.ratio});
+
+  final double ratio;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final List<int> r = ocrGuideRect(
+      size.width.round(),
+      size.height.round(),
+      ratio,
+      pad: 0,
+    );
+    if (r.length != 4) return;
+    final Rect box = Rect.fromLTWH(
+      r[0].toDouble(),
+      r[1].toDouble(),
+      r[2].toDouble(),
+      r[3].toDouble(),
+    );
+    // Scrim everything outside the box so the eye lands inside it.
+    final Path scrim = Path.combine(
+      PathOperation.difference,
+      Path()..addRect(Offset.zero & size),
+      Path()..addRRect(RRect.fromRectAndRadius(box, const Radius.circular(6))),
+    );
+    canvas.drawPath(scrim, Paint()..color = const Color(0x66000000));
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(box, const Radius.circular(6)),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = const Color(0xFF3B82F6),
+    );
+  }
+
+  @override
+  bool shouldRepaint(OcrGuidePainter old) => old.ratio != ratio;
+}

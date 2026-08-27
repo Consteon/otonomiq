@@ -57,7 +57,47 @@ TaskFeedList({
 | `returnRoute` | `String` | Grouped | allDone button route. Ignored in FLAT. |
 | `returnGateTable` | `String` | Grouped | Return-CTA gate table. Ignored in FLAT. |
 | `returnGateSearch` | `String` | Grouped | Return-CTA gate search. Ignored in FLAT. |
-| `text` | `String` | Grouped | Diamond-separated labels. 15 segments (section headers, badges, banners). Unused in FLAT. |
+| `mapsUrl` | `String` | Grouped | Keyed DSL `url◼<template>⭘fallback◼<template>⭘empty◼<message>⭘label◼<button text>`. `url` required, the rest optional. `<field>` tokens are task-doc fields, URL-encoded on substitution. Absent = no button anywhere (backward compat). See "Maps button" below. |
+| `text` | `String` | Grouped | Diamond-separated labels. 15 segments (section headers, badges, banners). Unused in FLAT. **No maps slot** — the button caption lives in `mapsUrl`'s `label◼` key. |
+
+### Maps button (GROUPED only)
+
+When `mapsUrl` is set, every card gets a "Lihat Lokasi" button on its own row
+under the address — **every status**, `Sudah Selesai` and `Dilaporkan Gagal`
+included. One uniform rule, zero per-status branching.
+
+> **FLAT mode ignores `mapsUrl`, silently.** `_parseMapsCfg()` runs in
+> `initState` for both modes, but only the GROUPED card (`_buildTaskCard`)
+> renders the button — so `mapsUrl` on a FLAT `TASK_FEED_LIST` is dead
+> config: no button, no error, no log line, nothing to find on the device.
+> If the button is missing, check `groupField` before anything else (empty
+> `""` = FLAT). This is deliberate, not an oversight: the FLAT card is a
+> customer picker, not a stop list, and FLAT support was explicitly ruled out
+> for this feature. Put the button on the GROUPED screen, or use
+> `DRIVER_STOP_CARD` / `WORKSPACE_HEADER`.
+
+Caption: `mapsUrl`'s `label◼` key, else the hardcoded default
+`📍 Lihat Lokasi`. **There is no `text` slot for it** — appending a `◆` segment
+is a hand-counted edit whose failure mode is silent, and this widget's `text` is
+already 15 segments long.
+
+Template choice: try `url`; if any `<token>` in it is empty / absent /
+whitespace-only, try `fallback`; if that also fails the button is greyed out and
+the `empty` message is printed beneath it. The emptiness test is generic — no
+field name is hardcoded in Dart.
+
+Tapping opens the URL with `LaunchMode.externalApplication`. The card itself is
+tappable (`_onCardTap`), but no `stopPropagation` equivalent is needed: hit
+testing adds gesture recognizers deepest-first and the arena awards the tap to
+the innermost, so the maps button wins and the card's route navigation does not
+fire. `test/task_feed_list_test.dart` → `maps tap does not navigate the card
+(gesture arena)` is the witness.
+
+The GROUPED card address renders up to **2 lines** (reverse-geocode addresses
+are long by construction). FLAT-mode cards are unchanged at 1 line.
+
+Implementation: `MapsButton` in `driver_home_support.dart`, shared with
+`DRIVER_STOP_CARD` and `WORKSPACE_HEADER`.
 
 ### Actual-over-plan display
 

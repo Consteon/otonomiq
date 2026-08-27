@@ -60,6 +60,17 @@ void main() {
         nav: NavPolicy.screen, rebuild: RebuildPolicy.none);
     _expectEntry(snap, 'ItemCardDetail.currentRow',
         nav: NavPolicy.screen, rebuild: RebuildPolicy.none);
+    // DIGIT_PAD's verdict-sheet raise latch. rebuild:none for the SignaturePad
+    // reason — a background readSettings refresh must not make a dismissed
+    // sheet pop back up (§4c rule 3).
+    _expectEntry(snap, 'DigitPad.sheetRaised',
+        nav: NavPolicy.screen, rebuild: RebuildPolicy.none);
+    // DIGIT_PAD's serial-verdict memo (the OCR key + its answer). Same pair of
+    // policies for the same pair of reasons: a different meter is a different
+    // verdict (nav:screen), and a background readSettings refresh must not
+    // re-run ML Kit or re-raise the sheet the officer dismissed (rebuild:none).
+    _expectEntry(snap, 'DigitPad.serialMemo',
+        nav: NavPolicy.screen, rebuild: RebuildPolicy.none);
 
     // ── nav:none, rebuild:screen (NOT flipped — documented reasons) ──────
     _expectEntry(snap, 'ApproverStickyBar.configs',
@@ -77,8 +88,9 @@ void main() {
         persistent: true);
 
     // ── Completeness check ───────────────────────────────────────────────
-    expect(snap.length, 25,
-        reason: 'expected 25 registered entries (Phase 2: +2 ItemCardDetail)');
+    expect(snap.length, 27,
+        reason: 'expected 27 registered entries (Phase 2: +2 ItemCardDetail, '
+            '+1 DigitPad.sheetRaised, +1 DigitPad.serialMemo)');
   });
 }
 

@@ -41,10 +41,12 @@ DetailCard({
 | `note` | String | no | Optional display line template with `<field>` tokens. Empty = hidden. If any token resolves empty/missing, the whole line is hidden. If the note does not appear, check the token spelling first — a misspelled `<field>` is hidden exactly like an unstamped one. |
 | `badgeField` | String | no | Doc field for badge value |
 | `badgeMap` | String | no | `value◼Label◼tier★...` (tier: danger/warn/ok/neutral) |
-| `rows` | String | no | `Label◼template★...` key-value rows |
+| `rows` | String | no | `★`-separated rows, two shapes: `Label◼template` (literal label + resolved value) OR `template` with NO `◼` (label-less: the RESOLVED value is split at the LAST `" \| "` into title + value; no `" \| "` = plain value row) |
 | `hideEmptyRows` | String | no | `TRUE` (default) or `FALSE` |
 | `images` | String | no | `◆`-separated `<field>` templates of image URLs |
-| `imageLabels` | String | no | `◆`-separated captions per image slot |
+| `imageLabels` | String | no | `◆`-separated label per `images` template (positional) |
+| `images2` | String | no | OPTIONAL second photo group: `◆`-separated `<field>` templates, stacked BELOW `images` |
+| `imageLabels2` | String | no | `◆`-separated label per `images2` template (positional) |
 | `text` | String | no | notFoundText when doc not found |
 
 ## Important Behavior
@@ -54,6 +56,11 @@ DetailCard({
 - **Empty optional = hidden:** subtitle, rows, gallery all auto-hide when their resolved content is empty.
 - **hideEmptyRows = TRUE (default):** rows with empty resolved template are skipped. When FALSE, empty rows show `-`.
 - **Gallery tap:** opens `FullScreenImageView` (pinch-zoom, single image).
+- **Photo label blocks:** `images`+`imageLabels` and `images2`+`imageLabels2` are concatenated into ONE ordered template list with positionally aligned labels. Consecutive templates carrying the SAME label (including consecutive EMPTY labels) merge into one block; each block renders as a label header line (omitted when the label is empty) plus ONE horizontally scrollable strip of 90x90 thumbnails. A thumbnail carries no caption of its own. `images2` empty/absent = exactly one block, so existing pages need no config change. A block whose templates all resolve empty is hidden, header included. Merging requires the equal labels to be CONSECUTIVE: `imageLabels: "X◆Y◆X"` yields THREE blocks `X`, `Y`, `X` — two of them carrying the same header. That is the specified behaviour, not a bug.
+- **Two `◆`-family separators, do not confuse them:** the CONFIG fields (`images`, `imageLabels`, `images2`, `imageLabels2`, `rows`) are split on `◆` (BLACK diamond, `separator[1]`) / `★`. The runtime VALUE of a single photo field holding several urls is joined with `◇` (WHITE diamond, `separator[5]` = `whiteDiamond`, the `processData` joiner in `init_values.dart`) and unpacked by `splitImageUrls`. `stringCleanUp` deliberately exempts `◇` from its forbidden-character sweep so multi-photo values survive save.
+- **Two row constructs, separated on sight:** labelled rows (`Label◼<f>`) are a key/value TABLE — secondary-grey key in a 120px column, primary-dark value beside it. Label-less rows are a LIST of results — primary-dark title, secondary-grey `w600` 12px tag right-aligned. The first labelled → label-less transition draws a divider and a wider gap, so the two conventions never read as one table that inverts halfway down.
+- **Text colours are contrast-measured, not picked by eye:** `#374151` primary (10.3:1 on white), `#6B7280` secondary (4.83:1). `Colors.grey.shade500` was replaced because it measures 2.68:1, under the WCAG AA 4.5:1 floor for normal text. Do not reintroduce a `grey.shadeNNN` here without measuring it.
+- **Label-less row split:** a `rows` entry with no `◼` is a TEMPLATE with an empty label. The resolved value is split at the **last** `" | "` (space-pipe-space) — last, not first, so a title containing a pipe stays intact; both sides are trimmed. An UNSPACED `|` is a literal character and does not split. This is the shape `CHECKLIST_DYNAMIC` writes per slot (`'<title> | <status>'`). Under `hideEmptyRows:TRUE` an unfilled `<ckN>` renders nothing.
 
 ## See Also
 

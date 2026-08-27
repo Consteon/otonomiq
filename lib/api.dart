@@ -10,7 +10,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
@@ -19,6 +18,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:googleapis_auth/auth_io.dart' as auth;
 import "package:http/http.dart" as http;
 import 'package:http/io_client.dart'; // part of dart.http package
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:ntp/ntp.dart';
 // import 'package:mobile_number/mobile_number.dart'; // android only
@@ -47,6 +47,7 @@ import 'notification/bloc.dart';
 import 'page/main_page.dart';
 import 'part/build_part/channel.dart';
 import 'redux/screen_transaction.dart';
+import 'screen_session.dart';
 import 'token_resolver.dart';
 import 'widget/build_theme.dart';
 import 'widget/driver_home_support.dart';
@@ -54,7 +55,6 @@ import 'widget/ftz_webview.dart';
 import 'widget/logout_transition_support.dart';
 import 'widget/photo_camera.dart';
 import 'widget/ui_component.dart';
-import 'screen_session.dart';
 
 /// Login perf instrumentation. Mirrors UserRepository.loginPerfTrace.
 /// Set to false (or remove) after root-cause confirmation.
@@ -191,30 +191,33 @@ Future<void> startGettingGpsData() async {
     positionStream = Geolocator.getPositionStream(
       locationSettings: locationSettings,
     );
-    positionStreamSubs = positionStream.listen((Position position) {
-      // update app gps
-      int currentEpoch = DateTime.now().millisecondsSinceEpoch;
-      if (position.timestamp.millisecondsSinceEpoch > 0 &&
-          gpsTime.value <
-              (position.timestamp.millisecondsSinceEpoch + time2GpsOffset)) {
-        gpsData = positionCopy(position);
-        gpsTime.value = gpsData.timestamp.millisecondsSinceEpoch;
-        time2GpsOffset =
-            position.timestamp.millisecondsSinceEpoch - currentEpoch;
-      } // end if (position.timestamp.millisecondsSinceEpoch > 0)
-      // devPrint("gpsTime:${gpsTime.value} , time2GpsOffset:$time2GpsOffset");
-      gpsSaveTimer ??= Timer.periodic(const Duration(minutes: 3), (_) {
-        getAppGps();
-        devPrint('=======-======---= saved by 3 minute ${DateTime.now()}');
-      });
-    }, onError: (e) {
-      // Location service disabled mid-stream → geolocator emits
-      // LocationServiceDisabledException on the stream. With no onError the
-      // stream error is unhandled → fatal. Log + cancel the now-dead sub;
-      // startGettingGpsData re-subscribes when GPS is re-enabled.
-      devPrint('positionStream error (location disabled?): $e');
-      positionStreamSubs.cancel();
-    });
+    positionStreamSubs = positionStream.listen(
+      (Position position) {
+        // update app gps
+        int currentEpoch = DateTime.now().millisecondsSinceEpoch;
+        if (position.timestamp.millisecondsSinceEpoch > 0 &&
+            gpsTime.value <
+                (position.timestamp.millisecondsSinceEpoch + time2GpsOffset)) {
+          gpsData = positionCopy(position);
+          gpsTime.value = gpsData.timestamp.millisecondsSinceEpoch;
+          time2GpsOffset =
+              position.timestamp.millisecondsSinceEpoch - currentEpoch;
+        } // end if (position.timestamp.millisecondsSinceEpoch > 0)
+        // devPrint("gpsTime:${gpsTime.value} , time2GpsOffset:$time2GpsOffset");
+        gpsSaveTimer ??= Timer.periodic(const Duration(minutes: 3), (_) {
+          getAppGps();
+          devPrint('=======-======---= saved by 3 minute ${DateTime.now()}');
+        });
+      },
+      onError: (e) {
+        // Location service disabled mid-stream → geolocator emits
+        // LocationServiceDisabledException on the stream. With no onError the
+        // stream error is unhandled → fatal. Log + cancel the now-dead sub;
+        // startGettingGpsData re-subscribes when GPS is re-enabled.
+        devPrint('positionStream error (location disabled?): $e');
+        positionStreamSubs.cancel();
+      },
+    );
   } // end if (gpsEnabled & (gpsPermission == LocationPermission.always))
 } // end of startGettingGpsData
 
@@ -296,77 +299,85 @@ Future<dynamic> getAppGps() async {
       returnValue['gpsData'].longitude == invalidLocation) {
     // Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high).then((Position position) {
     await Geolocator.getCurrentPosition(
-      locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-    ).then((Position position) async {
-      try {
-        gpsData = positionCopy(position);
-        gpsTime.value = gpsData.timestamp.millisecondsSinceEpoch;
-        returnValue['gpsTime'] = position.timestamp.millisecondsSinceEpoch;
-        returnValue['gpsData'] = position;
-        storage.write(key: 'gpsData', value: json.encode(position));
-        String gpsDataStream = positionToGpsString(position);
-        transactionStore.dispatch(
-          UpdateScreenTxAction(
-            ScreenTransaction({
-              '#GPSDATA': gpsDataStream,
-              '#LASTGPSTIME': position.timestamp.millisecondsSinceEpoch,
-            }),
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
           ),
-        );
-        prefs.setInt('@lastGpsTime', position.timestamp.millisecondsSinceEpoch);
-        List<Placemark> myPL = await placemarkFromCoordinates(
-          position.latitude,
-          position.longitude,
-        );
-        returnValue['gpsPlaceMark'] = placeMarkCopy(myPL[0]);
-        secureWrite(
-          key: 'gpsPlaceMark',
-          value: json.encode(returnValue['gpsPlaceMark']),
-        );
-      } catch (e) {
-        try {
-          returnValue['gpsData'] = position;
-        } catch (e1) {
-          returnValue['gpsData'] = Position(
-            latitude: invalidLocation,
-            longitude: invalidLocation,
-            altitude: -88.0,
-            accuracy: 0.0,
-            speed: 0.0,
-            speedAccuracy: 0.0,
-            heading: 0.0,
-            isMocked: false,
-            timestamp: invalidTime,
-            altitudeAccuracy: 0.0,
-            headingAccuracy: 0.0,
-          );
-        } // end try gpsData
-        try {
-          returnValue['gpsTime'] = position.timestamp.millisecondsSinceEpoch;
-        } catch (e2) {
-          returnValue['gpsTime'] = 0;
-        } // end try gpsTime
-        try {
-          List<Placemark> myPL2 = await placemarkFromCoordinates(
-            position.latitude,
-            position.longitude,
-          );
-          returnValue['gpsPlaceMark'] = placeMarkCopy(myPL2[0]);
-        } catch (e3) {
-          returnValue['gpsPlaceMark'] = placeMarkCopy(null);
-          returnValue['gpsPlaceMark'].name = 'Error $e';
-        } // end try gpsPlaceMark
-      } // end try
-    }).catchError((Object e) {
-      // getCurrentPosition itself rejects (location service off, permission
-      // denied, timeout) -> the .then callback never runs, so the try/catch
-      // INSIDE it is skipped and the error escapes getAppGps -> getLocation ->
-      // OtqState.setAllDataAsync, which swallows it and returns an OtqState
-      // still holding its defaults (mock=true, latitude=invalidLocation,
-      // gpsDone=false). Keep the invalid-location sentinel already in
-      // returnValue and report non-fatal instead.
-      errorReport('getAppGps getCurrentPosition: $e');
-    });
+        )
+        .then((Position position) async {
+          try {
+            gpsData = positionCopy(position);
+            gpsTime.value = gpsData.timestamp.millisecondsSinceEpoch;
+            returnValue['gpsTime'] = position.timestamp.millisecondsSinceEpoch;
+            returnValue['gpsData'] = position;
+            storage.write(key: 'gpsData', value: json.encode(position));
+            String gpsDataStream = positionToGpsString(position);
+            transactionStore.dispatch(
+              UpdateScreenTxAction(
+                ScreenTransaction({
+                  '#GPSDATA': gpsDataStream,
+                  '#LASTGPSTIME': position.timestamp.millisecondsSinceEpoch,
+                }),
+              ),
+            );
+            prefs.setInt(
+              '@lastGpsTime',
+              position.timestamp.millisecondsSinceEpoch,
+            );
+            List<Placemark> myPL = await placemarkFromCoordinates(
+              position.latitude,
+              position.longitude,
+            );
+            returnValue['gpsPlaceMark'] = placeMarkCopy(myPL[0]);
+            secureWrite(
+              key: 'gpsPlaceMark',
+              value: json.encode(returnValue['gpsPlaceMark']),
+            );
+          } catch (e) {
+            try {
+              returnValue['gpsData'] = position;
+            } catch (e1) {
+              returnValue['gpsData'] = Position(
+                latitude: invalidLocation,
+                longitude: invalidLocation,
+                altitude: -88.0,
+                accuracy: 0.0,
+                speed: 0.0,
+                speedAccuracy: 0.0,
+                heading: 0.0,
+                isMocked: false,
+                timestamp: invalidTime,
+                altitudeAccuracy: 0.0,
+                headingAccuracy: 0.0,
+              );
+            } // end try gpsData
+            try {
+              returnValue['gpsTime'] =
+                  position.timestamp.millisecondsSinceEpoch;
+            } catch (e2) {
+              returnValue['gpsTime'] = 0;
+            } // end try gpsTime
+            try {
+              List<Placemark> myPL2 = await placemarkFromCoordinates(
+                position.latitude,
+                position.longitude,
+              );
+              returnValue['gpsPlaceMark'] = placeMarkCopy(myPL2[0]);
+            } catch (e3) {
+              returnValue['gpsPlaceMark'] = placeMarkCopy(null);
+              returnValue['gpsPlaceMark'].name = 'Error $e';
+            } // end try gpsPlaceMark
+          } // end try
+        })
+        .catchError((Object e) {
+          // getCurrentPosition itself rejects (location service off, permission
+          // denied, timeout) -> the .then callback never runs, so the try/catch
+          // INSIDE it is skipped and the error escapes getAppGps -> getLocation ->
+          // OtqState.setAllDataAsync, which swallows it and returns an OtqState
+          // still holding its defaults (mock=true, latitude=invalidLocation,
+          // gpsDone=false). Keep the invalid-location sentinel already in
+          // returnValue and report non-fatal instead.
+          errorReport('getAppGps getCurrentPosition: $e');
+        });
   }
   return returnValue;
 } // end of getAppGps
@@ -755,8 +766,7 @@ Future<String> renamePath({
     final Directory appDir = await getApplicationSupportDirectory();
     final String imageDir = '${appDir.path}/otq_images';
     await Directory(imageDir).create(recursive: true);
-    finalImagePath =
-        '$imageDir/${buildImageDestinationName(folder, fileName)}';
+    finalImagePath = '$imageDir/${buildImageDestinationName(folder, fileName)}';
     try {
       await File(tempImagePath).rename(finalImagePath);
     } catch (e) {
@@ -1435,16 +1445,28 @@ void getLqrList(String? proxySsid) async {
       body: functionBody.body,
     );
     dynamic lqrArray = json.decode(locString.body)[0];
-    lqr = {};
-
+    // readSS answers with a bare negative error code (seen in the field: -6)
+    // instead of the rows array when the read fails. `.length` on it threw
+    // `Class 'int' has no instance getter 'length'` — a message that says
+    // nothing about the real fault, so name it here.
+    if (lqrArray is! List) {
+      throw StateError('readSS returned $lqrArray for range $locRange');
+    }
+    // Build into a local map and only publish on a clean parse. `lqr` used to
+    // be zeroed here, so ANY failure below (bad code, short row) let an empty
+    // map overwrite BOTH #LQR_LIST and the "lqrList" cache — geofences gone
+    // until the next good fetch: LOCATION card reads "Unknown", attendance
+    // dies. On failure the cached list now survives.
+    Map<String, dynamic> fresh = {};
     for (int i = 0; i < lqrArray.length && lqrArray[i][3] != ""; i++) {
-      lqr[lqrArray[i][3]] = [
+      fresh[lqrArray[i][3]] = [
         lqrArray[i][2],
         lqrArray[i][0],
         lqrArray[i][1],
         lqrArray[i][4],
       ];
     } // end for in lqrArray
+    lqr = fresh;
   } catch (eLoc) {
     errorReport(eLoc);
   }
@@ -1514,13 +1536,15 @@ Future setStatus(msgId, status) async {
   // had its own `.catchError`; its sibling did not. Nobody consumes the
   // return value, so never rejecting is the whole contract.
   safeUnawaited(
-      FirebaseFirestore.instance.runTransaction((Transaction tx) async {
-    final docSnapshot = await tx.get<Map<String, dynamic>>(notifRef);
-    // A thread doc can exist without `urd` (server CF, half-applied offline
-    // write) or not exist at all — either way tx.update would throw here.
-    if (!docSnapshot.exists) return;
-    tx.update(notifRef, {"urd": decUnread(docSnapshot.data()?['urd'])});
-  }), 'setStatus urd'); // end of firebase transaction
+    FirebaseFirestore.instance.runTransaction((Transaction tx) async {
+      final docSnapshot = await tx.get<Map<String, dynamic>>(notifRef);
+      // A thread doc can exist without `urd` (server CF, half-applied offline
+      // write) or not exist at all — either way tx.update would throw here.
+      if (!docSnapshot.exists) return;
+      tx.update(notifRef, {"urd": decUnread(docSnapshot.data()?['urd'])});
+    }),
+    'setStatus urd',
+  ); // end of firebase transaction
 }
 
 Future sendMessage(mTo, mFrom, mDisplay, mData, mIn, mStatus) async {
@@ -3744,7 +3768,9 @@ Future getLifProfileData(String lifKey) async {
           .timeout(const Duration(seconds: 20));
       break;
     } on TimeoutException {
-      devPrint('[LOGINPERF] getLifProfileData attempt $attempt timed out (20s)');
+      devPrint(
+        '[LOGINPERF] getLifProfileData attempt $attempt timed out (20s)',
+      );
       // Only timeouts are retried. A network/DNS error still throws straight
       // out — retrying those just delays the same failure.
       if (attempt == 3) rethrow;
@@ -4018,39 +4044,41 @@ Future<int> launchCheck() async {
       // would block login on that round-trip, so keep it fire-and-forget and
       // guard it. The write is retried by the next launchCheck.
       safeUnawaited(
-          FirebaseFirestore.instance.runTransaction((Transaction tx) async {
-        result = 9929;
-        var msgSnapshot = await tx.get<Map<String, dynamic>>(docRef);
-        Map<String, dynamic> updateMsg = {};
-        result = 9930;
-        // Only write a real token. This ran unguarded, so any start that reached
-        // here before setUpFirebase had dispatched #FCM_TOKEN (getToken() null,
-        // or the static _isSetUp guard short-circuiting a later call in a process
-        // where the dispatch never happened) wrote `f: null` and WIPED the stored
-        // token -- after which the sender has no target and nobody gets a push.
-        final fcmToken = state['#FCM_TOKEN'];
-        if (fcmToken != null && fcmToken.toString().isNotEmpty) {
-          updateMsg["f"] = fcmToken;
-        }
-        result = 9931;
-        if (msgSnapshot.exists) {
-          result = 9932;
-          if (msgSnapshot.data()!["n"] == null) {
-            updateMsg["n"] = cUser.displayName ?? '';
-            result = 9933;
+        FirebaseFirestore.instance.runTransaction((Transaction tx) async {
+          result = 9929;
+          var msgSnapshot = await tx.get<Map<String, dynamic>>(docRef);
+          Map<String, dynamic> updateMsg = {};
+          result = 9930;
+          // Only write a real token. This ran unguarded, so any start that reached
+          // here before setUpFirebase had dispatched #FCM_TOKEN (getToken() null,
+          // or the static _isSetUp guard short-circuiting a later call in a process
+          // where the dispatch never happened) wrote `f: null` and WIPED the stored
+          // token -- after which the sender has no target and nobody gets a push.
+          final fcmToken = state['#FCM_TOKEN'];
+          if (fcmToken != null && fcmToken.toString().isNotEmpty) {
+            updateMsg["f"] = fcmToken;
           }
-          if (msgSnapshot.data()!["p"] == null) {
-            updateMsg["p"] = cUser.photoURL ?? '';
-            result = 9934;
+          result = 9931;
+          if (msgSnapshot.exists) {
+            result = 9932;
+            if (msgSnapshot.data()!["n"] == null) {
+              updateMsg["n"] = cUser.displayName ?? '';
+              result = 9933;
+            }
+            if (msgSnapshot.data()!["p"] == null) {
+              updateMsg["p"] = cUser.photoURL ?? '';
+              result = 9934;
+            }
+            //await tx.update(docRef, updateMsg);
           }
-          //await tx.update(docRef, updateMsg);
-        }
-        result = 9935;
-        // updateMsg can now be empty (no token yet, nothing else to backfill);
-        // skip the write rather than issue a pointless transaction update.
-        if (updateMsg.isNotEmpty) tx.update(docRef, updateMsg);
-        result = 9936;
-      }), 'launchCheck msgDoc'); // end of firebase transaction
+          result = 9935;
+          // updateMsg can now be empty (no token yet, nothing else to backfill);
+          // skip the write rather than issue a pointless transaction update.
+          if (updateMsg.isNotEmpty) tx.update(docRef, updateMsg);
+          result = 9936;
+        }),
+        'launchCheck msgDoc',
+      ); // end of firebase transaction
     }
     //    docRef.updateData(updateData); //= write updated data to message doc
     // write user qr seed to secure storage

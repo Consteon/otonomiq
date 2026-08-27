@@ -19,6 +19,7 @@ import 'package:geolocator/geolocator.dart';
 import '../firestore_repository/table_repository.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'ftz_scanner_screen.dart';
+import 'menu_icon_card.dart';
 // import 'package:barcode_scan2/barcode_scan2.dart';
 
 part '../part/build_part/ftz_checker_part.dart';
@@ -867,49 +868,17 @@ class FtzCheckerState extends State<FtzChecker> {
 
     h = MediaQuery.of(context).size.height - 20;
     w = MediaQuery.of(context).size.width - 20;
-    const double defaultAspectRatio = 18 / 12;
-    var topPad = 6.0;
     double fontSize = (widget.component['fontSize'] ?? 14.0).toDouble();
     // textArray = diamondTextToList(widget.component['text']);
     Widget button1;
     button1 = Center(
-      child: Column(
-        children: [
-          Container(
-            alignment: Alignment.center,
-            width: (widget.component['width'] ?? 90).toDouble(),
-            child: Card(
-              child: InkWell(
-                child: Column(
-                  // mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: <Widget>[
-                    Container(
-                      height: topPad,
-                    ),
-                    AspectRatio(
-                      aspectRatio: defaultAspectRatio,
-                      child: displayImage(
-                          imageUrl: widget.component['url'] ?? defaultImage,
-                          cached: true),
-                      // child: FadeInImage.memoryNetwork(
-                      //   placeholder: kTransparentImage,
-                      //   image: widget.component['url'] ?? defaultImage,
-                      // ),
-                    ),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        textArray[0],
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: fontSize),
-                      ),
-                    ),
-                  ],
-                ),
-                onTap: () async {
+      child: SizedBox(
+        width: (widget.component['width'] ?? 90).toDouble(),
+        child: menuIconCard(
+          imageUrl: widget.component['url'] ?? defaultImage,
+          label: textArray[0],
+          fontSize: fontSize,
+          onTap: () async {
                   if (!tapped) {
                     // setState(() {
                     tapped = true;
@@ -955,11 +924,8 @@ class FtzCheckerState extends State<FtzChecker> {
                       } // end if !dataOK
                     } // end if (!dataOk)
                   } // end if !tapped
-                }, // end of onTap
-              ),
-            ),
-          ),
-        ],
+          }, // end of onTap
+        ),
       ),
     );
     return button1;

@@ -405,6 +405,53 @@ void main() {
       expect(doc['it'], isEmpty);
     });
 
+    test('la/lo written when the customer has a coordinate', () {
+      final doc = AdminCreateTaskSupport.assembleTaskDoc(
+        tnm: 'TASK-C1-20260826-100000',
+        kl: 'C1', kn: 'Toko Maju', al: 'Jl. Merdeka No. 5',
+        vv: 'VEH-1', gl: 'WH-1', cv: '1', cn: 'Admin',
+        tdt: 1782244800000, t: 1782286245000,
+        itArray: const [],
+        tableVid: '20342033315492',
+        la: '-6.302154',
+        lo: '106.653428',
+      );
+      expect(doc['la'], '-6.302154');
+      expect(doc['lo'], '106.653428');
+    });
+
+    test('la/lo are PRESENT and empty when the customer has no coordinate', () {
+      // Spec section 7: "kalau di pelanggan kosong -> tulis kosong". They must
+      // NOT use the omit-when-empty idiom that vv/ln/tdt use.
+      final doc = AdminCreateTaskSupport.assembleTaskDoc(
+        tnm: 'TASK-C1-20260826-100000',
+        kl: 'C1', kn: 'Toko Maju', al: 'Jl. Merdeka No. 5',
+        vv: 'VEH-1', gl: 'WH-1', cv: '1', cn: 'Admin',
+        tdt: 1782244800000, t: 1782286245000,
+        itArray: const [],
+        tableVid: '20342033315492',
+        la: '',
+        lo: '',
+      );
+      expect(doc.containsKey('la'), isTrue, reason: 'la must be present');
+      expect(doc.containsKey('lo'), isTrue, reason: 'lo must be present');
+      expect(doc['la'], '');
+      expect(doc['lo'], '');
+    });
+
+    test('la/lo default to empty when the caller omits them', () {
+      final doc = AdminCreateTaskSupport.assembleTaskDoc(
+        tnm: 'TASK-C1-20260826-100000',
+        kl: 'C1', kn: 'Toko Maju', al: 'Jl. Merdeka No. 5',
+        vv: 'VEH-1', gl: 'WH-1', cv: '1', cn: 'Admin',
+        tdt: 1782244800000, t: 1782286245000,
+        itArray: const [],
+        tableVid: '20342033315492',
+      );
+      expect(doc['la'], '');
+      expect(doc['lo'], '');
+    });
+
     test('it[] in assembled doc carries ad+ap present+null on every line', () {
       // Regression end-to-end: the field must reach the real Firestore payload.
       // Build itArray via draftToItArray (the production path), then assemble
@@ -604,6 +651,39 @@ void main() {
       expect(c['kl'], '');
       expect(c['kn'], '');
       expect(c['al'], '');
+    });
+
+    test('setCustomer + getCustomer round-trips la/lo', () {
+      AdminCreateTaskSupport.setCustomer('wiz1',
+          kl: 'C1',
+          kn: 'Toko Maju',
+          al: 'Jl. Merdeka No. 5',
+          la: '-6.302154',
+          lo: '106.653428');
+      final c = AdminCreateTaskSupport.getCustomer('wiz1')!;
+      expect(c['la'], '-6.302154');
+      expect(c['lo'], '106.653428');
+    });
+
+    test('setCustomer defaults la/lo to empty when omitted', () {
+      AdminCreateTaskSupport.setCustomer('wiz1',
+          kl: 'C1', kn: 'Toko Maju', al: 'Jl. Merdeka No. 5');
+      final c = AdminCreateTaskSupport.getCustomer('wiz1')!;
+      expect(c['la'], '');
+      expect(c['lo'], '');
+    });
+
+    test('re-picking a customer without a point clears the previous la/lo', () {
+      // The whole point of the draft-as-a-UNIT read: a stale coordinate from a
+      // previously-picked customer must never survive onto the next task.
+      AdminCreateTaskSupport.setCustomer('wiz1',
+          kl: 'C1', kn: 'Old', al: 'Old Addr', la: '-6.1', lo: '106.1');
+      AdminCreateTaskSupport.setCustomer('wiz1',
+          kl: 'C2', kn: 'New', al: 'New Addr');
+      final c = AdminCreateTaskSupport.getCustomer('wiz1')!;
+      expect(c['kl'], 'C2');
+      expect(c['la'], '');
+      expect(c['lo'], '');
     });
 
     test('customer is independent of items', () {

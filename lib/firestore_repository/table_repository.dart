@@ -3576,9 +3576,17 @@ Future<void> uploadUpdateImage(
 
 Future<String> uploadImageToCloud(String localPath) async {
   // try to upload to cloud, will return successful url if successful
-  // will return 'aum__Invalid image path-XX__mua' if failed
-  const invalidPathPrefix = 'aume__InvalidImagePath-';
-  const invalidPathPostfix = '__emua';
+  // will return 'aum__InvalidImagePath-XX__mua' if failed.
+  // invalidPathPrefix / invalidPathPostfix are the GLOBALS (global.dart:226-227,
+  // 'aum__InvalidImagePath-' / '__mua'). They were re-declared here as
+  // 'aume__InvalidImagePath-' / '__emua', which shadowed the globals for this
+  // whole function. Nothing downstream recognises that spelling:
+  // replaceLocalImageToUrl's guard (api.dart:589) and its RegExp(r"aum__(.*?)__mua"),
+  // historySync's content.contains('aum__'), sendImagesInImageMap's
+  // value[1].contains('aum__') and updateHistoryImage's regex all key on 'aum__'.
+  // So the give-up sentinel - which embeds the raw local file path - failed the
+  // guard open and was written verbatim into Event C. Do NOT re-introduce a
+  // local copy of either constant.
   String returnUrl = invalidPathPrefix;
   if (localPath.length < 5 || !localPath.contains('___')) {
     devPrint('Not processing localPath = $localPath');

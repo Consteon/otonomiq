@@ -194,6 +194,23 @@ class _OtqDropdown2State extends State<OtqDropdown2>
                             txfController[widget.scrName]![_position]!
                                     .finalData =
                                 dataSeparated ? dataMap[item] ?? "" : item;
+                            // Slot writes are a PAIR: .finalData is the stored
+                            // value, .controller.text the display. This writer
+                            // used to set only the first half, so any widget
+                            // listening on the slot's TextEditingController for
+                            // a change (DIGIT_PAD reads its box count from a
+                            // dropdown slot) never fired. Several other slot
+                            // writers — ocrWriteToPosition, otq_get_images_2,
+                            // the RBT `run:` actions — already write both;
+                            // otq_rdo_2 and group_picker still write finalData
+                            // alone, so a slot fed by one of those stays
+                            // non-reactive. No update() call is needed: this
+                            // widget renders from its own _itemSelected state
+                            // (it reads controller.text nowhere), and the .text
+                            // assignment notifies listeners by itself.
+                            txfController[widget.scrName]![_position]!
+                                .controller
+                                .text = item;
                           }
                           Navigator.of(ctx).pop();
                         },

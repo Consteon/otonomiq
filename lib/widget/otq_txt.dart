@@ -116,33 +116,66 @@ class OtqTxt extends StatelessWidget {
   // ---------------------------------------------------------------------------
   // variant: "section" — styled section header (accent bar + small caps).
   // ---------------------------------------------------------------------------
+  /// "ABSEN MASUK -- 18-Aug 8:34" → ["ABSEN MASUK", "18 Aug · 8:34"].
+  /// The server joins a sheet-side "\n" into " -- " (replaceMarker in
+  /// global.dart), so the part after the FIRST " -- " is the meta (date/time)
+  /// tail. No " -- " → [data, ""]. Meta: dashes become spaces, the last
+  /// space becomes " · " so "18-Aug 8:34" reads "18 Aug · 8:34".
+  static List<String> splitSectionMeta(String data) {
+    final int i = data.indexOf(' -- ');
+    if (i < 0) return [data.trim(), ''];
+    final String title = data.substring(0, i).trim();
+    String meta = data.substring(i + 4).trim();
+    final int sp = meta.lastIndexOf(' ');
+    if (sp > 0) {
+      meta =
+          '${meta.substring(0, sp).replaceAll('-', ' ')} · ${meta.substring(sp + 1)}';
+    }
+    return [title, meta];
+  } // end of splitSectionMeta
+
   Widget _sectionHeader(BuildContext context, String data) {
-    final Color accent = Theme.of(context).colorScheme.primary;
     final Color body =
         Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
+    final List<String> parts = splitSectionMeta(data);
+    final String title = parts[0];
+    // Two header tiers, keyed off how the sheet wrote the title:
+    // ALL-CAPS ("ABSEN MASUK") → compact overline (small, wide tracking);
+    // mixed case ("Laporan")   → large bold section title, rendered as-is.
+    final bool caps = title == title.toUpperCase();
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: <Widget>[
-        Container(
-          width: 3,
-          height: 15,
-          decoration: BoxDecoration(
-            color: accent,
-            borderRadius: BorderRadius.circular(2),
+        Expanded(
+          child: Text(
+            title,
+            style: caps
+                ? const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
+                    color: Color(0xFF16212B),
+                  )
+                : const TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.2,
+                    color: Color(0xFF16212B),
+                  ),
           ),
         ),
-        const SizedBox(width: 9),
-        Flexible(
-          child: Text(
-            data.trim().toUpperCase(),
+        if (parts[1].isNotEmpty) ...<Widget>[
+          const SizedBox(width: 8),
+          Text(
+            parts[1],
             style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
               letterSpacing: 0.8,
-              color: body.withValues(alpha: 0.75),
+              color: body.withValues(alpha: 0.45),
             ),
           ),
-        ),
+        ],
       ],
     );
   } // end of _sectionHeader

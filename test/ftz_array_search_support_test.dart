@@ -279,6 +279,257 @@ void main() {
     });
   });
 
+  group('rowSplit — parseContentLinesSplit', () {
+    // Stand-in for the widget's per-line render callback. It substitutes the
+    // markers this fixture defines and folds a literal `\n`, exactly as
+    // _renderContent does. A marker with NO fixture entry survives verbatim —
+    // which is precisely what replaceMarker does for a <N> past the end of the
+    // row, because it only loops `i < ref.length` (global.dart:1300).
+    String Function(String) renderer(Map<int, String> values) => (String line) {
+      String out = line;
+      values.forEach((int k, String v) {
+        out = out.replaceAll('<$k>', v);
+      });
+      return out.replaceAll('\\n', '\n');
+    };
+
+    // op1Screen!D1619 `detail`, verbatim. The JSON \n escapes decode to real
+    // line breaks; the lone " " line is the spacer the sheet author added.
+    const String liveDetail =
+        'Tanggal: <2>\nJenis: <30>\nLokasi: <8>\nSite: <6>\nKeterangan: <9>\n \n'
+        '<11>\n<12>\n<13>\n<14>\n<15>\n<16>\n<17>\n<18>\n<19>';
+
+    // Firestore MobileTable/60936087747650/tables/84214220504259/
+    // report-checklist, doc of 25 Aug 2026 11:17. indexStart:1 -> <N> = c[N-1].
+    // <16> is the CHECKLIST_DYNAMIC empty-slot sentinel; <17>..<19> are blank.
+    const Map<int, String> liveRow = <int, String>{
+      2: '25 Aug 2026 11:17',
+      6: 'Product Group',
+      8: 'BSD Tech Center #26',
+      9: 'hahaha',
+      11: 'Sapu halaman dan area pedestrian|Selesai',
+      12: 'Buang sampah dan kosongkan tempat sampah|Selesai',
+      13: 'Bersihkan asbak dan smoking area|Selesai',
+      14: 'Siram/semprot area jika perlu (debu, noda)|Selesai',
+      15: 'Bersihkan saluran air (jika ada)|Selesai',
+      16: '*',
+      17: '',
+      18: '',
+      19: '',
+      30: 'Outdoor',
+    };
+
+    /// One bare `<11>` template line carrying [value].
+    List<ContentLine> bare(String value) => parseContentLinesSplit(
+          '<11>',
+          '|',
+          renderer(<int, String>{11: value}),
+        );
+
+    test('renders the live LogChecklist detail as stacked header/value', () {
+      final lines = parseContentLinesSplit(liveDetail, '|', renderer(liveRow));
+
+      expect(lines.map((l) => l.label).toList(), [
+        'Tanggal',
+        'Jenis',
+        'Lokasi',
+        'Site',
+        'Keterangan',
+        'Sapu halaman dan area pedestrian',
+        'Buang sampah dan kosongkan tempat sampah',
+        'Bersihkan asbak dan smoking area',
+        'Siram/semprot area jika perlu (debu, noda)',
+        'Bersihkan saluran air (jika ada)',
+      ]);
+      expect(lines.map((l) => l.value).toList(), [
+        '25 Aug 2026 11:17',
+        'Outdoor',
+        'BSD Tech Center #26',
+        'Product Group',
+        'hahaha',
+        'Selesai',
+        'Selesai',
+        'Selesai',
+        'Selesai',
+        'Selesai',
+      ]);
+      // 15 template lines -> 10 rendered: the " " spacer, the `*` slot and the
+      // three blank slots are all dropped.
+      expect(lines.length, 10);
+    });
+
+    test('rowSplit OFF leaves the same template exactly as it renders today', () {
+      // The regression guard. This is the untouched pre-rowSplit path.
+      final lines = parseContentLines(renderer(liveRow)(liveDetail));
+
+      expect(lines.length, 11);
+      // The task stays ONE unlabelled line with the raw pipe in it.
+      expect(lines[5].label, '');
+      expect(lines[5].value, 'Sapu halaman dan area pedestrian|Selesai');
+      // And the sentinel is NOT dropped when rowSplit is off.
+      expect(lines.last.label, '');
+      expect(lines.last.value, '*');
+    });
+
+    test('a blank separator falls back to the untouched single-pass path', () {
+      final off = parseContentLines(renderer(liveRow)(liveDetail));
+      final viaFn = parseContentLinesSplit(liveDetail, '', renderer(liveRow));
+
+      expect(viaFn.map((l) => l.label).toList(),
+          off.map((l) => l.label).toList());
+      expect(viaFn.map((l) => l.value).toList(),
+          off.map((l) => l.value).toList());
+      expect(viaFn.last.value, '*'); // skip rule must NOT apply when off
+    });
+
+    test('a whitespace-only separator is off too', () {
+      final viaFn = parseContentLinesSplit(liveDetail, '   ', renderer(liveRow));
+      expect(viaFn.length, 11);
+      expect(viaFn.last.value, '*');
+    });
+
+    test('splits a pipe written without spaces (legacy TASKLIST writer)', () {
+      final line = bare('task|status').single;
+      expect(line.label, 'task');
+      expect(line.value, 'status');
+    });
+
+    test('splits a pipe written with spaces (CHECKLIST_DYNAMIC writer)', () {
+      final line = bare('task | status').single;
+      expect(line.label, 'task');
+      expect(line.value, 'status');
+    });
+
+    test('splits at the FIRST separator only', () {
+      final line = bare('a|b|c').single;
+      expect(line.label, 'a');
+      expect(line.value, 'b|c');
+    });
+
+    test('a leading separator yields a header-less line', () {
+      final line = bare('|Selesai').single;
+      expect(line.label, '');
+      expect(line.value, 'Selesai');
+    });
+
+    test('a trailing separator keeps the header and an empty value', () {
+      final line = bare('task|').single;
+      expect(line.label, 'task');
+      expect(line.value, '');
+    });
+
+    test('a bare slot with no separator renders as one plain line', () {
+      final line = bare('apa adanya').single;
+      expect(line.label, '');
+      expect(line.value, 'apa adanya');
+    });
+
+    test('a bare slot whose header contains a colon takes the rowSplit path', () {
+      // The colon sits at index 10, inside maxContentLabelLength, so the plain
+      // parser would have produced label 'Cek jam 08' / value '00|Selesai'.
+      final line = bare('Cek jam 08:00|Selesai').single;
+      expect(line.label, 'Cek jam 08:00');
+      expect(line.value, 'Selesai');
+    });
+
+    test('a header longer than maxContentLabelLength is kept', () {
+      const String task = 'Sapu halaman dan area pedestrian'; // 32 chars
+      expect(task.length, greaterThan(maxContentLabelLength));
+      final line = bare('$task|Selesai').single;
+      expect(line.label, task);
+      expect(line.value, 'Selesai');
+    });
+
+    test('an empty, whitespace, star or unsubstituted slot is dropped', () {
+      expect(bare(''), isEmpty);
+      expect(bare('   '), isEmpty);
+      expect(bare(emptyRowSlotMarker), isEmpty);
+      // <19> on a row that never had a 19th column survives replaceMarker as
+      // the literal text '<19>' — it must not be shown as a value.
+      expect(
+        parseContentLinesSplit('<19>', '|', renderer(const <int, String>{})),
+        isEmpty,
+      );
+    });
+
+    test('a labelled line is never split, even when its value has the separator', () {
+      // A date or a note that happens to contain '|' must survive intact.
+      final line = parseContentLinesSplit(
+        'Keterangan: <9>',
+        '|',
+        renderer(<int, String>{9: 'kiri|kanan'}),
+      ).single;
+      expect(line.label, 'Keterangan');
+      expect(line.value, 'kiri|kanan');
+    });
+
+    test('a literal-text line with no colon is never split', () {
+      final line = parseContentLinesSplit(
+        'Catatan <9>',
+        '|',
+        renderer(<int, String>{9: 'kiri|kanan'}),
+      ).single;
+      expect(line.label, '');
+      expect(line.value, 'Catatan kiri|kanan');
+    });
+
+    test('a multi-character separator works', () {
+      final line = parseContentLinesSplit(
+        '<11>',
+        ' :: ',
+        renderer(<int, String>{11: 'task :: status'}),
+      ).single;
+      expect(line.label, 'task');
+      expect(line.value, 'status');
+    });
+
+    test('a blank template line is dropped, no spacer is rendered', () {
+      final lines = parseContentLinesSplit(
+        'A: <2>\n \nB: <3>',
+        '|',
+        renderer(<int, String>{2: 'x', 3: 'y'}),
+      );
+      expect(lines.length, 2);
+      expect(lines.map((l) => l.label).toList(), ['A', 'B']);
+    });
+
+    test('a literal backslash-n in the template becomes two bare lines', () {
+      final lines = parseContentLinesSplit(
+        '<11>\\n<12>',
+        '|',
+        renderer(<int, String>{11: 'a|1', 12: 'b|2'}),
+      );
+      expect(lines.length, 2);
+      expect(lines[0].label, 'a');
+      expect(lines[0].value, '1');
+      expect(lines[1].label, 'b');
+      expect(lines[1].value, '2');
+    });
+
+    test('a labelled line with an empty or star value is still rendered', () {
+      // The drop rule (empty / whitespace / '*' / unsubstituted marker) belongs
+      // to BARE lines only. Hoist it above the isBareMarkerLine branch and
+      // `Keterangan: <17>` silently vanishes instead of rendering as '-'.
+      final lines = parseContentLinesSplit(
+        'Keterangan: <9>\nCatatan: <16>',
+        '|',
+        renderer(<int, String>{9: '', 16: '*'}),
+      );
+      expect(lines.map((l) => l.label).toList(), ['Keterangan', 'Catatan']);
+      expect(lines.map((l) => l.value).toList(), ['', '*']);
+    });
+
+    test('isBareMarkerLine accepts only a lone marker', () {
+      expect(isBareMarkerLine('<11>'), isTrue);
+      expect(isBareMarkerLine('  <11>  '), isTrue);
+      expect(isBareMarkerLine('Tanggal: <2>'), isFalse);
+      expect(isBareMarkerLine('Catatan <9>'), isFalse);
+      expect(isBareMarkerLine('<a>'), isFalse);
+      expect(isBareMarkerLine('<11><12>'), isFalse);
+      expect(isBareMarkerLine(''), isFalse);
+    });
+  });
+
   group('metaIcon', () {
     test('maps the labels used by the live report screens', () {
       expect(metaIcon('Tanggal'), Icons.schedule);

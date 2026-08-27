@@ -2,7 +2,8 @@ import 'dart:async'; // unawaited
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:get/get.dart';
-import 'package:flutter/widgets.dart'; // WidgetsBinding (deferred publish)
+import 'package:flutter/material.dart'; // WidgetsBinding + MapsButton (Material)
+import 'package:url_launcher/url_launcher.dart'; // MapsButton -> external maps app
 
 import '../api.dart'; // getTableVid
 import '../global.dart';
@@ -483,6 +484,280 @@ List<MapEntry<String, String>> parseRouteParams(String? raw) {
     out.add(MapEntry(key, value));
   }
   return out;
+}
+
+/// Parse a keyed DSL (`key◼value⭘key◼value`) into a Map.
+///
+/// Thin composition over [parseRouteParams] that bundles the decode step so a
+/// caller cannot forget it. Used by DRIVER_STOP_CARD's `mapsUrl`
+/// ({url, fallback, empty}); reusable for any other keyed component field that
+/// wants a Map instead of an ordered pair list.
+///
+/// Decoding runs in two passes:
+///   1. `autheniumDecode` -- handles `_u25FC_` / `_u2B58_` and the legacy
+///      `_25FC_`.
+///   2. A local `_2B58_` -> `⭘` pass. The equivalent line inside
+///      `autheniumDecode` is COMMENTED OUT, so a server that emits the legacy
+///      no-`u` dialect for ⭘ would leave the pair separator intact, collapse
+///      the whole DSL into one pair, and hand back a silently corrupted URL
+///      that still launches. `global.dart` is off-limits, so the guard lives
+///      here. `_u2B58_` never contains `_2B58_` as a substring, so running
+///      pass 2 after pass 1 is safe.
+///
+/// Duplicate keys: last one wins. Malformed pairs (no ◼) and empty keys are
+/// dropped by [parseRouteParams]. Null / blank input -> empty map.
+Map<String, String> parseKeyedDsl(String? raw) => Map<String, String>.fromEntries(
+      parseRouteParams(
+        (autheniumDecode(raw) ?? raw)?.replaceAll('_2B58_', '\u{2B58}'),
+      ),
+    );
+
+/// Same `<field>` dialect as `resolveMapTokens` in panel_card_support.dart --
+/// deliberately identical so the codebase has exactly ONE angle-token grammar.
+/// No underscore in the char class: `<a_b>` stays literal text in both.
+final RegExp _angleFieldToken = RegExp(r'<([a-zA-Z][a-zA-Z0-9]*)>');
+
+/// Fill every `<field>` token in [template] from [row], URL-encoding each value.
+///
+/// Returns `null` -- meaning "this template is not usable" -- when EITHER
+///   * [template] is blank/whitespace-only, OR
+///   * any `<token>` resolves to null / empty / whitespace-only.
+///
+/// That single rule is the whole of DRIVER_STOP_CARD `mapsUrl` spec 6.1: the
+/// caller writes `fill(url) ?? fill(fallback)` and gets "first template whose
+/// tokens ALL filled, else disabled". The emptiness check is generic -- no
+/// field name is hardcoded anywhere -- which is why the spec dropped its first
+/// draft's latField/lngField params.
+///
+/// Values are stringified with `.toString().trim()` (Convention #7: Firestore
+/// rows are `Map<String, dynamic>`; a tenant storing `la` as a double still
+/// renders). `Uri.encodeComponent` leaves `- _ . ! ~ * ' ( )` and alphanumerics
+/// alone and escapes the rest, so `-6.302154` passes through untouched while an
+/// address's spaces and commas become `%20` / `%2C`. Separators that are LITERAL
+/// text in the template (e.g. the comma in `<la>,<lo>`) are never encoded --
+/// that is required by the Google Maps URLs API.
+///
+/// Pure -- no Flutter / Firestore / Redux deps, directly testable.
+String? fillAngleTemplate(String template, Map<String, dynamic> row) {
+  final String trimmed = template.trim();
+  if (trimmed.isEmpty) return null;
+  bool complete = true;
+  final String filled = trimmed.replaceAllMapped(_angleFieldToken, (Match m) {
+    final String value = (row[m.group(1)] ?? '').toString().trim();
+    if (value.isEmpty) {
+      complete = false;
+      return '';
+    }
+    return Uri.encodeComponent(value);
+  });
+  return complete ? filled : null;
+}
+
+/// DRIVER_STOP_CARD `mapsUrl` spec 6.1, in one expression.
+///
+/// [cfg] is a [parseKeyedDsl] result ({url, fallback, empty}); [row] is the task
+/// doc for one stop. Returns the URL to open, or `null` when neither template
+/// could be filled -- the caller then renders a disabled button plus
+/// `cfg['empty']` (spec 6.6: a vanished button reads as "app broken", a greyed
+/// one with a reason teaches the driver to tell the admin).
+///
+/// A missing `url` key degrades through the same path: `fillAngleTemplate('')`
+/// is `null`, so a malformed config produces a VISIBLE disabled button rather
+/// than a silent no-op.
+///
+/// Pure -- directly testable.
+String? resolveMapsUrl(Map<String, String> cfg, Map<String, dynamic> row) =>
+    fillAngleTemplate(cfg['url'] ?? '', row) ??
+    fillAngleTemplate(cfg['fallback'] ?? '', row);
+
+/// Default label for [MapsButton].
+///
+/// Words, not a bare glyph: the audience is a non-technical driver and a lone
+/// compass icon does not read (spec 6.6). "Lihat Lokasi" rather than "Navigasi"
+/// because the button is used for two things -- checking a stop before setting
+/// off, and navigating during the run.
+const String kMapsLabelDefault = '\u{1F4CD} Lihat Lokasi';
+
+/// Resolve the maps button label.
+///
+/// Order: `mapsUrl`'s `label` key -> [legacySlot] (the host widget's `text`
+/// slot, or `''` when it has none) -> [kMapsLabelDefault].
+///
+/// The label lives in the SAME keyed DSL as `url`/`fallback`/`empty`, so a
+/// tenant enables the button and names it in one cell. That is deliberately NOT
+/// a new `text` slot: a hand-counted `◆` append has already destroyed a live
+/// segment on this very feature (the DRIVER_STOP_CARD reject footnote at index
+/// 19), and the failure is silent -- `_t(n, default)` falls through, nothing
+/// throws, and a neighbouring line quietly prints the button caption. Only
+/// DRIVER_STOP_CARD passes a [legacySlot], and only to keep the tenants that
+/// already migrated their `text` working.
+///
+/// Pure -- directly testable.
+String resolveMapsLabel(Map<String, String> cfg, [String legacySlot = '']) {
+  final String fromCfg = (cfg['label'] ?? '').trim();
+  if (fromCfg.isNotEmpty) return fromCfg;
+  final String fromSlot = legacySlot.trim();
+  if (fromSlot.isNotEmpty) return fromSlot;
+  return kMapsLabelDefault;
+}
+
+/// Parse a widget's raw `mapsUrl` component field into the keyed-DSL map.
+///
+/// Returns an EMPTY map both when the field is blank and when the DSL could not
+/// be parsed. Callers keep their own `_hasMaps` gate off the RAW field, because
+/// the two cases have different outcomes: "absent" means render nothing at all,
+/// "present but broken" means render a DISABLED button with its reason
+/// ([resolveMapsUrl] on an empty cfg is `null`). Collapsing them would make a
+/// malformed config fail silently.
+///
+/// Pure -- directly testable.
+Map<String, String> parseMapsCfg(dynamic rawField) {
+  final String raw = (rawField ?? '').toString().trim();
+  if (raw.isEmpty) return const <String, String>{};
+  try {
+    return parseKeyedDsl(raw);
+  } catch (_) {
+    // Malformed server JSON must never take a card down.
+    return const <String, String>{};
+  }
+}
+
+/// Shared "Lihat Lokasi" button.
+///
+/// DRIVER_STOP_CARD, TASK_FEED_LIST and WORKSPACE_HEADER all render THIS class,
+/// so the enable/disable rule, the `empty` message, the launch mode and the
+/// failure SnackBar exist exactly once (spec 13.1: one contract, three widgets).
+///
+/// Disabled = greyed WITH the reason printed, never hidden (spec 6.6): a
+/// vanished button reads as "the app is broken", a greyed one with a reason
+/// teaches the driver to tell the admin.
+class MapsButton extends StatelessWidget {
+  const MapsButton({
+    super.key,
+    required this.cfg,
+    required this.row,
+    required this.label,
+    this.filled = true,
+  });
+
+  /// Parsed `mapsUrl` keyed DSL: {url, fallback, empty, label}. See
+  /// [parseMapsCfg].
+  final Map<String, String> cfg;
+
+  /// The doc row this button navigates to (a task doc / a customer doc).
+  /// `Map<String, dynamic>` BY DESIGN -- Firestore rows are dynamic and nothing
+  /// here casts them (Convention #7).
+  final Map<String, dynamic> row;
+
+  /// Already-resolved caption -- see [resolveMapsLabel]. Passed in rather than
+  /// resolved here because only the host knows its own legacy `text` slot.
+  final String label;
+
+  /// `true`  = filled tint. The SAFE action, deliberately heavier than the
+  ///           destructive outline `Tolak` it sits beside (spec 13.5.3).
+  /// `false` = outline. Use on a host whose background is ALREADY indigo-50
+  ///           (WORKSPACE_HEADER's address band), where a tint would vanish.
+  final bool filled;
+
+  static const Color _accent = Color(0xFF4338CA); // indigo-700
+  static const Color _accentBg = Color(0xFFEEF2FF); // indigo-50
+
+  /// gray-600, not gray-500. This button renders over three different host
+  /// backgrounds; measured contrast for gray-600 is 7.56:1 on white, 6.87:1 on
+  /// gray-100 and 6.76:1 on indigo-50. gray-500 is only 4.32:1 on indigo-50 --
+  /// below AA -- which is exactly the band WORKSPACE_HEADER puts it on.
+  static const Color _disabledFg = Color(0xFF4B5563);
+
+  @override
+  Widget build(BuildContext context) {
+    final String? url = resolveMapsUrl(cfg, row);
+    final String emptyMsg = (cfg['empty'] ?? '').trim();
+    final bool enabled = url != null;
+    final bool tinted = enabled && filled;
+    final Color fg = enabled ? _accent : _disabledFg;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          // Direct null-test (not a bool flag) so `url` promotes to String
+          // inside the closure.
+          onTap: url == null ? null : () => _launch(context, url),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: tinted ? _accentBg : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+              // Border.all is UNIFORM, so it is legal with borderRadius.
+              // A per-side Border(...) plus a radius asserts at paint time.
+              border: tinted ? null : Border.all(color: fg),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: fg,
+              ),
+            ),
+          ),
+        ),
+        if (!enabled && emptyMsg.isNotEmpty) ...[
+          const SizedBox(height: 3),
+          Text(
+            emptyMsg,
+            style: const TextStyle(
+              fontSize: 11,
+              color: _disabledFg,
+              height: 1.3,
+            ),
+            // Bounded: this Column is laid out unconstrained inside a Row on
+            // WORKSPACE_HEADER, and a long tenant message would otherwise grow
+            // the intrinsic width until the Row overflows.
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Open [url] in an EXTERNAL app (spec 6.1: the driver needs real
+  /// turn-by-turn navigation -- never an in-app webview). On Android this
+  /// resolves to the Google Maps app when installed and the browser otherwise.
+  ///
+  /// The messenger is captured BEFORE the await and `context.mounted` is
+  /// re-checked after it: this button lives inside GetX `Obx` lists that rebuild
+  /// on every Firestore snapshot, so the element can be gone by the time the
+  /// platform channel answers.
+  ///
+  /// The raw exception is deliberately NEVER shown. The audience is a
+  /// non-technical driver and `PlatformException(ACTIVITY_NOT_FOUND, ...)`
+  /// reads as a crash. The catch variable is `err`, never `e` -- `e` shadows
+  /// `dart:math`'s constant in any file that imports it, and the habit is
+  /// repo-wide.
+  Future<void> _launch(BuildContext context, String url) async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    bool launched = false;
+    try {
+      launched = await launchUrl(
+        Uri.parse(url),
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (err) {
+      // Swallowed on purpose -- the fixed message below is what the driver sees.
+      launched = false;
+    }
+    if (launched) return;
+    if (!context.mounted) return;
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Tidak bisa membuka peta'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
 }
 
 /// Resolve routeParams values and dispatch them as bare keys into screenTx.
