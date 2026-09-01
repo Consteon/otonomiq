@@ -1,3 +1,4 @@
+import '../global.dart'; // diamondTextToList
 import 'admin_home_support.dart'; // evaluateGate
 
 // ─── Note template resolution ───────────────────────────────────────────────
@@ -208,7 +209,13 @@ class RowDef {
 /// **Split each row at the FIRST ◼ only** — the template itself may contain ◼
 /// (e.g. `Jam kerja◼<st>–<et>` → label `"Jam kerja"`, template `"<st>–<et>"`).
 ///
-/// No ◼ at all (e.g. `Label`) = label only, empty template.
+/// **No ◼ at all = the whole entry is the TEMPLATE, with an EMPTY label** (D3).
+/// `<ck1>` -> label `""`, template `"<ck1>"`. The renderer then splits the
+/// RESOLVED value at the last `" | "` (see [splitPipeValue]) to get the row's
+/// title. A literal bare entry (`Ringkasan`) therefore renders as a plain value
+/// row, not as a label — deliberate, and invisible under hideEmptyRows:TRUE.
+///
+/// An entry that HAS a ◼ but an empty label (`◼<vn>`) is still SKIPPED.
 ///
 /// Caller MUST `autheniumDecode` the raw string BEFORE calling.
 List<RowDef> parseRowDefs(String raw) {
@@ -220,8 +227,8 @@ List<RowDef> parseRowDefs(String raw) {
     if (trimmed.isEmpty) continue;
     final int sep = trimmed.indexOf('\u{25FC}'); // FIRST ◼ only
     if (sep < 0) {
-      // no ◼ — label only, empty template
-      out.add(RowDef(trimmed, ''));
+      // no ◼ — empty label, the whole entry is the template (D3)
+      out.add(RowDef('', trimmed));
       continue;
     }
     final String label = trimmed.substring(0, sep).trim();
@@ -230,6 +237,136 @@ List<RowDef> parseRowDefs(String raw) {
     out.add(RowDef(label, template));
   }
   return out;
+}
+
+// ─── Photo label blocks (DETAIL_CARD Perubahan 2) ───────────────────────
+
+/// One photo group: a header label plus the ordered `<field>` TEMPLATES whose
+/// resolved urls render as ONE horizontally scrollable strip under it.
+///
+/// [templates] is growable — [buildImageBlocks] merges into it.
+class ImageBlock {
+  final String label;
+  final List<String> templates;
+  ImageBlock(this.label, this.templates);
+}
+
+/// Append one config group's template<->label PAIRS to [outTpls]/[outLabels].
+///
+/// The pair is the unit: a pair whose template is blank is dropped WHOLE, so a
+/// filtered-out template can never shift the labels of the ones after it.
+/// Every label index is length-guarded (short label list -> `''`) — a label
+/// list SHORTER than the template list therefore opens a new, unlabelled block
+/// at the first unlabelled template. That is intended.
+///
+/// The two try/catch guards are belt-and-braces, mirroring today's shape in
+/// `detail_card.dart`: `diamondTextToList` already catches its own `jsonDecode`
+/// failure and falls back to `input.split('◆')`, so it cannot throw. Kept for
+/// symmetry — their removal is not a required cleanup.
+void _appendImageGroup(
+  String imagesCfg,
+  String labelsCfg,
+  List<String> outTpls,
+  List<String> outLabels,
+) {
+  List<String> rawTpls;
+  List<String> rawLabels;
+  try {
+    rawTpls = diamondTextToList(imagesCfg);
+  } catch (_) {
+    rawTpls = const <String>[];
+  }
+  try {
+    rawLabels = diamondTextToList(labelsCfg);
+  } catch (_) {
+    rawLabels = const <String>[];
+  }
+  for (int i = 0; i < rawTpls.length; i++) {
+    final String t = rawTpls[i].trim();
+    // '' -> diamondTextToList gives [''], NOT []. Dropping the PAIR here is
+    // what keeps an empty `images2` from becoming a phantom block.
+    if (t.isEmpty) continue;
+    outTpls.add(t);
+    outLabels.add(rawLabels.length > i ? rawLabels[i].trim() : '');
+  }
+}
+
+/// Merge `images`/`imageLabels` and the OPTIONAL `images2`/`imageLabels2` into
+/// ordered label blocks (D1).
+///
+/// Group 1 first, then group 2. Consecutive templates carrying the SAME label
+/// — including several consecutive EMPTY labels — merge into ONE block, which
+/// the renderer draws as one header line (omitted when the label is empty) plus
+/// one horizontal strip. `images2` empty/absent therefore degrades to exactly
+/// one block, which is why the ~5 pre-existing detailCard pages need no config
+/// change.
+///
+/// All four arguments MUST be `autheniumDecode`d by the caller (use `_cfg()`).
+/// `'--'` (the sheet's empty sentinel) yields no blocks — `diamondTextToList`
+/// maps it to `[]`.
+List<ImageBlock> buildImageBlocks(
+  String imagesCfg,
+  String labelsCfg,
+  String images2Cfg,
+  String labels2Cfg,
+) {
+  final List<String> tpls = <String>[];
+  final List<String> labels = <String>[];
+  _appendImageGroup(imagesCfg, labelsCfg, tpls, labels);
+  _appendImageGroup(images2Cfg, labels2Cfg, tpls, labels);
+
+  final List<ImageBlock> out = <ImageBlock>[];
+  for (int i = 0; i < tpls.length; i++) {
+    // [tpls] and [labels] are parallel, kept in lockstep by _appendImageGroup.
+    // Guard the read anyway: that invariant lives in the OTHER function, so a
+    // label-side filter added there would turn this into a RangeError thrown
+    // from initState on whichever tenant sheet happens to be short.
+    final String lbl = labels.length > i ? labels[i] : '';
+    if (out.isNotEmpty && out.last.label == lbl) {
+      out.last.templates.add(tpls[i]);
+    } else {
+      out.add(ImageBlock(lbl, <String>[tpls[i]]));
+    }
+  }
+  return out;
+}
+
+// ─── Label-less row value split (DETAIL_CARD Perubahan 3) ───────────────
+
+/// Separator inside a label-less row's RESOLVED value: SPACE pipe SPACE.
+///
+/// WIRE FORMAT, TWO ENDS, NO SPANNING TEST. The writer is `checklistSerialize`
+/// in `lib/widget/checklist_dynamic.dart`, which emits
+/// `'${checklistTitleKey(title)} $checklistPairSep ${checklistTitleKey(label)}'`
+/// with `const String checklistPairSep = '|'`. That constant and this one are
+/// the two halves of one contract: the writer's tests assert the serialized
+/// string, this side's tests assert the split, and BOTH stay green if either
+/// side changes its spacing. Change one, change the other.
+///
+/// `|` is NOT in `forbiddenCharacter`, so it survives `stringCleanUp` into the
+/// stored doc field verbatim. An UNSPACED `|` is a literal character, not a
+/// separator.
+const String pipeRowSep = ' | ';
+
+/// A label-less row's resolved value, split into a title and a value.
+class PipeSplit {
+  final String title;
+  final String value;
+  const PipeSplit(this.title, this.value);
+}
+
+/// Split a RESOLVED label-less row value at the **LAST** [pipeRowSep] (D4).
+///
+/// Last, not first, so a title that itself contains ` | ` stays intact and the
+/// trailing status is what gets separated. Both sides are trimmed. No
+/// separator -> empty title + the trimmed value (the row renders plain).
+PipeSplit splitPipeValue(String resolved) {
+  final int i = resolved.lastIndexOf(pipeRowSep);
+  if (i < 0) return PipeSplit('', resolved.trim());
+  return PipeSplit(
+    resolved.substring(0, i).trim(),
+    resolved.substring(i + pipeRowSep.length).trim(),
+  );
 }
 
 // ─── Slot gate helpers (approve-leave-gating-and-note) ──────────────────
@@ -342,4 +479,68 @@ bool isVisibleBySlotGate(
   if (concrete.isEmpty && wildcardLevels.isEmpty) return false;
   if (concrete.contains(pointerValue)) return true;
   return wildcardLevels.contains(levelValue);
+}
+
+// ─── `limit` — top-N cut (list-card-limit) ──────────────────────────────
+
+/// Parse the optional `limit` config key into a row cap.
+///
+/// The spec writes `"limit":5` (a plain number, like `delay`/`size`), but
+/// sheet-sourced JSON is inconsistent, so a quoted `"5"` and a `jsonDecode`
+/// double (`5.0`) are accepted too. Everything that is not a positive whole
+/// number means UNLIMITED and maps to `0`: absent (`null`), `''`, `'--'` (the
+/// sheet's empty-cell sentinel), `0`, a negative, a bool, or unparseable text.
+/// `0` is the single "no cap" sentinel, so callers only ever test `> 0`.
+///
+/// A NEGATIVE must land on 0 and not reach [applyLimit]: `Iterable.take` with a
+/// negative count throws `RangeError`, i.e. one bad sheet cell would crash that
+/// tenant's screen.
+///
+/// A quoted `'5.0'` yields 0 (unlimited) — `int.tryParse` rejects it and spec
+/// §1 says unparseable = no cap. Documented in `docs/widgets/list_card.md` and
+/// asserted in `test/list_card_limit_test.dart`; change both together.
+///
+/// NOT `autheniumDecode`d: this is a number, not a ◼/⭘-encoded string, so the
+/// caller reads `component['limit']` raw and never through `_cfg()`.
+///
+/// Ladder shape mirrors the repo's private `dynamic → int` coercers
+/// (`admin_home_support.dart` `_toInt`, `asset_stock_list.dart` `_safeInt`),
+/// plus the `limit`-specific "≤ 0 means unlimited" rule.
+int parseLimit(dynamic raw) {
+  final int n;
+  if (raw == null) {
+    n = 0;
+  } else if (raw is int) {
+    n = raw;
+  } else if (raw is num) {
+    n = raw.toInt(); // jsonDecode may hand back 5.0
+  } else {
+    n = int.tryParse(raw.toString().trim()) ?? 0;
+  }
+  return n > 0 ? n : 0;
+}
+
+/// Cut a display list down to its first [limit] rows.
+///
+/// `limit <= 0` (unlimited) and `limit >= docs.length` both return the SAME
+/// list instance — every already-deployed LIST_CARD has no `limit` key, so the
+/// no-cap path allocates nothing and behaves identically to before.
+///
+/// Applied to the DISPLAY list only: after the sort in `_getServerFiltered()`
+/// and after the search bar, but BEFORE grouping. Two consequences, both
+/// deliberate:
+///   * grouped mode gets a GLOBAL cap (N rows in total across all sections,
+///     never N per section) and a group with no rows inside the cap is not
+///     rendered at all;
+///   * the header count and the stats strip read `serverFiltered`, which is
+///     never cut, so they keep reporting the original total.
+///
+/// [docs] is already `List<Map<String, dynamic>>`, so `.take().toList()` stays
+/// statically typed — this is not the `dynamic`-source `.map().toList()` trap.
+List<Map<String, dynamic>> applyLimit(
+  List<Map<String, dynamic>> docs,
+  int limit,
+) {
+  if (limit <= 0 || limit >= docs.length) return docs;
+  return docs.take(limit).toList();
 }

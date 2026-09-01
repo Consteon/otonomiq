@@ -5,6 +5,36 @@ import '../global.dart';
 import '../global2.dart';
 import 'task_progress_store.dart';
 
+/// Serializes one task slot as `{title}|{statusLabel}` (spec: tasklist status separator).
+///
+/// The delimiter is a plain ASCII pipe `|`, and it must stay one. Points 1-2 are
+/// why `|` and not something else; point 3 is why the join sanitizes its operands:
+///
+/// 1. NOT `:` — task titles and timestamps legitimately contain colons
+///    ("Cek jam: shift pagi", "08:31"), so `:` is ambiguous to split on.
+/// 2. NOT `☆`/`★`/`◆` or any other geometric-or-star glyph — every entry in
+///    [forbiddenCharacter] (except `separator[5]` `◇`) is replaced with a SPACE by
+///    [stringCleanUp], which `saveSend` runs over `controller.text` and `finalData`
+///    before the value ever leaves the device. That alphabet IS the structural
+///    delimiter set and is stripped from user payload BY DESIGN; a TASKLIST slot
+///    is user payload, so it can never carry one. Picking `☆` (= `separator[6]`
+///    = `forbiddenCharacter[14]`) would silently deliver "title status" with the
+///    delimiter gone — no exception, no failing widget test.
+///
+/// 3. Because `|` survives `stringCleanUp`, nothing stops a tenant sheet from
+///    authoring a title that contains one ("Cek panel A|B") — the very ambiguity
+///    that motivated dropping `:`. So the join STRIPS `|` from both operands
+///    (replacing it with a space, the same repair idiom `stringCleanUp` uses for a
+///    forbidden char) before joining. The delivered value therefore carries EXACTLY
+///    one `|`, structurally, and the downstream op1Script may split naively.
+///    Accepted cost: a literal pipe typed into a title renders as a space — a
+///    mangled title is recoverable, a misparsed row is not.
+///
+/// `|` survives `stringCleanUp`, is absent from [forbiddenCharacter], and is
+/// untouched by `quoteCleanUp` (which only maps `"` and `'`).
+String tasklistSerialize(String title, String label) =>
+    '${title.replaceAll('|', ' ')}|${label.replaceAll('|', ' ')}';
+
 class Tasklist extends StatefulWidget {
   const Tasklist({
     required Key key,
@@ -52,7 +82,7 @@ class _TasklistState extends State<Tasklist> {
     _category = widget.component['category'] as String? ?? '';
     _position = (widget.component['position'] as num?)?.toInt() ?? 0;
     _pendingLabel =
-    (widget.component['pendingLabel'] as String?)?.trim().isNotEmpty == true
+        (widget.component['pendingLabel'] as String?)?.trim().isNotEmpty == true
         ? widget.component['pendingLabel'] as String
         : 'belum';
     if (_position > 0) {
@@ -75,17 +105,19 @@ class _TasklistState extends State<Tasklist> {
     final parts = diamondTextToList(rawOptions);
     _options = [];
     for (int i = 0; i + 2 < parts.length; i += 3) {
-      _options.add(_OptionConfig(
-        icon: parts[i],
-        label: parts[i + 1],
-        description: parts[i + 2],
-      ));
+      _options.add(
+        _OptionConfig(
+          icon: parts[i],
+          label: parts[i + 1],
+          description: parts[i + 2],
+        ),
+      );
     }
   }
 
   String _serialize(String label) {
     final title = _texts.isNotEmpty ? _texts[0] : '';
-    return '$title:$label';
+    return tasklistSerialize(title, label);
   }
 
   void _updateStore(String status) {
@@ -214,12 +246,19 @@ class _TasklistState extends State<Tasklist> {
     final taskName = _texts.isNotEmpty ? _texts[0] : '';
 
     return Padding(
-      padding: EdgeInsets.only(top: _margin[0], bottom: _margin[1], left: widget.lPad + _margin[2], right: widget.rPad + _margin[3]),
+      padding: EdgeInsets.only(
+        top: _margin[0],
+        bottom: _margin[1],
+        left: widget.lPad + _margin[2],
+        right: widget.rPad + _margin[3],
+      ),
       child: GestureDetector(
         onTap: _showStatusSheet,
         child: Container(
           decoration: BoxDecoration(
-            color: isActive ? config.color.withValues(alpha: 0.05) : Colors.white,
+            color: isActive
+                ? config.color.withValues(alpha: 0.05)
+                : Colors.white,
             borderRadius: BorderRadius.circular(_borderRadius),
             border: Border.all(
               color: isActive
@@ -269,9 +308,13 @@ class _TasklistState extends State<Tasklist> {
                     if (_category.isNotEmpty) ...[
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
-                          color: const Color(0xff3b82f6).withValues(alpha: 0.12),
+                          color: const Color(
+                            0xff3b82f6,
+                          ).withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
@@ -326,11 +369,14 @@ class _TasklistState extends State<Tasklist> {
                 children: [
                   if (isActive) ...[
                     Container(
-                      padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
                       decoration: BoxDecoration(
                         border: Border.all(
-                            color: config.color.withValues(alpha: 0.5)),
+                          color: config.color.withValues(alpha: 0.5),
+                        ),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -428,15 +474,18 @@ class _StatusSheet extends StatelessWidget {
                 onTap: () => onSelect(key),
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
                   decoration: isSelected
                       ? BoxDecoration(
-                    color: color.withValues(alpha: 0.05),
-                    border:
-                    Border.all(color: color.withValues(alpha: 0.4)),
-                    borderRadius: BorderRadius.circular(8),
-                  )
+                          color: color.withValues(alpha: 0.05),
+                          border: Border.all(
+                            color: color.withValues(alpha: 0.4),
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        )
                       : null,
                   child: Row(
                     children: [

@@ -32,6 +32,14 @@ class DriverStopCard extends StatefulWidget {
 
 class _DriverStopCardState extends State<DriverStopCard> {
   List<String> _textArray = [];
+
+  /// mapsUrl keyed-DSL config: {url, fallback, empty, label}. Empty when the
+  /// feature is off or the DSL was unparseable.
+  Map<String, String> _mapsCfg = const <String, String>{};
+
+  /// Feature gate: raw `mapsUrl` non-empty. Mirrors the `hasReject` gate --
+  /// an unmigrated component renders byte-identically to today.
+  bool _hasMaps = false;
   String _dataCode = ''; // task subscription code
   String _gateCode = ''; // vehicle_check gate subscription code
 
@@ -39,8 +47,29 @@ class _DriverStopCardState extends State<DriverStopCard> {
   void initState() {
     super.initState();
     _parseText();
+    _parseMapsCfg();
     _subscribe();
   }
+
+  /// Parse `component['mapsUrl']` once. `component` is immutable for the life
+  /// of this State, so there is nothing per-screen to key or to clear on route
+  /// change -- same lifetime as `_textArray`.
+  void _parseMapsCfg() {
+    final String raw = (widget.component['mapsUrl'] ?? '').toString().trim();
+    // `_hasMaps` is read off the RAW field, not off `_mapsCfg`: "absent"
+    // (render nothing) and "present but unparseable" (render a DISABLED button
+    // with its reason) are different outcomes.
+    _hasMaps = raw.isNotEmpty;
+    _mapsCfg = parseMapsCfg(raw);
+  }
+
+  /// Maps button caption. `mapsUrl`'s `label` key wins; then the LEGACY `text`
+  /// slot 20; then the hardcoded default.
+  ///
+  /// Slot 20 stays as the middle fallback because tenants have already migrated
+  /// their `text` for it. New configs should use `label◼` and never touch
+  /// `text` again -- see resolveMapsLabel's doc comment.
+  String get _mapsLabel => resolveMapsLabel(_mapsCfg, _t(20));
 
   void _parseText() {
     try {
@@ -50,7 +79,7 @@ class _DriverStopCardState extends State<DriverStopCard> {
     }
   }
 
-  /// text slot accessors (20 slots; 18 original + 2 reject):
+  /// text slot accessors (21 slots; 18 original + 2 reject + 1 maps):
   ///  [0]  "Stop Berikutnya"
   ///  [1]  "Dilaporkan Gagal"
   ///  [2]  "Sudah Selesai"
@@ -71,6 +100,8 @@ class _DriverStopCardState extends State<DriverStopCard> {
   ///  [17] "Buka Tasklist (eksekusi)"
   ///  [18] "Tolak"  (reject button label; gated by rejectRoute)
   ///  [19] "Ada stop nggak searah? Tolak sebelum berangkat, dikembalikan ke Admin."  (footnote)
+  ///  [20] "📍 Lihat Lokasi"  (maps button label -- LEGACY fallback only;
+  ///       prefer `mapsUrl`'s `label◼` key, which needs no ◆ counting)
   String _t(int i, [String def = '']) =>
       _textArray.length > i ? _textArray[i] : def;
 
@@ -312,108 +343,12 @@ class _DriverStopCardState extends State<DriverStopCard> {
           if (stops.isNotEmpty) ...[
             const SizedBox(height: 12),
             for (int i = 0; i < stops.length; i++)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Number circle
-                    Container(
-                      width: 24,
-                      height: 24,
-                      alignment: Alignment.center,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Color(0xFFF3F4F6), // gray-100
-                      ),
-                      child: Text(
-                        '${i + 1}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF9CA3AF),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            (stops[i][nameField] ?? '').toString(),
-                            style: const TextStyle(
-                              fontSize: 14,
-                              color: Color(0xFF9CA3AF),
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          Text(
-                            (stops[i][addressField] ?? '').toString(),
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFFD1D5DB),
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                    // Trailing: Selesai chip / Tolak button / nothing
-                    if (hasReject) ...[
-                      const SizedBox(width: 8),
-                      if (stopStatusOf(stops[i]) == 'done')
-                        // Green "Selesai" chip (reuses existing badge palette)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFDCFCE7), // green-100
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            _t(5, 'Selesai'),
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF16A34A), // green-600
-                            ),
-                          ),
-                        )
-                      else
-                        // Amber outline "Tolak" button
-                        GestureDetector(
-                          onTap: () => _onRejectTap(stops[i]),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.transparent,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: const Color(0xFFD97706), // amber-600
-                              ),
-                            ),
-                            child: Text(
-                              _t(18, 'Tolak'),
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFFD97706), // amber-600
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ],
-                ),
+              _buildPendingStopRow(
+                stops[i],
+                i,
+                nameField,
+                addressField,
+                hasReject,
               ),
           ],
           // Footnote (once, after the list) -- only when reject is enabled
@@ -432,6 +367,168 @@ class _DriverStopCardState extends State<DriverStopCard> {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  /// One row of the LOCKED (pending) stop list.
+  ///
+  /// Extracted from `_buildPending`'s collection-`for` so the row can compute
+  /// locals -- spec 13.5.1 needs `isDone` and the maps gate before it can decide
+  /// where `Tolak` goes. The tree is otherwise identical to the inline version
+  /// it replaces.
+  ///
+  /// Layout (spec 13.5.1): a PENDING stop pairs `[📍 Lihat Lokasi]` and
+  /// `[Tolak]` on ONE line under the address -- look at the map, then decide
+  /// (spec 6.5). A `done` stop keeps its green `Selesai` chip in the trailing
+  /// position and the maps button sits alone.
+  ///
+  /// The pairing is gated on `_hasMaps`: with `mapsUrl` ABSENT the row renders
+  /// exactly as it did before this feature (Tolak pinned top-right), so an
+  /// unmigrated tenant sees no change at all.
+  Widget _buildPendingStopRow(
+    Map<String, dynamic> stop,
+    int index,
+    String nameField,
+    String addressField,
+    bool hasReject,
+  ) {
+    final bool isDone = stopStatusOf(stop) == 'done';
+    final bool pairInline = _hasMaps && hasReject && !isDone;
+    final bool trailingReject = hasReject && !pairInline;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Number circle
+          Container(
+            width: 24,
+            height: 24,
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color(0xFFF3F4F6), // gray-100
+            ),
+            child: Text(
+              '${index + 1}',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF9CA3AF),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  (stop[nameField] ?? '').toString(),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF9CA3AF),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  (stop[addressField] ?? '').toString(),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFFD1D5DB),
+                  ),
+                  // Spec 13.5.2: since spec 4.1 the map is the ONLY address
+                  // source, so every new customer's address is a long
+                  // reverse-geocode string ending in ", Banten, 15345,
+                  // Indonesia". One line can never be enough.
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (_hasMaps)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Expanded, not Flexible: it pushes Tolak to the RIGHT
+                        // edge of the text column while the button keeps its
+                        // intrinsic width (MapsButton's root Column is
+                        // crossAxisAlignment.start, so it never stretches).
+                        Expanded(
+                          child: MapsButton(
+                            cfg: _mapsCfg,
+                            row: stop,
+                            label: _mapsLabel,
+                          ),
+                        ),
+                        if (pairInline) ...[
+                          const SizedBox(width: 8),
+                          _buildRejectButton(stop),
+                        ],
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          // Trailing: Selesai chip / Tolak button / nothing
+          if (trailingReject) ...[
+            const SizedBox(width: 8),
+            if (isDone)
+              // Green "Selesai" chip (reuses existing badge palette)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDCFCE7), // green-100
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  _t(5, 'Selesai'),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF16A34A), // green-600
+                  ),
+                ),
+              )
+            else
+              _buildRejectButton(stop),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Amber outline "Tolak" button.
+  ///
+  /// Extracted so 13.5.1's inline pairing and the legacy trailing position
+  /// render the SAME button rather than two copies that can drift apart. Stays
+  /// OUTLINE while the maps button is filled: one is destructive (the task goes
+  /// back to Admin), one is safe (just looking) -- spec 13.5.3.
+  Widget _buildRejectButton(Map<String, dynamic> stop) {
+    return GestureDetector(
+      onTap: () => _onRejectTap(stop),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: const Color(0xFFD97706), // amber-600
+          ),
+        ),
+        child: Text(
+          _t(18, 'Tolak'),
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFFD97706), // amber-600
+          ),
+        ),
       ),
     );
   }
@@ -684,10 +781,23 @@ class _DriverStopCardState extends State<DriverStopCard> {
                       fontSize: 12,
                       color: Color(0xFF9CA3AF),
                     ),
-                    maxLines: 1,
+                    // Spec 13.5.2 -- same reason as the locked row.
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
+                // OUTSIDE the address collection-if on purpose: a stop with no
+                // address must still show the button (disabled, with its
+                // reason) -- spec 6.4's last mockup.
+                if (_hasMaps)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: MapsButton(
+                      cfg: _mapsCfg,
+                      row: stop,
+                      label: _mapsLabel,
+                    ),
+                  ),
               ],
             ),
           ),

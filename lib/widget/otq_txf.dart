@@ -178,7 +178,8 @@ class OtqTxfState extends State<OtqTxf>
           try {
             int newPosition = int.parse(currentArray[i]);
             newValue = num.parse(
-                txfController[widget.scrName]![newPosition]!.finalData);
+              txfController[widget.scrName]![newPosition]!.finalData,
+            );
           } catch (e) {
             newValue = 0;
           }
@@ -204,8 +205,10 @@ class OtqTxfState extends State<OtqTxf>
   @override
   void initState() {
     super.initState();
-    GeneralGetXController.to
-        .registerWidget(widget.scrName, widget.component['position']);
+    GeneralGetXController.to.registerWidget(
+      widget.scrName,
+      widget.component['position'],
+    );
     int currentTableVid = getTableVid(widget.component['com']);
     // final String com =
     //     (widget.component['com'] ?? '').toString().trim().toLowerCase();
@@ -230,26 +233,31 @@ class OtqTxfState extends State<OtqTxf>
     // }
     String tableCode =
         autheniumDecode(normalizeTableName(widget.component['table'] ?? '')) ??
-            '';
+        '';
     if (tableCode.isNotEmpty) {
       String indexTableString = '';
       try {
         if (widget.component['filter'] != null) {
           List<String> parts =
-              (autheniumDecode(widget.component['filter']) ?? '')
-                  .split(separator[8]); // white hollow circle
+              (autheniumDecode(widget.component['filter']) ?? '').split(
+                separator[8],
+              ); // white hollow circle
           indexTableString = parts[0];
         }
       } catch (e) {
         // do nothing}
       }
-      subscribeToTable(tableCode, currentTableVid,
-              indexTableString: indexTableString, indexTableType: 'K')
-          .then((_) {
+      subscribeToTable(
+        tableCode,
+        currentTableVid,
+        indexTableString: indexTableString,
+        indexTableType: 'K',
+      ).then((_) {
         localTable = tableToArray(
-            transactionStore.state.screenTx['#TABLE$tableCode'],
-            tableCode,
-            widget.component['sort']);
+          transactionStore.state.screenTx['#TABLE$tableCode'],
+          tableCode,
+          widget.component['sort'],
+        );
         int dd = 1;
         // setState(() {
         //   pickTable = List.from(localTable).obs;
@@ -259,13 +267,17 @@ class OtqTxfState extends State<OtqTxf>
     } // end if (widget.component['table'] != null)
     if (widget.component['refTableNegative'] != null &&
         widget.component['refTableNegative'].toString().trim() != '') {
-      subscribeToTable(widget.component['refTableNegative'], currentTableVid)
-          .then((_) {
+      subscribeToTable(
+        widget.component['refTableNegative'],
+        currentTableVid,
+      ).then((_) {
         localTable = tableToArray(
-            transactionStore.state.screenTx[
-                '#TABLE${widget.component['refTableNegative'].toString().trim()}'],
-            widget.component['refTableNegative'],
-            'asc');
+          transactionStore
+              .state
+              .screenTx['#TABLE${widget.component['refTableNegative'].toString().trim()}'],
+          widget.component['refTableNegative'],
+          'asc',
+        );
         // setState(() {
         //   pickTable = List.from(localTable).obs;
         // });
@@ -308,7 +320,10 @@ class OtqTxfState extends State<OtqTxf>
     // myController = (widget.cnt == null) ? TextEditingController() : widget.cnt!;
     // : myController = widget.cnt!;
     GeneralGetXController.to.putController(
-        widget.scrName, widget.component['position'], myController);
+      widget.scrName,
+      widget.component['position'],
+      myController,
+    );
     // GeneralGetXController.to.putController(
     //     widget.scrName, widget.component['position'], (widget.cnt == null)
     //     ? TextEditingController()
@@ -325,23 +340,27 @@ class OtqTxfState extends State<OtqTxf>
     String variant = widget.component['variant'].toString().toLowerCase();
     if (variant == 'creditcardnumber') {
       //formatArray = getCurrencyFormat(widget.component['format']);
-      tiFormatter.add(MaskedInputFormatter(
-        "#### #### #### ####",
-        allowedCharMatcher: RegExp(r'[0-9]+'),
-      ));
+      tiFormatter.add(
+        MaskedInputFormatter(
+          "#### #### #### ####",
+          allowedCharMatcher: RegExp(r'[0-9]+'),
+        ),
+      );
     } else if (variant == 'money') {
       if (formatArray.length <= 0) {
         // for money formatArray is mandatory
         formatArray = getCurrencyFormat(widget.component['format']);
       }
-      tiFormatter.add(CurrencyInputFormatter(
-        leadingSymbol: formatArray[0],
-        thousandSeparator: formatArray[1] == "."
-            ? ThousandSeparator.Period
-            : ThousandSeparator.Comma,
-        mantissaLength: formatArray[2],
-        useSymbolPadding: formatArray[0].toString().isNotEmpty ? true : false,
-      ));
+      tiFormatter.add(
+        CurrencyInputFormatter(
+          leadingSymbol: formatArray[0],
+          thousandSeparator: formatArray[1] == "."
+              ? ThousandSeparator.Period
+              : ThousandSeparator.Comma,
+          mantissaLength: formatArray[2],
+          useSymbolPadding: formatArray[0].toString().isNotEmpty ? true : false,
+        ),
+      );
     } else if (variant == 'creditcardexpire') {
       tiFormatter.add(CreditCardExpirationDateFormatter());
     } else if (variant == 'static') {
@@ -363,67 +382,92 @@ class OtqTxfState extends State<OtqTxf>
             break;
 
           case 'time':
-            String fm = widget.component['format'] == null ||
+            String fm =
+                widget.component['format'] == null ||
                     widget.component['format'] == ""
                 ? "H:mm"
                 : widget.component['format'];
-            myController.text = widget.component['currentValue'] == null ||
-                    widget.component['currentValue'] == ""
-                ? emptyString
-                : DateFormat(fm).format(_string2DT(
-                    widget.component['currentValue'],
-                    string2Bool(widget.component['utc'])));
-            selectedDate = _string2DT(widget.component['currentValue'],
-                string2Bool(widget.component['utc']));
-            break;
-
-          case 'date':
-            String fm = widget.component['format'] == null ||
-                    widget.component['format'] == ""
-                ? "d-MMM-yyyy"
-                : widget.component['format'];
-            myController.text = widget.component['currentValue'] == null ||
+            myController.text =
+                widget.component['currentValue'] == null ||
                     widget.component['currentValue'] == ""
                 ? emptyString
                 : DateFormat(fm).format(
-                    _string2DT(widget.component['currentValue'], false));
+                    _string2DT(
+                      widget.component['currentValue'],
+                      string2Bool(widget.component['utc']),
+                    ),
+                  );
+            selectedDate = _string2DT(
+              widget.component['currentValue'],
+              string2Bool(widget.component['utc']),
+            );
+            break;
+
+          case 'date':
+            String fm =
+                widget.component['format'] == null ||
+                    widget.component['format'] == ""
+                ? "d-MMM-yyyy"
+                : widget.component['format'];
+            myController.text =
+                widget.component['currentValue'] == null ||
+                    widget.component['currentValue'] == ""
+                ? emptyString
+                : DateFormat(
+                    fm,
+                  ).format(_string2DT(widget.component['currentValue'], false));
             if (widget.component['currentValue'] == null ||
                 widget.component['currentValue'] == '') {
               selectedDate = _string2DT(
-                  DateTime.now().millisecondsSinceEpoch.toString(),
-                  string2Bool(widget.component['utc']));
+                DateTime.now().millisecondsSinceEpoch.toString(),
+                string2Bool(widget.component['utc']),
+              );
             } else {
-              selectedDate =
-                  _string2DT(widget.component['currentValue'], false);
+              selectedDate = _string2DT(
+                widget.component['currentValue'],
+                false,
+              );
             } // end if (widget.component['currentValue'] == null
-            selectedDate = DateTime(selectedDate.year, selectedDate.month,
-                selectedDate.day); // trim hourly data
+            selectedDate = DateTime(
+              selectedDate.year,
+              selectedDate.month,
+              selectedDate.day,
+            ); // trim hourly data
             break;
 
           case 'dateTime':
-            String fm = widget.component['format'] == null ||
+            String fm =
+                widget.component['format'] == null ||
                     widget.component['format'] == ""
                 ? "d-MMM-yyyy H:mm"
                 : widget.component['format'];
-            myController.text = widget.component['currentValue'] == null ||
+            myController.text =
+                widget.component['currentValue'] == null ||
                     widget.component['currentValue'] == ""
                 ? emptyString
-                : DateFormat(fm).format(_string2DT(
-                    widget.component['currentValue'],
-                    string2Bool(widget.component['utc'])));
+                : DateFormat(fm).format(
+                    _string2DT(
+                      widget.component['currentValue'],
+                      string2Bool(widget.component['utc']),
+                    ),
+                  );
             if (widget.component['currentValue'] == null ||
                 widget.component['currentValue'] == '') {
               selectedDate = _string2DT(
-                  DateTime.now().millisecondsSinceEpoch.toString(),
-                  string2Bool(widget.component['utc']));
+                DateTime.now().millisecondsSinceEpoch.toString(),
+                string2Bool(widget.component['utc']),
+              );
             } else {
-              selectedDate = _string2DT(widget.component['currentValue'],
-                  string2Bool(widget.component['utc']));
+              selectedDate = _string2DT(
+                widget.component['currentValue'],
+                string2Bool(widget.component['utc']),
+              );
             }
             break;
 
           case 'static':
-            myController.text = (widget.component['line'] == null ||
+            myController.text =
+                (widget.component['line'] == null ||
                     widget.component['line'] <= 1)
                 ? (valueArray[1]).replaceAll("\n", " ")
                 : valueArray[1];
@@ -435,20 +479,25 @@ class OtqTxfState extends State<OtqTxf>
             break;
 
           default:
-            myController.text = (widget.component['line'] == null ||
+            myController.text =
+                (widget.component['line'] == null ||
                     widget.component['line'] <= 1)
                 ? (valueArray[1]).replaceAll("\n", " ")
                 : valueArray[1];
         }
 
         if (widget.component['position'] != null) {
-          txfControllerCheck(widget.scrName,
-              widget.component['position']); // build txfController if necessary
+          txfControllerCheck(
+            widget.scrName,
+            widget.component['position'],
+          ); // build txfController if necessary
           if (canInitializePage(widget.scrName)) {
             txfController[widget.scrName]![widget.component['position']]!
-                .finalData = valueArray[0];
+                    .finalData =
+                valueArray[0];
             txfController[widget.scrName]![widget.component['position']]!
-                .initialValue = myController.text;
+                    .initialValue =
+                myController.text;
           } // end if (canInitializePage(widget.scrName))
         } // end if (widget.component['position'] != null)
 
@@ -471,11 +520,14 @@ class OtqTxfState extends State<OtqTxf>
         if (widget.component['locationNamePosition'] != null &&
             widget.component['locationNamePosition'] > 0) {
           txfControllerCheck(
-              widget.scrName, widget.component['locationNamePosition']);
+            widget.scrName,
+            widget.component['locationNamePosition'],
+          );
           if (canInitializePage(widget.scrName)) {
-            txfController[widget.scrName]![
-                    widget.component['locationNamePosition']]!
-                .finalData = '';
+            txfController[widget.scrName]![widget
+                        .component['locationNamePosition']]!
+                    .finalData =
+                '';
           } // end if (canInitializePage(widget.scrName))
         } // end if (widget.component['tableContentReference'] > 0)
       } else {
@@ -483,23 +535,27 @@ class OtqTxfState extends State<OtqTxf>
         errorCode = textList["NoPosition"]; // No position error
       } // end if component['position'] != null
     } catch (controllerE) {
-      errorCode = textList[
-          "TXFInitError"]; // No position error // error while initializing controller
+      errorCode =
+          textList["TXFInitError"]; // No position error // error while initializing controller
     } // end of try controller
     margin = marginArray(widget.component['margin']);
     style = styleArray(widget.component['style']);
-    radioOption = List<String>.from((widget.component['radio'] == null ||
-            widget.component['radio'].length <= 0)
-        ? [emptyString]
-        : widget.component['radio']); // for radio button
-    radioAxis = (widget.component['buttonLayout'] ?? 'vertical')
+    radioOption = List<String>.from(
+      (widget.component['radio'] == null ||
+              widget.component['radio'].length <= 0)
+          ? [emptyString]
+          : widget.component['radio'],
+    ); // for radio button
+    radioAxis =
+        (widget.component['buttonLayout'] ?? 'vertical')
                 .toString()
                 .toLowerCase() ==
             'horizontal'
         ? Axis.horizontal
         : Axis.vertical; // for radio button
-    radioAlignment =
-        mainAlignmentConst(widget.component['alignment']); // for radio button
+    radioAlignment = mainAlignmentConst(
+      widget.component['alignment'],
+    ); // for radio button
     textArray = (widget.component['text'] == null)
         ? []
         : diamondTextToList(widget.component['text']);
@@ -511,7 +567,8 @@ class OtqTxfState extends State<OtqTxf>
         : (widget.component['hint'] ?? 'Hint');
     // labelStr = widget.component['label'] ??
     //     (textArray.isNotEmpty ? textArray[0] : 'Label');
-    hintStr = widget.component['hint'] ??
+    hintStr =
+        widget.component['hint'] ??
         (textArray.length > 1 ? textArray[1] : 'Hint');
     cancelStr = textArray.length > 2 ? textArray[2] : 'Cancel';
     const noObject = {"searchDisplayType": "none", "content": ""};
@@ -541,8 +598,11 @@ class OtqTxfState extends State<OtqTxf>
   @override
   Future<void> dispose() async {
     super.dispose();
-    GeneralGetXController.to
-        .putController(widget.scrName, widget.component['position'], null);
+    GeneralGetXController.to.putController(
+      widget.scrName,
+      widget.component['position'],
+      null,
+    );
     // myController.dispose();
     searchController.dispose();
     localTable.clear();
@@ -558,250 +618,285 @@ class OtqTxfState extends State<OtqTxf>
   @override
   Widget build(BuildContext context) {
     return GetBuilder<WidgetUpdateController>(
-        id: "${widget.scrName}-${widget.component['position']}",
-        builder: (_) {
-          super.build(context); // needed by AutomaticKeepAliveClientMixin
+      id: "${widget.scrName}-${widget.component['position']}",
+      builder: (_) {
+        super.build(context); // needed by AutomaticKeepAliveClientMixin
 
-          // MODIFIED: Get the isEnabled state from the controller
-          // txfControllerCheck(widget.scrName,
-          //     widget.component['position']); // Make sure controller exists
-          final inputCtrl =
-              txfController[widget.scrName]![widget.component['position']]!;
-          final bool isEnabled = inputCtrl.isEnabled;
-          debugPrint(
-              "********* build txf ${widget.scrName} - ${widget.component['position']} = $isEnabled");
-          Widget result;
-          var component = widget.component;
-          String scrName = widget.scrName;
-          final txfKey = widget.key;
+        // MODIFIED: Get the isEnabled state from the controller
+        // txfControllerCheck(widget.scrName,
+        //     widget.component['position']); // Make sure controller exists
+        final inputCtrl =
+            txfController[widget.scrName]![widget.component['position']]!;
+        final bool isEnabled = inputCtrl.isEnabled;
+        debugPrint(
+          "********* build txf ${widget.scrName} - ${widget.component['position']} = $isEnabled",
+        );
+        Widget result;
+        var component = widget.component;
+        String scrName = widget.scrName;
+        final txfKey = widget.key;
 
-          void saveData(String scrName, String locString) {
-            TimerBloc timerBloc =
-                transactionStore.state.screenTx['#TIMER_BLOC'];
-            var route = widget.component['route'] ?? widget.scrName;
-            rootThis.setState(() {
-              rootThis.wait = true;
-            });
-            timerBloc.add(const Start(
-                duration: 5)); //  get timerBloc from transactionStore
-            transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
-              '#NEXTROUTE': route,
-              '#TIMER_CONTEXT': context,
-              '#TIMER_DURATION': widget.component['delay'] ?? 5,
-            }))); // set state #NEXTROUTE route that will b_scrNamee displayed after waitScreen
-            saveSend(null, scrName, widget.component, locString, defaultVid());
-          } // end of saveData
+        void saveData(String scrName, String locString) {
+          TimerBloc timerBloc = transactionStore.state.screenTx['#TIMER_BLOC'];
+          var route = widget.component['route'] ?? widget.scrName;
+          rootThis.setState(() {
+            rootThis.wait = true;
+          });
+          timerBloc.add(
+            const Start(duration: 5),
+          ); //  get timerBloc from transactionStore
+          transactionStore.dispatch(
+            UpdateScreenTxAction(
+              ScreenTransaction({
+                '#NEXTROUTE': route,
+                '#TIMER_CONTEXT': context,
+                '#TIMER_DURATION': widget.component['delay'] ?? 5,
+              }),
+            ),
+          ); // set state #NEXTROUTE route that will b_scrNamee displayed after waitScreen
+          saveSend(null, scrName, widget.component, locString, defaultVid());
+        } // end of saveData
 
-          Future<void> scan1() async {
-            String barcodeScanRes = "";
-            // Platform messages may fail, so use a try/catch PlatformException.
-            try {
-              if (barcodeScanRes != "") {
-                setState(() {
-                  myController.text = barcodeScanRes;
-                });
-                vibrate(duration: 150);
-              }
-            } on PlatformException {
-              barcodeScanRes = textList["ScanFailed"];
+        Future<void> scan1() async {
+          String barcodeScanRes = "";
+          // Platform messages may fail, so use a try/catch PlatformException.
+          try {
+            if (barcodeScanRes != "") {
+              setState(() {
+                myController.text = barcodeScanRes;
+              });
+              vibrate(duration: 150);
             }
-          } // end of _scan1
+          } on PlatformException {
+            barcodeScanRes = textList["ScanFailed"];
+          }
+        } // end of _scan1
 
-          Future<void> scan2() async {
-            String barcodeScanRes = "";
-            // Platform messages may fail, so we use a try/catch PlatformException.
-            try {
-              if (barcodeScanRes != "") {
-                setState(() {
-                  myController.text = barcodeScanRes;
-                });
-                vibrate(duration: 150);
-                // int beepNow = await pool.play(scannerBeep);
-                saveData(scrName, separator[1] * 15);
-              }
-            } on PlatformException {
-              barcodeScanRes = textList["ScanFailed"];
+        Future<void> scan2() async {
+          String barcodeScanRes = "";
+          // Platform messages may fail, so we use a try/catch PlatformException.
+          try {
+            if (barcodeScanRes != "") {
+              setState(() {
+                myController.text = barcodeScanRes;
+              });
+              vibrate(duration: 150);
+              // int beepNow = await pool.play(scannerBeep);
+              // 16 diamonds = 17 fields, matching getLocationString after the
+              // GPS-accuracy slot (◀17▶) was appended. Append-only: no
+              // existing ◀N▶ index moves.
+              saveData(scrName, separator[1] * 16);
             }
-          } // end of _scan2
+          } on PlatformException {
+            barcodeScanRes = textList["ScanFailed"];
+          }
+        } // end of _scan2
 
-          chooseDate(BuildContext context, String initialDateString,
-              dynamic component) {
-            late dynamic modal, frm;
-            bool isDate = true;
-            if (widget.component['variant'] == 'date') {
-              modal = CupertinoDatePickerMode.date;
-              frm = widget.component['format'] == null ||
-                      widget.component['format'] == ""
-                  ? "d-MMM-yyyy"
-                  : widget.component['format'];
-            } else {
-              isDate = false;
-              modal = CupertinoDatePickerMode.dateAndTime;
-              frm = widget.component['format'] == null ||
-                      widget.component['format'] == ""
-                  ? "d-MMM-yyyy H:mm"
-                  : widget.component['format'];
-            } // end if (widget.component['variant'] == 'date')
-            myController.text = DateFormat(frm).format(selectedDate);
-            if (isDate) {
-              txfControllerCheck(widget.scrName, widget.component['position']);
-              txfController[scrName]![widget.component['position']]!
-                  .finalData = DateTime(
-                      selectedDate.year, selectedDate.month, selectedDate.day)
-                  .add(Duration(minutes: selectedDate.timeZoneOffset.inMinutes))
-                  .millisecondsSinceEpoch
-                  .toString();
-            } else {
-              txfControllerCheck(widget.scrName, widget.component['position']);
-              txfController[scrName]![widget.component['position']]!.finalData =
-                  string2Bool(widget.component['utc'])
-                      ? (selectedDate.toUtc().millisecondsSinceEpoch).toString()
-                      : (selectedDate
-                              .add(Duration(
-                                  minutes:
-                                      selectedDate.timeZoneOffset.inMinutes))
-                              .millisecondsSinceEpoch)
-                          .toString();
-            } // end if (isDate)
-            showCupertinoModalPopup(
-                context: context,
-                builder: (BuildContext builder) {
-                  DateTime startDate = widget.component['startDate'] == null
-                      ? DateTime(minYear)
-                      : DateTime.fromMillisecondsSinceEpoch(
-                          widget.component['startDate']);
-                  DateTime endDate = widget.component['endDate'] == null
-                      ? DateTime.now().add(Duration(days: maxPlusYear * 365))
-                      : DateTime.fromMillisecondsSinceEpoch(
-                          widget.component['endDate']);
-                  if (startDate.isAfter(selectedDate)) {
-                    startDate = selectedDate;
-                  } // end if (startDate.isAfter(initialDate))
-                  return Container(
-                    height:
-                        MediaQuery.of(context).copyWith().size.height * 0.25,
-                    //color: Theme.of(context).textTheme.bodyText1!.backgroundColor,
-                    color: Colors.white,
-                    child: CupertinoDatePicker(
-                      mode: modal,
-                      dateOrder: DatePickerDateOrder.dmy,
-                      onDateTimeChanged: (value) {
-                        if (value != selectedDate) {
-                          setState(() {
-                            selectedDate = value;
-                            myController.text =
-                                DateFormat(frm).format(selectedDate);
-                          }); // end of setState
-                          if (isDate) {
-                            txfControllerCheck(
-                                widget.scrName, widget.component['position']);
-                            txfController[scrName]![
-                                    widget.component['position']]!
-                                .finalData = DateTime(selectedDate.year,
-                                    selectedDate.month, selectedDate.day)
-                                .add(Duration(
-                                    minutes:
-                                        selectedDate.timeZoneOffset.inMinutes))
-                                .millisecondsSinceEpoch
-                                .toString();
-                          } else {
-                            txfControllerCheck(
-                                widget.scrName, widget.component['position']);
-                            txfController[scrName]![
-                                        widget.component['position']]!
-                                    .finalData =
-                                string2Bool(widget.component['utc'])
-                                    ? (selectedDate
-                                            .toUtc()
-                                            .millisecondsSinceEpoch)
-                                        .toString()
-                                    : (selectedDate
-                                            .add(Duration(
-                                                minutes: selectedDate
-                                                    .timeZoneOffset.inMinutes))
-                                            .millisecondsSinceEpoch)
-                                        .toString();
-                          } // end if (isDate)
-                        } // end if value != selectedDate
-                      },
-                      // end of onDateTimeChanged
-                      initialDateTime: selectedDate,
-                      minimumDate: startDate,
-                      maximumDate: endDate,
-                    ),
-                  );
-                });
-          } // end of _chooseDate
-
-          chooseTime(BuildContext context, dynamic component) {
+        chooseDate(
+          BuildContext context,
+          String initialDateString,
+          dynamic component,
+        ) {
+          late dynamic modal, frm;
+          bool isDate = true;
+          if (widget.component['variant'] == 'date') {
+            modal = CupertinoDatePickerMode.date;
+            frm =
+                widget.component['format'] == null ||
+                    widget.component['format'] == ""
+                ? "d-MMM-yyyy"
+                : widget.component['format'];
+          } else {
+            isDate = false;
+            modal = CupertinoDatePickerMode.dateAndTime;
+            frm =
+                widget.component['format'] == null ||
+                    widget.component['format'] == ""
+                ? "d-MMM-yyyy H:mm"
+                : widget.component['format'];
+          } // end if (widget.component['variant'] == 'date')
+          myController.text = DateFormat(frm).format(selectedDate);
+          if (isDate) {
             txfControllerCheck(widget.scrName, widget.component['position']);
             txfController[scrName]![widget.component['position']]!.finalData =
-                timeOfDayToGSheet(
-                    TimeOfDay(
-                        hour: selectedDate.hour, minute: selectedDate.minute),
-                    string2Bool(widget.component['utc']));
-            showCupertinoModalPopup(
-                context: context,
-                builder: (BuildContext builder) {
-                  return Container(
-                    height:
-                        MediaQuery.of(context).copyWith().size.height * 0.25,
-                    //color: Theme.of(context).textTheme.bodyText1!.backgroundColor,
-                    color: Colors.white,
-                    child: CupertinoDatePicker(
-                      mode: CupertinoDatePickerMode.time,
-                      onDateTimeChanged: (value) {
-                        if (value != selectedDate) {
-                          setState(() {
-                            selectedDate = value;
-                            myController.text = DateFormat(
-                                    widget.component['format'] == null ||
-                                            widget.component['format'] == ""
-                                        ? "k:mm"
-                                        : widget.component['format'])
-                                .format(selectedDate);
-                          }); // end of setState
-                          // txfControllerCheck(
-                          //     widget.scrName, widget.component['position']);
-                          txfController[scrName]![widget.component['position']]!
-                                  .finalData =
-                              timeOfDayToGSheet(
-                                  TimeOfDay(
-                                      hour: selectedDate.hour,
-                                      minute: selectedDate.minute),
-                                  string2Bool(widget.component['utc']));
-                        } // end if value != selectedDate
-                      }, // end of onDateTimeChanged
-                      initialDateTime: selectedDate,
-                    ),
-                  );
-                });
-          } // end of _chooseTime
-
-          Future chooseContact(BuildContext context) async {
-            // final PhoneContact result =
-            //     await FlutterContactPicker.pickPhoneContact();
-            // todo make a contact picker here
-            myController.text = await chooseContactAndGetPhoneNumber(
-                    widget.component['label']) ??
-                '';
+                DateTime(
+                      selectedDate.year,
+                      selectedDate.month,
+                      selectedDate.day,
+                    )
+                    .add(
+                      Duration(minutes: selectedDate.timeZoneOffset.inMinutes),
+                    )
+                    .millisecondsSinceEpoch
+                    .toString();
+          } else {
             txfControllerCheck(widget.scrName, widget.component['position']);
-            txfController[scrName]![component['position']]!.finalData =
-                myController.text;
-          } // end of _chooseContact
+            txfController[scrName]![widget.component['position']]!.finalData =
+                string2Bool(widget.component['utc'])
+                ? (selectedDate.toUtc().millisecondsSinceEpoch).toString()
+                : (selectedDate
+                          .add(
+                            Duration(
+                              minutes: selectedDate.timeZoneOffset.inMinutes,
+                            ),
+                          )
+                          .millisecondsSinceEpoch)
+                      .toString();
+          } // end if (isDate)
+          showCupertinoModalPopup(
+            context: context,
+            builder: (BuildContext builder) {
+              DateTime startDate = widget.component['startDate'] == null
+                  ? DateTime(minYear)
+                  : DateTime.fromMillisecondsSinceEpoch(
+                      widget.component['startDate'],
+                    );
+              DateTime endDate = widget.component['endDate'] == null
+                  ? DateTime.now().add(Duration(days: maxPlusYear * 365))
+                  : DateTime.fromMillisecondsSinceEpoch(
+                      widget.component['endDate'],
+                    );
+              if (startDate.isAfter(selectedDate)) {
+                startDate = selectedDate;
+              } // end if (startDate.isAfter(initialDate))
+              return Container(
+                height: MediaQuery.of(context).copyWith().size.height * 0.25,
+                //color: Theme.of(context).textTheme.bodyText1!.backgroundColor,
+                color: Colors.white,
+                child: CupertinoDatePicker(
+                  mode: modal,
+                  dateOrder: DatePickerDateOrder.dmy,
+                  onDateTimeChanged: (value) {
+                    if (value != selectedDate) {
+                      setState(() {
+                        selectedDate = value;
+                        myController.text = DateFormat(
+                          frm,
+                        ).format(selectedDate);
+                      }); // end of setState
+                      if (isDate) {
+                        txfControllerCheck(
+                          widget.scrName,
+                          widget.component['position'],
+                        );
+                        txfController[scrName]![widget.component['position']]!
+                                .finalData =
+                            DateTime(
+                                  selectedDate.year,
+                                  selectedDate.month,
+                                  selectedDate.day,
+                                )
+                                .add(
+                                  Duration(
+                                    minutes:
+                                        selectedDate.timeZoneOffset.inMinutes,
+                                  ),
+                                )
+                                .millisecondsSinceEpoch
+                                .toString();
+                      } else {
+                        txfControllerCheck(
+                          widget.scrName,
+                          widget.component['position'],
+                        );
+                        txfController[scrName]![widget.component['position']]!
+                            .finalData = string2Bool(widget.component['utc'])
+                            ? (selectedDate.toUtc().millisecondsSinceEpoch)
+                                  .toString()
+                            : (selectedDate
+                                      .add(
+                                        Duration(
+                                          minutes: selectedDate
+                                              .timeZoneOffset
+                                              .inMinutes,
+                                        ),
+                                      )
+                                      .millisecondsSinceEpoch)
+                                  .toString();
+                      } // end if (isDate)
+                    } // end if value != selectedDate
+                  },
+                  // end of onDateTimeChanged
+                  initialDateTime: selectedDate,
+                  minimumDate: startDate,
+                  maximumDate: endDate,
+                ),
+              );
+            },
+          );
+        } // end of _chooseDate
 
-          Future chooseFromTable(dynamic component, dynamic tableArray) async {
-            // localTable = tableToArray(
-            //     transactionStore.state.screenTx['#TABLE${widget.component['table']}'],
-            //     widget.component['table'],
-            //     widget.component['sort']);
-            String tableCode = autheniumDecode(
-                    normalizeTableName(widget.component['table'])) ??
-                '';
-            localTable = deepCopy2(tableContent[tableCode] ?? []);
-            double contentHeight =
-                ((MediaQuery.of(context).size.height) * 0.7).round() * 1.0;
-            return Get.dialog(AlertDialog(
+        chooseTime(BuildContext context, dynamic component) {
+          txfControllerCheck(widget.scrName, widget.component['position']);
+          txfController[scrName]![widget.component['position']]!.finalData =
+              timeOfDayToGSheet(
+                TimeOfDay(hour: selectedDate.hour, minute: selectedDate.minute),
+                string2Bool(widget.component['utc']),
+              );
+          showCupertinoModalPopup(
+            context: context,
+            builder: (BuildContext builder) {
+              return Container(
+                height: MediaQuery.of(context).copyWith().size.height * 0.25,
+                //color: Theme.of(context).textTheme.bodyText1!.backgroundColor,
+                color: Colors.white,
+                child: CupertinoDatePicker(
+                  mode: CupertinoDatePickerMode.time,
+                  onDateTimeChanged: (value) {
+                    if (value != selectedDate) {
+                      setState(() {
+                        selectedDate = value;
+                        myController.text = DateFormat(
+                          widget.component['format'] == null ||
+                                  widget.component['format'] == ""
+                              ? "k:mm"
+                              : widget.component['format'],
+                        ).format(selectedDate);
+                      }); // end of setState
+                      // txfControllerCheck(
+                      //     widget.scrName, widget.component['position']);
+                      txfController[scrName]![widget.component['position']]!
+                          .finalData = timeOfDayToGSheet(
+                        TimeOfDay(
+                          hour: selectedDate.hour,
+                          minute: selectedDate.minute,
+                        ),
+                        string2Bool(widget.component['utc']),
+                      );
+                    } // end if value != selectedDate
+                  }, // end of onDateTimeChanged
+                  initialDateTime: selectedDate,
+                ),
+              );
+            },
+          );
+        } // end of _chooseTime
+
+        Future chooseContact(BuildContext context) async {
+          // final PhoneContact result =
+          //     await FlutterContactPicker.pickPhoneContact();
+          // todo make a contact picker here
+          myController.text =
+              await chooseContactAndGetPhoneNumber(widget.component['label']) ??
+              '';
+          txfControllerCheck(widget.scrName, widget.component['position']);
+          txfController[scrName]![component['position']]!.finalData =
+              myController.text;
+        } // end of _chooseContact
+
+        Future chooseFromTable(dynamic component, dynamic tableArray) async {
+          // localTable = tableToArray(
+          //     transactionStore.state.screenTx['#TABLE${widget.component['table']}'],
+          //     widget.component['table'],
+          //     widget.component['sort']);
+          String tableCode =
+              autheniumDecode(normalizeTableName(widget.component['table'])) ??
+              '';
+          localTable = deepCopy2(tableContent[tableCode] ?? []);
+          double contentHeight =
+              ((MediaQuery.of(context).size.height) * 0.7).round() * 1.0;
+          return Get.dialog(
+            AlertDialog(
               content: SizedBox(
                 width: double.maxFinite,
                 height: contentHeight, // Specify the height explicitly
@@ -820,282 +915,322 @@ class OtqTxfState extends State<OtqTxf>
                   },
                 ),
               ],
-            )); // end Get.dialog
-          } // end of chooseFromTable
+            ),
+          ); // end Get.dialog
+        } // end of chooseFromTable
 
-          String getSearchContent(String contentSource, String? searchKey) {
-            String res = contentSource;
-            String tableCode = autheniumDecode(
-                    normalizeTableName(widget.component['table'])) ??
-                '';
-            if (searchKey != null &&
-                transactionStore.state.screenTx['#TABLE$tableCode']
-                        [searchKey] !=
-                    null) {
-              // The most concise and readable version for creating a copy of the list.
-              // final elementArray = transactionStore.state
-              //     .screenTx['#TABLE$tableCode'][searchKey] as List<dynamic>;
-              late List<dynamic> elementArray;
-              if (tableType[tableCode] == 'A') {
-                elementArray = [0];
-              } else {
-                elementArray = [];
-              }
-              elementArray.addAll(transactionStore
-                  .state.screenTx['#TABLE$tableCode'][searchKey]);
-              res = replaceMarker(contentSource, elementArray,
-                  widget.component['indexStart'] ?? 0, true);
+        String getSearchContent(String contentSource, String? searchKey) {
+          String res = contentSource;
+          String tableCode =
+              autheniumDecode(normalizeTableName(widget.component['table'])) ??
+              '';
+          if (searchKey != null &&
+              transactionStore.state.screenTx['#TABLE$tableCode'][searchKey] !=
+                  null) {
+            // The most concise and readable version for creating a copy of the list.
+            // final elementArray = transactionStore.state
+            //     .screenTx['#TABLE$tableCode'][searchKey] as List<dynamic>;
+            late List<dynamic> elementArray;
+            if (tableType[tableCode] == 'A') {
+              elementArray = [0];
+            } else {
+              elementArray = [];
             }
-            return res;
-          } // end of getSearchContent
+            elementArray.addAll(
+              transactionStore.state.screenTx['#TABLE$tableCode'][searchKey],
+            );
+            res = replaceMarker(
+              contentSource,
+              elementArray,
+              widget.component['indexStart'] ?? 0,
+              true,
+            );
+          }
+          return res;
+        } // end of getSearchContent
 
-          void txfOnTap() {
-            int indexFactor =
-                (2 - (widget.component['indexStart'] ?? 0)).round();
-            switch (component['variant'].toString().toLowerCase()) {
-              case 'tablesearch':
-                List<String> refArray = [];
-                int mainRef = 0;
-                String? tableContentReference;
-                if (widget.component['tableContentReference'] != null &&
-                    widget.component['tableContentReference'] != '') {
-                  tableContentReference = autheniumDecode(
-                      widget.component['tableContentReference'].toString());
-                  refArray = tableContentReference!.split(blackDiamond);
-                  mainRef = int.tryParse(refArray[0]) ?? 0;
-                } // end if (widget.component['tableContentReference'] != null)
-                chooseFromTable(component, localTable).then((result) {
-                  List<List<int>> resultArray =
-                      refArray.sublist(1).expand((part) {
-                    List<String> subParts = part.split(':');
-                    if (subParts.length == 2) {
-                      int? num1 = int.tryParse(subParts[0]);
-                      int? num2 = int.tryParse(subParts[1]);
-                      if (num1 != null && num2 != null) {
-                        return [
-                          [num1, num2]
-                        ];
-                      }
-                    } // end if (subParts.length == 2)
-                    // If the format is wrong or parsing fails, return an empty list
-                    // to effectively exclude this part from the final result.
-                    return <List<int>>[];
-                  }).toList(); // Convert the result to a List.
-                  String tableCode = autheniumDecode(
-                          normalizeTableName(widget.component['table'])) ??
-                      '';
-                  tableSearchFound = (transactionStore.state
-                          .screenTx['#TABLE$tableCode'][myController.text] !=
-                      null);
-                  final searchKey = myController.text;
-                  List<dynamic> elementArray = [searchKey];
-                  // indexFactor++; // need to advance one more for search key
-
-                  // --- START: MODIFICATION ---
-                  // A list to hold the unique IDs of widgets that need to be updated.
-                  List<String> idsToUpdate = [];
-
-                  if (tableContentReference != null &&
-                      tableContentReference != '' &&
-                      tableSearchFound) {
-                    // get the content from reference table
-                    String tableCode = autheniumDecode(
-                            normalizeTableName(widget.component['table'])) ??
-                        '';
-                    elementArray.addAll(transactionStore
-                        .state.screenTx['#TABLE$tableCode'][searchKey]);
-                    if (tableType[tableCode] == 'A') {
-                      // for array table
-                      indexFactor--;
+        void txfOnTap() {
+          int indexFactor = (2 - (widget.component['indexStart'] ?? 0)).round();
+          switch (component['variant'].toString().toLowerCase()) {
+            case 'tablesearch':
+              List<String> refArray = [];
+              int mainRef = 0;
+              String? tableContentReference;
+              if (widget.component['tableContentReference'] != null &&
+                  widget.component['tableContentReference'] != '') {
+                tableContentReference = autheniumDecode(
+                  widget.component['tableContentReference'].toString(),
+                );
+                refArray = tableContentReference!.split(blackDiamond);
+                mainRef = int.tryParse(refArray[0]) ?? 0;
+              } // end if (widget.component['tableContentReference'] != null)
+              chooseFromTable(component, localTable).then((result) {
+                List<List<int>> resultArray = refArray.sublist(1).expand((
+                  part,
+                ) {
+                  List<String> subParts = part.split(':');
+                  if (subParts.length == 2) {
+                    int? num1 = int.tryParse(subParts[0]);
+                    int? num2 = int.tryParse(subParts[1]);
+                    if (num1 != null && num2 != null) {
+                      return [
+                        [num1, num2],
+                      ];
                     }
+                  } // end if (subParts.length == 2)
+                  // If the format is wrong or parsing fails, return an empty list
+                  // to effectively exclude this part from the final result.
+                  return <List<int>>[];
+                }).toList(); // Convert the result to a List.
+                String tableCode =
+                    autheniumDecode(
+                      normalizeTableName(widget.component['table']),
+                    ) ??
+                    '';
+                tableSearchFound =
+                    (transactionStore
+                        .state
+                        .screenTx['#TABLE$tableCode'][myController.text] !=
+                    null);
+                final searchKey = myController.text;
+                List<dynamic> elementArray = [searchKey];
+                // indexFactor++; // need to advance one more for search key
 
-                    for (List<int> element in resultArray) {
-                      if (element.length == 2) {
-                        int position = element[0];
-                        int index = element[1] + indexFactor;
-                        try {
-                          if (position >= 0) {
-                            txfControllerCheck(widget.scrName, position);
-                            txfController[widget.scrName]![position]!
-                                .controller
-                                .text = elementArray[index].toString();
-                            txfController[widget.scrName]![position]!
-                                .finalData = elementArray[index].toString();
-                            idsToUpdate.add(GeneralGetXController.to
-                                .getWidgetId(widget.scrName, position));
-                            devPrint('$position:$index updated.');
-                          }
-                        } catch (eElement) {
-                          // Error handling for safety
+                // --- START: MODIFICATION ---
+                // A list to hold the unique IDs of widgets that need to be updated.
+                List<String> idsToUpdate = [];
+
+                if (tableContentReference != null &&
+                    tableContentReference != '' &&
+                    tableSearchFound) {
+                  // get the content from reference table
+                  String tableCode =
+                      autheniumDecode(
+                        normalizeTableName(widget.component['table']),
+                      ) ??
+                      '';
+                  elementArray.addAll(
+                    transactionStore
+                        .state
+                        .screenTx['#TABLE$tableCode'][searchKey],
+                  );
+                  if (tableType[tableCode] == 'A') {
+                    // for array table
+                    indexFactor--;
+                  }
+
+                  for (List<int> element in resultArray) {
+                    if (element.length == 2) {
+                      int position = element[0];
+                      int index = element[1] + indexFactor;
+                      try {
+                        if (position >= 0) {
                           txfControllerCheck(widget.scrName, position);
-                          final errorContent =
-                              'Error in $position:$index. in tableContentReference';
                           txfController[widget.scrName]![position]!
                               .controller
-                              .text = errorContent;
-                          devPrint(errorContent);
-                        } // End of try-catch
-                      } // end if (element.length == 2
-                    } // end for (List<int> element in resultArray
-                  } // end if (tableContentReference != null
-
-                  // After updating all controllers, explicitly notify GetBuilder
-                  // for all target widgets to force a UI refresh.
-                  if (idsToUpdate.isNotEmpty) {
-                    GeneralGetXController.to.update(idsToUpdate);
-                  }
-                  // --- END: MODIFICATION ---
-                  if (mounted) {
-                    // Update the state for THIS widget (W1)
-                    setState(() {
-                      searchContent = getSearchContent(
-                          searchContentBase, myController.text);
-                      String contentResult = atiCode;
-                      if (tableSearchFound) {
-                        txfController[widget.scrName]![
-                                widget.component['position']]!
-                            .finalData = myController.text;
-                        var content = transactionStore.state
-                            .screenTx['#TABLE$tableCode'][myController.text];
-                        for (dynamic e in content) {
-                          if (contentResult != atiCode) {
-                            contentResult += separator[6];
-                          }
-                          try {
-                            contentResult += e.toString();
-                          } catch (err) {
-                            // do nothing
-                          }
+                              .text = elementArray[index]
+                              .toString();
+                          txfController[widget.scrName]![position]!.finalData =
+                              elementArray[index].toString();
+                          idsToUpdate.add(
+                            GeneralGetXController.to.getWidgetId(
+                              widget.scrName,
+                              position,
+                            ),
+                          );
+                          devPrint('$position:$index updated.');
                         }
-                      } else {
-                        try {
-                          contentResult += separator[6] *
-                              getNumberOfField(tableHeader[tableCode]);
-                        } catch (e) {
+                      } catch (eElement) {
+                        // Error handling for safety
+                        txfControllerCheck(widget.scrName, position);
+                        final errorContent =
+                            'Error in $position:$index. in tableContentReference';
+                        txfController[widget.scrName]![position]!
+                                .controller
+                                .text =
+                            errorContent;
+                        devPrint(errorContent);
+                      } // End of try-catch
+                    } // end if (element.length == 2
+                  } // end for (List<int> element in resultArray
+                } // end if (tableContentReference != null
+
+                // After updating all controllers, explicitly notify GetBuilder
+                // for all target widgets to force a UI refresh.
+                if (idsToUpdate.isNotEmpty) {
+                  GeneralGetXController.to.update(idsToUpdate);
+                }
+                // --- END: MODIFICATION ---
+                if (mounted) {
+                  // Update the state for THIS widget (W1)
+                  setState(() {
+                    searchContent = getSearchContent(
+                      searchContentBase,
+                      myController.text,
+                    );
+                    String contentResult = atiCode;
+                    if (tableSearchFound) {
+                      txfController[widget.scrName]![widget
+                                  .component['position']]!
+                              .finalData =
+                          myController.text;
+                      var content = transactionStore
+                          .state
+                          .screenTx['#TABLE$tableCode'][myController.text];
+                      for (dynamic e in content) {
+                        if (contentResult != atiCode) {
                           contentResult += separator[6];
                         }
+                        try {
+                          contentResult += e.toString();
+                        } catch (err) {
+                          // do nothing
+                        }
                       }
-                      if (mainRef > 0) {
-                        txfControllerCheck(widget.scrName, mainRef);
-                        txfController[widget.scrName]![mainRef]!.finalData =
-                            contentResult;
+                    } else {
+                      try {
+                        contentResult +=
+                            separator[6] *
+                            getNumberOfField(tableHeader[tableCode]);
+                      } catch (e) {
+                        contentResult += separator[6];
                       }
-                    }); // End of setState for W1
-                  } // End of if(mounted)
-                });
-                break;
+                    }
+                    if (mainRef > 0) {
+                      txfControllerCheck(widget.scrName, mainRef);
+                      txfController[widget.scrName]![mainRef]!.finalData =
+                          contentResult;
+                    }
+                  }); // End of setState for W1
+                } // End of if(mounted)
+              });
+              break;
 
-              case 'time':
-                chooseTime(context, component);
-                break;
+            case 'time':
+              chooseTime(context, component);
+              break;
 
-              case 'date':
-                chooseDate(context, myController.text, component);
-                break;
+            case 'date':
+              chooseDate(context, myController.text, component);
+              break;
 
-              case 'datetime':
-                chooseDate(context, myController.text, component);
-                break;
+            case 'datetime':
+              chooseDate(context, myController.text, component);
+              break;
 
-              case 'barcode1': // should barcode1
-                scan1();
-                break;
+            case 'barcode1': // should barcode1
+              scan1();
+              break;
 
-              case 'barcode2':
-                scan2();
-                break;
+            case 'barcode2':
+              scan2();
+              break;
 
-              case 'barcode3':
-                scan1();
-                break;
-            } // end switch (component['variant'].toString().toLowerCase())
-          } // end of txfOnTap
+            case 'barcode3':
+              scan1();
+              break;
+          } // end switch (component['variant'].toString().toLowerCase())
+        } // end of txfOnTap
 
-          try {
-            late Widget element;
-            TextInputType kbType = TextInputType.text;
-            String variant =
-                (component['variant'] ?? emptyString).toString().toLowerCase();
-            if (variant == 'date' ||
-                variant == 'datetime' ||
-                variant == 'time') {
-              kbType = TextInputType.none;
-            } else if (variant == 'numeric' ||
-                variant == 'creditcardnumber' ||
-                variant == 'creditcardexpire' ||
-                variant == 'money') {
-              // kbType = TextInputType.number;
-              kbType = TextInputType.numberWithOptions(decimal: true);
-            } else if (variant == 'contact') {
-              kbType = TextInputType.number;
-            } else if (variant == 'pin') {
-              kbType = TextInputType.number;
-              obscure = true;
-            } else if (variant == 'password') {
-              kbType = TextInputType.text;
-              obscure = true;
-            } else {
-              kbType = TextInputType.text;
-            }
+        try {
+          late Widget element;
+          TextInputType kbType = TextInputType.text;
+          String variant = (component['variant'] ?? emptyString)
+              .toString()
+              .toLowerCase();
+          if (variant == 'date' || variant == 'datetime' || variant == 'time') {
+            kbType = TextInputType.none;
+          } else if (variant == 'numeric' ||
+              variant == 'creditcardnumber' ||
+              variant == 'creditcardexpire' ||
+              variant == 'money') {
+            // kbType = TextInputType.number;
+            kbType = TextInputType.numberWithOptions(decimal: true);
+          } else if (variant == 'contact') {
+            kbType = TextInputType.number;
+          } else if (variant == 'pin') {
+            kbType = TextInputType.number;
+            obscure = true;
+          } else if (variant == 'password') {
+            kbType = TextInputType.text;
+            obscure = true;
+          } else {
+            kbType = TextInputType.text;
+          }
 
-            Widget radioSelection = radioOption[0] == emptyString
-                ? Container()
-                : RadioGroup<String>.builder(
-                    groupValue: _picked ?? "",
-                    direction: radioAxis,
-                    horizontalAlignment:
-                        mainAlignmentConst(widget.component['alignment']),
-                    onChanged: isEnabled
-                        ? (value) => setState(() {
-                              setState(() {
-                                _picked = value;
-                                txfController[widget.scrName]![
-                                        widget.component['position']]!
+          Widget radioSelection = radioOption[0] == emptyString
+              ? Container()
+              : RadioGroup<String>.builder(
+                  groupValue: _picked ?? "",
+                  direction: radioAxis,
+                  horizontalAlignment: mainAlignmentConst(
+                    widget.component['alignment'],
+                  ),
+                  onChanged: isEnabled
+                      ? (value) => setState(() {
+                          setState(() {
+                            _picked = value;
+                            txfController[widget.scrName]![widget
+                                        .component['position']]!
                                     .controller
-                                    .text = _picked ?? "";
-                                myController.text = value ?? "";
-                              });
-                              txfControllerCheck(
-                                  widget.scrName, widget.component['position']);
-                              txfController[widget.scrName]![
-                                      widget.component['position']]!
-                                  .finalData = _picked ?? "";
-                            })
-                        : null,
-                    items: radioOption,
-                    itemBuilder: (item) => RadioButtonBuilder(
-                      item,
-                      textPosition: ((radioAxis == Axis.vertical) &&
-                              radioAlignment == MainAxisAlignment.end)
-                          ? RadioButtonTextPosition.left
-                          : RadioButtonTextPosition.right,
-                    ),
-                  );
-            result = Builder(
-              builder: (BuildContext context) {
-                Widget txf;
-                String cValueString =
-                    (widget.component['currentValue'] ?? "").toString();
-                if (widget.component['variant'] == 'static' &&
-                    cValueString.length >= 7 &&
-                    cValueString.substring(0, 7) == "_u2605_") {
-                  // if static and subtotal type (star in currentValue)
-                  List<dynamic> valueArray = getTotalValueFormatted();
-                  myController.text = (widget.component['line'] == null ||
-                          widget.component['line'] <= 1)
-                      ? (valueArray[1]).replaceAll("\n", " ")
-                      : valueArray[1];
-                  txfControllerCheck(
-                      widget.scrName, widget.component['position']);
-                  txfController[widget.scrName]![widget.component['position']]!
-                      .finalData = valueArray[0];
-                } // end if (widget.component['variant']== 'static')
-                try {
-                  txf = Container(
-                    margin: EdgeInsets.only(top: margin[0], bottom: margin[1]),
-                    padding: EdgeInsets.fromLTRB(widget.lPad + margin[2],
-                        widget.tPad, widget.rPad + margin[3], widget.bPad),
-                    child: Column(children: <Widget>[
+                                    .text =
+                                _picked ?? "";
+                            myController.text = value ?? "";
+                          });
+                          txfControllerCheck(
+                            widget.scrName,
+                            widget.component['position'],
+                          );
+                          txfController[widget.scrName]![widget
+                                      .component['position']]!
+                                  .finalData =
+                              _picked ?? "";
+                        })
+                      : null,
+                  items: radioOption,
+                  itemBuilder: (item) => RadioButtonBuilder(
+                    item,
+                    textPosition:
+                        ((radioAxis == Axis.vertical) &&
+                            radioAlignment == MainAxisAlignment.end)
+                        ? RadioButtonTextPosition.left
+                        : RadioButtonTextPosition.right,
+                  ),
+                );
+          result = Builder(
+            builder: (BuildContext context) {
+              Widget txf;
+              String cValueString = (widget.component['currentValue'] ?? "")
+                  .toString();
+              if (widget.component['variant'] == 'static' &&
+                  cValueString.length >= 7 &&
+                  cValueString.substring(0, 7) == "_u2605_") {
+                // if static and subtotal type (star in currentValue)
+                List<dynamic> valueArray = getTotalValueFormatted();
+                myController.text =
+                    (widget.component['line'] == null ||
+                        widget.component['line'] <= 1)
+                    ? (valueArray[1]).replaceAll("\n", " ")
+                    : valueArray[1];
+                txfControllerCheck(
+                  widget.scrName,
+                  widget.component['position'],
+                );
+                txfController[widget.scrName]![widget.component['position']]!
+                        .finalData =
+                    valueArray[0];
+              } // end if (widget.component['variant']== 'static')
+              try {
+                txf = Container(
+                  margin: EdgeInsets.only(top: margin[0], bottom: margin[1]),
+                  padding: EdgeInsets.fromLTRB(
+                    widget.lPad + margin[2],
+                    widget.tPad,
+                    widget.rPad + margin[3],
+                    widget.bPad,
+                  ),
+                  child: Column(
+                    children: <Widget>[
                       (widget.component['fieldPosition'] ?? 'bottom')
                                   .toString()
                                   .toLowerCase() ==
@@ -1105,60 +1240,78 @@ class OtqTxfState extends State<OtqTxf>
                       TextFormField(
                         key: txfKey,
                         controller: myController,
-                        keyboardType: (component['line'] == null ||
+                        keyboardType:
+                            (component['line'] == null ||
                                 component['line'] <= 1)
                             ? kbType
                             : TextInputType.multiline,
                         obscureText: obscure,
-                        enabled: editable &&
+                        enabled:
+                            editable &&
                             isEnabled, // MODIFIED: Combine editable with isEnabled
                         inputFormatters: tiFormatter,
                         onTap: txfOnTap,
                         onChanged: (value) async {
                           txfControllerCheck(
-                              widget.scrName, widget.component['position']);
+                            widget.scrName,
+                            widget.component['position'],
+                          );
                           String variant = (widget.component['variant'] ?? '')
                               .toString()
                               .trim()
                               .toLowerCase();
                           if (variant == 'creditcardexpire') {
-                            txfController[widget.scrName]![
-                                    widget.component['position']]!
-                                .finalData = exp2Epoch(value).toString();
+                            txfController[widget.scrName]![widget
+                                    .component['position']]!
+                                .finalData = exp2Epoch(
+                              value,
+                            ).toString();
                           } else if (variant == 'qrscan') {
-                            txfController[widget.scrName]![
-                                    widget.component['position']]!
-                                .finalData = value.toString();
+                            txfController[widget.scrName]![widget
+                                    .component['position']]!
+                                .finalData = value
+                                .toString();
                             if (widget.component['locationNamePosition'] !=
                                     null &&
                                 widget.component['locationNamePosition']
                                         .toString()
                                         .trim() !=
                                     '') {
-                              txfControllerCheck(widget.scrName,
-                                  widget.component['locationNamePosition']);
-                              txfController[widget.scrName]![
-                                      widget.component['locationNamePosition']]!
-                                  .finalData = value.toString();
+                              txfControllerCheck(
+                                widget.scrName,
+                                widget.component['locationNamePosition'],
+                              );
+                              txfController[widget.scrName]![widget
+                                      .component['locationNamePosition']]!
+                                  .finalData = value
+                                  .toString();
                             } // end if (widget.component['locationNamePosition'] != null
                           } else if (variant == 'static') {
                             // do nothing
                           } else {
-                            txfController[widget.scrName]![
-                                        widget.component['position']]!
-                                    .finalData =
-                                numericCleanUp(formatArray, myController.text);
+                            txfController[widget.scrName]![widget
+                                    .component['position']]!
+                                .finalData = numericCleanUp(
+                              formatArray,
+                              myController.text,
+                            );
                             if (variant == 'tablesearch') {
                               setState(() {
-                                String tableCode = autheniumDecode(
-                                        normalizeTableName(
-                                            widget.component['table'])) ??
+                                String tableCode =
+                                    autheniumDecode(
+                                      normalizeTableName(
+                                        widget.component['table'],
+                                      ),
+                                    ) ??
                                     '';
-                                if (transactionStore.state
+                                if (transactionStore
+                                        .state
                                         .screenTx['#TABLE$tableCode'][value] !=
                                     null) {
                                   searchContent = getSearchContent(
-                                      searchContentBase, value);
+                                    searchContentBase,
+                                    value,
+                                  );
                                   tableSearchFound = true;
                                 } else {
                                   tableSearchFound = false;
@@ -1168,33 +1321,36 @@ class OtqTxfState extends State<OtqTxf>
                           }
                         },
                         //end of onChanged
-                        minLines: (component['line'] == null ||
+                        minLines:
+                            (component['line'] == null ||
                                 component['line'] <= 1)
                             ? 1
                             : component['line'],
-                        maxLines: (component['line'] == null ||
+                        maxLines:
+                            (component['line'] == null ||
                                 component['line'] <= 1)
                             ? 1
                             : component['line'],
                         decoration: InputDecoration(
                           prefixIcon: component['icon'].toString().isNotEmpty
-                              ? Icon(
-                                  otqIcons[component['icon'].toString()],
-                                )
+                              ? Icon(otqIcons[component['icon'].toString()])
                               : null,
                           // hintText: hintStr,
                           hintText: hintStr,
                           labelText: labelStr,
-                          border: (component['border'] == null ||
+                          border:
+                              (component['border'] == null ||
                                   component['border']
                                           .toString()
                                           .toLowerCase() ==
                                       'false')
                               ? const UnderlineInputBorder()
                               : const OutlineInputBorder(
-                                  borderRadius:
-                                      BorderRadius.all(Radius.circular(4)),
-                                  borderSide: BorderSide()),
+                                  borderRadius: BorderRadius.all(
+                                    Radius.circular(4),
+                                  ),
+                                  borderSide: BorderSide(),
+                                ),
                         ),
                         style: TextStyle(
                           color: (component['color'] ?? 'default') != 'default'
@@ -1202,12 +1358,11 @@ class OtqTxfState extends State<OtqTxf>
                               : Theme.of(context).textTheme.bodyLarge!.color,
                           backgroundColor:
                               (component['background'] ?? 'default') !=
-                                      'default'
-                                  ? Color(int.parse(component['background']))
-                                  : Theme.of(context)
-                                      .textTheme
-                                      .bodyLarge!
-                                      .backgroundColor,
+                                  'default'
+                              ? Color(int.parse(component['background']))
+                              : Theme.of(
+                                  context,
+                                ).textTheme.bodyLarge!.backgroundColor,
                           fontWeight: style[0],
                           fontStyle: style[1],
                           decoration: style[2],
@@ -1221,40 +1376,390 @@ class OtqTxfState extends State<OtqTxf>
                               'bottom'
                           ? Container()
                           : radioSelection,
-                    ]),
+                    ],
+                  ),
+                );
+              } catch (eTxf) {
+                txf = Text("-- TXF -- $scrName, $txfKey : ${eTxf.toString()}");
+              }
+              bool errorHappened = false;
+              switch (component['variant'].toString().toLowerCase()) {
+                case 'contact':
+                  element = Row(
+                    children: <Widget>[
+                      Expanded(child: txf),
+                      IconButton(
+                        icon: Icon(
+                          otqIcons[component['buttonIcon'] ?? 'contact_page'],
+                          size: 8.0 + (component['size'] ?? 16.0),
+                        ),
+                        tooltip: 'Contact',
+                        onPressed: isEnabled
+                            ? () => chooseContact(context)
+                            : null, // MODIFIED
+                      ),
+                    ],
                   );
-                } catch (eTxf) {
-                  txf =
-                      Text("-- TXF -- $scrName, $txfKey : ${eTxf.toString()}");
-                }
-                bool errorHappened = false;
-                switch (component['variant'].toString().toLowerCase()) {
-                  case 'contact':
+                  break;
+
+                case 'tablesearch':
+                  element = Row(
+                    children: <Widget>[
+                      Expanded(child: txf),
+                      IconButton(
+                        icon: Icon(
+                          otqIcons[component['buttonIcon'] ?? 'flare'],
+                          size: 8.0 + (component['size'] ?? 16.0),
+                        ),
+                        tooltip: 'Scan',
+                        onPressed: isEnabled
+                            ? () async {
+                                // MODIFIED
+                                if (!await dataOk(context)) {
+                                  setState(() {
+                                    myController.text = lastValue ?? "";
+                                  });
+                                } else {
+                                  if (txfController[scrName] != null &&
+                                      txfController[scrName]![component['position']] !=
+                                          null) {
+                                    lastValue = myController.text;
+                                  }
+                                  actionLock('tableSearch otq_txf');
+                                  String? rawQRText = await takeQR(
+                                    context,
+                                    textArray.length > 3
+                                        ? textArray[3]
+                                        : 'Scan QR',
+                                    scrName,
+                                    component,
+                                    'txt',
+                                  );
+                                  if (rawQRText != null &&
+                                      rawQRText != emptyString &&
+                                      rawQRText != 'null') {
+                                    String qrResult = (await getQRContent(
+                                      qrType,
+                                      rawQRText,
+                                      gpsPosition,
+                                      component['table'],
+                                      component['refTableNegative'],
+                                      [],
+                                    )).toString();
+                                    String errorMessage = '';
+                                    if (qrResult.substring(0, 6) ==
+                                        textList["ErrorPrefix"]) {
+                                      errorHappened = true;
+                                      switch (qrResult.substring(6, 8)) {
+                                        case '01': //out of range
+                                          errorMessage = textArray.length > 9
+                                              ? textArray[9]
+                                              : textList['GPSOutOfRange'];
+                                          break;
+
+                                        case '02': // no qr result
+                                          errorMessage = textArray.length > 11
+                                              ? textArray[11]
+                                              : textList["QRError"];
+                                          break;
+
+                                        case '05': //user not in list
+                                          errorMessage = textArray.length > 8
+                                              ? textArray[8]
+                                              : textList['QRNotListed2'];
+                                          break;
+
+                                        case '98': //qr not recognized
+                                          errorMessage = textArray.length > 10
+                                              ? textArray[10]
+                                              : textList['QRError'];
+                                          break;
+
+                                        default:
+                                          errorMessage =
+                                              textList['GeneralError'];
+                                      } // end switch (qrResult.substring(6, 8))
+                                      // qrResult += ' $errorMessage';
+                                      qrResult = errorMessage;
+                                    } // end if (qrResult.substring(0,6)
+                                    setState(() {
+                                      dynamic refTable = {};
+                                      bool table = false;
+                                      String tableCode =
+                                          autheniumDecode(
+                                            normalizeTableName(
+                                              widget.component['table'],
+                                            ),
+                                          ) ??
+                                          '';
+                                      if (tableCode.toString().isEmpty) {
+                                        if (qrType == 'L') {
+                                          refTable = transactionStore
+                                              .state
+                                              .screenTx['#LQR_LIST'];
+                                        }
+                                        table = false;
+                                      } else {
+                                        refTable = transactionStore
+                                            .state
+                                            .screenTx['#TABLE$tableCode'];
+                                        table = true;
+                                      }
+                                      if (qrType == 'L') {
+                                        if (errorHappened) {
+                                          myController.text = qrResult;
+                                        } else {
+                                          myController.text =
+                                              (table
+                                                      ? refTable[qrResult][2]
+                                                      : refTable[qrResult][0])
+                                                  .toString(); // location name
+                                        } // end if (qrResult.substring(0, 6)
+                                      } else if (qrType == 'U') {
+                                        myController.text = qrResult; // vid
+                                      } else {
+                                        myController.text = qrResult;
+                                      } // end if (widget.component['qr'] == 'lqr')
+                                      txfController[widget
+                                                  .scrName]![component['position']]!
+                                              .finalData =
+                                          qrResult;
+                                      if (refTable[qrResult] != null) {
+                                        searchContent = getSearchContent(
+                                          searchContentBase,
+                                          qrResult,
+                                        );
+                                        tableSearchFound = true;
+                                        if (!errorHappened) {
+                                          List<String> refArray = [];
+                                          int mainRef = 0;
+                                          String? tableContentReference;
+                                          if (component['tableContentReference'] !=
+                                                  null &&
+                                              component['tableContentReference'] !=
+                                                  '') {
+                                            tableContentReference = autheniumDecode(
+                                              widget
+                                                  .component['tableContentReference']
+                                                  .toString(),
+                                            );
+                                            refArray = tableContentReference!
+                                                .split(blackDiamond);
+                                            mainRef =
+                                                int.tryParse(refArray[0]) ?? 0;
+                                            var content = refTable[qrResult];
+                                            // String contentResult = '';
+                                            String contentResult = atiCode;
+                                            for (dynamic e in content) {
+                                              if (contentResult != atiCode) {
+                                                contentResult += separator[6];
+                                              } // end if (contentResult != '')
+                                              try {
+                                                contentResult += e.toString();
+                                              } catch (err) {
+                                                // do nothing
+                                              }
+                                            } // end for (dynamic e in content)
+                                            if (mainRef > 0) {
+                                              txfControllerCheck(
+                                                widget.scrName,
+                                                mainRef,
+                                              );
+                                              txfController[widget
+                                                          .scrName]![mainRef]!
+                                                      .finalData =
+                                                  contentResult;
+                                            }
+                                            List<dynamic> elementArray = [
+                                              qrResult,
+                                            ];
+                                            elementArray.addAll(
+                                              transactionStore
+                                                  .state
+                                                  .screenTx['#TABLE$tableCode'][qrResult],
+                                            );
+                                            List<List<int>>
+                                            resultArray = refArray.sublist(1).expand((
+                                              part,
+                                            ) {
+                                              // Each part is split by ':'
+                                              List<String> subParts = part
+                                                  .split(':');
+                                              // Ensure the part has exactly two components after splitting.
+                                              if (subParts.length == 2) {
+                                                // Try to parse both components into integers.
+                                                int? num1 = int.tryParse(
+                                                  subParts[0],
+                                                );
+                                                int? num2 = int.tryParse(
+                                                  subParts[1],
+                                                );
+                                                // If both parsing attempts are successful, return the pair
+                                                // wrapped in a list for the expand method.
+                                                if (num1 != null &&
+                                                    num2 != null) {
+                                                  return [
+                                                    [num1, num2],
+                                                  ];
+                                                }
+                                              } // end if (subParts.length == 2)
+                                              // If the format is wrong or parsing fails, return an empty list
+                                              // to effectively exclude this part from the final result.
+                                              return <List<int>>[];
+                                            }).toList(); // Convert the result to a List.
+                                            for (List<int> element
+                                                in resultArray) {
+                                              if (element.length == 2) {
+                                                int position = element[0];
+                                                int index = element[1];
+                                                List<String> idsToUpdate = [];
+                                                try {
+                                                  if (position >= 0) {
+                                                    txfControllerCheck(
+                                                      widget.scrName,
+                                                      position,
+                                                    );
+                                                    // Update the controller's text for the target widget (e.g., W2, W3)
+                                                    txfController[widget
+                                                            .scrName]![position]!
+                                                        .controller
+                                                        .text = elementArray[index]
+                                                        .toString();
+                                                    // Update the final data as well
+                                                    txfController[widget
+                                                                .scrName]![position]!
+                                                            .finalData =
+                                                        elementArray[index]
+                                                            .toString();
+
+                                                    // Add the target widget's ID to our notification list.
+                                                    idsToUpdate.add(
+                                                      GeneralGetXController.to
+                                                          .getWidgetId(
+                                                            widget.scrName,
+                                                            position,
+                                                          ),
+                                                    );
+
+                                                    devPrint(
+                                                      '$position:$index updated.',
+                                                    );
+                                                  }
+                                                } catch (eElement) {
+                                                  // Error handling for safety
+                                                  txfControllerCheck(
+                                                    widget.scrName,
+                                                    position,
+                                                  );
+                                                  final errorContent =
+                                                      'Error in $position:$index. in tableContentReference';
+                                                  txfController[widget
+                                                              .scrName]![position]!
+                                                          .controller
+                                                          .text =
+                                                      errorContent;
+                                                  devPrint(errorContent);
+                                                } // End of try-catch
+                                                if (idsToUpdate.isNotEmpty) {
+                                                  GeneralGetXController.to
+                                                      .update(idsToUpdate);
+                                                }
+                                              } // end if (element.length == 2
+                                            } // end for (List<int> element in resultArray
+                                          } // end if (component['tableContentReference'] != null
+                                        } // end if (!errorHappend)
+                                      } else {
+                                        tableSearchFound = false;
+                                      } // end if (transactionStore.state.screenTx
+                                    });
+                                  } // end if (rawQRText != null && rawQRText != emptyString
+                                  setDataOK(
+                                    '2',
+                                  ); // reload pages and display green status.
+                                } // end if !transactionStore.state.screenTx['#DATA_OK']
+                              }
+                            : null,
+                      ),
+                    ],
+                  );
+                  if (searchDisplayType == 'text1') {
+                    element = Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        element,
+                        !tableSearchFound
+                            ? Container()
+                            : Container(
+                                margin: EdgeInsets.only(
+                                  top: margin[0],
+                                  bottom: margin[1],
+                                ),
+                                padding: EdgeInsets.fromLTRB(
+                                  widget.lPad + margin[2],
+                                  widget.tPad,
+                                  widget.rPad + margin[3],
+                                  widget.bPad,
+                                ),
+                                child: Text(
+                                  searchContent,
+                                  softWrap: true,
+                                  style: TextStyle(
+                                    color:
+                                        (component['color'] ?? 'default') !=
+                                            'default'
+                                        ? Color(int.parse(component['color']))
+                                        : Theme.of(
+                                            context,
+                                          ).textTheme.bodyLarge!.color,
+                                    backgroundColor:
+                                        (component['background'] ??
+                                                'default') !=
+                                            'default'
+                                        ? Color(
+                                            int.parse(component['background']),
+                                          )
+                                        : Theme.of(context)
+                                              .textTheme
+                                              .bodyLarge!
+                                              .backgroundColor,
+                                    fontWeight: style[0],
+                                    fontStyle: style[1],
+                                    decoration: style[2],
+                                    fontSize:
+                                        0.0 +
+                                        (int.parse(
+                                          (component['size'] ?? 16).toString(),
+                                        )),
+                                  ),
+                                ),
+                              ),
+                      ],
+                    );
+                  } // end if (searchDisplayType == 'text1')
+                  break;
+
+                case 'barcode1': // should barcode1
+                  {
                     element = Row(
                       children: <Widget>[
-                        Expanded(
-                          child: txf,
-                        ),
+                        Expanded(child: txf),
                         IconButton(
-                          icon: Icon(
-                            otqIcons[component['buttonIcon'] ?? 'contact_page'],
-                            size: 8.0 + (component['size'] ?? 16.0),
-                          ),
-                          tooltip: 'Contact',
+                          icon: const Icon(Icons.flare),
+                          tooltip: 'Scan',
                           onPressed: isEnabled
-                              ? () => chooseContact(context)
+                              ? () => scan1()
                               : null, // MODIFIED
                         ),
                       ],
                     );
-                    break;
+                  }
+                  break;
 
-                  case 'tablesearch':
+                case 'qrscan':
+                  {
                     element = Row(
                       children: <Widget>[
-                        Expanded(
-                          child: txf,
-                        ),
+                        Expanded(child: txf),
                         IconButton(
                           icon: Icon(
                             otqIcons[component['buttonIcon'] ?? 'flare'],
@@ -1270,436 +1775,112 @@ class OtqTxfState extends State<OtqTxf>
                                     });
                                   } else {
                                     if (txfController[scrName] != null &&
-                                        txfController[scrName]![
-                                                component['position']] !=
+                                        txfController[scrName]![component['position']] !=
                                             null) {
                                       lastValue = myController.text;
                                     }
-                                    actionLock('tableSearch otq_txf');
-                                    String? rawQRText = await takeQR(
-                                        context,
-                                        textArray.length > 3
-                                            ? textArray[3]
-                                            : 'Scan QR',
-                                        scrName,
-                                        component,
-                                        'txt');
-                                    if (rawQRText != null &&
-                                        rawQRText != emptyString &&
-                                        rawQRText != 'null') {
-                                      String qrResult = (await getQRContent(
-                                              qrType,
-                                              rawQRText,
-                                              gpsPosition,
-                                              component['table'],
-                                              component['refTableNegative'],
-                                              []))
-                                          .toString();
-                                      String errorMessage = '';
-                                      if (qrResult.substring(0, 6) ==
-                                          textList["ErrorPrefix"]) {
-                                        errorHappened = true;
-                                        switch (qrResult.substring(6, 8)) {
-                                          case '01': //out of range
-                                            errorMessage = textArray.length > 9
-                                                ? textArray[9]
-                                                : textList['GPSOutOfRange'];
-                                            break;
-
-                                          case '02': // no qr result
-                                            errorMessage = textArray.length > 11
-                                                ? textArray[11]
-                                                : textList["QRError"];
-                                            break;
-
-                                          case '05': //user not in list
-                                            errorMessage = textArray.length > 8
-                                                ? textArray[8]
-                                                : textList['QRNotListed2'];
-                                            break;
-
-                                          case '98': //qr not recognized
-                                            errorMessage = textArray.length > 10
-                                                ? textArray[10]
-                                                : textList['QRError'];
-                                            break;
-
-                                          default:
-                                            errorMessage =
-                                                textList['GeneralError'];
-                                        } // end switch (qrResult.substring(6, 8))
-                                        // qrResult += ' $errorMessage';
-                                        qrResult = errorMessage;
-                                      } // end if (qrResult.substring(0,6)
-                                      setState(() {
-                                        dynamic refTable = {};
-                                        bool table = false;
-                                        String tableCode = autheniumDecode(
-                                                normalizeTableName(widget
-                                                    .component['table'])) ??
-                                            '';
-                                        if (tableCode.toString().isEmpty) {
-                                          if (qrType == 'L') {
-                                            refTable = transactionStore
-                                                .state.screenTx['#LQR_LIST'];
-                                          }
-                                          table = false;
-                                        } else {
-                                          refTable = transactionStore.state
-                                              .screenTx['#TABLE$tableCode'];
-                                          table = true;
-                                        }
-                                        if (qrType == 'L') {
-                                          if (errorHappened) {
-                                            myController.text = qrResult;
-                                          } else {
-                                            myController.text = (table
-                                                    ? refTable[qrResult][2]
-                                                    : refTable[qrResult][0])
-                                                .toString(); // location name
-                                          } // end if (qrResult.substring(0, 6)
-                                        } else if (qrType == 'U') {
-                                          myController.text = qrResult; // vid
-                                        } else {
-                                          myController.text = qrResult;
-                                        } // end if (widget.component['qr'] == 'lqr')
-                                        txfController[widget.scrName]![
-                                                component['position']]!
-                                            .finalData = qrResult;
-                                        if (refTable[qrResult] != null) {
-                                          searchContent = getSearchContent(
-                                              searchContentBase, qrResult);
-                                          tableSearchFound = true;
-                                          if (!errorHappened) {
-                                            List<String> refArray = [];
-                                            int mainRef = 0;
-                                            String? tableContentReference;
-                                            if (component[
-                                                        'tableContentReference'] !=
-                                                    null &&
-                                                component[
-                                                        'tableContentReference'] !=
-                                                    '') {
-                                              tableContentReference =
-                                                  autheniumDecode(widget
-                                                      .component[
-                                                          'tableContentReference']
-                                                      .toString());
-                                              refArray = tableContentReference!
-                                                  .split(blackDiamond);
-                                              mainRef =
-                                                  int.tryParse(refArray[0]) ??
-                                                      0;
-                                              var content = refTable[qrResult];
-                                              // String contentResult = '';
-                                              String contentResult = atiCode;
-                                              for (dynamic e in content) {
-                                                if (contentResult != atiCode) {
-                                                  contentResult += separator[6];
-                                                } // end if (contentResult != '')
-                                                try {
-                                                  contentResult += e.toString();
-                                                } catch (err) {
-                                                  // do nothing
-                                                }
-                                              } // end for (dynamic e in content)
-                                              if (mainRef > 0) {
-                                                txfControllerCheck(
-                                                    widget.scrName, mainRef);
-                                                txfController[widget.scrName]![
-                                                        mainRef]!
-                                                    .finalData = contentResult;
-                                              }
-                                              List<dynamic> elementArray = [
-                                                qrResult
-                                              ];
-                                              elementArray.addAll(
-                                                  transactionStore
-                                                              .state.screenTx[
-                                                          '#TABLE$tableCode']
-                                                      [qrResult]);
-                                              List<List<int>> resultArray =
-                                                  refArray
-                                                      .sublist(1)
-                                                      .expand((part) {
-                                                // Each part is split by ':'
-                                                List<String> subParts =
-                                                    part.split(':');
-                                                // Ensure the part has exactly two components after splitting.
-                                                if (subParts.length == 2) {
-                                                  // Try to parse both components into integers.
-                                                  int? num1 =
-                                                      int.tryParse(subParts[0]);
-                                                  int? num2 =
-                                                      int.tryParse(subParts[1]);
-                                                  // If both parsing attempts are successful, return the pair
-                                                  // wrapped in a list for the expand method.
-                                                  if (num1 != null &&
-                                                      num2 != null) {
-                                                    return [
-                                                      [num1, num2]
-                                                    ];
-                                                  }
-                                                } // end if (subParts.length == 2)
-                                                // If the format is wrong or parsing fails, return an empty list
-                                                // to effectively exclude this part from the final result.
-                                                return <List<int>>[];
-                                              }).toList(); // Convert the result to a List.
-                                              for (List<int> element
-                                                  in resultArray) {
-                                                if (element.length == 2) {
-                                                  int position = element[0];
-                                                  int index = element[1];
-                                                  List<String> idsToUpdate = [];
-                                                  try {
-                                                    if (position >= 0) {
-                                                      txfControllerCheck(
-                                                          widget.scrName,
-                                                          position);
-                                                      // Update the controller's text for the target widget (e.g., W2, W3)
-                                                      txfController[widget
-                                                                  .scrName]![
-                                                              position]!
-                                                          .controller
-                                                          .text = elementArray[
-                                                              index]
-                                                          .toString();
-                                                      // Update the final data as well
-                                                      txfController[widget
-                                                                      .scrName]![
-                                                                  position]!
-                                                              .finalData =
-                                                          elementArray[index]
-                                                              .toString();
-
-                                                      // Add the target widget's ID to our notification list.
-                                                      idsToUpdate.add(
-                                                          GeneralGetXController
-                                                              .to
-                                                              .getWidgetId(
-                                                                  widget
-                                                                      .scrName,
-                                                                  position));
-
-                                                      devPrint(
-                                                          '$position:$index updated.');
-                                                    }
-                                                  } catch (eElement) {
-                                                    // Error handling for safety
-                                                    txfControllerCheck(
-                                                        widget.scrName,
-                                                        position);
-                                                    final errorContent =
-                                                        'Error in $position:$index. in tableContentReference';
-                                                    txfController[widget
-                                                                .scrName]![
-                                                            position]!
-                                                        .controller
-                                                        .text = errorContent;
-                                                    devPrint(errorContent);
-                                                  } // End of try-catch
-                                                  if (idsToUpdate.isNotEmpty) {
-                                                    GeneralGetXController.to
-                                                        .update(idsToUpdate);
-                                                  }
-                                                } // end if (element.length == 2
-                                              } // end for (List<int> element in resultArray
-                                            } // end if (component['tableContentReference'] != null
-                                          } // end if (!errorHappend)
-                                        } else {
-                                          tableSearchFound = false;
-                                        } // end if (transactionStore.state.screenTx
-                                      });
-                                    } // end if (rawQRText != null && rawQRText != emptyString
-                                    setDataOK(
-                                        '2'); // reload pages and display green status.
-                                  } // end if !transactionStore.state.screenTx['#DATA_OK']
-                                }
-                              : null,
-                        ),
-                      ],
-                    );
-                    if (searchDisplayType == 'text1') {
-                      element = Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          element,
-                          !tableSearchFound
-                              ? Container()
-                              : Container(
-                                  margin: EdgeInsets.only(
-                                      top: margin[0], bottom: margin[1]),
-                                  padding: EdgeInsets.fromLTRB(
-                                      widget.lPad + margin[2],
-                                      widget.tPad,
-                                      widget.rPad + margin[3],
-                                      widget.bPad),
-                                  child: Text(
-                                    searchContent,
-                                    softWrap: true,
-                                    style: TextStyle(
-                                      color: (component['color'] ??
-                                                  'default') !=
-                                              'default'
-                                          ? Color(int.parse(component['color']))
-                                          : Theme.of(context)
-                                              .textTheme
-                                              .bodyLarge!
-                                              .color,
-                                      backgroundColor:
-                                          (component['background'] ??
-                                                      'default') !=
-                                                  'default'
-                                              ? Color(int.parse(
-                                                  component['background']))
-                                              : Theme.of(context)
-                                                  .textTheme
-                                                  .bodyLarge!
-                                                  .backgroundColor,
-                                      fontWeight: style[0],
-                                      fontStyle: style[1],
-                                      decoration: style[2],
-                                      fontSize: 0.0 +
-                                          (int.parse((component['size'] ?? 16)
-                                              .toString())),
-                                    ),
-                                  ),
-                                ),
-                        ],
-                      );
-                    } // end if (searchDisplayType == 'text1')
-                    break;
-
-                  case 'barcode1': // should barcode1
-                    {
-                      element = Row(
-                        children: <Widget>[
-                          Expanded(
-                            child: txf,
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.flare),
-                            tooltip: 'Scan',
-                            onPressed:
-                                isEnabled ? () => scan1() : null, // MODIFIED
-                          ),
-                        ],
-                      );
-                    }
-                    break;
-
-                  case 'qrscan':
-                    {
-                      element = Row(
-                        children: <Widget>[
-                          Expanded(
-                            child: txf,
-                          ),
-                          IconButton(
-                            icon: Icon(
-                              otqIcons[component['buttonIcon'] ?? 'flare'],
-                              size: 8.0 + (component['size'] ?? 16.0),
-                            ),
-                            tooltip: 'Scan',
-                            onPressed: isEnabled
-                                ? () async {
-                                    // MODIFIED
-                                    if (!await dataOk(context)) {
-                                      setState(() {
-                                        myController.text = lastValue ?? "";
-                                      });
-                                    } else {
-                                      if (txfController[scrName] != null &&
-                                          txfController[scrName]![
-                                                  component['position']] !=
-                                              null) {
-                                        lastValue = myController.text;
+                                    final bool fakeGpsAllowed =
+                                        (component['fakeGpsAllowed']
+                                                ?.toString()
+                                                .toLowerCase() ??
+                                            'true') !=
+                                        'false';
+                                    if (!fakeGpsAllowed &&
+                                        (gpsPosition?.isMocked ?? false)) {
+                                      if (context.mounted) {
+                                        await showDialog(
+                                          context: context,
+                                          builder: (BuildContext ctx) {
+                                            return AlertDialog(
+                                              title: Text(
+                                                textArray.length > 12
+                                                    ? textArray[12]
+                                                    : 'Lokasi tidak valid',
+                                              ),
+                                              content: Text(
+                                                textArray.length > 13
+                                                    ? textArray[13]
+                                                    : 'Nonaktifkan Fake GPS',
+                                              ),
+                                              actions: [
+                                                TextButton(
+                                                  child: const Text('OK'),
+                                                  onPressed: () =>
+                                                      Navigator.of(ctx).pop(),
+                                                ),
+                                              ],
+                                            );
+                                          },
+                                        );
                                       }
-                                      final bool fakeGpsAllowed =
-                                          (component['fakeGpsAllowed']
-                                                      ?.toString()
-                                                      .toLowerCase() ??
-                                                  'true') !=
-                                              'false';
-                                      if (!fakeGpsAllowed &&
-                                          (gpsPosition?.isMocked ?? false)) {
-                                        if (context.mounted) {
-                                          await showDialog(
-                                              context: context,
-                                              builder: (BuildContext ctx) {
-                                                return AlertDialog(
-                                                  title: Text(textArray.length >
-                                                          12
-                                                      ? textArray[12]
-                                                      : 'Lokasi tidak valid'),
-                                                  content: Text(textArray
-                                                              .length >
-                                                          13
-                                                      ? textArray[13]
-                                                      : 'Nonaktifkan Fake GPS'),
-                                                  actions: [
-                                                    TextButton(
-                                                      child: const Text('OK'),
-                                                      onPressed: () =>
-                                                          Navigator.of(ctx)
-                                                              .pop(),
-                                                    ),
-                                                  ],
-                                                );
-                                              });
-                                        }
-                                        return;
-                                      }
-                                      final bool outPositionAllowed =
-                                          (component['outPositionAllowed']
-                                                      ?.toString()
-                                                      .toUpperCase() ??
-                                                  'TRUE') !=
-                                              'FALSE';
-                                      bool outBlocked = false;
-                                      if (!outPositionAllowed) {
-                                        final dynamic lqrRef = transactionStore
-                                            .state.screenTx['#LQR_REF'];
-                                        final bool hasLqrRef = lqrRef != null &&
-                                            lqrRef is Map &&
-                                            lqrRef.isNotEmpty;
-                                        if (hasLqrRef) {
-                                          try {
-                                            final firstEntry =
-                                                lqrRef.values.first as List;
+                                      return;
+                                    }
+                                    final bool outPositionAllowed =
+                                        (component['outPositionAllowed']
+                                                ?.toString()
+                                                .toUpperCase() ??
+                                            'TRUE') !=
+                                        'FALSE';
+                                    bool outBlocked = false;
+                                    if (!outPositionAllowed) {
+                                      final dynamic lqrList = transactionStore
+                                          .state
+                                          .screenTx['#LQR_LIST'];
+                                      final bool hasLqrList =
+                                          lqrList != null &&
+                                          lqrList is Map &&
+                                          lqrList.isNotEmpty;
+                                      if (hasLqrList) {
+                                        try {
+                                          final double gpsAccuracy =
+                                              gpsPosition!.accuracy;
+                                          bool insideAny = false;
+                                          double minDistance = double.infinity;
+                                          double matchZone2 = 0;
+                                          for (final entry in lqrList.values) {
+                                            final List data = entry as List;
                                             final double targetLat =
-                                                (firstEntry[1] as num)
-                                                    .toDouble();
+                                                (data[1] as num).toDouble();
                                             final double targetLng =
-                                                (firstEntry[2] as num)
-                                                    .toDouble();
+                                                (data[2] as num).toDouble();
                                             final double tolerance =
-                                                (firstEntry[3] as num)
-                                                    .toDouble();
-                                            final double zone2 = tolerance +
-                                                gpsPosition!.accuracy * 2;
+                                                (data[3] as num).toDouble();
+                                            final double zone2 =
+                                                tolerance + gpsAccuracy * 2;
                                             final double distance =
                                                 Geolocator.distanceBetween(
-                                              targetLat,
-                                              targetLng,
-                                              gpsPosition!.latitude,
-                                              gpsPosition!.longitude,
-                                            );
-                                            debugPrint(
-                                                '[qrScan/otq_txf] distance=${distance.toStringAsFixed(1)}m, zone2=${zone2.toStringAsFixed(1)}m');
-                                            if (distance > zone2) {
-                                              outBlocked = true;
-                                              if (context.mounted) {
-                                                await Get.dialog(AlertDialog(
-                                                  title: Text(textArray.length >
-                                                          14
-                                                      ? textArray[14]
-                                                      : 'Diluar Area Absensi'),
-                                                  content: Text(textArray
-                                                              .length >
-                                                          15
-                                                      ? textArray[15]
-                                                      : 'Silahkan menuju lokasi yang ditentukan'),
+                                                  targetLat,
+                                                  targetLng,
+                                                  gpsPosition!.latitude,
+                                                  gpsPosition!.longitude,
+                                                );
+                                            if (distance < minDistance) {
+                                              minDistance = distance;
+                                              matchZone2 = zone2;
+                                            }
+                                            if (distance <= zone2) {
+                                              insideAny = true;
+                                              break;
+                                            }
+                                          }
+                                          debugPrint(
+                                            '[qrScan/otq_txf] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m',
+                                          );
+                                          if (!insideAny) {
+                                            outBlocked = true;
+                                            if (context.mounted) {
+                                              await Get.dialog(
+                                                AlertDialog(
+                                                  title: Text(
+                                                    textArray.length > 14
+                                                        ? textArray[14]
+                                                        : 'Diluar Area Absensi',
+                                                  ),
+                                                  content: Text(
+                                                    textArray.length > 15
+                                                        ? textArray[15]
+                                                        : 'Silahkan menuju lokasi yang ditentukan',
+                                                  ),
                                                   actions: [
                                                     TextButton(
                                                       child: const Text('OK'),
@@ -1707,215 +1888,248 @@ class OtqTxfState extends State<OtqTxf>
                                                           Get.back(),
                                                     ),
                                                   ],
-                                                ));
-                                              }
+                                                ),
+                                              );
                                             }
-                                          } catch (eLoc) {
-                                            debugPrint(
-                                                '[qrScan/otq_txf] parse error: $eLoc — bypass pengecekan');
+                                          }
+                                        } catch (eLoc) {
+                                          debugPrint(
+                                            '[qrScan/otq_txf] parse error: $eLoc — bypass pengecekan',
+                                          );
+                                        }
+                                      } else {
+                                        if (!internetConnected()) {
+                                          debugPrint(
+                                            '[qrScan/otq_txf] offline & #LQR_LIST kosong/null — block absensi',
+                                          );
+                                          outBlocked = true;
+                                          if (context.mounted) {
+                                            await Get.dialog(
+                                              AlertDialog(
+                                                title: Text(
+                                                  textArray.length > 14
+                                                      ? textArray[14]
+                                                      : 'Diluar Area Absensi',
+                                                ),
+                                                content: Text(
+                                                  textArray.length > 15
+                                                      ? textArray[15]
+                                                      : 'Silahkan menuju lokasi yang ditentukan',
+                                                ),
+                                                actions: [
+                                                  TextButton(
+                                                    child: const Text('OK'),
+                                                    onPressed: () => Get.back(),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
                                           }
                                         } else {
                                           debugPrint(
-                                              '[qrScan/otq_txf] #LQR_REF kosong/null — bypass pengecekan');
+                                            '[qrScan/otq_txf] online & #LQR_LIST kosong/null — bypass pengecekan',
+                                          );
                                         }
                                       }
-                                      if (outBlocked) return;
-                                      actionLock('qrScan otq_txf');
-                                      String? rawQRText = await takeQR(
-                                          context,
-                                          textArray.length > 3
-                                              ? textArray[3]
-                                              : 'Scan QR',
-                                          scrName,
-                                          component,
-                                          'txt');
-                                      if (rawQRText != null &&
-                                          rawQRText != emptyString &&
-                                          rawQRText != 'null') {
-                                        String qrResult = (await getQRContent(
-                                                qrType,
-                                                rawQRText,
-                                                gpsPosition,
-                                                component['table'],
-                                                component['refTableNegative'],
-                                                component['cluster']))
-                                            .toString();
-                                        if (qrResult.substring(0, 6) !=
-                                            textList["ErrorPrefix"]) {
-                                          Map<String, dynamic> refTable = {};
-                                          if (component['table'] == null ||
-                                              component['table']
-                                                  .toString()
-                                                  .trim()
-                                                  .isEmpty) {
-                                            if (qrType == 'L') {
-                                              refTable = transactionStore
-                                                  .state.screenTx['#LQR_LIST'];
-                                            }
-                                          } else {
+                                    }
+                                    if (outBlocked) return;
+                                    actionLock('qrScan otq_txf');
+                                    String? rawQRText = await takeQR(
+                                      context,
+                                      textArray.length > 3
+                                          ? textArray[3]
+                                          : 'Scan QR',
+                                      scrName,
+                                      component,
+                                      'txt',
+                                    );
+                                    if (rawQRText != null &&
+                                        rawQRText != emptyString &&
+                                        rawQRText != 'null') {
+                                      String qrResult = (await getQRContent(
+                                        qrType,
+                                        rawQRText,
+                                        gpsPosition,
+                                        component['table'],
+                                        component['refTableNegative'],
+                                        component['cluster'],
+                                      )).toString();
+                                      if (qrResult.substring(0, 6) !=
+                                          textList["ErrorPrefix"]) {
+                                        Map<String, dynamic> refTable = {};
+                                        if (component['table'] == null ||
+                                            component['table']
+                                                .toString()
+                                                .trim()
+                                                .isEmpty) {
+                                          if (qrType == 'L') {
                                             refTable = transactionStore
-                                                    .state.screenTx[
-                                                '#TABLE${component['table']}'];
-                                          } // end if (component['table'] == null)
-                                          // refTable ??= {};
-                                          setState(() {
-                                            if (refTable[qrResult] != null) {
+                                                .state
+                                                .screenTx['#LQR_LIST'];
+                                          }
+                                        } else {
+                                          refTable = transactionStore
+                                              .state
+                                              .screenTx['#TABLE${component['table']}'];
+                                        } // end if (component['table'] == null)
+                                        // refTable ??= {};
+                                        setState(() {
+                                          if (refTable[qrResult] != null) {
+                                            myController.text =
+                                                refTable[qrResult][0]
+                                                    .toString();
+                                            txfController[widget
+                                                        .scrName]![component['position']]!
+                                                    .finalData =
+                                                qrResult;
+                                            if (component['locationNamePosition'] !=
+                                                    null &&
+                                                component['locationNamePosition']
+                                                    .toString()
+                                                    .trim()
+                                                    .isNotEmpty) {
+                                              try {
+                                                txfControllerCheck(
+                                                  widget.scrName,
+                                                  widget
+                                                      .component['locationNamePosition'],
+                                                );
+                                                txfController[widget
+                                                            .scrName]![component['locationNamePosition']]!
+                                                        .finalData =
+                                                    refTable[qrResult][0]
+                                                        .toString();
+                                              } catch (e) {
+                                                // do nothing
+                                                devPrint(e);
+                                              } // end try
+                                            } // end if (component['locationNamePosition']
+                                          } else {
+                                            txfController[widget
+                                                        .scrName]![component['position']]!
+                                                    .finalData =
+                                                '';
+                                            if (qrType == 'L') {
                                               myController.text =
-                                                  refTable[qrResult][0]
-                                                      .toString();
-                                              txfController[widget.scrName]![
-                                                      component['position']]!
-                                                  .finalData = qrResult;
-                                              if (component[
-                                                          'locationNamePosition'] !=
+                                                  textList["QRError"]; // location not defined #Error02
+                                            } else if (qrType == 'U') {
+                                              myController.text =
+                                                  textList['QRNotListed2']; // location not defined #Error05
+                                            } else {
+                                              myController.text = qrResult;
+                                              txfController[widget
+                                                          .scrName]![component['position']]!
+                                                      .finalData =
+                                                  qrResult;
+                                              if (component['locationNamePosition'] !=
                                                       null &&
-                                                  component[
-                                                          'locationNamePosition']
+                                                  component['locationNamePosition']
                                                       .toString()
                                                       .trim()
                                                       .isNotEmpty) {
                                                 try {
                                                   txfControllerCheck(
-                                                      widget.scrName,
-                                                      widget.component[
-                                                          'locationNamePosition']);
-                                                  txfController[
-                                                          widget
-                                                              .scrName]![component[
-                                                          'locationNamePosition']]!
-                                                      .finalData = refTable[
-                                                          qrResult][0]
-                                                      .toString();
+                                                    widget.scrName,
+                                                    widget
+                                                        .component['locationNamePosition'],
+                                                  );
+                                                  txfController[widget
+                                                              .scrName]![component['locationNamePosition']]!
+                                                          .finalData =
+                                                      qrResult;
+                                                  // textList['QRNotListed2'];
                                                 } catch (e) {
                                                   // do nothing
-                                                  devPrint(e);
                                                 } // end try
                                               } // end if (component['locationNamePosition']
-                                            } else {
-                                              txfController[widget.scrName]![
-                                                      component['position']]!
-                                                  .finalData = '';
-                                              if (qrType == 'L') {
-                                                myController.text = textList[
-                                                    "QRError"]; // location not defined #Error02
-                                              } else if (qrType == 'U') {
-                                                myController.text = textList[
-                                                    'QRNotListed2']; // location not defined #Error05
-                                              } else {
-                                                myController.text = qrResult;
-                                                txfController[widget.scrName]![
-                                                        component['position']]!
-                                                    .finalData = qrResult;
-                                                if (component[
-                                                            'locationNamePosition'] !=
-                                                        null &&
-                                                    component[
-                                                            'locationNamePosition']
-                                                        .toString()
-                                                        .trim()
-                                                        .isNotEmpty) {
-                                                  try {
-                                                    txfControllerCheck(
-                                                        widget.scrName,
-                                                        widget.component[
-                                                            'locationNamePosition']);
-                                                    txfController[widget
-                                                                .scrName]![
-                                                            component[
-                                                                'locationNamePosition']]!
-                                                        .finalData = qrResult;
-                                                    // textList['QRNotListed2'];
-                                                  } catch (e) {
-                                                    // do nothing
-                                                  } // end try
-                                                } // end if (component['locationNamePosition']
-                                              } // end if (qrType == 'L')
-                                            } // end if (refTable[qrResult] != null)
-                                          });
-                                        } else {
-                                          txfController[widget.scrName]![
-                                                  component['position']]!
-                                              .finalData = '';
-                                          switch (qrResult.substring(6, 8)) {
-                                            case '01': //out of range
-                                              myController.text = textArray
-                                                          .length >
-                                                      14
-                                                  ? textArray[14]
-                                                  : textList['GPSOutOfRange'];
-                                              break;
+                                            } // end if (qrType == 'L')
+                                          } // end if (refTable[qrResult] != null)
+                                        });
+                                      } else {
+                                        txfController[widget
+                                                    .scrName]![component['position']]!
+                                                .finalData =
+                                            '';
+                                        switch (qrResult.substring(6, 8)) {
+                                          case '01': //out of range
+                                            myController.text =
+                                                textArray.length > 14
+                                                ? textArray[14]
+                                                : textList['GPSOutOfRange'];
+                                            break;
 
-                                            case '02': // no qr result
-                                              myController.text =
-                                                  textArray.length > 11
-                                                      ? textArray[11]
-                                                      : textList["QRError"];
-                                              break;
+                                          case '02': // no qr result
+                                            myController.text =
+                                                textArray.length > 11
+                                                ? textArray[11]
+                                                : textList["QRError"];
+                                            break;
 
-                                            case '05': //user not in list
-                                              myController.text = textArray
-                                                          .length >
-                                                      8
-                                                  ? textArray[8]
-                                                  : textList['QRNotListed2'];
-                                              break;
+                                          case '05': //user not in list
+                                            myController.text =
+                                                textArray.length > 8
+                                                ? textArray[8]
+                                                : textList['QRNotListed2'];
+                                            break;
 
-                                            case '98': //qr not recognized
-                                              myController.text =
-                                                  textArray.length > 10
-                                                      ? textArray[10]
-                                                      : textList['QRError'];
-                                              break;
+                                          case '98': //qr not recognized
+                                            myController.text =
+                                                textArray.length > 10
+                                                ? textArray[10]
+                                                : textList['QRError'];
+                                            break;
 
-                                            default:
-                                              myController.text =
-                                                  textList['GeneralError'];
-                                          } // end switch (q
-                                        } // end if (qrResult.substring(0,6) != '#Error')
-                                      }
-                                      setDataOK(
-                                          '2'); // reload pages and display green status.
-                                    } // end if !transactionStore.state.screenTx['#DATA_OK']
-                                  }
-                                : null,
-                          ),
-                        ],
-                      );
-                    }
-                    break;
+                                          default:
+                                            myController.text =
+                                                textList['GeneralError'];
+                                        } // end switch (q
+                                      } // end if (qrResult.substring(0,6) != '#Error')
+                                    }
+                                    setDataOK(
+                                      '2',
+                                    ); // reload pages and display green status.
+                                  } // end if !transactionStore.state.screenTx['#DATA_OK']
+                                }
+                              : null,
+                        ),
+                      ],
+                    );
+                  }
+                  break;
 
-                  case 'qrAttend1': // barcode4 => scanner
-                    {
-                      BlocProvider.of<MainBloc>(context).add(QrAttend1Scan(
+                case 'qrAttend1': // barcode4 => scanner
+                  {
+                    BlocProvider.of<MainBloc>(context).add(
+                      QrAttend1Scan(
                         front: component['front'] ?? false,
                         flash: component['flash'] ?? false,
                         size: component['size'] ?? 300,
                         fSize: component['dataFont'] ?? 16,
                         exitSize: component['exitFont'] ?? 16,
                         exitRoute: component['route'] ?? home,
-//                      crypto: 'attend1',
+                        //                      crypto: 'attend1',
                         crypto: 'raw',
                         exitString: component['exitText'] ?? 'Exit',
                         position: component['position'] ?? 1,
                         screenName: scrName,
-                      ));
-                    }
-                    break;
-                  default:
-                    {
-                      element = txf;
-                    }
-                } // end switch (component['variant'].toString().toLowerCase())
-                return Container(
-                  child: element,
-                );
-              }, // end of builder
-            );
-          } catch (e) {
-            result = Text('--TXF-- (otq_txt): $e');
-          }
-          return result;
-        });
+                      ),
+                    );
+                  }
+                  break;
+                default:
+                  {
+                    element = txf;
+                  }
+              } // end switch (component['variant'].toString().toLowerCase())
+              return Container(child: element);
+            }, // end of builder
+          );
+        } catch (e) {
+          result = Text('--TXF-- (otq_txt): $e');
+        }
+        return result;
+      },
+    );
   } // end of build
 
   @override

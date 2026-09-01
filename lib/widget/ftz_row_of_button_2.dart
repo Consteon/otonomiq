@@ -17,10 +17,12 @@ import '../global2.dart';
 import '../login/bloc_authentication/authentication_bloc.dart';
 import '../login/bloc_authentication/authentication_event.dart';
 import '../model/connection_data.dart';
+import '../model/input_controller.dart';
 import '../model/otq_state.dart';
 import '../redux/screen_transaction.dart';
 import 'do_chain.dart';
 import 'driver_home_support.dart';
+import 'get_images_required_support.dart';
 import 'item_execution_list.dart';
 import 'item_execution_submit.dart';
 import 'where_eq_type_tolerant.dart';
@@ -488,7 +490,10 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
           timeStamp = await getRealTime();
           locString = '${separator[1]}$timeStamp';
           locString +=
-              '${separator[1] * 3}$invalidLocation${separator[1]}$invalidLocation${separator[1] * 10}';
+              // *11 (was *10): one extra trailing ◆ so this literal carries the
+              // same 17 fields getLocationString now emits. The 888.8888888
+              // values keep their indexes 4/5 — nothing is renumbered.
+              '${separator[1] * 3}$invalidLocation${separator[1]}$invalidLocation${separator[1] * 11}';
         }
         if (children[i]['type'] == null) {
           children[i]['type'] = 'rbt';
@@ -771,6 +776,93 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
 
                         case 'savesend':
                           {
+                            // ── GET_IMAGES `optional:"FALSE"` gate ──────────
+                            // Spec get-images-required §3: a page carrying a
+                            // required photo field that is still empty must not
+                            // submit. Runs FIRST, before dataOk below, so a
+                            // blocked press never reaches actionLock,
+                            // doSaveProcedure, saveSend, gotoRoute or doChain —
+                            // and every other field the officer already filled
+                            // stays exactly where it is (§3 item 3).
+                            //
+                            // The return ALSO skips the post-switch
+                            // `if (dialog ?? false) { Get.back(); }`, so a
+                            // refused press on a savesend inside a
+                            // DO_BOTTOM_SHEET leaves the sheet OPEN with its
+                            // inputs intact. That is deliberate — the officer
+                            // reads the refusal in the sheet's own context and
+                            // presses again after taking the photo — and it
+                            // matches the existing `if (outBlocked) return;`
+                            // refusal in this same case, which skips that same
+                            // Get.back(). A dataOk refusal differs: it falls
+                            // through to `break` and closes the sheet.
+                            //
+                            // NOT undone by this return, because they ran
+                            // BEFORE this switch: the button's `run:` commands
+                            // (incl. generate_number) and writeRouteParams.
+                            // A refused press still burns an auto-number. That
+                            // is disclosed, not accidental — see the plan §3.1.
+                            //
+                            // Also covers the savesend button inside a
+                            // DO_BOTTOM_SHEET (§3.1 of the spec) at zero cost:
+                            // the sheet is built with the SAME scrName
+                            // (do_otq_bottom_sheet.dart -> buildPage(...,
+                            // scrName, dialog: true, clear: false)), so its RBT
+                            // runs this same case against the same page config
+                            // and the same txfController slots.
+                            //
+                            // The closure below is pure transcription: every
+                            // decision (slot selection, the five empty
+                            // sentinels, the disabled/positionless skips, the
+                            // message fallbacks) lives in
+                            // get_images_required_support.dart, where
+                            // flutter_test can drive it.
+                            //
+                            // Same `mounted` hazard as the dataOk call below:
+                            // this closure has already awaited, so merely
+                            // READING `context` on a disposed State is fatal.
+                            // Returning when unmounted is not a behavior change
+                            // — `mounted && await dataOk(context)` was already
+                            // false in that situation.
+                            final dynamic gatePageMap = screenUIComponent is Map
+                                ? screenUIComponent[scrName]
+                                : null;
+                            final GetImagesRequirement? photoBlock =
+                                getImagesRequiredBlock(
+                                  gatePageMap is Map
+                                      ? gatePageMap['children']
+                                      : null,
+                                  (int slotPosition) {
+                                    final InputController? ic =
+                                        txfController[scrName]?[slotPosition];
+                                    if (ic == null) return null;
+                                    return GetImagesSlot(
+                                      finalData: ic.finalData,
+                                      controllerText: ic.controller.text,
+                                      enabled: ic.isEnabled,
+                                    );
+                                  },
+                                );
+                            if (photoBlock != null) {
+                              if (!mounted) return;
+                              await showDialog(
+                                context: context,
+                                builder: (BuildContext ctx) {
+                                  return AlertDialog(
+                                    title: Text(photoBlock.title),
+                                    content: Text(photoBlock.message),
+                                    actions: [
+                                      TextButton(
+                                        child: const Text('OK'),
+                                        onPressed: () =>
+                                            Navigator.of(ctx).pop(),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              );
+                              return;
+                            }
                             // `mounted &&` on every dataOk() call in this switch.
                             // `context` here is the State getter (`_element!`),
                             // and this closure has already awaited before the

@@ -312,18 +312,19 @@ Widget buildDisplayComponent(
   } else if (tip == 'hgr') {
     try {
       double fontSize = (component['fontSize'] ?? 14.0).toDouble();
+      // 4 fixed columns, wrap to new rows past 4 items (no horizontal scroll);
+      // config `width`/`row` no longer size the cells
       result = Container(
         margin: EdgeInsets.only(
           top: (component['beforeSpacing'] ?? 0.0).toDouble(),
           bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
         ),
-        height: ((component['width'] ?? 90.0) * component['row']).toDouble(),
-        child: GridView(
-          scrollDirection: Axis.horizontal,
-          controller: ScrollController(),
-          gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: (component['width'] ?? 90.0).toDouble(),
-          ),
+        child: GridView.count(
+          crossAxisCount: 4,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          childAspectRatio: 0.85,
           children: buildGridList(component['children'], fontSize),
         ),
       );
@@ -892,6 +893,35 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     } // end of try
+  } else if (tip == 'checklist_dynamic' || tip == 'checklistdynamic') {
+    // DB-driven checklist: N task rows from a Firestore sub-collection.
+    //
+    // ★ IT CLAIMS A BLOCK OF SLOTS, NOT ONE. Task 1 lands in `position`, task 2
+    // in `position + 1`, and so on for `slots` entries -- so positions
+    // `position .. position + slots - 1` must belong to NO other component on
+    // the page. A collision just overwrites, with no crash, no log and no
+    // analyzer hit. Field names are decided sheet-side by the close button's
+    // `updateEventRow` (`ck1◼◁12▷⭘ck2◼◁13▷⭘…`); the component's `output` key is
+    // INERT. See docs/widgets/checklist_dynamic.md.
+    //
+    // Both spellings are accepted because the dev spec's §5 heading
+    // (`checklistDynamic`) and its contract JSON (`CHECKLIST_DYNAMIC`)
+    // disagree, and a `type` that misses this chain is dropped silently.
+    // Form-field family: the position-seeding block above already made the
+    // InputController, so this branch only constructs the widget.
+    try {
+      result = ChecklistDynamic(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
   } else if (tip == 'choice_button_group') {
     try {
       Key iKey = GlobalKey();
@@ -1078,20 +1108,18 @@ Widget buildDisplayComponent(
         } // end switch
         iconList.add(theIcon);
       } // end for
+      // 4 fixed columns, wrap to new rows past 4 items (no horizontal scroll)
       result = Container(
         margin: EdgeInsets.only(
           top: (component['beforeSpacing'] ?? 0.0).toDouble(),
           bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
         ),
-        height: ((component['width']) ?? 90.0).toDouble(),
-        child: GridView(
-          scrollDirection: Axis.horizontal,
-          controller: ScrollController(),
-          gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: ((component['width'] + 30) ?? 130.0).toDouble(),
-            crossAxisSpacing: 1.0,
-            // mainAxisSpacing: 1.0,
-          ),
+        child: GridView.count(
+          crossAxisCount: 4,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          childAspectRatio: 0.85,
           children: iconList,
         ),
       );
@@ -1203,6 +1231,20 @@ Widget buildDisplayComponent(
   } else if (tip == 'list_card') {
     try {
       result = ListCard(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'timeline_card') {
+    try {
+      result = TimelineCard(
         key: txfKey,
         component: component,
         scrName: scrName,
@@ -1763,6 +1805,40 @@ Widget buildDisplayComponent(
   } else if (tip == 'item_execution_submit' || tip == 'itemexecutionsubmit') {
     try {
       result = ItemExecutionSubmit(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'ocr_capture' || tip == 'ocrcapture') {
+    // Photo -> on-device ML Kit OCR -> values written to `ocrTargets`.
+    // Owns component['position'] = the PHOTO URL, so existing addToTable
+    // patterns (i◼◁4▷) keep working unchanged.
+    try {
+      result = OcrCapture(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
+  } else if (tip == 'digit_pad' || tip == 'digitpad') {
+    // Locked digit boxes + own numpad + inline 3-tier verdict (DIGIT_PAD spec).
+    // Form-field family: the position-seeding block above already made the
+    // InputController, so this branch only constructs the widget.
+    try {
+      result = DigitPad(
         key: txfKey,
         component: component,
         scrName: scrName,

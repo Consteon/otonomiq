@@ -5,7 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../firestore_repository/table_repository.dart'; // subscribeToMapCollection
 import '../global.dart'; // phoneCanonical62, diamondTextToList, mapTableContent, transactionStore, autheniumDecode
 import '../screen_session.dart';
-import 'driver_home_support.dart'; // resolveAppVid, resolveDriverCurlyTokens, writeNativeFields
+import 'driver_home_support.dart'; // resolveAppVid, resolveDriverCurlyTokens, resolveRowCurlyTokens, writeNativeFields
 import 'ftz_contact_picker.dart'; // chooseContactAndGetPhoneNumber
 import 'panel_card_support.dart'; // parseTablePath, TablePath
 import 'statistic_card_support.dart'; // filterByCharCodeEquality, resolveScreenTxTokens
@@ -62,6 +62,24 @@ class WhatsAppSend extends StatefulWidget {
     _sentBySearch.removeWhere((key, _) => key.startsWith('$scrName::'));
   }
 
+  /// Whether the OPTIONAL `phoneTable` + `phoneSearch` pair is usable
+  /// (spec (3) section 6b-2.1 rule 1).
+  ///
+  /// BOTH must be non-empty. Either one empty falls to rule 2 -- read
+  /// `phoneField` from the `messageTable` doc, which is today's behaviour and
+  /// what every already-deployed config (WalkInNota, DeliveryInvoice) gets.
+  /// Half-configured is NOT "try anyway": a `phoneTable` with no `phoneSearch`
+  /// would match the first document in the collection, i.e. an arbitrary
+  /// customer's phone number.
+  ///
+  /// Pure + static so a test can kill either conjunct; the read path that uses
+  /// it lives inside the State and is not reachable from `flutter_test`.
+  static bool phoneLookupConfigured(dynamic component) {
+    final String table = (component['phoneTable'] ?? '').toString().trim();
+    final String search = (component['phoneSearch'] ?? '').toString().trim();
+    return table.isNotEmpty && search.isNotEmpty;
+  }
+
   @override
   State<WhatsAppSend> createState() => _WhatsAppSendState();
 }
@@ -69,6 +87,15 @@ class WhatsAppSend extends StatefulWidget {
 class _WhatsAppSendState extends State<WhatsAppSend> {
   List<String> _textArray = [];
   String _msgSubCode = '';
+
+  /// vid-scoped subscription code for the OPTIONAL `phoneTable` collection.
+  /// Empty when `phoneTable`/`phoneSearch` are not both configured.
+  /// Format is identical to [_msgSubCode] -- `'$appVid/$tableDocId/$subColl'` --
+  /// because `subscribeToMapCollection` uses this string as BOTH the
+  /// `_mapSubscribed` dedup key AND the `mapTableContent` storage key, and vid
+  /// is not otherwise in it. Instance field (recreated per widget), so no clear
+  /// hook is needed.
+  String _phoneSubCode = '';
 
   // Parsed config
   String _phoneField = '';
@@ -136,6 +163,27 @@ class _WhatsAppSendState extends State<WhatsAppSend> {
         );
       }
     }
+
+    // Optional second collection: where the phone number lives (spec (3)
+    // section 6b-2.1). Gated on BOTH params, so a half-configured component
+    // opens no stream at all. When phoneTable == messageTable the two codes
+    // are equal and subscribeToMapCollection dedups via _mapSubscribed --
+    // harmless, one stream.
+    if (WhatsAppSend.phoneLookupConfigured(widget.component)) {
+      final String rawPhoneTable = (widget.component['phoneTable'] ?? '')
+          .toString()
+          .trim();
+      final TablePath tp = parseTablePath(rawPhoneTable);
+      if (tp.tableDocId.isNotEmpty && appVid.isNotEmpty) {
+        _phoneSubCode = '$appVid/${tp.tableDocId}/${tp.subColl}';
+        subscribeToMapCollection(
+          appVid,
+          tp.tableDocId,
+          tp.subColl,
+          _phoneSubCode,
+        );
+      }
+    }
   }
 
   /// Length-guarded text slot accessor. Same pattern as coordination_signal_list.
@@ -148,15 +196,15 @@ class _WhatsAppSendState extends State<WhatsAppSend> {
         .toString()
         .trim();
     if (rawSearch.isEmpty) return '${widget.scrName}::_default';
-    final String decoded = autheniumDecode(rawSearch) ?? rawSearch;
-    final String driverResolved = resolveDriverCurlyTokens(
-      decoded,
+    // Byte-identical to the previous inline chain (row == null skips step 1,
+    // and steps 2/3 are no-ops on a token-free string) -- routed through the
+    // shared resolver so the sent-key and the doc lookup can never disagree
+    // about which invoice is "this one".
+    final String fullyResolved = resolveSearchWithRow(
+      rawSearch,
+      null,
       widget.scrName,
-    );
-    final Map<String, dynamic> screenTx = transactionStore.state.screenTx;
-    final String fullyResolved = resolveScreenTxTokens(
-      driverResolved,
-      screenTx,
+      transactionStore.state.screenTx,
     );
     return '${widget.scrName}::$fullyResolved';
   }
@@ -168,37 +216,74 @@ class _WhatsAppSendState extends State<WhatsAppSend> {
     if (mounted) setState(() {});
   }
 
-  /// Find the source doc for message template + phone field.
-  Map<String, dynamic>? _findDoc() {
-    if (_msgSubCode.isEmpty) return null;
+  /// One doc lookup, two callers. Same pipeline as receipt_doc.dart L296-306,
+  /// with the search resolved by [resolveSearchWithRow].
+  ///
+  /// [subCode]    -- vid-scoped `mapTableContent` key.
+  /// [rawSearch]  -- `field◼value` DSL; empty means "first doc in the
+  ///                 collection", which is the pre-existing messageSearch-less
+  ///                 behaviour. The phone caller never reaches that branch --
+  ///                 it requires a non-empty phoneSearch first.
+  /// [rowContext] -- when non-null, `{field}` tokens resolve from THIS map
+  ///                 before any session/screenTx source.
+  Map<String, dynamic>? _findDocIn({
+    required String subCode,
+    required String rawSearch,
+    Map<String, dynamic>? rowContext,
+  }) {
+    if (subCode.isEmpty) return null;
     final List<Map<String, dynamic>> docs = List<Map<String, dynamic>>.from(
-      mapTableContent[_msgSubCode] ?? const [],
+      mapTableContent[subCode] ?? const [],
     );
     if (docs.isEmpty) return null;
-
-    final String rawSearch = (widget.component['messageSearch'] ?? '')
-        .toString()
-        .trim();
     if (rawSearch.isEmpty) return docs.first;
 
-    // Same search pipeline as receipt_doc.dart L296-306
-    final String decoded = autheniumDecode(rawSearch) ?? rawSearch;
-    final String driverResolved = resolveDriverCurlyTokens(
-      decoded,
-      widget.scrName,
-    );
     final Map<String, dynamic> screenTx = transactionStore.state.screenTx;
-    final String fullyResolved = resolveScreenTxTokens(
-      driverResolved,
+    final String fullyResolved = resolveSearchWithRow(
+      rawSearch,
+      rowContext,
+      widget.scrName,
       screenTx,
     );
-
     final List<Map<String, dynamic>> matched = filterByCharCodeEquality(
       docs,
       fullyResolved,
       screenTx,
     );
     return matched.isNotEmpty ? matched.first : null;
+  }
+
+  /// Find the MAIN doc: source for the message template, and the phoneField
+  /// fallback. Unchanged behaviour -- no row context.
+  Map<String, dynamic>? _findDoc() => _findDocIn(
+    subCode: _msgSubCode,
+    rawSearch: (widget.component['messageSearch'] ?? '').toString().trim(),
+  );
+
+  /// Find the doc that holds the phone number, when `phoneTable` +
+  /// `phoneSearch` are configured (spec (3) section 6b-2.1 rule 1).
+  ///
+  /// Returns null -- meaning "fall back to rule 2, read phoneField from the
+  /// main doc" -- for every not-configured / not-found case.
+  ///
+  /// [mainDoc] is REQUIRED to be non-null, mirroring
+  /// `writeRouteParamsFromRow`'s own `if (row == null) return;`. Without that
+  /// guard a `phoneSearch` of `lv◼{kl}` with a missing main doc falls through
+  /// to a STALE bare screenTx `kl` -- and `kl` really is dispatched as a bare
+  /// key by this wizard (docs/admin_runtime/admin-create-task-op1screen.md:22,
+  /// "P1 deposits kl (customer id) via routeParams"). The failure that guard
+  /// prevents is prefilling the PREVIOUS customer's phone number next to an
+  /// empty message; skipping the lookup instead leaves the number blank, which
+  /// the admin cannot mistake for correct.
+  Map<String, dynamic>? _findPhoneDoc(Map<String, dynamic>? mainDoc) {
+    if (!WhatsAppSend.phoneLookupConfigured(widget.component)) return null;
+    if (_phoneSubCode.isEmpty) return null;
+    if (mainDoc == null) return null;
+    return _findDocIn(
+      subCode: _phoneSubCode,
+      rawSearch: (widget.component['phoneSearch'] ?? '').toString().trim(),
+      rowContext: mainDoc,
+    );
   }
 
   /// Resolve initial phone from doc phoneField + token fallback.
@@ -224,7 +309,13 @@ class _WhatsAppSendState extends State<WhatsAppSend> {
 
   void _openSheet() {
     final Map<String, dynamic>? doc = _findDoc();
-    final String initialPhone = _resolvePhone(doc);
+    // Rule 1 (phoneTable+phoneSearch) > rule 2 (main doc) > rule 3
+    // (phoneFallback / manual), spec (3) section 6b-2.1. A configured lookup
+    // that finds nothing degrades to rule 2 rather than to "no number": for a
+    // `task` main doc that simply reads an absent `hpic` and lands on rule 3,
+    // which is exactly today's behaviour.
+    final Map<String, dynamic>? phoneDoc = _findPhoneDoc(doc);
+    final String initialPhone = _resolvePhone(phoneDoc ?? doc);
     final String initialMessage = doc != null && _messageTemplate.isNotEmpty
         ? renderWhatsAppTemplate(_messageTemplate, doc)
         : '';
@@ -262,6 +353,11 @@ class _WhatsAppSendState extends State<WhatsAppSend> {
     return Obx(() {
       // Touch reactive dep so Obx repaints when doc data arrives
       mapTableContent[_msgSubCode];
+      // Second reactive dep: the OPTIONAL phoneTable stream (spec (3) section
+      // 6b-2.1). Without it an arriving customer doc triggers no repaint.
+      // `mapTableContent['']` is a harmless null read when the pair is not
+      // configured, so this is byte-neutral for every already-deployed config.
+      mapTableContent[_phoneSubCode];
 
       final bool sent = _sent;
 
@@ -609,12 +705,60 @@ class _WhatsAppSheetState extends State<_WhatsAppSheet> {
 ///   {{field}}        -> doc[field]
 ///   {{field|idr}}    -> dot-thousands formatted (Indonesian locale)
 ///   `<LOOP source='li'>...{{item.x}}...</LOOP>` -> iterate doc['li'] array
+///   `<IFSET source='tot'>...</IFSET>` -> emit the body ONLY when doc['tot']
+///                      is SET (see [_ifSetIsSet]); otherwise the whole block
+///                      disappears, literal separator text included
 ///   \n               -> literal newline
 ///
 /// Missing fields -> empty string. Null doc -> empty for all fields.
 String renderWhatsAppTemplate(String template, Map<String, dynamic> doc) {
   // 1. Process \n to real newlines
   String result = template.replaceAll(r'\n', '\n');
+
+  // 1b. Process <IFSET source='x'>...</IFSET> conditional blocks.
+  //
+  // RUNS BEFORE THE <LOOP> PASS ON PURPOSE. The <LOOP> pass substitutes
+  // {{item.*}} VALUES into `result`, so while <IFSET> ran after it, a catalog
+  // item whose name contained a literal <IFSET ...>...</IFSET> was EXECUTED as
+  // control flow and could delete itself from the customer's message with no
+  // error anywhere. Running first means an injected tag leaks VERBATIM into the
+  // editable preview sheet, where the admin can see it -- visible garbage beats
+  // silent loss. (Phase-2 code review, Warning W1.)
+  //
+  // The SAME reason keeps it above the {{field}} pass, and it is the only
+  // reason: whatever an earlier pass substitutes into `result` becomes control
+  // flow for a later one, so <IFSET> must precede BOTH substitution passes --
+  // not just <LOOP>.
+  //
+  // Do NOT justify the placement by "a KEPT body still needs its {{tot|idr}}
+  // substituted". A kept body does still get it below, but that holds under
+  // EVERY ordering: kept- and dropped-body output is byte-identical with this
+  // pass at 1b, at 2b, and after the {{field}} pass (all three measured). That
+  // claim would wave 2b back in -- the position this move just removed.
+  //
+  // Control structure now comes only from the TEMPLATE, never from doc data,
+  // for BOTH tags and for both top-level and item fields.
+  //
+  // The attribute grammar is _loopSource's, called verbatim -- one parser for
+  // both tags, so a template that works on <LOOP> works here. That includes
+  // the `<IFSET tot>` bare shorthand, inherited rather than designed.
+  //
+  // NESTING: <IFSET> inside a <LOOP> body, and <LOOP> inside an <IFSET> body,
+  // both produce the same output they did before this pass was moved (verified
+  // by running both orders over each shape). What is genuinely undefined is
+  // INTERLEAVED tags -- `<IFSET ...>A<LOOP ...>B</IFSET>C</LOOP>` - because the
+  // lazy `*?` here pairs the FIRST </IFSET> with the FIRST <IFSET>. Do not
+  // interleave.
+  result = result.replaceAllMapped(
+    RegExp(r'<IFSET([^>]*)>([\s\S]*?)</IFSET>', multiLine: true),
+    (Match m) {
+      final String field = _loopSource(m.group(1)!);
+      // No source= (or an empty one) -> drop the block. Fail-closed: a
+      // mis-typed tag prints nothing rather than an unconditional line.
+      if (field.isEmpty) return '';
+      return _ifSetIsSet(doc[field]) ? m.group(2)! : '';
+    },
+  );
 
   // 2. Process <LOOP ...>...</LOOP> blocks
   result = result.replaceAllMapped(
@@ -687,6 +831,36 @@ String _loopSource(String attributeString) {
   return bare != null ? bare.group(1)! : '';
 }
 
+/// Whether an `<IFSET source='x'>` field counts as SET.
+///
+/// Three ways to be UNSET, all of which drop the block:
+///   * `null`                    -- the key is absent from the doc;
+///   * blank after `trim()`      -- `''`, `'   '`;
+///   * NUMERICALLY ZERO          -- `0`, `'0'`, `0.0`, `'0.00'`.
+///
+/// The third clause is the reason this tag exists: a pickup-only task
+/// (purchase/refill only) has `tot == 0`, and `*Perkiraan total: Rp 0*` is not
+/// something to send a customer. One template serves every task on the
+/// destination page, so the operator cannot solve it by dropping the cell --
+/// that would strip the total from priced tasks too.
+///
+/// The ORDER matters. Parse first, and only THEN test for zero: a non-numeric
+/// value like `LUNAS` yields `num.tryParse == null`, falls through both zero
+/// clauses and stays SET. Do NOT reach for `coerceNum` here -- it maps an
+/// unparseable String to 0, which would silently delete a `<IFSET source='st'>`
+/// block whose value is `LUNAS`.
+///
+/// Firestore is dynamic by design (Convention #7): the same field arrives as
+/// int, double or String depending on whether it was written by this app or
+/// typed into a sheet, which is why the numeric test runs on the STRING form.
+bool _ifSetIsSet(dynamic value) {
+  if (value == null) return false;
+  final String s = value.toString().trim();
+  if (s.isEmpty) return false;
+  final num? parsed = num.tryParse(s);
+  return !(parsed != null && parsed == 0);
+}
+
 /// Format a numeric string with dot-separated thousands (Indonesian locale).
 /// Mirrors receipt_doc.dart formatThousands / template_printer _formatIdr
 /// but standalone -- no ESC/POS dependency.
@@ -708,4 +882,59 @@ String _formatIdrWa(String numberString) {
   } catch (_) {
     return numberString;
   }
+}
+
+// ── Search resolution (top-level, exported for tests) ─────────────────
+
+/// Resolve a `field◼value` search DSL, main-doc fields FIRST.
+///
+/// Spec (3) section 6b-2.1: `phoneSearch` must be able to point at a field of
+/// the MAIN doc -- `lv◼{kl}` where `kl` is the customer FK ON THE TASK. That is
+/// the only genuinely new step; the rest is the chain `_findDoc` has always
+/// used, factored out so the message search and the phone search can never
+/// drift apart.
+///
+///   0. [autheniumDecode]           -- server sends ◼/⭘ as _25FC_/_2B58_.
+///   1. [resolveRowCurlyTokens]     -- `{kl}` -> row['kl'].            (NEW)
+///   2. [resolveDriverCurlyTokens]  -- session tokens ({tnm}, {today}, …).
+///   3. [resolveScreenTxTokens]     -- bare screenTx keys (route params).
+///
+/// Steps 2 and 3 run only while a `{` remains. That is behaviour-preserving --
+/// both helpers are no-ops on a `{`-free string -- and it keeps the common
+/// fully-row-resolved case from touching the GetX driver state at all. It is
+/// also the same short-circuit shape as `writeRouteParamsFromRow`.
+///
+/// `row == null` (or an empty map) reproduces today's message-search chain
+/// BYTE FOR BYTE.
+///
+/// Unresolvable tokens are left LITERAL on purpose: `filterByCharCodeEquality`
+/// is fail-closed on a value still containing `{` (returns no match), so a
+/// half-resolved search can never silently match the wrong document.
+///
+/// KNOWN CEILING: [resolveRowCurlyTokens] leaves a token literal when the row
+/// value is present but EMPTY, so step 3 can still fill it from a stale bare
+/// key. That is the shared helper's documented contract (writeRouteParamsFromRow
+/// depends on it) and is not changed here. In practice `assembleTaskDoc` always
+/// writes a non-empty `kl`.
+///
+/// Pure over its arguments except for the GetX read inside
+/// [resolveDriverCurlyTokens]; [screenTx] is passed in rather than read, so the
+/// row-resolved path is directly unit-testable.
+String resolveSearchWithRow(
+  String rawSearch,
+  Map<String, dynamic>? row,
+  String scrName,
+  Map<String, dynamic> screenTx,
+) {
+  String resolved = autheniumDecode(rawSearch) ?? rawSearch;
+  if (row != null && row.isNotEmpty) {
+    resolved = resolveRowCurlyTokens(resolved, row);
+  }
+  if (resolved.contains('{')) {
+    resolved = resolveDriverCurlyTokens(resolved, scrName);
+  }
+  if (resolved.contains('{')) {
+    resolved = resolveScreenTxTokens(resolved, screenTx);
+  }
+  return resolved;
 }

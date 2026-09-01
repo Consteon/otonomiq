@@ -323,11 +323,26 @@ Future<dynamic> getAppGps() async {
               '@lastGpsTime',
               position.timestamp.millisecondsSinceEpoch,
             );
-            List<Placemark> myPL = await placemarkFromCoordinates(
-              position.latitude,
-              position.longitude,
-            );
-            returnValue['gpsPlaceMark'] = placeMarkCopy(myPL[0]);
+            // Android's Geocoder is network-backed: offline it answers
+            // `PlatformException(IO_ERROR, Service not Available)`, and the
+            // retry below then repeats the same dead round-trip and reports it
+            // to Crashlytics. The sibling branch already gates on
+            // internetConnected() (api.dart:244/257) and falls back silently;
+            // do the same here instead of paying two plugin calls to learn it.
+            List<Placemark> myPL = internetConnected()
+                ? await placemarkFromCoordinates(
+                    position.latitude,
+                    position.longitude,
+                  )
+                : <Placemark>[];
+            // Assign the GLOBAL too, not just the map entry. `otq_state.dart:203`
+            // (and connection_data.dart:57) read the global `gpsPlaceMark`;
+            // NOTHING reads returnValue['gpsPlaceMark']. Without this the freshly
+            // geocoded address only reached consumers after an app restart (via
+            // the secureWrite below -> startGettingGpsData api.dart:178), so a
+            // force-fetched position was shown/recorded with a STALE address.
+            gpsPlaceMark = placeMarkCopy(myPL.isNotEmpty ? myPL[0] : null);
+            returnValue['gpsPlaceMark'] = gpsPlaceMark;
             secureWrite(
               key: 'gpsPlaceMark',
               value: json.encode(returnValue['gpsPlaceMark']),
@@ -357,14 +372,35 @@ Future<dynamic> getAppGps() async {
               returnValue['gpsTime'] = 0;
             } // end try gpsTime
             try {
-              List<Placemark> myPL2 = await placemarkFromCoordinates(
-                position.latitude,
-                position.longitude,
-              );
-              returnValue['gpsPlaceMark'] = placeMarkCopy(myPL2[0]);
+              List<Placemark> myPL2 = internetConnected()
+                  ? await placemarkFromCoordinates(
+                      position.latitude,
+                      position.longitude,
+                    )
+                  : <Placemark>[];
+              gpsPlaceMark = placeMarkCopy(myPL2.isNotEmpty ? myPL2[0] : null);
+              returnValue['gpsPlaceMark'] = gpsPlaceMark;
             } catch (e3) {
-              returnValue['gpsPlaceMark'] = placeMarkCopy(null);
-              returnValue['gpsPlaceMark'].name = 'Error $e';
+              // Placemark fields are final. `returnValue['gpsPlaceMark'].name =`
+              // went through a dynamic map entry, so it compiled but ALWAYS
+              // threw NoSuchMethodError once reached — and that throw escaped
+              // this handler into the .catchError below, masking the real
+              // geocoder failure behind a bogus 'getCurrentPosition' report.
+              // Wipe the global rather than leave the last successful geocode
+              // standing: a stale address attached to a fresh fix is written
+              // into submitted records as if current. Matches the sibling
+              // branch (api.dart:253/257), which already wipes on the same
+              // failure. Not secureWritten - persisting a blank buys nothing.
+              gpsPlaceMark = placeMarkCopy(null);
+              returnValue['gpsPlaceMark'] = gpsPlaceMark;
+              // devPrint, not errorReport: an Android Geocoder that answers
+              // `Service not Available` (MIUI ships GMS but cripples the
+              // network geocoder) fires on EVERY force-fetch, and location_detector
+              // force-fetches on every screen open + refresh tap -> a permanent
+              // non-fatal flood in release for a condition the app cannot act on
+              // and already degrades cleanly from (blank address). Matches the
+              // sibling branch api.dart:253, which swallows the same failure.
+              devPrint('getAppGps placemark: $e3 (outer: $e)');
             } // end try gpsPlaceMark
           } // end try
         })
@@ -906,6 +942,21 @@ String getLocationString(
   result += cleanupString(locSensor.thoroughfare) + diamond; //14
   result += cleanupString(locSensor.subThoroughfare);
   result += diamond + cleanupString(locSensor.locationStatus); // 15
+  // APPEND-ONLY slot, 0-based index 16 -> system token ◀17▶ (resolveValueTokens
+  // -> ref[0][16], table_repository.dart resolveValueTokens). GPS accuracy in
+  // whole metres.
+  //
+  // EMPTY, not "0", when there is no usable reading: OtqState.accuracy defaults
+  // to 0.0 and getDataFrom only assigns it inside its valid-fix branch, so a
+  // "0" here would render a fake "GPS ±0 m" on the TIMELINE_CARD note line. An
+  // empty resolution makes the whole line vanish (spec section 3 auto-hide).
+  //
+  // NEVER renumber the slots above this one: every deployed ◀N▶ config is
+  // positional, and docs/firestore/update_table_row.md records live attendance
+  // configs bound to ◀2▶ / ◀5▶ / ◀6▶.
+  result +=
+      diamond +
+      (locSensor.accuracy > 0 ? locSensor.accuracy.round().toString() : '');
 
   return result;
 } // end of getLocationString
@@ -1445,16 +1496,28 @@ void getLqrList(String? proxySsid) async {
       body: functionBody.body,
     );
     dynamic lqrArray = json.decode(locString.body)[0];
-    lqr = {};
-
+    // readSS answers with a bare negative error code (seen in the field: -6)
+    // instead of the rows array when the read fails. `.length` on it threw
+    // `Class 'int' has no instance getter 'length'` — a message that says
+    // nothing about the real fault, so name it here.
+    if (lqrArray is! List) {
+      throw StateError('readSS returned $lqrArray for range $locRange');
+    }
+    // Build into a local map and only publish on a clean parse. `lqr` used to
+    // be zeroed here, so ANY failure below (bad code, short row) let an empty
+    // map overwrite BOTH #LQR_LIST and the "lqrList" cache — geofences gone
+    // until the next good fetch: LOCATION card reads "Unknown", attendance
+    // dies. On failure the cached list now survives.
+    Map<String, dynamic> fresh = {};
     for (int i = 0; i < lqrArray.length && lqrArray[i][3] != ""; i++) {
-      lqr[lqrArray[i][3]] = [
+      fresh[lqrArray[i][3]] = [
         lqrArray[i][2],
         lqrArray[i][0],
         lqrArray[i][1],
         lqrArray[i][4],
       ];
     } // end for in lqrArray
+    lqr = fresh;
   } catch (eLoc) {
     errorReport(eLoc);
   }
@@ -2393,8 +2456,7 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
         // plain-text body ("upstream request timeout"), not JSON — jsonDecode
         // would throw FormatException on the startup path. First run has no
         // cached page anyway, so bail.
-        final String rsBody = response.body.trimLeft();
-        if (rsBody.isEmpty || (rsBody[0] != '[' && rsBody[0] != '{')) {
+        if (!looksLikeJson(response.body)) {
           devPrint('readSettingsStart: non-JSON body, bail: ${response.body}');
           return;
         }
@@ -2851,7 +2913,21 @@ Future<bool> retryUserPages() async {
   return true;
 }
 
-Future<void> readSettingsContext(
+/// True when [body] can be handed to `jsonDecode` — the settings/pages payload
+/// is always a JSON array or object. A gateway or proxy hiccup answers with
+/// plain text instead ("upstream request timeout"), which used to reach
+/// jsonDecode and throw FormatException on a routine refresh.
+bool looksLikeJson(String body) {
+  final String b = body.trimLeft();
+  return b.isNotEmpty && (b[0] == '[' || b[0] == '{');
+}
+
+/// Returns true only when fresh pages were fetched, decoded AND applied.
+/// False means the cached UI was kept untouched (network error, non-JSON body,
+/// or a decode failure). The caller must report that instead of painting a
+/// successful refresh over data that never changed — a `Future<void>` here made
+/// every failure path indistinguishable from success.
+Future<bool> readSettingsContext(
   BuildContext context,
   String lifKey,
   int opt,
@@ -2906,11 +2982,9 @@ Future<void> readSettingsContext(
     print('data response: ${functionBody.body}');
     print('data response: ${functionBody.url}');
   } catch (e) {
+    // No showAlert here: the caller now gets `false` back and owns the
+    // user-facing message, and this dialog leaked raw exception text.
     errorReport(e);
-    showAlert(
-      context,
-      textList["ErrorLoading"] + " [readSettingsContext] : $e",
-    );
   }
   if (response != null) {
     // The settings/pages payload is always a JSON array/object. A gateway or
@@ -2919,12 +2993,11 @@ Future<void> readSettingsContext(
     // exception alert on a routine refresh AND logs a Crashlytics non-fatal.
     // Detect the non-JSON body up front and keep the cached UI — the refresh
     // chain (.then in main_page) still completes cleanly on cache.
-    final String rsBody = response.body.trimLeft();
-    if (rsBody.isEmpty || (rsBody[0] != '[' && rsBody[0] != '{')) {
+    if (!looksLikeJson(response.body)) {
       devPrint(
         'readSettingsContext: non-JSON body, keep cache: ${response.body}',
       );
-      return;
+      return false;
     }
     var getResult = [];
     try {
@@ -3050,11 +3123,19 @@ Future<void> readSettingsContext(
         showAlert(context, textList["ErrorLoading"] + " : $e");
         // devPrint ("Error in saving to shared preferences (readSettings): $e");
       }
+      // Pages were fetched, decoded and applied. A prefs-write failure above is
+      // reported but does not invalidate them, so it stays a success.
+      return true;
     } catch (ep) {
+      // Same reason as the HTTP catch above: this path now returns false, so
+      // the caller alerts. Keeping this one would stack two dialogs on a
+      // decode failure, the second one showing raw exception text.
       errorReport(ep);
-      showAlert(context, textList["ErrorLoading"] + " : $ep");
     }
   } // end if (response != null)
+  // response == null (network/HTTP error) or the decode block above threw:
+  // nothing was applied, the cached UI stands.
+  return false;
 } // end of readSettingsContext
 
 void showAlert(BuildContext context, String msg) {

@@ -11,6 +11,7 @@ import 'widget/custody_count_list.dart';
 import 'widget/custody_event_submit.dart';
 import 'widget/custody_reveal.dart';
 import 'widget/customer_outstanding_list.dart';
+import 'widget/digit_pad.dart';
 import 'widget/driver_home_support.dart';
 import 'widget/executor_designate_card.dart';
 import 'widget/group_picker.dart';
@@ -54,4 +55,5 @@ void registerAllScreenSessionEntries() {
   TablePicker.registerScreenSession();
   AdminCreateTaskSupport.registerScreenSession();
   ItemCardDetail.registerScreenSession();
+  DigitPad.registerScreenSession();
 }

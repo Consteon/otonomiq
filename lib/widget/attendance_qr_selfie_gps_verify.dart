@@ -17,6 +17,7 @@ import '../model/otq_state.dart';
 import '../redux/screen_transaction.dart';
 import 'biometric_gate.dart';
 import 'ftz_scanner_screen.dart';
+import 'menu_icon_card.dart';
 import 'photo_camera.dart';
 
 part '../part/build_part/attend_qr_gps_selfie_state_part.dart';
@@ -1550,8 +1551,6 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
     media = MediaQuery.maybeOf(context);
     h = media?.size.height - 20;
     w = media.size.width - 20;
-    const double defaultAspectRatio = 18 / 12;
-    var topPad = 6.0;
     double fontSize = (widget.component['fontSize'] ?? 14.0).toDouble();
     // ponytail: ?? '' is intentional — diamondTextToList(String) would TypeError
     // on a null text; old code had no guard here at all
@@ -1561,586 +1560,13 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
     Widget button1;
     if (widget.single) {
       button1 = Center(
-        child: Column(
-          children: [
-            Container(
-              // display single icon
-              alignment: Alignment.center,
-              width: (widget.component['width'] ?? 90).toDouble(),
-              child: Card(
-                child: InkWell(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: <Widget>[
-                      Container(height: topPad),
-                      AspectRatio(
-                        aspectRatio: defaultAspectRatio,
-                        child: displayImage(
-                          imageUrl: widget.component['url'] ?? defaultImage,
-                          cached: true,
-                        ),
-                        // child: FadeInImage.memoryNetwork(
-                        //   placeholder: kTransparentImage,
-                        //   image: widget.component['url'] ?? defaultImage,
-                        // ),
-                      ),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          textArray[0],
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: fontSize),
-                        ),
-                      ),
-                    ],
-                  ),
-                  onTap: () async {
-                    if (!await bioGate(widget.component, context)) return;
-                    if (!mounted) return;
-                    if (!tapped) {
-                      setState(() {
-                        tapped = true;
-                      });
-                      // if (await dataOk(context)) {
-                      actionLock(
-                        'acquireSelfie attendance_qr_selfie_gps_verify',
-                      );
-                      // ConnectionData connectionData =
-                      //     await ConnectionData().getConnection(true, true);
-                      // if (true || await internetOk(context)) {
-                      if (true) {
-                        try {
-                          OtqState currentData = await OtqState()
-                              .setAllDataAsync();
-                          switch (widget.component['opMode'] ?? 'gps-single') {
-                            case 'qr-checker-single':
-                              await acquireData(
-                                'qr-checker-single',
-                                textArray,
-                                currentData,
-                              );
-                              var locArray = widget.component['locList'] ?? [];
-                              bool selfie;
-                              if (locArray.length < 1) {
-                                // location array =  empty
-                                selfie = true; // selfie
-                              } else {
-                                if (await locationVerify(
-                                  locArray,
-                                  widget.component['tolerance'] ?? 50,
-                                  currentData,
-                                )) {
-                                  selfie = false; // scan qr
-                                } else {
-                                  selfie = true; // selfie
-                                }
-                              }
-                              await acquireData('back', textArray, currentData);
-                              String toGo = widget.component['route'] ?? home;
-                              routeStack.push(toGo);
-                              gotoRoute(toGo);
-                              break; // end case 'qr-checker-single'
-
-                            case 'qr-selfie':
-                            case 'qr-single':
-                              final bool fakeGpsAllowed =
-                                  (widget.component['fakeGpsAllowed']
-                                          ?.toString()
-                                          .toLowerCase() ??
-                                      'true') !=
-                                  'false';
-                              if (!fakeGpsAllowed && currentData.mock) {
-                                if (context.mounted) {
-                                  await showDialog(
-                                    context: context,
-                                    builder: (BuildContext context) {
-                                      return AlertDialog(
-                                        title: Text(
-                                          textArray[22] ?? 'Lokasi tidak valid',
-                                        ),
-                                        content: Text(
-                                          fakeGpsDialogText(
-                                            currentData,
-                                            textArray,
-                                          ),
-                                        ),
-                                        actions: [
-                                          TextButton(
-                                            child: Text(textArray[8] ?? 'OK'),
-                                            onPressed: () =>
-                                                Navigator.of(context).pop(),
-                                          ),
-                                        ],
-                                      );
-                                    },
-                                  );
-                                }
-                                setDataOK('2');
-                                break;
-                              }
-                              final bool outPositionAllowed =
-                                  (widget.component['outPositionAllowed']
-                                          ?.toString()
-                                          .toUpperCase() ??
-                                      'TRUE') !=
-                                  'FALSE';
-                              bool outBlocked = false;
-                              if (!outPositionAllowed) {
-                                final dynamic lqrList = transactionStore
-                                    .state
-                                    .screenTx['#LQR_LIST'];
-                                final bool hasLqrList =
-                                    lqrList != null &&
-                                    lqrList is Map &&
-                                    lqrList.isNotEmpty;
-                                if (hasLqrList) {
-                                  try {
-                                    final double gpsAccuracy =
-                                        currentData.accuracy;
-                                    bool insideAny = false;
-                                    double minDistance = double.infinity;
-                                    double matchZone2 = 0;
-                                    for (final entry in lqrList.values) {
-                                      final List data = entry as List;
-                                      final double targetLat = (data[1] as num)
-                                          .toDouble();
-                                      final double targetLng = (data[2] as num)
-                                          .toDouble();
-                                      final double tolerance = (data[3] as num)
-                                          .toDouble();
-                                      final double zone2 =
-                                          tolerance + gpsAccuracy * 2;
-                                      final double distance =
-                                          Geolocator.distanceBetween(
-                                            targetLat,
-                                            targetLng,
-                                            currentData.latitude,
-                                            currentData.longitude,
-                                          );
-                                      if (distance < minDistance) {
-                                        minDistance = distance;
-                                        matchZone2 = zone2;
-                                      }
-                                      if (distance <= zone2) {
-                                        insideAny = true;
-                                      }
-                                    }
-                                    debugPrint(
-                                      '[qr-single/single] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m',
-                                    );
-                                    if (!insideAny) {
-                                      outBlocked = true;
-                                      if (context.mounted) {
-                                        await Get.dialog(
-                                          AlertDialog(
-                                            title: Text(textArray[24]),
-                                            content: Text(textArray[25]),
-                                            actions: [
-                                              TextButton(
-                                                child: Text(textArray[8]),
-                                                onPressed: () => Get.back(),
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      }
-                                    }
-                                  } catch (eLoc) {
-                                    debugPrint(
-                                      '[qr-single/single] parse error: $eLoc — bypass pengecekan',
-                                    );
-                                  }
-                                } else {
-                                  if (!internetConnected()) {
-                                    debugPrint(
-                                      '[qr-single/single] offline & #LQR_LIST kosong/null — block absensi',
-                                    );
-                                    outBlocked = true;
-                                    if (context.mounted) {
-                                      await Get.dialog(
-                                        AlertDialog(
-                                          title: Text(textArray[24]),
-                                          content: Text(textArray[25]),
-                                          actions: [
-                                            TextButton(
-                                              child: Text(textArray[8]),
-                                              onPressed: () => Get.back(),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    }
-                                  } else {
-                                    debugPrint(
-                                      '[qr-single/single] online & #LQR_LIST kosong/null — bypass pengecekan',
-                                    );
-                                  }
-                                }
-                              }
-                              if (outBlocked) {
-                                setDataOK('2');
-                                break;
-                              }
-                              if ((widget.component['opMode'] ??
-                                      'gps-single') ==
-                                  'qr-selfie') {
-                                await doQrSelfieFlow(textArray, currentData);
-                              } else {
-                                String myPage = '_OtqQR1';
-                                await acquireQrSelfie(
-                                  myPage,
-                                  widget.scrName,
-                                  widget.component,
-                                  currentData,
-                                  false,
-                                );
-                              }
-                              break;
-
-                            case 'selfie':
-                              final bool fakeGpsAllowedSelfie =
-                                  (widget.component['fakeGpsAllowed']
-                                          ?.toString()
-                                          .toLowerCase() ??
-                                      'true') !=
-                                  'false';
-                              if (!fakeGpsAllowedSelfie && currentData.mock) {
-                                if (context.mounted) {
-                                  await showDialog(
-                                    context: context,
-                                    builder: (BuildContext context) {
-                                      return AlertDialog(
-                                        title: Text(textArray[22]),
-                                        content: Text(
-                                          fakeGpsDialogText(
-                                            currentData,
-                                            textArray,
-                                          ),
-                                        ),
-                                        actions: [
-                                          TextButton(
-                                            child: Text(textArray[8]),
-                                            onPressed: () =>
-                                                Navigator.of(context).pop(),
-                                          ),
-                                        ],
-                                      );
-                                    },
-                                  );
-                                }
-                                setDataOK('2');
-                                break;
-                              }
-                              final bool outPositionAllowedSelfie =
-                                  (widget.component['outPositionAllowed']
-                                          ?.toString()
-                                          .toUpperCase() ??
-                                      'TRUE') !=
-                                  'FALSE';
-                              bool outBlockedSelfie = false;
-                              if (!outPositionAllowedSelfie) {
-                                final dynamic lqrList = transactionStore
-                                    .state
-                                    .screenTx['#LQR_LIST'];
-                                final bool hasLqrList =
-                                    lqrList != null &&
-                                    lqrList is Map &&
-                                    lqrList.isNotEmpty;
-                                if (hasLqrList) {
-                                  try {
-                                    final double gpsAccuracy =
-                                        currentData.accuracy;
-                                    bool insideAny = false;
-                                    double minDistance = double.infinity;
-                                    double matchZone2 = 0;
-                                    for (final entry in lqrList.values) {
-                                      final List data = entry as List;
-                                      final double targetLat = (data[1] as num)
-                                          .toDouble();
-                                      final double targetLng = (data[2] as num)
-                                          .toDouble();
-                                      final double tolerance = (data[3] as num)
-                                          .toDouble();
-                                      final double zone2 =
-                                          tolerance + gpsAccuracy * 2;
-                                      final double distance =
-                                          Geolocator.distanceBetween(
-                                            targetLat,
-                                            targetLng,
-                                            currentData.latitude,
-                                            currentData.longitude,
-                                          );
-                                      if (distance < minDistance) {
-                                        minDistance = distance;
-                                        matchZone2 = zone2;
-                                      }
-                                      if (distance <= zone2) {
-                                        insideAny = true;
-                                      }
-                                    }
-                                    debugPrint(
-                                      '[selfie/single] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m',
-                                    );
-                                    if (!insideAny) {
-                                      outBlockedSelfie = true;
-                                      if (context.mounted) {
-                                        await Get.dialog(
-                                          AlertDialog(
-                                            title: Text(textArray[24]),
-                                            content: Text(textArray[25]),
-                                            actions: [
-                                              TextButton(
-                                                child: Text(textArray[8]),
-                                                onPressed: () => Get.back(),
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      }
-                                    }
-                                  } catch (eLoc) {
-                                    debugPrint(
-                                      '[selfie/single] parse error: $eLoc — bypass pengecekan',
-                                    );
-                                  }
-                                } else {
-                                  if (!internetConnected()) {
-                                    debugPrint(
-                                      '[selfie/single] offline & #LQR_LIST kosong/null — block absensi',
-                                    );
-                                    outBlockedSelfie = true;
-                                    if (context.mounted) {
-                                      await Get.dialog(
-                                        AlertDialog(
-                                          title: Text(textArray[24]),
-                                          content: Text(textArray[25]),
-                                          actions: [
-                                            TextButton(
-                                              child: Text(textArray[8]),
-                                              onPressed: () => Get.back(),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    }
-                                  } else {
-                                    debugPrint(
-                                      '[selfie/single] online & #LQR_LIST kosong/null — bypass pengecekan',
-                                    );
-                                  }
-                                }
-                              }
-                              if (outBlockedSelfie) {
-                                setDataOK('2');
-                                break;
-                              }
-                              await acquireData(
-                                'selfie',
-                                textArray,
-                                currentData,
-                              );
-                              String toGo = widget.component['route'] ?? home;
-                              routeStack.push(toGo);
-                              gotoRoute(toGo);
-                              break;
-
-                            default: // gps-single or other
-                              final bool fakeGpsAllowedGps =
-                                  (widget.component['fakeGpsAllowed']
-                                          ?.toString()
-                                          .toLowerCase() ??
-                                      'true') !=
-                                  'false';
-                              if (!fakeGpsAllowedGps && currentData.mock) {
-                                if (context.mounted) {
-                                  await showDialog(
-                                    context: context,
-                                    builder: (BuildContext context) {
-                                      return AlertDialog(
-                                        title: Text(textArray[22]),
-                                        content: Text(
-                                          fakeGpsDialogText(
-                                            currentData,
-                                            textArray,
-                                          ),
-                                        ),
-                                        actions: [
-                                          TextButton(
-                                            child: Text(textArray[8]),
-                                            onPressed: () =>
-                                                Navigator.of(context).pop(),
-                                          ),
-                                        ],
-                                      );
-                                    },
-                                  );
-                                }
-                                setDataOK('2');
-                                break;
-                              }
-                              final bool outPositionAllowedGps =
-                                  (widget.component['outPositionAllowed']
-                                          ?.toString()
-                                          .toUpperCase() ??
-                                      'TRUE') !=
-                                  'FALSE';
-                              bool outBlockedGps = false;
-                              if (!outPositionAllowedGps) {
-                                final dynamic lqrList = transactionStore
-                                    .state
-                                    .screenTx['#LQR_LIST'];
-                                final bool hasLqrList =
-                                    lqrList != null &&
-                                    lqrList is Map &&
-                                    lqrList.isNotEmpty;
-                                if (hasLqrList) {
-                                  try {
-                                    final double gpsAccuracy =
-                                        currentData.accuracy;
-                                    bool insideAny = false;
-                                    double minDistance = double.infinity;
-                                    double matchZone2 = 0;
-                                    for (final entry in lqrList.values) {
-                                      final List data = entry as List;
-                                      final double targetLat = (data[1] as num)
-                                          .toDouble();
-                                      final double targetLng = (data[2] as num)
-                                          .toDouble();
-                                      final double tolerance = (data[3] as num)
-                                          .toDouble();
-                                      final double zone2 =
-                                          tolerance + gpsAccuracy * 2;
-                                      final double distance =
-                                          Geolocator.distanceBetween(
-                                            targetLat,
-                                            targetLng,
-                                            currentData.latitude,
-                                            currentData.longitude,
-                                          );
-                                      if (distance < minDistance) {
-                                        minDistance = distance;
-                                        matchZone2 = zone2;
-                                      }
-                                      if (distance <= zone2) {
-                                        insideAny = true;
-                                      }
-                                    }
-                                    debugPrint(
-                                      '[gps-single/single] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m',
-                                    );
-                                    if (!insideAny) {
-                                      outBlockedGps = true;
-                                      if (context.mounted) {
-                                        await Get.dialog(
-                                          AlertDialog(
-                                            title: Text(textArray[24]),
-                                            content: Text(textArray[25]),
-                                            actions: [
-                                              TextButton(
-                                                child: Text(textArray[8]),
-                                                onPressed: () => Get.back(),
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      }
-                                    }
-                                  } catch (eLoc) {
-                                    debugPrint(
-                                      '[gps-single/single] parse error: $eLoc — bypass pengecekan',
-                                    );
-                                  }
-                                } else {
-                                  if (!internetConnected()) {
-                                    debugPrint(
-                                      '[gps-single/single] offline & #LQR_LIST kosong/null — block absensi',
-                                    );
-                                    outBlockedGps = true;
-                                    if (context.mounted) {
-                                      await Get.dialog(
-                                        AlertDialog(
-                                          title: Text(textArray[24]),
-                                          content: Text(textArray[25]),
-                                          actions: [
-                                            TextButton(
-                                              child: Text(textArray[8]),
-                                              onPressed: () => Get.back(),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    }
-                                  } else {
-                                    debugPrint(
-                                      '[gps-single/single] online & #LQR_LIST kosong/null — bypass pengecekan',
-                                    );
-                                  }
-                                }
-                              }
-                              if (outBlockedGps) {
-                                setDataOK('2');
-                                break;
-                              }
-                              await acquireData(
-                                'gps-single',
-                                textArray,
-                                currentData,
-                              );
-                              String toGo = widget.component['route'] ?? home;
-                              routeStack.push(toGo);
-                              gotoRoute(toGo);
-                          } // end of switch
-                        } catch (e) {
-                          setDataOK('2');
-                          errorReport(e);
-                        }
-                        if (mounted) {
-                          setState(() {
-                            tapped = false;
-                          });
-                        }
-                      }
-                    } // end if !tapped
-                  }, // end of onTap
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    } else {
-      // else if (widget.single)
-      button1 = Container(
-        alignment: const Alignment(0.0, 0.0),
-        child: Card(
-          child: InkWell(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: <Widget>[
-                Container(height: topPad),
-                AspectRatio(
-                  aspectRatio: defaultAspectRatio,
-                  child: displayImage(
-                    imageUrl: widget.component['url'] ?? defaultImage,
-                    cached: true,
-                  ),
-                  // child: FadeInImage.memoryNetwork(
-                  //   placeholder: kTransparentImage,
-                  //   image: widget.component['url'] ?? defaultImage,
-                  // ),
-                ),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    textArray[0],
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: fontSize),
-                  ),
-                ),
-              ],
-            ),
+        child: SizedBox(
+          // display single icon
+          width: (widget.component['width'] ?? 90).toDouble(),
+          child: menuIconCard(
+            imageUrl: widget.component['url'] ?? defaultImage,
+            label: textArray[0],
+            fontSize: fontSize,
             onTap: () async {
               if (!await bioGate(widget.component, context)) return;
               if (!mounted) return;
@@ -2149,17 +1575,20 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                   tapped = true;
                 });
                 // if (await dataOk(context)) {
-                actionLock(
-                  '[1302] acquireSelfie attendance_qr_selfie_gps_verify',
-                );
+                actionLock('acquireSelfie attendance_qr_selfie_gps_verify');
                 // ConnectionData connectionData =
                 //     await ConnectionData().getConnection(true, true);
-                // if (await internetOk(context)) {
+                // if (true || await internetOk(context)) {
                 if (true) {
                   try {
                     OtqState currentData = await OtqState().setAllDataAsync();
                     switch (widget.component['opMode'] ?? 'gps-single') {
                       case 'qr-checker-single':
+                        await acquireData(
+                          'qr-checker-single',
+                          textArray,
+                          currentData,
+                        );
                         var locArray = widget.component['locList'] ?? [];
                         bool selfie;
                         if (locArray.length < 1) {
@@ -2176,44 +1605,11 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                             selfie = true; // selfie
                           }
                         }
-                        if (selfie) {
-                          await showDialog(
-                            // show dialog 5
-                            context: context,
-                            builder: (BuildContext context) {
-                              return AlertDialog(
-                                // dialog 3
-                                title: Text(textArray[19]),
-                                content: Text(textArray[20]),
-                                actions: <Widget>[
-                                  TextButton(
-                                    child: Text(textArray[21]),
-                                    onPressed: () {
-                                      Navigator.of(context).pop();
-                                    },
-                                  ),
-                                ],
-                              );
-                            },
-                          );
-                          await acquireData('selfie', textArray, currentData);
-                          String toGo = widget.component['route'] ?? home;
-                          routeStack.push(toGo);
-                          gotoRoute(toGo);
-                        } else {
-                          String myPage = '_OtqQR1';
-                          await acquireQrSelfie(
-                            myPage,
-                            widget.scrName,
-                            widget.component,
-                            currentData,
-                            true,
-                          );
-                          // setDataOK('2');
-                          // routeStack.push(myPage);
-                          // gotoRoute(myPage);
-                        }
-                        break; // end case qr-checker-single
+                        await acquireData('back', textArray, currentData);
+                        String toGo = widget.component['route'] ?? home;
+                        routeStack.push(toGo);
+                        gotoRoute(toGo);
+                        break; // end case 'qr-checker-single'
 
                       case 'qr-selfie':
                       case 'qr-single':
@@ -2229,13 +1625,15 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                               context: context,
                               builder: (BuildContext context) {
                                 return AlertDialog(
-                                  title: Text(textArray[22]),
+                                  title: Text(
+                                    textArray[22] ?? 'Lokasi tidak valid',
+                                  ),
                                   content: Text(
                                     fakeGpsDialogText(currentData, textArray),
                                   ),
                                   actions: [
                                     TextButton(
-                                      child: Text(textArray[8]),
+                                      child: Text(textArray[8] ?? 'OK'),
                                       onPressed: () =>
                                           Navigator.of(context).pop(),
                                     ),
@@ -2293,7 +1691,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                 }
                               }
                               debugPrint(
-                                '[qr-single/multi] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m',
+                                '[qr-single/single] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m',
                               );
                               if (!insideAny) {
                                 outBlocked = true;
@@ -2314,13 +1712,13 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                               }
                             } catch (eLoc) {
                               debugPrint(
-                                '[qr-single/multi] parse error: $eLoc — bypass pengecekan',
+                                '[qr-single/single] parse error: $eLoc — bypass pengecekan',
                               );
                             }
                           } else {
                             if (!internetConnected()) {
                               debugPrint(
-                                '[qr-single/multi] offline & #LQR_LIST kosong/null — block absensi',
+                                '[qr-single/single] offline & #LQR_LIST kosong/null — block absensi',
                               );
                               outBlocked = true;
                               if (context.mounted) {
@@ -2339,7 +1737,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                               }
                             } else {
                               debugPrint(
-                                '[qr-single/multi] online & #LQR_LIST kosong/null — bypass pengecekan',
+                                '[qr-single/single] online & #LQR_LIST kosong/null — bypass pengecekan',
                               );
                             }
                           }
@@ -2440,7 +1838,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                 }
                               }
                               debugPrint(
-                                '[selfie/multi] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m',
+                                '[selfie/single] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m',
                               );
                               if (!insideAny) {
                                 outBlockedSelfie = true;
@@ -2461,13 +1859,13 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                               }
                             } catch (eLoc) {
                               debugPrint(
-                                '[selfie/multi] parse error: $eLoc — bypass pengecekan',
+                                '[selfie/single] parse error: $eLoc — bypass pengecekan',
                               );
                             }
                           } else {
                             if (!internetConnected()) {
                               debugPrint(
-                                '[selfie/multi] offline & #LQR_LIST kosong/null — block absensi',
+                                '[selfie/single] offline & #LQR_LIST kosong/null — block absensi',
                               );
                               outBlockedSelfie = true;
                               if (context.mounted) {
@@ -2486,7 +1884,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                               }
                             } else {
                               debugPrint(
-                                '[selfie/multi] online & #LQR_LIST kosong/null — bypass pengecekan',
+                                '[selfie/single] online & #LQR_LIST kosong/null — bypass pengecekan',
                               );
                             }
                           }
@@ -2578,7 +1976,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                                 }
                               }
                               debugPrint(
-                                '[gps-single/multi] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m',
+                                '[gps-single/single] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m',
                               );
                               if (!insideAny) {
                                 outBlockedGps = true;
@@ -2599,13 +1997,13 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                               }
                             } catch (eLoc) {
                               debugPrint(
-                                '[gps-single/multi] parse error: $eLoc — bypass pengecekan',
+                                '[gps-single/single] parse error: $eLoc — bypass pengecekan',
                               );
                             }
                           } else {
                             if (!internetConnected()) {
                               debugPrint(
-                                '[gps-single/multi] offline & #LQR_LIST kosong/null — block absensi',
+                                '[gps-single/single] offline & #LQR_LIST kosong/null — block absensi',
                               );
                               outBlockedGps = true;
                               if (context.mounted) {
@@ -2624,7 +2022,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                               }
                             } else {
                               debugPrint(
-                                '[gps-single/multi] online & #LQR_LIST kosong/null — bypass pengecekan',
+                                '[gps-single/single] online & #LQR_LIST kosong/null — bypass pengecekan',
                               );
                             }
                           }
@@ -2641,20 +2039,525 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                   } catch (e) {
                     setDataOK('2');
                     errorReport(e);
-                  } // end of try
-                } else {
-                  setDataOK('2');
-                } // end if internetOK
-                // } // end if dataOk
-                if (mounted) {
-                  setState(() {
-                    tapped = false;
-                  });
+                  }
+                  if (mounted) {
+                    setState(() {
+                      tapped = false;
+                    });
+                  }
                 }
-              } // end if ! tapped
+              } // end if !tapped
             }, // end of onTap
           ),
         ),
+      );
+    } else {
+      // else if (widget.single)
+      button1 = menuIconCard(
+        imageUrl: widget.component['url'] ?? defaultImage,
+        label: textArray[0],
+        fontSize: fontSize,
+        onTap: () async {
+          if (!await bioGate(widget.component, context)) return;
+          if (!mounted) return;
+          if (!tapped) {
+            setState(() {
+              tapped = true;
+            });
+            // if (await dataOk(context)) {
+            actionLock('[1302] acquireSelfie attendance_qr_selfie_gps_verify');
+            // ConnectionData connectionData =
+            //     await ConnectionData().getConnection(true, true);
+            // if (await internetOk(context)) {
+            if (true) {
+              try {
+                OtqState currentData = await OtqState().setAllDataAsync();
+                switch (widget.component['opMode'] ?? 'gps-single') {
+                  case 'qr-checker-single':
+                    var locArray = widget.component['locList'] ?? [];
+                    bool selfie;
+                    if (locArray.length < 1) {
+                      // location array =  empty
+                      selfie = true; // selfie
+                    } else {
+                      if (await locationVerify(
+                        locArray,
+                        widget.component['tolerance'] ?? 50,
+                        currentData,
+                      )) {
+                        selfie = false; // scan qr
+                      } else {
+                        selfie = true; // selfie
+                      }
+                    }
+                    if (selfie) {
+                      await showDialog(
+                        // show dialog 5
+                        context: context,
+                        builder: (BuildContext context) {
+                          return AlertDialog(
+                            // dialog 3
+                            title: Text(textArray[19]),
+                            content: Text(textArray[20]),
+                            actions: <Widget>[
+                              TextButton(
+                                child: Text(textArray[21]),
+                                onPressed: () {
+                                  Navigator.of(context).pop();
+                                },
+                              ),
+                            ],
+                          );
+                        },
+                      );
+                      await acquireData('selfie', textArray, currentData);
+                      String toGo = widget.component['route'] ?? home;
+                      routeStack.push(toGo);
+                      gotoRoute(toGo);
+                    } else {
+                      String myPage = '_OtqQR1';
+                      await acquireQrSelfie(
+                        myPage,
+                        widget.scrName,
+                        widget.component,
+                        currentData,
+                        true,
+                      );
+                      // setDataOK('2');
+                      // routeStack.push(myPage);
+                      // gotoRoute(myPage);
+                    }
+                    break; // end case qr-checker-single
+
+                  case 'qr-selfie':
+                  case 'qr-single':
+                    final bool fakeGpsAllowed =
+                        (widget.component['fakeGpsAllowed']
+                                ?.toString()
+                                .toLowerCase() ??
+                            'true') !=
+                        'false';
+                    if (!fakeGpsAllowed && currentData.mock) {
+                      if (context.mounted) {
+                        await showDialog(
+                          context: context,
+                          builder: (BuildContext context) {
+                            return AlertDialog(
+                              title: Text(textArray[22]),
+                              content: Text(
+                                fakeGpsDialogText(currentData, textArray),
+                              ),
+                              actions: [
+                                TextButton(
+                                  child: Text(textArray[8]),
+                                  onPressed: () => Navigator.of(context).pop(),
+                                ),
+                              ],
+                            );
+                          },
+                        );
+                      }
+                      setDataOK('2');
+                      break;
+                    }
+                    final bool outPositionAllowed =
+                        (widget.component['outPositionAllowed']
+                                ?.toString()
+                                .toUpperCase() ??
+                            'TRUE') !=
+                        'FALSE';
+                    bool outBlocked = false;
+                    if (!outPositionAllowed) {
+                      final dynamic lqrList =
+                          transactionStore.state.screenTx['#LQR_LIST'];
+                      final bool hasLqrList =
+                          lqrList != null &&
+                          lqrList is Map &&
+                          lqrList.isNotEmpty;
+                      if (hasLqrList) {
+                        try {
+                          final double gpsAccuracy = currentData.accuracy;
+                          bool insideAny = false;
+                          double minDistance = double.infinity;
+                          double matchZone2 = 0;
+                          for (final entry in lqrList.values) {
+                            final List data = entry as List;
+                            final double targetLat = (data[1] as num)
+                                .toDouble();
+                            final double targetLng = (data[2] as num)
+                                .toDouble();
+                            final double tolerance = (data[3] as num)
+                                .toDouble();
+                            final double zone2 = tolerance + gpsAccuracy * 2;
+                            final double distance = Geolocator.distanceBetween(
+                              targetLat,
+                              targetLng,
+                              currentData.latitude,
+                              currentData.longitude,
+                            );
+                            if (distance < minDistance) {
+                              minDistance = distance;
+                              matchZone2 = zone2;
+                            }
+                            if (distance <= zone2) {
+                              insideAny = true;
+                            }
+                          }
+                          debugPrint(
+                            '[qr-single/multi] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m',
+                          );
+                          if (!insideAny) {
+                            outBlocked = true;
+                            if (context.mounted) {
+                              await Get.dialog(
+                                AlertDialog(
+                                  title: Text(textArray[24]),
+                                  content: Text(textArray[25]),
+                                  actions: [
+                                    TextButton(
+                                      child: Text(textArray[8]),
+                                      onPressed: () => Get.back(),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
+                          }
+                        } catch (eLoc) {
+                          debugPrint(
+                            '[qr-single/multi] parse error: $eLoc — bypass pengecekan',
+                          );
+                        }
+                      } else {
+                        if (!internetConnected()) {
+                          debugPrint(
+                            '[qr-single/multi] offline & #LQR_LIST kosong/null — block absensi',
+                          );
+                          outBlocked = true;
+                          if (context.mounted) {
+                            await Get.dialog(
+                              AlertDialog(
+                                title: Text(textArray[24]),
+                                content: Text(textArray[25]),
+                                actions: [
+                                  TextButton(
+                                    child: Text(textArray[8]),
+                                    onPressed: () => Get.back(),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+                        } else {
+                          debugPrint(
+                            '[qr-single/multi] online & #LQR_LIST kosong/null — bypass pengecekan',
+                          );
+                        }
+                      }
+                    }
+                    if (outBlocked) {
+                      setDataOK('2');
+                      break;
+                    }
+                    if ((widget.component['opMode'] ?? 'gps-single') ==
+                        'qr-selfie') {
+                      await doQrSelfieFlow(textArray, currentData);
+                    } else {
+                      String myPage = '_OtqQR1';
+                      await acquireQrSelfie(
+                        myPage,
+                        widget.scrName,
+                        widget.component,
+                        currentData,
+                        false,
+                      );
+                    }
+                    break;
+
+                  case 'selfie':
+                    final bool fakeGpsAllowedSelfie =
+                        (widget.component['fakeGpsAllowed']
+                                ?.toString()
+                                .toLowerCase() ??
+                            'true') !=
+                        'false';
+                    if (!fakeGpsAllowedSelfie && currentData.mock) {
+                      if (context.mounted) {
+                        await showDialog(
+                          context: context,
+                          builder: (BuildContext context) {
+                            return AlertDialog(
+                              title: Text(textArray[22]),
+                              content: Text(
+                                fakeGpsDialogText(currentData, textArray),
+                              ),
+                              actions: [
+                                TextButton(
+                                  child: Text(textArray[8]),
+                                  onPressed: () => Navigator.of(context).pop(),
+                                ),
+                              ],
+                            );
+                          },
+                        );
+                      }
+                      setDataOK('2');
+                      break;
+                    }
+                    final bool outPositionAllowedSelfie =
+                        (widget.component['outPositionAllowed']
+                                ?.toString()
+                                .toUpperCase() ??
+                            'TRUE') !=
+                        'FALSE';
+                    bool outBlockedSelfie = false;
+                    if (!outPositionAllowedSelfie) {
+                      final dynamic lqrList =
+                          transactionStore.state.screenTx['#LQR_LIST'];
+                      final bool hasLqrList =
+                          lqrList != null &&
+                          lqrList is Map &&
+                          lqrList.isNotEmpty;
+                      if (hasLqrList) {
+                        try {
+                          final double gpsAccuracy = currentData.accuracy;
+                          bool insideAny = false;
+                          double minDistance = double.infinity;
+                          double matchZone2 = 0;
+                          for (final entry in lqrList.values) {
+                            final List data = entry as List;
+                            final double targetLat = (data[1] as num)
+                                .toDouble();
+                            final double targetLng = (data[2] as num)
+                                .toDouble();
+                            final double tolerance = (data[3] as num)
+                                .toDouble();
+                            final double zone2 = tolerance + gpsAccuracy * 2;
+                            final double distance = Geolocator.distanceBetween(
+                              targetLat,
+                              targetLng,
+                              currentData.latitude,
+                              currentData.longitude,
+                            );
+                            if (distance < minDistance) {
+                              minDistance = distance;
+                              matchZone2 = zone2;
+                            }
+                            if (distance <= zone2) {
+                              insideAny = true;
+                            }
+                          }
+                          debugPrint(
+                            '[selfie/multi] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m',
+                          );
+                          if (!insideAny) {
+                            outBlockedSelfie = true;
+                            if (context.mounted) {
+                              await Get.dialog(
+                                AlertDialog(
+                                  title: Text(textArray[24]),
+                                  content: Text(textArray[25]),
+                                  actions: [
+                                    TextButton(
+                                      child: Text(textArray[8]),
+                                      onPressed: () => Get.back(),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
+                          }
+                        } catch (eLoc) {
+                          debugPrint(
+                            '[selfie/multi] parse error: $eLoc — bypass pengecekan',
+                          );
+                        }
+                      } else {
+                        if (!internetConnected()) {
+                          debugPrint(
+                            '[selfie/multi] offline & #LQR_LIST kosong/null — block absensi',
+                          );
+                          outBlockedSelfie = true;
+                          if (context.mounted) {
+                            await Get.dialog(
+                              AlertDialog(
+                                title: Text(textArray[24]),
+                                content: Text(textArray[25]),
+                                actions: [
+                                  TextButton(
+                                    child: Text(textArray[8]),
+                                    onPressed: () => Get.back(),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+                        } else {
+                          debugPrint(
+                            '[selfie/multi] online & #LQR_LIST kosong/null — bypass pengecekan',
+                          );
+                        }
+                      }
+                    }
+                    if (outBlockedSelfie) {
+                      setDataOK('2');
+                      break;
+                    }
+                    await acquireData('selfie', textArray, currentData);
+                    String toGo = widget.component['route'] ?? home;
+                    routeStack.push(toGo);
+                    gotoRoute(toGo);
+                    break;
+
+                  default: // gps-single or other
+                    final bool fakeGpsAllowedGps =
+                        (widget.component['fakeGpsAllowed']
+                                ?.toString()
+                                .toLowerCase() ??
+                            'true') !=
+                        'false';
+                    if (!fakeGpsAllowedGps && currentData.mock) {
+                      if (context.mounted) {
+                        await showDialog(
+                          context: context,
+                          builder: (BuildContext context) {
+                            return AlertDialog(
+                              title: Text(textArray[22]),
+                              content: Text(
+                                fakeGpsDialogText(currentData, textArray),
+                              ),
+                              actions: [
+                                TextButton(
+                                  child: Text(textArray[8]),
+                                  onPressed: () => Navigator.of(context).pop(),
+                                ),
+                              ],
+                            );
+                          },
+                        );
+                      }
+                      setDataOK('2');
+                      break;
+                    }
+                    final bool outPositionAllowedGps =
+                        (widget.component['outPositionAllowed']
+                                ?.toString()
+                                .toUpperCase() ??
+                            'TRUE') !=
+                        'FALSE';
+                    bool outBlockedGps = false;
+                    if (!outPositionAllowedGps) {
+                      final dynamic lqrList =
+                          transactionStore.state.screenTx['#LQR_LIST'];
+                      final bool hasLqrList =
+                          lqrList != null &&
+                          lqrList is Map &&
+                          lqrList.isNotEmpty;
+                      if (hasLqrList) {
+                        try {
+                          final double gpsAccuracy = currentData.accuracy;
+                          bool insideAny = false;
+                          double minDistance = double.infinity;
+                          double matchZone2 = 0;
+                          for (final entry in lqrList.values) {
+                            final List data = entry as List;
+                            final double targetLat = (data[1] as num)
+                                .toDouble();
+                            final double targetLng = (data[2] as num)
+                                .toDouble();
+                            final double tolerance = (data[3] as num)
+                                .toDouble();
+                            final double zone2 = tolerance + gpsAccuracy * 2;
+                            final double distance = Geolocator.distanceBetween(
+                              targetLat,
+                              targetLng,
+                              currentData.latitude,
+                              currentData.longitude,
+                            );
+                            if (distance < minDistance) {
+                              minDistance = distance;
+                              matchZone2 = zone2;
+                            }
+                            if (distance <= zone2) {
+                              insideAny = true;
+                            }
+                          }
+                          debugPrint(
+                            '[gps-single/multi] insideAny=$insideAny, minDistance=${minDistance.toStringAsFixed(1)}m, zone2=${matchZone2.toStringAsFixed(1)}m',
+                          );
+                          if (!insideAny) {
+                            outBlockedGps = true;
+                            if (context.mounted) {
+                              await Get.dialog(
+                                AlertDialog(
+                                  title: Text(textArray[24]),
+                                  content: Text(textArray[25]),
+                                  actions: [
+                                    TextButton(
+                                      child: Text(textArray[8]),
+                                      onPressed: () => Get.back(),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
+                          }
+                        } catch (eLoc) {
+                          debugPrint(
+                            '[gps-single/multi] parse error: $eLoc — bypass pengecekan',
+                          );
+                        }
+                      } else {
+                        if (!internetConnected()) {
+                          debugPrint(
+                            '[gps-single/multi] offline & #LQR_LIST kosong/null — block absensi',
+                          );
+                          outBlockedGps = true;
+                          if (context.mounted) {
+                            await Get.dialog(
+                              AlertDialog(
+                                title: Text(textArray[24]),
+                                content: Text(textArray[25]),
+                                actions: [
+                                  TextButton(
+                                    child: Text(textArray[8]),
+                                    onPressed: () => Get.back(),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+                        } else {
+                          debugPrint(
+                            '[gps-single/multi] online & #LQR_LIST kosong/null — bypass pengecekan',
+                          );
+                        }
+                      }
+                    }
+                    if (outBlockedGps) {
+                      setDataOK('2');
+                      break;
+                    }
+                    await acquireData('gps-single', textArray, currentData);
+                    String toGo = widget.component['route'] ?? home;
+                    routeStack.push(toGo);
+                    gotoRoute(toGo);
+                } // end of switch
+              } catch (e) {
+                setDataOK('2');
+                errorReport(e);
+              } // end of try
+            } else {
+              setDataOK('2');
+            } // end if internetOK
+            // } // end if dataOk
+            if (mounted) {
+              setState(() {
+                tapped = false;
+              });
+            }
+          } // end if ! tapped
+        }, // end of onTap
       );
     } // end if (widget.single)
     return button1;

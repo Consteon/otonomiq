@@ -232,7 +232,7 @@ class _LoginFormState extends State<LoginForm> {
             );
           } else if (state.loginStatus == 802) {
             // got text from guest | VM>JSON
-            // read from Firestore
+            // TODO read from Firestore
             showDialog(
               context: context,
               builder: (BuildContext context) {
@@ -260,7 +260,7 @@ class _LoginFormState extends State<LoginForm> {
             );
           } else if (state.loginStatus == 809) {
             // got text from guest | VM>JSON
-            // read from Firestore
+            // TODO read from Firestore
             showDialog(
               context: context,
               builder: (BuildContext context) {
@@ -312,7 +312,7 @@ class _LoginFormState extends State<LoginForm> {
         } else if (state.loginUid != '') {
           gotoRoute(
             widget.route ?? '_Invitation',
-          ); // delete this line, change it with new user getter.
+          ); // TODO delete this line, change it with new user getter.
         }
       },
       child: BlocBuilder(
@@ -412,6 +412,21 @@ class _LoginFormState extends State<LoginForm> {
                                   TextField(
                                     controller: _invController,
                                     keyboardType: TextInputType.phone,
+                                    // The phone keypad has no return/done
+                                    // key, so the keyboard stays up once the
+                                    // field is focused. Without a deep bottom
+                                    // scrollPadding it covers the ToS row and
+                                    // BOTH login buttons, which is what the
+                                    // App Store reviewer saw as "no login
+                                    // button". 300 = ToS + divider + both
+                                    // buttons, so focusing the field scrolls
+                                    // them above the keyboard.
+                                    scrollPadding: const EdgeInsets.only(
+                                      left: 20,
+                                      top: 20,
+                                      right: 20,
+                                      bottom: 300,
+                                    ),
                                     autofillHints: const [
                                       AutofillHints.telephoneNumber,
                                     ],
@@ -650,33 +665,44 @@ class _LoginFormState extends State<LoginForm> {
                                   const SizedBox(height: 20),
 
                                   // Social buttons — enabled only when TOS checked & phone filled
-                                  AbsorbPointer(
-                                    absorbing: !_isLoginReady(),
-                                    child: AnimatedOpacity(
-                                      opacity: _isLoginReady() ? 1.0 : 0.45,
-                                      duration: const Duration(
-                                        milliseconds: 200,
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.stretch,
-                                        children: [
-                                          if (sinner) ...[
-                                            AppleLoginButton(
-                                              key: _appleBtnKey,
+                                  // A silently dead button reads as "there is
+                                  // no login button" — exactly what the App
+                                  // Store reviewer reported. Keep the tap alive
+                                  // so the gate always says why it is closed.
+                                  GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: _isLoginReady()
+                                        ? null
+                                        : () => _explainLoginGate(context),
+                                    child: AbsorbPointer(
+                                      absorbing: !_isLoginReady(),
+                                      child: AnimatedOpacity(
+                                        opacity: _isLoginReady() ? 1.0 : 0.45,
+                                        duration: const Duration(
+                                          milliseconds: 200,
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.stretch,
+                                          children: [
+                                            if (sinner) ...[
+                                              AppleLoginButton(
+                                                key: _appleBtnKey,
+                                                component: widget.component,
+                                                country:
+                                                    _countryController.text,
+                                                inv: _invController.text,
+                                              ),
+                                              const SizedBox(height: 12),
+                                            ],
+                                            GoogleLoginButton(
+                                              key: _googleBtnKey,
                                               component: widget.component,
                                               country: _countryController.text,
                                               inv: _invController.text,
                                             ),
-                                            const SizedBox(height: 12),
                                           ],
-                                          GoogleLoginButton(
-                                            key: _googleBtnKey,
-                                            component: widget.component,
-                                            country: _countryController.text,
-                                            inv: _invController.text,
-                                          ),
-                                        ],
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -814,6 +840,20 @@ class _LoginFormState extends State<LoginForm> {
 
   bool _isLoginReady() {
     return _tosOk && _invController.text.isNotEmpty;
+  }
+
+  // Why the login buttons are inert. Shown on tap only — the always-visible
+  // hint row was deliberately removed in the redesign, so this stays silent
+  // until the user actually reaches for a button.
+  void _explainLoginGate(BuildContext context) {
+    final String message = _invController.text.isEmpty
+        ? (widget.component['hintPhone'] ??
+              'Isi nomor ponsel terdaftar terlebih dahulu.')
+        : (widget.component['hintTos'] ??
+              'Centang persetujuan Syarat dan Ketentuan terlebih dahulu.');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 3)),
+    );
   }
 
   String phoneInternationalize(String phone) {

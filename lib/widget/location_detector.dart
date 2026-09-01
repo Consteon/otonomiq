@@ -43,10 +43,10 @@ class _LocationDetectorState extends State<LocationDetector> {
     _gpsStatus = _gps['status'] as String? ?? 'last_known';
     _showViewMap =
         (widget.component['showViewMap']?.toString().toUpperCase() ?? 'TRUE') !=
-            'FALSE';
+        'FALSE';
     _showRefresh =
         (widget.component['showRefresh']?.toString().toUpperCase() ?? 'TRUE') !=
-            'FALSE';
+        'FALSE';
     _borderRadius =
         (widget.component['borderRadius'] as num?)?.toDouble() ?? 10;
     _fetchLocationData();
@@ -70,7 +70,10 @@ class _LocationDetectorState extends State<LocationDetector> {
           final parts = [
             otqState.subLocality,
             otqState.locality.replaceFirst(RegExp(r'^[Kk]ecamatan\s+'), ''),
-            otqState.subAdministrativeArea.replaceFirst(RegExp(r'^([Kk]abupaten|[Kk]ota)\s+'), ''),
+            otqState.subAdministrativeArea.replaceFirst(
+              RegExp(r'^([Kk]abupaten|[Kk]ota)\s+'),
+              '',
+            ),
             otqState.postalCode,
           ].where((s) => s.isNotEmpty).toList();
           address = parts.isNotEmpty ? parts.join(', ') : _fallbackAddress;
@@ -243,16 +246,10 @@ class _LocationDetectorState extends State<LocationDetector> {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(_borderRadius),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 12,
-              offset: const Offset(0, 2),
-            ),
-          ],
-          border: Border.all(color: Color(0xffE2E8F0))),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(_borderRadius),
+        border: Border.all(color: Color(0xffE2E8F0)),
+      ),
       padding: const EdgeInsets.all(16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -261,8 +258,11 @@ class _LocationDetectorState extends State<LocationDetector> {
           // Header
           Row(
             children: [
-              const Icon(Icons.location_on_outlined,
-                  size: 16, color: Color(0xFF9CA3AF)),
+              const Icon(
+                Icons.location_on_outlined,
+                size: 16,
+                color: Color(0xFF9CA3AF),
+              ),
               const SizedBox(width: 6),
               Text(
                 (_texts.isNotEmpty ? _texts[0] : 'LOCATION').toUpperCase(),
@@ -322,16 +322,20 @@ class _LocationDetectorState extends State<LocationDetector> {
                 const SizedBox(width: 4),
                 Text(
                   '${_accuracyLabel()} ${_texts.length > 6 ? _texts[6] : '±'}${_accuracy!.round()}${_texts.length > 7 ? _texts[7] : 'm'}',
-                  style:
-                  const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF9CA3AF),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 const Text('·', style: TextStyle(color: Color(0xFF9CA3AF))),
                 const SizedBox(width: 8),
                 Text(
                   'Updated $updatedAt',
-                  style:
-                  const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF9CA3AF),
+                  ),
                 ),
               ],
             ),

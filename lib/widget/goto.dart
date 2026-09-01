@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+
 import '../global.dart';
-import '../api.dart';
+import 'menu_icon_card.dart';
 
 /*
   Send current GPS location and display google map static
@@ -30,92 +31,24 @@ class _GotoState extends State<Goto> {
       }
     } // end of tabGoto
 
-    const double defaultAspectRatio = 18 / 12;
-    var topPad = 6.0;
     double fontSize = (widget.component['fontSize'] ?? 14.0).toDouble();
     var textArray = diamondTextToList(widget.component['text']);
-    Widget button;
+
+    Widget card = menuIconCard(
+      imageUrl: widget.component['url'] ?? defaultImage,
+      label: textArray[0],
+      fontSize: fontSize,
+      onTap: () async => await tabGoto(widget.component['route'] ?? 'home'),
+    );
 
     if (widget.single) {
-      // single, display centered icon with map
-      button = Center(
-        child: Container(
-          // if single
-          alignment: Alignment.center,
-//      color: Colors.red,
+      return Center(
+        child: SizedBox(
           width: (widget.component['width'] ?? 90).toDouble(),
-          child: Card(
-            child: InkWell(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: <Widget>[
-                  Container(
-                    height: topPad,
-                  ),
-                  AspectRatio(
-                    aspectRatio: defaultAspectRatio,
-                    child: displayImage(
-                        imageUrl: widget.component['url'] ?? defaultImage,
-                        cached: true),
-                    // child: FadeInImage.memoryNetwork(
-                    //   placeholder: kTransparentImage,
-                    //   image: widget.component['url'] ?? defaultImage,
-                    // ),
-                  ),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      textArray[0],
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: fontSize),
-                    ),
-                  ),
-                ],
-              ),
-              onTap: () async =>
-                  await tabGoto(widget.component['route'] ?? 'home'),
-            ),
-          ),
-        ),
-      );
-    } else {
-      // called from Horizontal_icon, display icon only
-      button = Container(
-        alignment: const Alignment(0.0, 0.0),
-        child: Card(
-          child: InkWell(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: <Widget>[
-                Container(
-                  height: topPad,
-                ),
-                AspectRatio(
-                  aspectRatio: defaultAspectRatio,
-                  child: displayImage(
-                      imageUrl: widget.component['url'] ?? defaultImage,
-                      cached: true),
-                  // child: FadeInImage.memoryNetwork(
-                  //   placeholder: kTransparentImage,
-                  //   image: widget.component['url'] ?? defaultImage,
-                  // ),
-                ),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    textArray[0],
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: fontSize),
-                  ),
-                ),
-              ],
-            ),
-            onTap: () async =>
-                await tabGoto(widget.component['route'] ?? 'home'),
-          ),
+          child: card,
         ),
       );
     }
-    return button;
+    return card;
   }
 }

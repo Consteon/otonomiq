@@ -660,7 +660,13 @@ class MainPageState extends State<MainPage> {
                                     // (value or error) is discarded by
                                     // Future.timeout, never unhandled.
                                     .timeout(const Duration(seconds: 60))
-                                    .then((_) {
+                                    // `ok` is false when readSettingsContext
+                                    // kept the cache (network error, non-JSON
+                                    // body, decode failure). It completes
+                                    // NORMALLY in that case, so without this
+                                    // flag a failed refresh painted a green
+                                    // dot over data that never changed.
+                                    .then((ok) {
                                       transactionStore.dispatch(
                                         UpdateScreenTxAction(
                                           ScreenTransaction({
@@ -670,7 +676,10 @@ class MainPageState extends State<MainPage> {
                                       );
                                       _endRefresh(
                                         elements: reloadPage(pageName),
-                                        tag: 'refresh icon',
+                                        alert: !ok,
+                                        tag: ok
+                                            ? 'refresh icon'
+                                            : 'refresh kept cache',
                                       );
                                     })
                                     .catchError((e) async {

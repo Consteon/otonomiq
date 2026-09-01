@@ -11,6 +11,7 @@ import '../model/connection_data.dart';
 import '../model/input_controller.dart';
 import '../model/otq_state.dart';
 import '../redux/screen_transaction.dart';
+import 'menu_icon_card.dart';
 
 /*
   Send current GPS location and display google map static
@@ -323,7 +324,7 @@ class GpsSendState extends State<GpsSend> {
             );
           } // end if position
         } on PlatformException catch (err) {
-          // display dialog fail, and play wrong beep
+          // TODO display dialog fail, and play wrong beep
           setDataOK(
             '1',
           ); // reload pages and display green anyway. So the app will not lock up
@@ -359,99 +360,26 @@ class GpsSendState extends State<GpsSend> {
       } // end of dataOk
     } // end of _sendLocation
 
-    const double defaultAspectRatio = 18 / 12;
-    var topPad = 6.0;
     double fontSize = (widget.component['fontSize'] ?? 14.0).toDouble();
     var textArray = diamondTextToList(widget.component['text']);
-    Widget button;
+
+    Widget card = menuIconCard(
+      imageUrl: widget.component['url'] ?? defaultImage,
+      label: textArray[0],
+      fontSize: fontSize,
+      onTap: () async {
+        await sendLocation(textArray);
+      },
+    );
 
     if (widget.single) {
-      // single, display centered icon with map
-      button = Center(
-        child: Container(
-          // if single
-          alignment: Alignment.center,
-          //      color: Colors.red,
+      return Center(
+        child: SizedBox(
           width: (widget.component['width'] ?? 90).toDouble(),
-          child: Card(
-            child: InkWell(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: <Widget>[
-                  Container(height: topPad),
-                  AspectRatio(
-                    aspectRatio: defaultAspectRatio,
-                    child: displayImage(
-                      imageUrl: widget.component['url'] ?? defaultImage,
-                      cached: true,
-                    ),
-                    // child: FadeInImage.memoryNetwork(
-                    //   placeholder: kTransparentImage,
-                    //   image: widget.component['url'] ?? defaultImage,
-                    // ),
-                  ),
-                  Text(
-                    textArray[0],
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: fontSize),
-                  ),
-                ],
-              ),
-              onTap: () async {
-                await sendLocation(textArray);
-              },
-            ),
-          ),
-        ),
-      );
-    } else {
-      // called from Horizontal_icon, display icon only
-      button = Container(
-        alignment: const Alignment(0.0, 0.0),
-        child: Card(
-          child: InkWell(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: <Widget>[
-                Container(height: topPad),
-                AspectRatio(
-                  aspectRatio: defaultAspectRatio,
-                  child: displayImage(
-                    imageUrl: widget.component['url'] ?? defaultImage,
-                    cached: true,
-                  ),
-                  // child: CachedNetworkImage(
-                  //   imageUrl: widget.component['url'] ?? defaultImage,
-                  //   placeholder: (context, url) => Container(
-                  //     color: Colors.transparent, // Set transparency
-                  //     width: double.infinity, // Match image size
-                  //     height: double.infinity, // Match image size
-                  //   ), // Placeholder while loading
-                  //   errorWidget: (context, url, error) => const Icon(Icons.error), // Error widget
-                  //   fadeInDuration: const Duration(milliseconds: 100), // Fade-in effect
-                  // ),
-                  // child: FadeInImage.memoryNetwork(
-                  //   placeholder: kTransparentImage,
-                  //   image: widget.component['url'] ?? defaultImage,
-                  // ),
-                ),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    textArray[0],
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: fontSize),
-                  ),
-                ),
-              ],
-            ),
-            onTap: () async {
-              await sendLocation(textArray);
-            },
-          ),
+          child: card,
         ),
       );
     }
-    return button;
+    return card;
   }
 }

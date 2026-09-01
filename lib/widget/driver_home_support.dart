@@ -1,11 +1,14 @@
 import 'dart:async'; // unawaited
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/widgets.dart'; // WidgetsBinding (deferred publish)
+import 'package:flutter/material.dart'; // WidgetsBinding + MapsButton (Material)
 import 'package:get/get.dart';
+import 'package:url_launcher/url_launcher.dart'; // MapsButton -> external maps app
 
 import '../api.dart'; // getTableVid
 import '../global.dart';
+import '../global2.dart'; // txfControllerCheck
+import '../model/otq_state.dart'; // OtqState
 import '../redux/screen_transaction.dart';
 import '../screen_session.dart';
 import 'dsl_eq.dart';
@@ -481,6 +484,281 @@ List<MapEntry<String, String>> parseRouteParams(String? raw) {
     out.add(MapEntry(key, value));
   }
   return out;
+}
+
+/// Parse a keyed DSL (`key◼value⭘key◼value`) into a Map.
+///
+/// Thin composition over [parseRouteParams] that bundles the decode step so a
+/// caller cannot forget it. Used by DRIVER_STOP_CARD's `mapsUrl`
+/// ({url, fallback, empty}); reusable for any other keyed component field that
+/// wants a Map instead of an ordered pair list.
+///
+/// Decoding runs in two passes:
+///   1. `autheniumDecode` -- handles `_u25FC_` / `_u2B58_` and the legacy
+///      `_25FC_`.
+///   2. A local `_2B58_` -> `⭘` pass. The equivalent line inside
+///      `autheniumDecode` is COMMENTED OUT, so a server that emits the legacy
+///      no-`u` dialect for ⭘ would leave the pair separator intact, collapse
+///      the whole DSL into one pair, and hand back a silently corrupted URL
+///      that still launches. `global.dart` is off-limits, so the guard lives
+///      here. `_u2B58_` never contains `_2B58_` as a substring, so running
+///      pass 2 after pass 1 is safe.
+///
+/// Duplicate keys: last one wins. Malformed pairs (no ◼) and empty keys are
+/// dropped by [parseRouteParams]. Null / blank input -> empty map.
+Map<String, String> parseKeyedDsl(String? raw) =>
+    Map<String, String>.fromEntries(
+      parseRouteParams(
+        (autheniumDecode(raw) ?? raw)?.replaceAll('_2B58_', '\u{2B58}'),
+      ),
+    );
+
+/// Same `<field>` dialect as `resolveMapTokens` in panel_card_support.dart --
+/// deliberately identical so the codebase has exactly ONE angle-token grammar.
+/// No underscore in the char class: `<a_b>` stays literal text in both.
+final RegExp _angleFieldToken = RegExp(r'<([a-zA-Z][a-zA-Z0-9]*)>');
+
+/// Fill every `<field>` token in [template] from [row], URL-encoding each value.
+///
+/// Returns `null` -- meaning "this template is not usable" -- when EITHER
+///   * [template] is blank/whitespace-only, OR
+///   * any `<token>` resolves to null / empty / whitespace-only.
+///
+/// That single rule is the whole of DRIVER_STOP_CARD `mapsUrl` spec 6.1: the
+/// caller writes `fill(url) ?? fill(fallback)` and gets "first template whose
+/// tokens ALL filled, else disabled". The emptiness check is generic -- no
+/// field name is hardcoded anywhere -- which is why the spec dropped its first
+/// draft's latField/lngField params.
+///
+/// Values are stringified with `.toString().trim()` (Convention #7: Firestore
+/// rows are `Map<String, dynamic>`; a tenant storing `la` as a double still
+/// renders). `Uri.encodeComponent` leaves `- _ . ! ~ * ' ( )` and alphanumerics
+/// alone and escapes the rest, so `-6.302154` passes through untouched while an
+/// address's spaces and commas become `%20` / `%2C`. Separators that are LITERAL
+/// text in the template (e.g. the comma in `<la>,<lo>`) are never encoded --
+/// that is required by the Google Maps URLs API.
+///
+/// Pure -- no Flutter / Firestore / Redux deps, directly testable.
+String? fillAngleTemplate(String template, Map<String, dynamic> row) {
+  final String trimmed = template.trim();
+  if (trimmed.isEmpty) return null;
+  bool complete = true;
+  final String filled = trimmed.replaceAllMapped(_angleFieldToken, (Match m) {
+    final String value = (row[m.group(1)] ?? '').toString().trim();
+    if (value.isEmpty) {
+      complete = false;
+      return '';
+    }
+    return Uri.encodeComponent(value);
+  });
+  return complete ? filled : null;
+}
+
+/// DRIVER_STOP_CARD `mapsUrl` spec 6.1, in one expression.
+///
+/// [cfg] is a [parseKeyedDsl] result ({url, fallback, empty}); [row] is the task
+/// doc for one stop. Returns the URL to open, or `null` when neither template
+/// could be filled -- the caller then renders a disabled button plus
+/// `cfg['empty']` (spec 6.6: a vanished button reads as "app broken", a greyed
+/// one with a reason teaches the driver to tell the admin).
+///
+/// A missing `url` key degrades through the same path: `fillAngleTemplate('')`
+/// is `null`, so a malformed config produces a VISIBLE disabled button rather
+/// than a silent no-op.
+///
+/// Pure -- directly testable.
+String? resolveMapsUrl(Map<String, String> cfg, Map<String, dynamic> row) =>
+    fillAngleTemplate(cfg['url'] ?? '', row) ??
+    fillAngleTemplate(cfg['fallback'] ?? '', row);
+
+/// Default label for [MapsButton].
+///
+/// Words, not a bare glyph: the audience is a non-technical driver and a lone
+/// compass icon does not read (spec 6.6). "Lihat Lokasi" rather than "Navigasi"
+/// because the button is used for two things -- checking a stop before setting
+/// off, and navigating during the run.
+const String kMapsLabelDefault = '\u{1F4CD} Lihat Lokasi';
+
+/// Resolve the maps button label.
+///
+/// Order: `mapsUrl`'s `label` key -> [legacySlot] (the host widget's `text`
+/// slot, or `''` when it has none) -> [kMapsLabelDefault].
+///
+/// The label lives in the SAME keyed DSL as `url`/`fallback`/`empty`, so a
+/// tenant enables the button and names it in one cell. That is deliberately NOT
+/// a new `text` slot: a hand-counted `◆` append has already destroyed a live
+/// segment on this very feature (the DRIVER_STOP_CARD reject footnote at index
+/// 19), and the failure is silent -- `_t(n, default)` falls through, nothing
+/// throws, and a neighbouring line quietly prints the button caption. Only
+/// DRIVER_STOP_CARD passes a [legacySlot], and only to keep the tenants that
+/// already migrated their `text` working.
+///
+/// Pure -- directly testable.
+String resolveMapsLabel(Map<String, String> cfg, [String legacySlot = '']) {
+  final String fromCfg = (cfg['label'] ?? '').trim();
+  if (fromCfg.isNotEmpty) return fromCfg;
+  final String fromSlot = legacySlot.trim();
+  if (fromSlot.isNotEmpty) return fromSlot;
+  return kMapsLabelDefault;
+}
+
+/// Parse a widget's raw `mapsUrl` component field into the keyed-DSL map.
+///
+/// Returns an EMPTY map both when the field is blank and when the DSL could not
+/// be parsed. Callers keep their own `_hasMaps` gate off the RAW field, because
+/// the two cases have different outcomes: "absent" means render nothing at all,
+/// "present but broken" means render a DISABLED button with its reason
+/// ([resolveMapsUrl] on an empty cfg is `null`). Collapsing them would make a
+/// malformed config fail silently.
+///
+/// Pure -- directly testable.
+Map<String, String> parseMapsCfg(dynamic rawField) {
+  final String raw = (rawField ?? '').toString().trim();
+  if (raw.isEmpty) return const <String, String>{};
+  try {
+    return parseKeyedDsl(raw);
+  } catch (_) {
+    // Malformed server JSON must never take a card down.
+    return const <String, String>{};
+  }
+}
+
+/// Shared "Lihat Lokasi" button.
+///
+/// DRIVER_STOP_CARD, TASK_FEED_LIST and WORKSPACE_HEADER all render THIS class,
+/// so the enable/disable rule, the `empty` message, the launch mode and the
+/// failure SnackBar exist exactly once (spec 13.1: one contract, three widgets).
+///
+/// Disabled = greyed WITH the reason printed, never hidden (spec 6.6): a
+/// vanished button reads as "the app is broken", a greyed one with a reason
+/// teaches the driver to tell the admin.
+class MapsButton extends StatelessWidget {
+  const MapsButton({
+    super.key,
+    required this.cfg,
+    required this.row,
+    required this.label,
+    this.filled = true,
+  });
+
+  /// Parsed `mapsUrl` keyed DSL: {url, fallback, empty, label}. See
+  /// [parseMapsCfg].
+  final Map<String, String> cfg;
+
+  /// The doc row this button navigates to (a task doc / a customer doc).
+  /// `Map<String, dynamic>` BY DESIGN -- Firestore rows are dynamic and nothing
+  /// here casts them (Convention #7).
+  final Map<String, dynamic> row;
+
+  /// Already-resolved caption -- see [resolveMapsLabel]. Passed in rather than
+  /// resolved here because only the host knows its own legacy `text` slot.
+  final String label;
+
+  /// `true`  = filled tint. The SAFE action, deliberately heavier than the
+  ///           destructive outline `Tolak` it sits beside (spec 13.5.3).
+  /// `false` = outline. Use on a host whose background is ALREADY indigo-50
+  ///           (WORKSPACE_HEADER's address band), where a tint would vanish.
+  final bool filled;
+
+  static const Color _accent = Color(0xFF4338CA); // indigo-700
+  static const Color _accentBg = Color(0xFFEEF2FF); // indigo-50
+
+  /// gray-600, not gray-500. This button renders over three different host
+  /// backgrounds; measured contrast for gray-600 is 7.56:1 on white, 6.87:1 on
+  /// gray-100 and 6.76:1 on indigo-50. gray-500 is only 4.32:1 on indigo-50 --
+  /// below AA -- which is exactly the band WORKSPACE_HEADER puts it on.
+  static const Color _disabledFg = Color(0xFF4B5563);
+
+  @override
+  Widget build(BuildContext context) {
+    final String? url = resolveMapsUrl(cfg, row);
+    final String emptyMsg = (cfg['empty'] ?? '').trim();
+    final bool enabled = url != null;
+    final bool tinted = enabled && filled;
+    final Color fg = enabled ? _accent : _disabledFg;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          // Direct null-test (not a bool flag) so `url` promotes to String
+          // inside the closure.
+          onTap: url == null ? null : () => _launch(context, url),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: tinted ? _accentBg : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+              // Border.all is UNIFORM, so it is legal with borderRadius.
+              // A per-side Border(...) plus a radius asserts at paint time.
+              border: tinted ? null : Border.all(color: fg),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: fg,
+              ),
+            ),
+          ),
+        ),
+        if (!enabled && emptyMsg.isNotEmpty) ...[
+          const SizedBox(height: 3),
+          Text(
+            emptyMsg,
+            style: const TextStyle(
+              fontSize: 11,
+              color: _disabledFg,
+              height: 1.3,
+            ),
+            // Bounded: this Column is laid out unconstrained inside a Row on
+            // WORKSPACE_HEADER, and a long tenant message would otherwise grow
+            // the intrinsic width until the Row overflows.
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Open [url] in an EXTERNAL app (spec 6.1: the driver needs real
+  /// turn-by-turn navigation -- never an in-app webview). On Android this
+  /// resolves to the Google Maps app when installed and the browser otherwise.
+  ///
+  /// The messenger is captured BEFORE the await and `context.mounted` is
+  /// re-checked after it: this button lives inside GetX `Obx` lists that rebuild
+  /// on every Firestore snapshot, so the element can be gone by the time the
+  /// platform channel answers.
+  ///
+  /// The raw exception is deliberately NEVER shown. The audience is a
+  /// non-technical driver and `PlatformException(ACTIVITY_NOT_FOUND, ...)`
+  /// reads as a crash. The catch variable is `err`, never `e` -- `e` shadows
+  /// `dart:math`'s constant in any file that imports it, and the habit is
+  /// repo-wide.
+  Future<void> _launch(BuildContext context, String url) async {
+    final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
+    bool launched = false;
+    try {
+      launched = await launchUrl(
+        Uri.parse(url),
+        mode: LaunchMode.externalApplication,
+      );
+    } catch (err) {
+      // Swallowed on purpose -- the fixed message below is what the driver sees.
+      launched = false;
+    }
+    if (launched) return;
+    if (!context.mounted) return;
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Tidak bisa membuka peta'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
 }
 
 /// Resolve routeParams values and dispatch them as bare keys into screenTx.
@@ -2653,6 +2931,253 @@ String stripRouteWrapper(String raw) {
     return trimmed.substring(7, trimmed.length - 1).trim();
   }
   return trimmed;
+}
+
+// ─── Event audit row for natively-written submits ──────────────────────────
+
+/// Keys stripped from the component copy handed to `saveSend` by
+/// [emitSubmitEventRow].
+///
+/// The first five are the write-DSL verbs. A widget that reaches
+/// [emitSubmitEventRow] has ALREADY written its document natively -- it does so
+/// precisely because the DSL cannot express arrays -- so leaving a DSL verb in
+/// place would make `saveSend` compose a SECOND write of the same data. On
+/// today's configs those keys are dead (the widgets never called `saveSend`),
+/// so stripping them keeps the change at "today's behaviour + one Event row".
+///
+/// `route` is stripped for a different reason: `saveSend` calls
+/// `clearData(scrName)` when `routeExist(component['route'])` is true
+/// (api.dart:4993). `clearData` (api.dart:4658) resets every
+/// `txfController[scrName]` entry AND fires `ScreenSession.navReset(scrName)`,
+/// which clears every registered per-screen store (some with NavPolicy.all,
+/// i.e. every screen). The calling widgets clear their own draft and navigate
+/// themselves, so that is a side effect with no upside. Live configs wrap the
+/// route (`"[ROUTE:taskSuccess]"`) and `routeExist` (global.dart:1522) looks the
+/// raw string up in `linkElement`, so it is false today anyway -- stripping
+/// makes the behaviour identical for a tenant that deploys a BARE route too.
+const List<String> kEventComponentStrippedKeys = <String>[
+  'addToTable',
+  'updateTableRow',
+  'deleteFromTable',
+  'addToEvent',
+  'updateEventRow',
+  'route',
+];
+
+/// Build the component map handed to `saveSend` for the Event audit row.
+///
+/// Returns a NEW map; [component] is never mutated. Absent keys are a no-op.
+/// Everything `saveSend` actually reads off the component survives: `flag`
+/// (api.dart:4811), `desc`, `type`, `com`.
+///
+/// Convention #7: server JSON is `dynamic` BY DESIGN. The cast here is
+/// explicit and per-call -- this is not a blanket typing of the JSON tree.
+Map<String, dynamic> eventComponent(dynamic component) {
+  final Map<String, dynamic> copy = Map<String, dynamic>.from(component as Map);
+  for (final String key in kEventComponentStrippedKeys) {
+    copy.remove(key);
+  }
+  return copy;
+}
+
+/// Build the `ev` geo block for a renderer-emitted Event row.
+///
+/// Wraps [getLocationString] (api.dart:882) and, when [sensor] carries NO valid
+/// fix, BLANKS the three slots that would otherwise ship dummy numbers into the
+/// report's coordinate columns:
+///
+/// | idx | slot            | no-fix value before | after |
+/// |-----|-----------------|---------------------|-------|
+/// | 4   | latitude        | `888.8888888`       | `''`  |
+/// | 5   | longitude       | `888.8888888`       | `''`  |
+/// | 7   | isoCountryCode  | `88`                | `''`  |
+/// | 16  | accuracy        | `''` (already)      | `''`  |
+///
+/// Those three are `OtqState` FIELD INITIALISERS (otq_state.dart:16-17 and :27,
+/// `invalidLocation` = global.dart:543), not measurements -- `setAllDataAsync`
+/// only assigns them inside its valid-fix branch. Index 15 (`locationStatus`)
+/// is KEPT at `No Gps` on purpose, so the report can still tell "GPS failed"
+/// apart from "geo was never captured" (spec section 5A-1 no.1).
+///
+/// The ◆ field count is LOAD-BEARING: 17 fields in, 17 out, since the
+/// GPS-accuracy slot (index 16, system token ◀17▶) was appended to
+/// getLocationString. Index 16 is blanked here too — belt-and-braces, because
+/// OtqState.accuracy is only assigned inside getDataFrom's valid-fix branch, so
+/// a no-fix sensor already carries 0.0 and getLocationString already writes ''.
+/// An empty index 4 is safe downstream -- the geocoding backfill in
+/// `historySync` is guarded by `double.tryParse(locArray[4]) != null`
+/// (table_repository.dart:3036-3042), so it is skipped, never parsed.
+///
+/// NOT the same as the standard-RBT no-GPS literal in ftz_row_of_button_2's
+/// submit closure. That one still ships its `888.8888888` values untouched —
+/// every standard submit rides it and the report's column-D formulas may key
+/// off them. It was only extended by ONE trailing ◆ so its field count matches
+/// the 17 this function now produces; nothing there was renumbered.
+///
+/// [sensor] -- an `OtqState`, normally straight out of `setAllDataAsync()`.
+String eventLocString(OtqState sensor) {
+  final String locString = getLocationString('', '', '', sensor);
+  if (sensor.latitude != invalidLocation) return locString;
+  // Plain split, NOT diamondTextToList(): that helper early-returns [] for the
+  // '--' sentinel and round-trips through jsonDecode (global.dart:1817). A
+  // plain split is the exact inverse of getLocationString's `+= diamond`.
+  final List<String> parts = locString.split(separator[1]);
+  // Convention 3 length guard. Unreachable by construction -- cleanupString
+  // (global.dart:1331) strips every forbiddenCharacter, ◆ included, from every
+  // free-text slot, so getLocationString always yields exactly 17 -- but kept
+  // as insurance against a future change there.
+  if (parts.length < 17) return locString;
+  parts[4] = ''; // latitude
+  parts[5] = ''; // longitude
+  parts[7] = ''; // isoCountryCode
+  parts[16] = ''; // GPS accuracy (◀17▶)
+  return parts.join(separator[1]);
+}
+
+/// Emit the Event-tab audit row for a submit that wrote its document natively.
+///
+/// Background: `ev`/`et`/`p` seen ON a Firestore document are injected by
+/// `buildEventDoc` (table_repository.dart:1472-1474) as a MIRROR copied FROM
+/// the history record -- they are never its source. The only producer of an
+/// Event-tab row is `saveSend -> saveSendRows -> appendToSheet`
+/// (api.dart:4781 / 5019 / 5282), where `c2` is the `ev` blob, `t` is `et`,
+/// `p` is the route and `f` is the flag. So a natively-written document is
+/// invisible to the report engine until this runs.
+///
+/// Call AFTER the native write has succeeded and BEFORE navigation. The
+/// ordering is required because `saveSend` reads the `txfController` slots
+/// SYNCHRONOUSLY and the GPS capture below is a multi-second await, so
+/// `gotoRoute` must not run first -- NOT because navigating clears anything.
+///
+/// Nothing clears `txfController[scrName]` on the outbound leg: `reloadPage`
+/// posts `clearData` for the DESTINATION route (global.dart:1532), and
+/// `saveSend`'s own `clearData` is gated on `routeExist(component['route'])`
+/// (api.dart:4993) -- a key [eventComponent] deliberately strips. The slots
+/// therefore OUTLIVE the submit, until this screen is navigated BACK to (at
+/// which point it IS the destination and `clearData` finally fires).
+///
+/// CONTRACT for a caller: `★`-slot freshness is the CALLER's job, not this
+/// helper's. Write every slot you care about unconditionally on every submit,
+/// immediately before calling this -- never assume a previous navigation left
+/// them empty. `TaskCreateSubmit.writeEventSlots` does exactly that, and
+/// `task_create_submit`'s step 5a re-seeds slot 17 for the same reason.
+///
+/// BEST-EFFORT, but scoped: the catch below covers what this function does
+/// itself -- the GPS capture, the component copy, the dispatch. It does NOT
+/// cover `saveSend`, which never throws: it swallows into its own catch and
+/// calls `setDataOK('1')` (api.dart:5013-5015), a fire-and-forget
+/// `readSettings(..., 2)` with a 15s timeout, i.e. a full proxy config re-read
+/// that this helper cannot intercept. A malformed component (e.g. a numeric
+/// `flag`, which fails the implicit downcast at api.dart:4811) lands there, not
+/// here. Within that scope the contract holds and mirrors custody_count_submit
+/// C1 block-7b ("Event/GPS fail != rollback"): the document is already written,
+/// and nothing on this path rolls it back or blocks navigation.
+///
+/// [component] -- the raw SDUI component (`widget.component`). `flag`, `desc`,
+///   `type` and `com` are read from it; nothing is written back. `gpsPosition`
+///   is deliberately NOT read: GPS capture is unconditional (round 2, spec
+///   section 5A-1 no.1). `eventComponent` still copies the key through, which
+///   is harmless -- `saveSend` never reads it.
+/// [scrName] -- the screen name, used as the history record's `p` (route) and
+///   as the `txfController` key for the `★` block.
+Future<void> emitSubmitEventRow({
+  required dynamic component,
+  required String scrName,
+}) async {
+  try {
+    // `saveSend` dereferences `txfController[scrName]!` unguarded
+    // (api.dart:4814). A screen whose components are all positionless would
+    // leave that map null, and `saveSend` would swallow the NPE into
+    // `setDataOK('1')` (api.dart:5014) -- a full readSettings + page reload.
+    // One check guarantees the map exists. Position 0 is outside saveSend's
+    // `1 <= position <= 100` window (api.dart:4834), so it adds no slot.
+    txfControllerCheck(scrName, 0);
+
+    // `appendToSheet` fires `timerBloc.add(Start(duration: ...))` whenever
+    // `#TIMER_DURATION` is an int (api.dart:5327). The standard submit widgets
+    // set that key immediately before their own saveSend -- verified at
+    // ftz_row_of_button_2.dart:243, otq_txf_2.dart:718, otq_txf.dart:590,
+    // ftz_checker.dart:370, image_upload.dart:110,
+    // attendance_qr_selfie_gps_verify.dart:246, gps_send.dart:49 and
+    // qr_gps.dart:50 -- and main_bloc.dart:122 sets it in the PIN-verify flow.
+    // Nothing ever clears it, so after any of those it is a stale int. Left
+    // alone it would drop a WaitScreen over this page (any_page.dart:183) and
+    // then navigate to the stale `#NEXTROUTE` (any_page.dart:192), hijacking
+    // the caller's own navigation. Null it so the guard actually holds; every
+    // producer above re-sets the key as part of its own flow, so this can
+    // never starve a consumer.
+    transactionStore.dispatch(
+      UpdateScreenTxAction(
+        ScreenTransaction(<String, dynamic>{'#TIMER_DURATION': null}),
+      ),
+    );
+
+    // GPS capture: ALWAYS real, no config gate. The old `gpsPosition > 0` gate
+    // was inert in production -- the deployed TASK_CREATE_SUBMIT config carries
+    // no `gpsPosition` (docs/admin_runtime/admin-create-task-op1screen.md), so
+    // every emitted row took the else branch and shipped a bare OtqState's
+    // FIELD INITIALISERS as if they were a measurement: 888.8888888 lat/lng and
+    // country 88 (live evidence, spec section 5A-1). Waiting for a builder
+    // deploy to add the key would have made the fix inert too, so the gate is
+    // deleted rather than configured. This mirrors what a savesend RBT with
+    // `gpsPosition > 0` already does (ftz_row_of_button_2.dart:442-447).
+    //
+    // ONE clock, and it is authoritative in every case: setAllDataAsync sets
+    // nowTime from getRealTime() inside its Future.wait (otq_state.dart:244),
+    // i.e. exactly the NTP value the deleted else branch fetched separately,
+    // falling back to the DateTime.now() field initialiser if NTP throws. The
+    // epoch is therefore never empty -- the one field the report can always
+    // rely on -- and is now guaranteed identical to locString index 1, since
+    // getLocationString reads nowTime off this same OtqState.
+    //
+    // BOUNDED at 8s (code-review-r1 W2). setAllDataAsync's getLocation ->
+    // getAppGps waits up to 5s on the position stream (api.dart:229, :234-240)
+    // and, when no fix is younger than 30 minutes, falls through to
+    // Geolocator.getCurrentPosition with NO timeLimit (api.dart:301-305),
+    // followed by an un-timeout'ed placemarkFromCoordinates. This await sits on
+    // the PRE-NAVIGATION path of both calling widgets, so an unbounded capture
+    // parks the user on a spinner indefinitely in the exact environment both
+    // personas work in: indoors, location ON, permission granted, fix stale.
+    // 8s and not less -- a legitimate cold capture can burn the whole 5s stream
+    // wait before the reverse-geocode even starts, so a tighter cap would
+    // truncate a capture that was going to succeed. The root-cause fix (a
+    // timeLimit inside getAppGps) is app-wide and belongs in its own round.
+    //
+    // onTimeout returns the SAME instance, never a fresh OtqState():
+    // setAllDataAsync mutates `this` from inside its Future.wait
+    // (otq_state.dart:185-248) and returns `this`, so whatever already landed
+    // -- typically the NTP nowTime from the parallel getRealTime future
+    // (otq_state.dart:244-245) -- is kept instead of thrown away. A timed-out
+    // capture then degrades to exactly the already-tested no-GPS path:
+    // `latitude` is still invalidLocation, so eventLocString blanks slots
+    // 4/5/7 and keeps `No Gps`, and the epoch is never empty (nowTime's field
+    // initialiser is DateTime.now(), otq_state.dart:14). The underlying futures
+    // may still mutate the instance after the timeout; harmless, because
+    // eventLocString reads it synchronously on the very next line.
+    final OtqState allOtqData = OtqState();
+    await allOtqData.setAllDataAsync().timeout(
+      const Duration(seconds: 8),
+      onTimeout: () => allOtqData,
+    );
+    final int timeStamp = allOtqData.nowTime.millisecondsSinceEpoch;
+    final String locString = eventLocString(allOtqData);
+
+    saveSend(
+      timeStamp,
+      scrName,
+      eventComponent(component),
+      locString,
+      defaultVid(),
+    );
+  } catch (e) {
+    // devPrint is SILENT in release (global.dart), so the trace alone would
+    // make a production failure of the Event row invisible -- the exact
+    // failure this helper exists to surface. errorReport prints
+    // unconditionally and files a non-fatal, matching the outer catch in both
+    // calling widgets.
+    devPrint('[emitSubmitEventRow] $scrName event audit failed: $e');
+    errorReport(e);
+  }
 }
 
 // -- Status exclusion filter (shared by DRIVER_STOP_CARD + future widgets) ---

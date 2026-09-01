@@ -104,6 +104,14 @@ class TaskFeedList extends StatefulWidget {
 
 class _TaskFeedListState extends State<TaskFeedList> {
   List<String> _textArray = [];
+
+  /// mapsUrl keyed-DSL config: {url, fallback, empty, label}. Empty when the
+  /// feature is off OR the DSL was unparseable -- see [_parseMapsCfg].
+  Map<String, String> _mapsCfg = const <String, String>{};
+
+  /// Feature gate: raw `mapsUrl` non-empty. An unmigrated component renders
+  /// byte-identically to today.
+  bool _hasMaps = false;
   String _taskCode = '';
   String _returnGateCode =
       ''; // return-CTA gate (vehicle_check rt) subscription
@@ -116,6 +124,7 @@ class _TaskFeedListState extends State<TaskFeedList> {
     super.initState();
     TaskFeedList.registerScreenSession();
     _parseText();
+    _parseMapsCfg();
     _subscribe();
     // Create search controller for FLAT mode (groupField empty).
     // GROUPED screens skip this — controller stays null.
@@ -143,6 +152,24 @@ class _TaskFeedListState extends State<TaskFeedList> {
       _textArray = [];
     }
   }
+
+  /// Parse `component['mapsUrl']` once. `component` is immutable for the life
+  /// of this State, so there is nothing per-screen to key or clear on route
+  /// change -- same lifetime as `_textArray`.
+  ///
+  /// `_hasMaps` is read off the RAW field, not off `_mapsCfg`: "absent" (render
+  /// nothing) and "present but unparseable" (render a DISABLED button with its
+  /// reason) are different outcomes.
+  void _parseMapsCfg() {
+    final String raw = (widget.component['mapsUrl'] ?? '').toString().trim();
+    _hasMaps = raw.isNotEmpty;
+    _mapsCfg = parseMapsCfg(raw);
+  }
+
+  /// Maps button caption. This widget has NO legacy `text` slot for it -- the
+  /// caption comes from `mapsUrl`'s `label◼` key or the hardcoded default.
+  /// Deliberately not a `text` segment 16 (spec 13.2): see resolveMapsLabel.
+  String get _mapsLabel => resolveMapsLabel(_mapsCfg);
 
   /// text slot accessors (15 slots):
   ///  [0]  "Stop Berikutnya"
@@ -306,6 +333,18 @@ class _TaskFeedListState extends State<TaskFeedList> {
       final String kn = (task[titleField] ?? '').toString().trim();
       final String al = (task[addressField] ?? '').toString().trim();
       final String pic = (task[picField] ?? '').toString().trim();
+      // Customer coordinate. Field codes are FIXED, not component-configurable
+      // -- same reason as _republishClient in task_item_builder.dart: the
+      // mapsUrl template on the driver card names <la>/<lo> itself, so a second
+      // layer of indirection could only ever drift out of sync with it. Read as
+      // Strings and kept as Strings (MAP_POINT_PICKER writes toStringAsFixed(6)).
+      //
+      // Carried here because setCustomer REPLACES the whole draft record: on a
+      // same-customer re-tap (priorKl == kl, so clearDraft deliberately does
+      // not run) omitting them blanks a good coordinate, and _republishClient
+      // will not refill it -- its _lastPublishedKl latch already holds this kl.
+      final String la = (task['la'] ?? '').toString().trim();
+      final String lo = (task['lo'] ?? '').toString().trim();
       // If the user picked a DIFFERENT customer (or this is the first pick),
       // wipe stale items + vehicle from the previous customer's draft.
       // Same-customer re-tap preserves in-progress items (resume).
@@ -328,6 +367,8 @@ class _TaskFeedListState extends State<TaskFeedList> {
         kn: kn,
         al: al,
         pic: pic,
+        la: la,
+        lo: lo,
       );
       // Dispatch kl into screenTx bare key for P2 _republishClient
       if (kl.isNotEmpty) {
@@ -826,8 +867,36 @@ class _TaskFeedListState extends State<TaskFeedList> {
                                       fontSize: 12,
                                       color: Color(0xFF6B7280),
                                     ),
-                                    maxLines: 1,
+                                    // Spec 13.5.2: since spec 4.1 the map is
+                                    // the ONLY address source, so every new
+                                    // customer's address is a long
+                                    // reverse-geocode string.
+                                    maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                                // Maps button -- own row under the address, on
+                                // EVERY card whatever the status (spec 13.2 +
+                                // 6.4: one uniform rule, zero per-status
+                                // branching). OUTSIDE the address
+                                // collection-if: a card with no address must
+                                // still show the button, disabled, with its
+                                // reason (spec 6.6).
+                                //
+                                // The card itself is a GestureDetector
+                                // (onTap: _onCardTap). No stopPropagation
+                                // equivalent is needed: hit testing adds
+                                // recognizers deepest-first and the gesture
+                                // arena awards the tap to members.first, so
+                                // this inner button wins. `maps tap does not
+                                // navigate the card` in
+                                // test/task_feed_list_test.dart is the witness.
+                                if (_hasMaps) ...[
+                                  const SizedBox(height: 6),
+                                  MapsButton(
+                                    cfg: _mapsCfg,
+                                    row: doc,
+                                    label: _mapsLabel,
                                   ),
                                 ],
                                 // Distance line: HIDDEN per decision 1

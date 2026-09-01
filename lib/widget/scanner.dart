@@ -5,6 +5,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../api.dart';
 import '../crypto/auth_crypto.dart';
+import '../firestore_repository/authenium_keys.dart';
 import '../firestore_repository/scanner_validate.dart';
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
@@ -32,6 +33,110 @@ String scannerSearchField(String raw) {
   final trimmed = raw.trim();
   if (trimmed.isEmpty) return '';
   return trimmed.split('★').first.trim();
+}
+
+/// Normalise what [lqrVerify] returns into the code the location table stores.
+///
+/// `lqrVerify` delegates to `aecDecrypt(qrText, 'l')`, which splits its input as
+/// version = `input[0]`, body = `input[1:]` and returns only the **body** — so a
+/// version-0 QR `0l<sha1>` comes back as `l<sha1>`, one character short of what
+/// `location.li` holds. `makeLqrCode` (auth_crypto.dart:389-403) builds the
+/// stored form as `'0' + 'l' + sha1`, so the version marker is re-added here.
+///
+/// Returns empty string when the scan did not resolve: `errorString` ("Error",
+/// what `aecDecrypt` yields for any version other than '0' or '2'), `empty`
+/// ("--"), or blank. Callers treat empty as "unrecognised QR".
+///
+/// Exported as a top-level function so tests can exercise the real implementation.
+String scannerLqrCode(String verified) {
+  final String trimmed = verified.trim();
+  if (trimmed.isEmpty || trimmed == errorString || trimmed == empty) return '';
+  return trimmed.startsWith('0') ? trimmed : '0$trimmed';
+}
+
+/// Build the blank-out map for every key a `routeParams` DSL declares.
+///
+/// screenTx is MERGE-only: `UpdateScreenTxAction` never removes a key, and
+/// `DeleteAllScreenTxRowAction` is declared but never dispatched anywhere in
+/// `lib/`. So a bare key written by a PREVIOUS scan survives for the whole app
+/// session. If THIS scan's matched document lacks one of the declared fields,
+/// `writeRouteParamsFromRow` skips that pair and the destination page would
+/// silently read the previous point's value.
+///
+/// Dispatching this map first turns that failure from "renders the WRONG
+/// document" into "renders EMPTY": `resolveScreenTxTokens`
+/// (statistic_card_support.dart) leaves the `{token}` literal for an empty
+/// value exactly as it does for an absent key, and `filterByMultiClause` is
+/// fail-closed on a literal.
+///
+/// Reuses `parseRouteParams` (driver_home_support.dart, already imported) so
+/// the key set is parsed by the SAME code that resolves it -- the two can
+/// never disagree about what a pair is.
+///
+/// Returns an empty map for empty/malformed input, so the caller can skip the
+/// dispatch entirely.
+///
+/// Exported as a top-level function so tests can exercise the real
+/// implementation.
+Map<String, dynamic> scannerBlankRouteParams(String rawDsl) {
+  final List<MapEntry<String, String>> declared = parseRouteParams(
+    autheniumDecode(rawDsl) ?? rawDsl,
+  );
+  return <String, dynamic>{
+    for (final MapEntry<String, String> p in declared) p.key: '',
+  };
+}
+
+/// Which Authenium tenants a Scheme 3 scan may verify against.
+///
+/// `component['ten']` narrows to a single tenant. Absent, empty or whitespace
+/// means **every tenant published in `public_keys`** — a badge is accepted if
+/// any published key of its version verifies it.
+///
+/// That default is a deliberate relaxation, not an oversight: the crypto layer
+/// then draws no tenant boundary, and the `table`/`search` workforce lookup is
+/// the only thing deciding whether a holder belongs here. Naming a tenant in
+/// the screen JSON restores the boundary without an app release.
+String scannerTenantId(Object? rawTen) => (rawTen ?? '').toString().trim();
+
+/// Why a Scheme 3 scan must be refused, or `null` to accept it.
+///
+/// The switch is exhaustive on purpose — no `default:`. A new
+/// [Scheme3Status] then becomes a compile error here instead of silently
+/// collapsing into the generic "tidak dikenal".
+///
+/// Three of these refusals are NOT a forged badge and must not read like one:
+/// an unsynced keyring and an out-of-date app are the device's problem, and
+/// telling the operator "QR palsu" sends them hunting a counterfeit that does
+/// not exist.
+String? scannerScheme3Reject(Scheme3Result result) {
+  switch (result.status) {
+    case Scheme3Status.ok:
+      // A valid signature proves the badge is AUTHENTIC, not that it is the
+      // right KIND. A location or asset token on a page that resolves a person
+      // is the wrong badge however good its signature.
+      return result.type == 'user' ? null : 'QR bukan kartu pekerja';
+    case Scheme3Status.badSignature:
+      return 'QR palsu';
+    case Scheme3Status.unknownKeyVersion:
+      return 'kunci belum tersinkron, sambungkan internet';
+    case Scheme3Status.unsupportedType:
+      return 'perbarui aplikasi';
+    case Scheme3Status.notScheme3:
+    case Scheme3Status.malformed:
+      return 'tidak dikenal';
+  }
+}
+
+/// The VID a Scheme 3 badge contributes, in the SAME shape [getVidUQR] yields.
+///
+/// [decodeScheme3] zero-pads to 14 digits per the wire spec; the legacy path
+/// returns `int.toString()`, unpadded. For a real 14-digit VID the two are
+/// identical, so this looks like a no-op — but a VID with a leading zero would
+/// diverge, and `#has_user_login`, `SCAN_RESULT` and the workforce lookup must
+/// not depend on which badge the operator happens to be carrying.
+String scannerScheme3Vid(Scheme3Result result) {
+  return int.tryParse(result.value)?.toString() ?? result.value;
 }
 
 /// SDUI component: in-page rounded viewport card with a **live inline camera**
@@ -160,6 +265,14 @@ class _ScannerState extends State<Scanner> with SingleTickerProviderStateMixin {
   /// camera forever.
   void _maybeAutoSkip() {
     if (_didAutoSkip) return;
+    // A scanner that declares routeParams exists to PRODUCE the identity the
+    // destination page reads. Skipping it would open that page with no fresh
+    // keys at all -- and screenTx is merge-only, so it would silently render
+    // whatever a PREVIOUS scan left behind. Never auto-skip such a page; the
+    // operator must actually scan.
+    if ((widget.component['routeParams'] ?? '').toString().trim().isNotEmpty) {
+      return;
+    }
     final String existingVid =
         (transactionStore.state.screenTx['#has_user_login'] ?? '').toString();
     final String route = (widget.component['route'] ?? '').toString();
@@ -204,11 +317,46 @@ class _ScannerState extends State<Scanner> with SingleTickerProviderStateMixin {
         .toString()
         .trim()
         .toLowerCase();
+    // A location scan resolves a PLACE, not a person. It must never touch the
+    // driver-session keys (#has_user_login / persisted login) that the user and
+    // plain paths own -- otherwise scanning a point would overwrite (or, on a
+    // failed scan, erase) whoever is logged in.
+    final bool isLocationScan = qrMode == 'lqr';
     String vidStr;
 
-    if (qrMode == 'uqr') {
+    if (qrMode == 'uqr' && scheme3Token(rawQR).isNotEmpty) {
+      // SCHEME 3 path: Ed25519-signed badge, verified locally against a public
+      // keyring synced from a SECOND FirebaseApp (authenium-prod1). Runs
+      // ALONGSIDE the legacy decrypt below, selected by the token's '3' prefix
+      // -- so a card of either generation works on the same screen, and a
+      // screen that never sees a Scheme 3 badge never builds the second app.
+      //
+      // Dispatch has to happen HERE, on the format, not on the failure: a
+      // Scheme 3 URL handed to getVidUQR comes back as -1, the exact value that
+      // also means "unrecognised". See scheme3Token.
+      // Which issuers this device trusts. The token never says -- it carries a
+      // type and a key version, nothing more -- so the trust set is decided
+      // here: a named `ten` pins one tenant, empty accepts every published one.
+      final String tenantId = scannerTenantId(widget.component['ten']);
+      final Scheme3Keyring keys = await autheniumKeys(tenantId: tenantId);
+      if (!mounted) return;
+      final Scheme3Result decoded = await decodeScheme3(rawQR, keys);
+      if (!mounted) return;
+      devPrint(
+        'scanner S3 decode: $decoded '
+        'ten=${tenantId.isEmpty ? '<all tenants>' : tenantId} '
+        'keys=${keys.entries.map((e) => 'v${e.key}x${e.value.length}').join(' ')}',
+      );
+
+      final String? reject = scannerScheme3Reject(decoded);
+      if (reject != null) {
+        // Do NOT store #has_user_login -- nothing was proven.
+        _doInvalid(reject);
+        return;
+      }
+      vidStr = scannerScheme3Vid(decoded);
+    } else if (qrMode == 'uqr') {
       // DECRYPT path: getVidUQR decrypts the encrypted URL -> VID int, or -1.
-      //    auth_crypto.dart is a gitignored secret; CALL ONLY, never modify.
       //    Mirrors getQRContent qrType=='U' path (api.dart).
       final int vid = await getVidUQR(rawQR);
       if (!mounted) return;
@@ -241,6 +389,28 @@ class _ScannerState extends State<Scanner> with SingleTickerProviderStateMixin {
         return;
       }
       vidStr = vid.toString();
+    } else if (qrMode == 'lqr') {
+      // LOCATION path (adopted from otq_txf_2.dart:344-349 + the qrType 'L'
+      // branch of getQRContent, api.dart:986-991). Same two-secret call shape,
+      // so a location QR that resolves in otq_txf_2 resolves here too.
+      final dynamic p = await omLqrReaderP();
+      final dynamic q = await osLqrMakerQ();
+      if (!mounted) return;
+      final String code = await lqrVerify(
+        p?.toString() ?? '',
+        q?.toString() ?? '',
+        rawQR,
+      );
+      if (!mounted) return;
+      devPrint('scanner LQR decode: code=$code raw=$rawQR');
+
+      final String located = scannerLqrCode(code);
+      if (located.isEmpty) {
+        // Do NOT store any session key -- this path never wrote one.
+        _doInvalid('tidak dikenal');
+        return;
+      }
+      vidStr = located;
     } else {
       // PLAIN path: raw scan string IS the value (no decrypt).
       vidStr = rawQR.trim();
@@ -263,13 +433,15 @@ class _ScannerState extends State<Scanner> with SingleTickerProviderStateMixin {
 
     //    STORE #has_user_login = resolved VID in Redux transactionStore.
     //    This is a #-prefixed datastore key (documented in documentation.md).
-    transactionStore.dispatch(
-      UpdateScreenTxAction(ScreenTransaction({'#has_user_login': vidStr})),
-    );
-    // Mirror to secure storage so the driver stays logged in across app
-    // restarts. Fire-and-forget (local I/O must not block the scan flow);
-    // cleared again below if the workforce compare fails (not-found path).
-    unawaited(persistDriverLogin(vidStr));
+    if (!isLocationScan) {
+      transactionStore.dispatch(
+        UpdateScreenTxAction(ScreenTransaction({'#has_user_login': vidStr})),
+      );
+      // Mirror to secure storage so the driver stays logged in across app
+      // restarts. Fire-and-forget (local I/O must not block the scan flow);
+      // cleared again below if the workforce compare fails (not-found path).
+      unawaited(persistDriverLogin(vidStr));
+    }
 
     // 4. Parse validation fields from component JSON.
     final String tableRaw = (widget.component['table'] ?? '').toString().trim();
@@ -284,40 +456,66 @@ class _ScannerState extends State<Scanner> with SingleTickerProviderStateMixin {
     //    - Both populated + valid searchField: hybrid workforce compare.
     if (tableRaw.isEmpty && searchRaw.isEmpty) {
       // No validation fields -- skip validation, go straight to success.
-      await _doSuccess(vidStr);
+      // No lookup ran, therefore no matched document, therefore no token
+      // source: routeParams resolves to nothing here by design (D4).
+      // writeRouteParamsFromRow already no-ops on a null row.
+      await _doSuccess(vidStr, null);
       return;
     }
     if (tableRaw.isEmpty || searchField.isEmpty) {
       // Misconfigured: one side missing. Fail closed.
-      _doInvalidNotFound();
+      _doInvalidNotFound(clearLogin: !isLocationScan);
       return;
     }
 
     // 6. Hybrid workforce compare (local-first + Firestore fallback).
     //    Pass tenantVid (round 8) so the Firestore fallback path queries the
     //    correct tenant container.
+    //
+    //    needRow (routeParams support) is true exactly when the component
+    //    declares a non-empty routeParams. It does two things at once:
+    //      D2 -- skip the local #TABLE fast path, which returns a POSITIONAL
+    //            row with no field names that {token}s cannot read from;
+    //      D1 -- fetch up to two documents so an ambiguous match (the live
+    //            `location` collection has `li` values shared by two sites)
+    //            is detected and FAILS rather than silently picking one.
+    //    Empty routeParams leaves both behaviours exactly as they were.
+    final String routeParamsRaw = (widget.component['routeParams'] ?? '')
+        .toString();
+    final bool needRow = routeParamsRaw.trim().isNotEmpty;
     try {
-      final bool found = await scannerVidInWorkforce(
+      final ScannerMatch match = await scannerVidInWorkforce(
         tableRaw,
         searchField,
         vidStr,
         tenantVid: tenantVid,
+        needRow: needRow,
       );
       if (!mounted) return;
-      if (found) {
-        await _doSuccess(vidStr);
+      if (match.found) {
+        await _doSuccess(vidStr, match.row);
       } else {
-        _doInvalidNotFound();
+        // Covers BOTH not-found and >1-match (spec 2.2): the same slot-9/10
+        // "QR salah" snackbar, no route, no write. clearLogin stays gated on
+        // isLocationScan so a failed point scan never signs out the operator.
+        _doInvalidNotFound(clearLogin: !isLocationScan);
       }
     } catch (_) {
       // Query error (offline, permission, path error) -> treat as not-found.
       if (!mounted) return;
-      _doInvalidNotFound();
+      _doInvalidNotFound(clearLogin: !isLocationScan);
     }
   }
 
   // ── Success path (validated or validation-skipped) ─────────────────
-  Future<void> _doSuccess(String vidStr) async {
+  /// [matchedRow] is the named-field document the validation lookup matched,
+  /// or null when there is none -- validation was skipped, or the answer came
+  /// from the local #TABLE positional cache. It is the ONLY source for the
+  /// `routeParams` `{token}`s; the raw QR text is never used for them.
+  Future<void> _doSuccess(
+    String vidStr,
+    Map<String, dynamic>? matchedRow,
+  ) async {
     final slots = diamondTextToList(
       (widget.component['text'] ?? '').toString(),
     );
@@ -328,6 +526,34 @@ class _ScannerState extends State<Scanner> with SingleTickerProviderStateMixin {
     transactionStore.dispatch(
       UpdateScreenTxAction(ScreenTransaction({'SCAN_RESULT': vidStr})),
     );
+
+    // 1b. routeParams -> BARE screen-tx keys, dispatched BEFORE saveSend (D3).
+    //     Resolving first also makes <lk>/<li>/<ln> usable inside the
+    //     addToTable DSL at zero cost; no live config uses those key names,
+    //     so nothing existing changes.
+    //
+    //     writeRouteParamsFromRow is the SAME function LIST_CARD, PICKER_LIST,
+    //     LIST_ACTION_CARD and SIGNAL_LIST call, which is what makes this
+    //     field's semantics identical to LIST_CARD.routeParams. It handles
+    //     autheniumDecode internally -- do NOT decode again -- and no-ops when
+    //     the DSL is empty or [matchedRow] is null. That no-op is what keeps a
+    //     routeParams-less scanner byte-for-byte the same as before.
+    final String routeParamsRaw = (widget.component['routeParams'] ?? '')
+        .toString();
+    //     Stale-key guard: blank every declared key first, so a key this scan
+    //     cannot resolve reads as '' rather than as the previous scan's value.
+    //     See scannerBlankRouteParams for why '' is the safe failure.
+    if (routeParamsRaw.trim().isNotEmpty) {
+      final Map<String, dynamic> blanks = scannerBlankRouteParams(
+        routeParamsRaw,
+      );
+      if (blanks.isNotEmpty) {
+        transactionStore.dispatch(
+          UpdateScreenTxAction(ScreenTransaction(blanks)),
+        );
+      }
+    }
+    writeRouteParamsFromRow(routeParamsRaw, matchedRow, widget.scrName);
 
     // 2. Acquire timestamp and location for saveSend
     final int timeStamp = await getRealTime();
@@ -391,15 +617,20 @@ class _ScannerState extends State<Scanner> with SingleTickerProviderStateMixin {
   }
 
   // ── Not-found path (VID not in workforce / query-error / misconfigured) ──
-  void _doInvalidNotFound() {
+  /// [clearLogin] false on the location path: that path never wrote a session
+  /// key, so clearing here would log out whoever is signed in just because a
+  /// point QR failed to resolve.
+  void _doInvalidNotFound({bool clearLogin = true}) {
     // 1. Clear #has_user_login (VID was stored in _onScanDetected step 3
     //    but is not in the workforce table -- clean up).
-    transactionStore.dispatch(
-      UpdateScreenTxAction(ScreenTransaction({'#has_user_login': ''})),
-    );
-    // Clear persisted driver login (mirrors the Redux clear above) so a
-    // not-found scan never leaves a stale session on disk.
-    unawaited(clearDriverLogin());
+    if (clearLogin) {
+      transactionStore.dispatch(
+        UpdateScreenTxAction(ScreenTransaction({'#has_user_login': ''})),
+      );
+      // Clear persisted driver login (mirrors the Redux clear above) so a
+      // not-found scan never leaves a stale session on disk.
+      unawaited(clearDriverLogin());
+    }
 
     // 2. Show "QR salah" snackbar from slots 9 and 10.
     final slots = diamondTextToList(

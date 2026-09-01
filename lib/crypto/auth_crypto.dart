@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+// Prefixed: `Signature` collides with pointycastle's own Signature class.
+import 'package:cryptography/cryptography.dart' as ed;
 import 'package:flutter/cupertino.dart';
 import 'package:pointycastle/export.dart'; // Replaced 'argon2' with 'pointycastle'
 
@@ -177,19 +179,19 @@ bool constantTimeComparison(String a, String b) {
 
 String crQRAttend1Enc(String content) {
   // attend1 encryption
-  // put get key and iv here
+  // TODO put get key and iv here
   return aesEnc(content, 'tempkey', 'tempiv');
 }
 
 String crQRAttend1Dec(String content) {
   // attend1 decryption
-  // put get key and iv here
+  // TODO put get key and iv here
   // return aesDec(content, 'tempkey', 'tempiv');
   return content;
 }
 
 String aesEnc(var data, var key, var iv) {
-  // put AES encrypt algorithm here
+  // TODO put AES encrypt algorithm here
   return data;
 }
 
@@ -419,7 +421,7 @@ Future<String> lqrVerify(String p, String q, var rawQrText) async {
   } else {
     returnValue = errorString;
   }
-  // use code below as reference to version 1 decryption (220105)
+  // TODO use code below as reference to version 1 decryption (220105)
   /*
   if (qrValid == empty) {
     if (qrText.substring(0, 1) == '1' &&
@@ -554,7 +556,7 @@ String assetVerify(String rawQrText, int initialCheckPosition) {
 } // end of assetVerify(String p, String q, var rawQrText)
 
 bool integrityCheck(String qrText, int initialCheckPosition) {
-  // put integrity check here
+  // todo put integrity check here
   // based on https://docs.google.com/spreadsheets/d/14qT1qbVitTYYfppF8Y21OGC_5XYUI9Kk0KzZtN15vZo/edit?gid=1066641925#gid=1066641925
   return true;
 } // end of integrityCheck
@@ -652,7 +654,7 @@ String aec1sc(String phKey, String cp, String qk) {
 String aec1h(String data) {
   // Authenium EC 1 hashing function
   String hashingPadding =
-      '76ad54fc4d31e7ec12375709f438b4bdf0d7e3107ddaf9a0e56bc5ce7afe467d'; // put in secure storage
+      '76ad54fc4d31e7ec12375709f438b4bdf0d7e3107ddaf9a0e56bc5ce7afe467d'; // TODO put in secure storage
   var o = List<int>.filled(16, 0);
   String hx = hashingPadding.substring(0, 4);
   int l = data.length;
@@ -1083,3 +1085,375 @@ List<String> getKeyTypes() {
   // get all kind of 1st char in qr code
   return ['6', 'P', "_"];
 } // end of getKeyTypes
+
+// ====================== Scheme 3 (Ed25519) family ======================
+// Offline decoder and verifier for Scheme 3 QR tokens -- the new user-badge
+// format, running ALONGSIDE the existing getVidUQR path, not replacing it.
+//
+// A Scheme 3 token is an Ed25519-signed (RFC 8032) binary blob, base64url
+// encoded behind a '3' prefix, scanned bare ('3MQET...') or wrapped in a URL
+// ('https://autsorz/l/3MQET...').
+//
+//   byte 0        high nibble = typeId, low nibble reserved (observed 1)
+//   byte 1        keyVersion (1..255)
+//   bytes 2..n-64 payload, layout depends on typeId
+//   last 64 bytes Ed25519 signature over bytes[0 .. n-64] -- header IS signed
+//
+// UNLIKE every other family in this file, Scheme 3 uses NO secret: the public
+// keyring is fetched from a public Firestore collection. That fetch lives in
+// lib/firestore_repository/authenium_keys.dart, deliberately kept out of here
+// so this file stays Firebase-free and deterministic.
+//
+// What a valid signature proves, and what it does not: the token was minted by
+// the issuer, NOT that the holder is still authorised. Ed25519 has no per-token
+// revocation -- rotating a key version revokes everyone signed with it -- and a
+// photograph of a valid badge is a valid badge. Callers keep their table lookup
+// for revocation, and pair with GPS/selfie where replay matters.
+
+/// Why a Scheme 3 token was or was not accepted.
+///
+/// Deliberately not collapsed into a single "invalid": three of these are not a
+/// forgery and have different remedies (sync the keyring, update the app,
+/// re-scan a real badge).
+/// keyVersion -> every 32-byte public key published under that version.
+///
+/// A LIST per version, not one key: key versions are numbered per tenant, so
+/// several tenants each publish a version `1` with different bytes. Holding
+/// them side by side is what lets a badge from any published tenant verify.
+///
+/// Narrowing this to a single tenant restores the crypto-level tenant boundary
+/// — see `autheniumKeys(tenantId:)`.
+typedef Scheme3Keyring = Map<int, List<List<int>>>;
+
+enum Scheme3Status {
+  /// Signature verified and payload unpacked.
+  ok,
+
+  /// Not a Scheme 3 token at all (wrong prefix, empty input).
+  notScheme3,
+
+  /// Scheme 3 shape, but the bytes do not parse: bad base64, too short, or a
+  /// payload the wrong size for its type.
+  malformed,
+
+  /// Signed with a key version this device does not hold. The badge may be
+  /// perfectly good -- the device needs to sync.
+  unknownKeyVersion,
+
+  /// The signature does not match. This is the forgery signal.
+  badSignature,
+
+  /// Signature verified, but the token is of a type this build cannot read.
+  unsupportedType,
+}
+
+/// A decoded Scheme 3 token.
+class Scheme3Result {
+  final Scheme3Status status;
+
+  /// `'user'`, `'location'`, `'asset'`, `'other'`, or `''` when not decoded.
+  final String type;
+
+  /// Key version from header byte 1. 0 when the header was never read.
+  final int keyVersion;
+
+  /// The single identifier a caller looks up. Empty unless [status] is
+  /// [Scheme3Status.ok].
+  final String value;
+
+  /// Raw location subtype id. Only set for `type == 'location'`.
+  ///
+  /// ponytail: the id is exposed, not a label. Mapping id -> name here would
+  /// hardcode the platform's subtype table in the client and make adding a
+  /// subtype an app release. If a screen ever needs the label, put the table in
+  /// the screen JSON.
+  final int? subtypeId;
+
+  /// Short reason, for devPrint only. Never shown to a user.
+  final String detail;
+
+  const Scheme3Result({
+    required this.status,
+    this.type = '',
+    this.keyVersion = 0,
+    this.value = '',
+    this.subtypeId,
+    this.detail = '',
+  });
+
+  bool get isValid => status == Scheme3Status.ok;
+
+  @override
+  String toString() =>
+      'Scheme3Result(${status.name}, type: $type, '
+      'keyVer: $keyVersion, value: $value, detail: $detail)';
+}
+
+final RegExp _hex64 = RegExp(r'^[0-9a-fA-F]{64}$');
+
+/// Parses one public key into 32 raw bytes, accepting hex or base64url.
+///
+/// Returns an EMPTY list for anything that is not exactly 32 bytes. Callers
+/// treat empty as "no key", so one malformed entry in the Firestore keyring
+/// disables that single version instead of throwing -- this runs inside a
+/// snapshot listener, where a throw becomes an uncaught async error.
+List<int> scheme3ParseKey(String raw) {
+  final String key = raw.trim();
+  if (key.isEmpty) return const [];
+
+  // Hex is detected by its alphabet, not by its length: a 64-character
+  // base64url string is legal too and a length-only test would mangle it.
+  if (_hex64.hasMatch(key)) {
+    final out = Uint8List(32);
+    for (int i = 0; i < 32; i++) {
+      out[i] = int.parse(key.substring(i * 2, i * 2 + 2), radix: 16);
+    }
+    return out;
+  }
+
+  try {
+    // base64.normalize maps -/_ to +//, adds padding and validates length.
+    final Uint8List bytes = base64.decode(base64.normalize(key));
+    return bytes.length == 32 ? bytes : const [];
+  } on FormatException {
+    return const [];
+  }
+}
+
+/// The uid shared by the location and asset payloads: 3 bytes of header, then
+/// the identifier itself.
+///
+/// Two layouts are live. The current minter writes 16 cryptographic random
+/// bytes rendered as a 23-character Scheme 0 id -- `'0'` plus unpadded
+/// base64url -- which reproduces the developer guide's own
+/// `0sJ4sy7f4FQVE4-rYyd95bg` sample byte for byte. The older 5-byte decimal
+/// uid is kept because the vendor's final reference decoder still emits it, so
+/// tags in that shape may be in the field.
+///
+/// The 16-byte form is tried FIRST on purpose: a 19-byte payload read under the
+/// 5-byte rule returns `ok` carrying a plausible but wrong id, and a wrong
+/// identifier that looks right is worse than a refusal.
+String _scheme3Uid(List<int> payload) {
+  if (payload.length >= 19) {
+    return '0${base64Url.encode(payload.sublist(3, 19)).replaceAll('=', '')}';
+  }
+  return _bigEndian(payload, 3, 8).toString();
+}
+
+/// Unpacks an already-VERIFIED payload.
+///
+/// Pure and synchronous, and exported so tests can reach the type dispatch
+/// without a signature -- including the unsupported-type branch, which cannot
+/// be reached through [decodeScheme3] without the issuer's private key.
+Scheme3Result scheme3Unpack(int typeId, int keyVersion, List<int> payload) {
+  Scheme3Result bad(String detail) => Scheme3Result(
+    status: Scheme3Status.malformed,
+    keyVersion: keyVersion,
+    detail: detail,
+  );
+
+  switch (typeId) {
+    case 3: // User badge: 6-byte big-endian VID.
+      if (payload.length != 6) {
+        return bad('user payload ${payload.length}B, expected 6');
+      }
+      return Scheme3Result(
+        status: Scheme3Status.ok,
+        type: 'user',
+        keyVersion: keyVersion,
+        value: _bigEndian(payload, 0, 6).toString().padLeft(14, '0'),
+      );
+
+    case 1: // Location: 2B country, 1B subtype, then the uid.
+      if (payload.length < 8) {
+        return bad('location payload ${payload.length}B, expected >= 8');
+      }
+      return Scheme3Result(
+        status: Scheme3Status.ok,
+        type: 'location',
+        keyVersion: keyVersion,
+        value: _scheme3Uid(payload),
+        subtypeId: payload[2],
+      );
+
+    case 2: // Asset: 3B UNSPSC, then the uid.
+      if (payload.length < 3) {
+        return bad('asset payload ${payload.length}B, expected >= 3');
+      }
+      final int unspsc = _bigEndian(payload, 0, 3);
+      // The uid is the identity a caller looks up; UNSPSC is a classification,
+      // so it stands in as the value only when there is no uid to return.
+      final String value = payload.length >= 8
+          ? _scheme3Uid(payload)
+          : unspsc.toString().padLeft(unspsc < 10000 ? 4 : 6, '0');
+      return Scheme3Result(
+        status: Scheme3Status.ok,
+        type: 'asset',
+        keyVersion: keyVersion,
+        value: value,
+      );
+
+    case 4: // Other / IoT: payload[0] reserved, 6B entity id, then metadata.
+      if (payload.length < 7) {
+        return bad('other payload ${payload.length}B, expected >= 7');
+      }
+      return Scheme3Result(
+        status: Scheme3Status.ok,
+        type: 'other',
+        keyVersion: keyVersion,
+        value: _bigEndian(payload, 1, 7).toString().padLeft(14, '0'),
+      );
+
+    default:
+      // The integration guide returns isValid:true here. It must not: a token
+      // this build cannot interpret is not a token this build may accept.
+      return Scheme3Result(
+        status: Scheme3Status.unsupportedType,
+        keyVersion: keyVersion,
+        detail: 'typeId $typeId unknown to this build',
+      );
+  }
+}
+
+/// Decodes and cryptographically verifies a Scheme 3 QR.
+///
+/// [input] is the scanned URL or the bare token. [keys] maps key version to 32
+/// raw public-key bytes.
+///
+/// Never throws: every failure comes back as a [Scheme3Status].
+/// The Scheme 3 token inside [input], or `''` when this is not one.
+///
+/// Takes whatever follows the LAST `/` and checks the `3` version prefix. Pure,
+/// cheap, and free of both crypto and the keyring, so a caller can decide WHICH
+/// decoder to run before paying for either.
+///
+/// ★ The path segment carries NO information — production mints Scheme 3 user
+/// badges at `https://autsorz.com/qr/3MQE…`, the SAME `/qr/` path the legacy
+/// encrypted badges use, while `flutter_integration_guide.md` documents
+/// `https://autsorz/l/3…`. Keying on `/l/` silently misses every real badge, so
+/// only the `3` prefix may decide. base64url contains no `/`, so cutting at the
+/// last one can never truncate a token.
+///
+/// Legacy badges stay unclaimed on the prefix alone: their a64 cipher starts
+/// with the aec version character (`1` or `2`), never `3`.
+///
+/// Dispatch on this, not on the failure. A Scheme 3 URL reaching [getVidUQR]
+/// clears its `http` gate, has its `/qr/` stripped, is handed to [aec1D] which
+/// does not know version `3` and returns the input untouched, and falls out as
+/// `-1` — the exact value that also means "unrecognised badge".
+String scheme3Token(String input) {
+  String token = input.trim();
+  final int slash = token.lastIndexOf('/');
+  if (slash >= 0) token = token.substring(slash + 1);
+  return (token.isNotEmpty && token[0] == '3') ? token : '';
+}
+
+/// Decodes and cryptographically verifies a Scheme 3 QR.
+///
+/// [input] is the scanned URL or the bare token. [keys] maps key version to the
+/// candidate public keys published under it — see [Scheme3Keyring].
+///
+/// Every candidate for the token's version is tried and the token is accepted
+/// if ANY verifies, which is what lets a badge from any published tenant pass.
+/// With a single-tenant keyring that loop runs exactly once.
+///
+/// Never throws: every failure comes back as a [Scheme3Status].
+Future<Scheme3Result> decodeScheme3(String input, Scheme3Keyring keys) async {
+  final String token = scheme3Token(input);
+  if (token.isEmpty) {
+    return const Scheme3Result(
+      status: Scheme3Status.notScheme3,
+      detail: 'prefix is not 3',
+    );
+  }
+
+  Uint8List raw;
+  try {
+    raw = base64.decode(base64.normalize(token.substring(1)));
+  } on FormatException catch (e) {
+    return Scheme3Result(
+      status: Scheme3Status.malformed,
+      detail: 'base64: ${e.message}',
+    );
+  }
+
+  // 2 header + at least 1 payload byte + 64 signature.
+  if (raw.length < 67) {
+    return Scheme3Result(
+      status: Scheme3Status.malformed,
+      detail: 'token ${raw.length}B, minimum 67',
+    );
+  }
+
+  // Header byte 0: high nibble = type, low nibble = format version.
+  final int typeId = (raw[0] >> 4) & 0x0F;
+  final int formatVersion = raw[0] & 0x0F;
+  final int keyVersion = raw[1];
+  final int msgLen = raw.length - 64;
+
+  // Checked BEFORE the signature, so a test can reach this branch without the
+  // issuer's private key. Nothing is given away by the ordering: the forger
+  // writes the header, so anyone who wants the badSignature reply instead can
+  // simply put a 1 here.
+  //
+  // Ungated, a future format 2 -- same type id, different payload layout --
+  // would be unpacked under version 1 rules and returned as `ok` carrying a
+  // wrong VID. A format this build has never seen has no safe reading.
+  if (formatVersion != 1) {
+    return Scheme3Result(
+      status: Scheme3Status.unsupportedType,
+      keyVersion: keyVersion,
+      detail: 'format version $formatVersion, this build reads 1',
+    );
+  }
+
+  final List<List<int>> candidates = (keys[keyVersion] ?? const <List<int>>[])
+      .where((k) => k.length == 32)
+      .toList();
+  if (candidates.isEmpty) {
+    return Scheme3Result(
+      status: Scheme3Status.unknownKeyVersion,
+      keyVersion: keyVersion,
+      detail: 'no 32-byte key for version $keyVersion',
+    );
+  }
+
+  // The signature covers the header as well as the payload, so type and key
+  // version cannot be swapped without breaking it.
+  //
+  // Several tenants publish a version 1, so this tries each candidate and
+  // accepts on the first that verifies. Ed25519 verification is not secret-
+  // dependent, so trying a wrong key leaks nothing.
+  final List<int> message = raw.sublist(0, msgLen);
+  final List<int> sigBytes = raw.sublist(msgLen);
+  bool verified = false;
+  for (final List<int> pub in candidates) {
+    verified = await ed.Ed25519().verify(
+      message,
+      signature: ed.Signature(
+        sigBytes,
+        publicKey: ed.SimplePublicKey(pub, type: ed.KeyPairType.ed25519),
+      ),
+    );
+    if (verified) break;
+  }
+  if (!verified) {
+    return Scheme3Result(
+      status: Scheme3Status.badSignature,
+      keyVersion: keyVersion,
+      detail: 'signature mismatch vs ${candidates.length} key(s)',
+    );
+  }
+
+  return scheme3Unpack(typeId, keyVersion, raw.sublist(2, msgLen));
+}
+
+int _bigEndian(List<int> bytes, int start, int end) {
+  int out = 0;
+  for (int i = start; i < end; i++) {
+    out = (out << 8) | bytes[i];
+  }
+  return out;
+}
+
+// =================== end of Scheme 3 family ===================

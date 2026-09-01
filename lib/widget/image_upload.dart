@@ -152,7 +152,7 @@ class ImageUploadState extends State<ImageUpload> {
         "${component['folder']}/${component['filename']}.$ext",
       );
 
-      // create parse diamond for parsing parameter.
+      // TODO create parse diamond for parsing parameter.
       String content = 'IMG_UPLOAD'; //= position 1
       txfController[scrName]![1] = InputController(
         1,
@@ -183,7 +183,9 @@ class ImageUploadState extends State<ImageUpload> {
         content,
       );
       component['route'] = component['route'] ?? home; //= default route = Home
-      saveData(scrName, separator[1] * 15); //= send record to event
+      // 16 diamonds = 17 fields, matching getLocationString after the
+      // GPS-accuracy slot (◀17▶) was appended. Append-only.
+      saveData(scrName, separator[1] * 16); //= send record to event
       actionUnLock('_saveFile IMG_UPLOAD');
       String toGo = widget.component['route'] ?? home;
       routeStack.push(toGo);

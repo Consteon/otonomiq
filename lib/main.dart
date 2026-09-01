@@ -41,17 +41,6 @@ final navigatorKey = GlobalKey<NavigatorState>();
 // https://flutter.dev/desktop#target-platform-override for more info.
 
 void main() async {
-  // TODO put runZonedGuarded before WidgetFlutterBinding
-  //   https://flutter.dev/docs/testing/errors
-  /*
-    like:
-    runZonedGuarded(() async {
-      WidgetsFlutterBinding.ensureInitialized();
-      await Firebase.initializeApp();
-      runApp(MyApp());
-    }
-   */
-
   debugCount = -1;
   trace(debugCount);
   WidgetsFlutterBinding.ensureInitialized(); // needed by flutter error message

@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.9.104+910403
+version: 0.9.105+910501
 
 environment:
   sdk: ">=3.12.0 <4.0.0"
@@ -77,6 +77,11 @@ dependencies:
   permission_handler: ^12.0.3
   flutter_multi_formatter: ^2.13.11
   image: ^4.8.0
+  # On-device OCR. Android pulls com.google.mlkit:text-recognition:16.0.1 =
+  # BUNDLED model (jni/<abi>/libmlkit_google_ocr_pipeline.so ships in the app),
+  # NOT the Play-Services-downloaded variant -> works offline from first install.
+  # iOS: GoogleMLKit/TextRecognition ~> 9.0.0, min deployment target 15.5.
+  google_mlkit_text_recognition: ^0.17.1
   bloc: ^7.0.0
   meta: ^1.18.0
   redux_dev_tools: ^0.7.0
@@ -102,6 +107,9 @@ dependencies:
   pdf: ^3.13.0
   flutter_pdfview: ^1.4.5
   share_plus: ^12.0.2
+  # Ed25519 (RFC 8032) verification for Scheme 3 QR tokens. Pure Dart, no
+  # native side, and resolves with zero new transitive dependencies.
+  cryptography: ^2.7.0
 
 #  flutter_blue_plus: ^1.35.5
 #  cryptography: ^2.7.0

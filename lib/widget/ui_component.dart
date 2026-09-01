@@ -445,254 +445,79 @@ List<Widget> buildBannerList(var bannerList, double aspectRatio) {
 
 List<Widget> buildGridList(var gridList, double fontSize) {
   // gridList is server JSON (component['children']); empty/null/non-List →
-  // the deferred Builder/onTap closures below index gridList[0] at LAYOUT time,
+  // the deferred Builder/onTap closures below index gridList[i] at LAYOUT time,
   // outside the try/catch, throwing RangeError → fatal. Guard at the source.
   if (gridList is! List || gridList.isEmpty) {
     return <Widget>[];
   }
-  const double defaultAspectRatio = 18 / 12;
-  var topPad = 6.0;
-  dynamic gridComponent;
-
-  try {
-    gridComponent = [
-      Builder(
-        builder: (BuildContext context) {
-          return Container(
-            alignment: const Alignment(0.0, 0.0),
-            child: Card(
-              child: InkWell(
-                onTap: () {
-                  if (gridList[0]['route'] != null &&
-                      gridList[0]['route'] != rootThis.pageName &&
-                      routeExist(gridList[0]['route'])) {
-                    routeStack.push(gridList[0]['route']);
-                    if (gridList[0]['route'].length >= 4 &&
-                        gridList[0]['route'].substring(0, 4).toLowerCase() ==
-                            'http') {
-                      openInWebView(
-                        context,
-                        gridList[0]['route'],
-                        gridList[0]['title'] ?? 'Web',
-                      );
-                    } else {
-                      var state = transactionStore.state.screenTx;
-                      if (state['#REFRESH']) {
-                        oldSettingUpShouldBeDeleted().then((aRes) {
-                          var state = transactionStore.state;
-                          var lifKey = state.screenTx['#INTERFACE_KEY'];
-                          readSettings(lifKey, 1).then((_) {
-                            // constructAllPageElements();
-                            transactionStore.dispatch(
-                              UpdateScreenTxAction(
-                                ScreenTransaction({'#REFRESH': false}),
-                              ),
-                            );
-                            String newRoute = gridList[0]['route'];
-                            List<Widget> newElementList = reloadPage(newRoute);
-                            rootThis.setState(() {
-                              rootThis.pageName = newRoute;
-                              rootThis.pageElements = newElementList;
-                              rootThis.wait = false;
-                            });
-                          });
-                        });
-                      } else {
-                        String newRoute = gridList[0]['route'];
-                        List<Widget> newElementList = reloadPage(newRoute);
-                        rootThis.setState(() {
-                          rootThis.pageName = newRoute;
-                          rootThis.pageElements = newElementList;
-                          rootThis.wait = false;
-                          rootThis.touch = !rootThis.touch;
-                        });
-                      }
-                    }
-                  }
-                },
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: <Widget>[
-                    Container(height: topPad),
-                    AspectRatio(
-                      aspectRatio: defaultAspectRatio,
-                      child: displayImage(
-                        imageUrl: gridList[0]['url'] ?? defaultImage,
-                        cached: true,
-                      ),
-                      // child: FadeInImage.memoryNetwork(
-                      //     placeholder: kTransparentImage,
-                      //     image: _gridList[0]['url']),
-                    ),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        gridList[0]['text'],
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: fontSize),
-                      ),
-                    ),
-                    // Text(
-                    //   gridList[0]['text'],
-                    //   textAlign: TextAlign.center,
-                    //   style: TextStyle(fontSize: fontSize),
-                    // ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    ];
-  } catch (_) {
-    gridComponent = Container(
-      alignment: const Alignment(0.0, 0.0),
-      child: Card(
-        child: InkWell(
-          onTap: () {},
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: <Widget>[
-              Container(height: topPad),
-              AspectRatio(
-                aspectRatio: defaultAspectRatio,
-                child: displayImage(imageUrl: errorUrl, cached: true),
-                // child: FadeInImage.memoryNetwork(
-                //     placeholder: kTransparentImage, image: errorUrl),
-              ),
-              const Text(
-                '--GRID--',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 10),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  for (var i = 1; i < gridList.length; i++) {
+  List<Widget> gridComponent = [];
+  for (var i = 0; i < gridList.length; i++) {
     try {
+      final item = gridList[i];
+      final bool first = i == 0;
       gridComponent.add(
         Builder(
           builder: (BuildContext context) {
-            return Container(
-              alignment: const Alignment(0.0, 0.0),
-              child: Card(
-                child: InkWell(
-                  onTap: () {
-                    if (gridList[i]['route'] != null &&
-                        gridList[i]['route'] != rootThis.pageName &&
-                        routeExist(gridList[i]['route'])) {
-                      routeStack.push(gridList[i]['route']);
-                      if (gridList[i]['route'].length >= 4 &&
-                          gridList[i]['route'].substring(0, 4).toLowerCase() ==
-                              'http') {
-                        openInWebView(
-                          context,
-                          gridList[i]['route'],
-                          gridList[i]['title'] ?? 'Web',
-                        );
-                      } else {
-                        var state = transactionStore.state.screenTx;
-                        if (state['#REFRESH']) {
-                          oldSettingUpShouldBeDeleted().then((aRes) {
-                            var state = transactionStore.state;
-                            var lifKey = state.screenTx['#INTERFACE_KEY'];
-                            readSettings(lifKey, 1).then((_) {
-                              // constructAllPageElements();
-                              transactionStore.dispatch(
-                                UpdateScreenTxAction(
-                                  ScreenTransaction({'#REFRESH': false}),
-                                ),
-                              );
-                              //                            List<Widget> newElementList = List<Widget>();
-                              String newRoute = gridList[i]['route'];
-                              List<Widget> newElementList = reloadPage(
-                                newRoute,
-                              );
-                              //                            newElementList.addAll(linkElement[newRoute]);
-                              rootThis.setState(() {
-                                rootThis.pageName = newRoute;
-                                rootThis.pageElements = newElementList;
-                                rootThis.wait = false;
-                              });
-                            });
-                          });
-                        } else {
-                          //                        List<Widget> newElementList = List<Widget>();
-                          String newRoute = gridList[i]['route'];
-                          List<Widget> newElementList = reloadPage(newRoute);
-                          //                        newElementList.addAll(linkElement[newRoute]);
+            return menuIconCard(
+              imageUrl: (item['url'] ?? defaultImage).toString(),
+              label: (item['text'] ?? '').toString(),
+              fontSize: fontSize,
+              onTap: () {
+                final route = item['route'];
+                if (route != null &&
+                    route != rootThis.pageName &&
+                    routeExist(route)) {
+                  routeStack.push(route);
+                  if (route.length >= 4 &&
+                      route.substring(0, 4).toLowerCase() == 'http') {
+                    openInWebView(context, route, item['title'] ?? 'Web');
+                  } else {
+                    var state = transactionStore.state.screenTx;
+                    if (state['#REFRESH']) {
+                      oldSettingUpShouldBeDeleted().then((aRes) {
+                        var lifKey =
+                            transactionStore.state.screenTx['#INTERFACE_KEY'];
+                        readSettings(lifKey, 1).then((_) {
+                          transactionStore.dispatch(
+                            UpdateScreenTxAction(
+                              ScreenTransaction({'#REFRESH': false}),
+                            ),
+                          );
+                          List<Widget> newElementList = reloadPage(route);
                           rootThis.setState(() {
-                            rootThis.pageName = newRoute;
+                            rootThis.pageName = route;
                             rootThis.pageElements = newElementList;
                             rootThis.wait = false;
                           });
+                        });
+                      });
+                    } else {
+                      List<Widget> newElementList = reloadPage(route);
+                      rootThis.setState(() {
+                        rootThis.pageName = route;
+                        rootThis.pageElements = newElementList;
+                        rootThis.wait = false;
+                        // legacy quirk kept verbatim: only the first grid item
+                        // toggled the touch flag before the dedup rewrite
+                        if (first) {
+                          rootThis.touch = !rootThis.touch;
                         }
-                      }
+                      });
                     }
-                  },
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: <Widget>[
-                      Container(height: topPad),
-                      AspectRatio(
-                        aspectRatio: defaultAspectRatio,
-                        child: displayImage(
-                          imageUrl: gridList[i]['url'] ?? defaultImage,
-                          cached: true,
-                        ),
-                        // child: FadeInImage.memoryNetwork(
-                        //     placeholder: kTransparentImage,
-                        //     image: _gridList[i]['url']),
-                      ),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          gridList[i]['text'],
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: fontSize),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+                  }
+                }
+              },
             );
           },
         ),
       );
     } catch (_) {
       gridComponent.add(
-        Container(
-          alignment: const Alignment(0.0, 0.0),
-          child: Card(
-            child: InkWell(
-              onTap: () {},
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: <Widget>[
-                  Container(height: topPad),
-                  AspectRatio(
-                    aspectRatio: defaultAspectRatio,
-                    child: displayImage(imageUrl: errorUrl, cached: true),
-                    // child: FadeInImage.memoryNetwork(
-                    //     placeholder: kTransparentImage, image: errorUrl),
-                  ),
-                  const Text(
-                    '--GRID--',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 10),
-                  ),
-                ],
-              ),
-            ),
-          ),
+        menuIconCard(
+          imageUrl: errorUrl,
+          label: '--GRID--',
+          fontSize: 10,
+          onTap: () {},
         ),
       );
     }
@@ -728,38 +553,15 @@ MainAxisAlignment maaSwitch(String alignment) {
 } // end of maaSwitch
 
 Widget disabledIcon(String url, String iText, double fontSize) {
-  const double defaultAspectRatio = 18 / 12;
-  var topPad = 6.0;
   String dimmedImage =
       'https://firebasestorage.googleapis.com/v0/b/otq-01-ase2/o/c%2Fautsorz%2Fring-icon-dimmed-90x90.png?alt=media&token=73ddfd91-0286-409f-be1d-86dbc7f8ee3a';
-  return Container(
-    alignment: const Alignment(0.0, 0.0),
-    child: Card(
-      child: InkWell(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: <Widget>[
-            Container(height: topPad),
-            AspectRatio(
-              aspectRatio: defaultAspectRatio,
-              child: displayImage(
-                imageUrl: (url == '') ? dimmedImage : url,
-                cached: true,
-              ),
-              // child: FadeInImage.memoryNetwork(
-              //   placeholder: kTransparentImage,
-              //   image: (url == '') ? dimmedImage : url,
-              // ),
-            ),
-            Text(
-              iText,
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: fontSize),
-            ),
-          ],
-        ),
-        onTap: () {},
-      ),
+  return Opacity(
+    opacity: 0.55,
+    child: menuIconCard(
+      imageUrl: (url == '') ? dimmedImage : url,
+      label: iText,
+      fontSize: fontSize,
+      onTap: () {},
     ),
   );
 } // end of DisabledIcon

@@ -89,23 +89,18 @@ class _TimePresenceState extends State<TimePresence> {
     } else {
       checkInDisplay = checkInDt != null ? _fmt(checkInDt) : noDataLabel;
 
-      final lastActionDt =
-          _isPlaceholder(rawLastAction) ? null : _parseTime(rawLastAction);
-      lastActionDisplay =
-          lastActionDt != null ? _fmt(lastActionDt) : noDataLabel;
+      final lastActionDt = _isPlaceholder(rawLastAction)
+          ? null
+          : _parseTime(rawLastAction);
+      lastActionDisplay = lastActionDt != null
+          ? _fmt(lastActionDt)
+          : noDataLabel;
     }
 
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(_borderRadius),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
         border: Border.all(color: Color(0xffE2E8F0)),
       ),
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
@@ -115,8 +110,11 @@ class _TimePresenceState extends State<TimePresence> {
         children: [
           Row(
             children: [
-              const Icon(Icons.access_time_outlined,
-                  size: 15, color: Color(0xFF9CA3AF)),
+              const Icon(
+                Icons.access_time_outlined,
+                size: 15,
+                color: Color(0xFF9CA3AF),
+              ),
               const SizedBox(width: 6),
               Text(
                 header,

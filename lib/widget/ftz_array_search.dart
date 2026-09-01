@@ -77,6 +77,18 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
 
   String get _imageCfg => (widget.component['image'] ?? '').toString();
 
+  /// Optional `rowSplit` separator (see docs/widgets/display_list.md).
+  ///
+  /// Blank or whitespace-only = OFF, and OFF is structural: [_linesFor] then
+  /// takes the original single-pass `_renderContent` + `parseContentLines`
+  /// call, so every `displayList` that does not author `rowSplit` — and every
+  /// PICKER-mode instance, which passes a txf component — renders exactly as
+  /// before. Read raw, like every other key in this widget; SduiSpec adoption
+  /// here is on-touch only and one new key does not justify a sweep.
+  ///
+  /// NOT trimmed when non-blank: `rowSplit: " | "` is a legal separator.
+  String get _rowSplit => (widget.component['rowSplit'] ?? '').toString();
+
   @override
   void initState() {
     try {
@@ -213,8 +225,35 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
     return res.replaceAll('\\n', '\n');
   }
 
-  List<ContentLine> _linesFor(List<dynamic> row, String? template) =>
-      parseContentLines(_renderContent(row, template));
+  /// Parse a row through a `content`/`detail` template.
+  ///
+  /// The single seam both renderers share: `detailDialog` passes `detail`,
+  /// `_buildCard` passes `content`. When `rowSplit` is blank — every screen but
+  /// LogChecklist, plus every PICKER-mode instance — this is the untouched
+  /// pre-`rowSplit` call, which is what makes the non-breaking guarantee
+  /// structural rather than argued.
+  ///
+  /// A blank template also stays on the old path on purpose: `_renderContent`
+  /// owns the `row[1]/row[2]/row[5]` fallback, which is a whole-blob concept
+  /// and must never fire once per template line.
+  List<ContentLine> _linesFor(List<dynamic> row, String? template) {
+    final String separator = _rowSplit;
+    if (separator.trim().isEmpty ||
+        template == null ||
+        template.trim().isEmpty) {
+      return parseContentLines(_renderContent(row, template));
+    }
+    return parseContentLinesSplit(
+      template,
+      separator,
+      (String line) => replaceMarker(
+        line,
+        row,
+        widget.component['indexStart'] ?? 0,
+        true,
+      ).replaceAll('\\n', '\n'),
+    );
+  }
 
   List<String> _imagesFor(List<dynamic> row) {
     if (_imageCfg.isEmpty) return const [];

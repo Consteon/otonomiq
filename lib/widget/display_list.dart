@@ -151,6 +151,12 @@ class _DisplayListState extends State<DisplayList> {
           tableCodeToLoad = widget.component['table']?.toString().trim() ?? '';
         }
 
+        // subscribeToTable normalizes internally (table_repository.dart) and
+        // stores under `#TABLE<a/b>`, so a keyed `a//b` table read back with the
+        // RAW name resolves to null and pickTable stays empty forever. Plain
+        // names normalize to themselves, which is why only keyed tables broke.
+        tableCodeToLoad = normalizeTableName(tableCodeToLoad);
+
         // Trigger table load if it has changed
         if (tableCodeToLoad != currentTableCode) {
           // Use a post-frame callback to safely update state after the build phase

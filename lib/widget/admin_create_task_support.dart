@@ -83,9 +83,46 @@ class DraftItem {
   /// Serialize to the Firestore it[] element shape (order mode).
   ///
   /// Sets zero-fields per tx type so the consumer (item_execution_list)
-  /// sees a complete shape regardless of tx kind. Adds `hg` for sale rows
-  /// only (deliver/purchase/refill never carry price).
+  /// sees a complete shape regardless of tx kind. ALWAYS emits `qt`, the
+  /// canonical billed qty. Adds `hg` AND `sub` for `deliver` and `sale` rows
+  /// (purchase/refill/buy/seed never carry price) -- see the inline comments
+  /// for each predicate's provenance.
   Map<String, dynamic> toItMap() {
+    // Canonical billed qty: ONE key for every tx kind (spec (5) section
+    // 6b-2.2 no.6). The real quantity lives in a different field per row kind
+    // -- pd (deliver) / ps (sale) / pb (purchase) / pr (refill) -- but
+    // receiptDoc's `lineQtyField` and the WA template's `{{item.*}}` can each
+    // name only ONE key. A screen configured on `pd` therefore rendered "0x"
+    // beside a correct `sub` on every sale row (production evidence
+    // TASK-2026-000568: tx "sale", ps 3, pd 0, sub 129000 -> "0x 43.000").
+    // Same key and meaning as the walk-in nota's li[].qt (see toLiMap below),
+    // so ONE receiptDoc field map serves both document shapes.
+    //
+    // BILLED qty specifically: `pp` is a returned-empties count and is never
+    // billed, so a pickup-only deliver line (pd 0, pp > 0) carries `qt: 0` BY
+    // DESIGN and renders "0x". That row is correct -- nothing on it is
+    // charged. It is NOT licence to read any "0x" as correct: the defect
+    // this key removes was a row whose BILLED qty was NON-zero (ps 3)
+    // rendering 0.
+    //
+    // UNCONDITIONAL on purpose. receiptDoc's line loop applies NO filter -- it
+    // renders every element of doc[linesField] -- so purchase and refill rows
+    // reach the screen too. Writing `qt` only inside the priced guard below
+    // would leave those rows showing "0x": the same bug, relocated. An
+    // unmapped tx ('buy'/'seed') gets 0, matching the zeroed pd/pp/ps/pb/pr
+    // those rows already carry.
+    // That 0 is safe because such rows never reach it[]: a `buy` line is a
+    // supplier-nota tx, submitted through draftToSupplierLiArray ->
+    // assembleNotaDoc as a nota li[], and draftToItArray is the only producer
+    // of it[]. No unmapped-tx element is ever handed to a receiptDoc.
+    //
+    // PLANNED qty, never actual. rebuildItWithActuals (item_execution_submit)
+    // shallow-copies each element and writes only the actual-qty fields, so
+    // after the driver executes, `qt` -- like `sub` and `tot` -- still holds
+    // what was planned at creation. That is intended: this feeds the
+    // pre-execution order confirmation, not the invoice. Do not "fix" it into
+    // an actual-qty field.
+    final int qt = primaryQty;
     final Map<String, dynamic> m = <String, dynamic>{
       'ii': ii,
       'in': itemName,
@@ -95,15 +132,44 @@ class DraftItem {
       'ps': tx == 'sale' ? ps : 0,
       'pb': tx == 'purchase' ? pb : 0,
       'pr': tx == 'refill' ? pr : 0,
+      'qt': qt,
       'cdo': (tx == 'deliver' || tx == 'sale') ? cdo : '',
       'cdi': (tx == 'deliver' || tx == 'purchase') ? cdi : '',
       'wt': tx == 'refill' ? wt : '',
       'ad': null,
       'ap': null,
     };
-    // Price for sale rows only (per spec target doc; deliver rows have no hg)
-    if (tx == 'sale') {
+    // Price + per-line subtotal for the two tx kinds that move goods TO the
+    // customer -- `deliver` and `sale`. That predicate mirrors the CF's own
+    // invoice rule (spec (3) section 2: "tx deliver ATAU sale; skip
+    // purchase/refill"), so a task line and the invoice line it becomes are
+    // priced by the same test. purchase/refill stay unpriced: no `hg`, no
+    // `sub`, zero contribution to `tot`.
+    //
+    // `sub` multiplies the SAME `qt` written above -- NOT the spec's literal
+    // `pd * hg` (section 6b-2.2 no.3). The spec wrote `pd` because it only had
+    // deliver rows in mind; a sale line's planned qty lives in `ps` and would
+    // have subtotalled to 0. Putting a literal `pd` back here would re-break
+    // every sale line: do NOT "simplify" it back.
+    //
+    // Deriving `sub` from `qt` is BEHAVIOUR-PRESERVING, not a behaviour
+    // change. This branch admits only tx 'deliver' and 'sale', and primaryQty
+    // maps exactly those two to pd and ps -- the same two values the previous
+    // `(tx == 'deliver' ? pd : ps)` ternary produced. No input distinguishes
+    // them. Sharing the one value is what makes the screen's qty column and
+    // the subtotal structurally unable to disagree, which is what section
+    // 6b-2.2 no.6 asks for ("qty tertagih yang dipakai ngitung sub").
+    //
+    // Canon: qt/hg/sub are int (Firestore Number) -- the rule stated on
+    // [AdminCreateTaskSupport.assembleNotaDoc].
+    //
+    // Shape change, deliberate: `deliver` elements gain `hg` and `sub`; `sale`
+    // elements gain `sub`. No reader in lib/ reads either key off an it[]
+    // element, and item_execution_submit.rebuildItWithActuals shallow-copies
+    // every field, so the driver's actual-qty write preserves them.
+    if (tx == 'deliver' || tx == 'sale') {
       m['hg'] = hg;
+      m['sub'] = hg * qt;
     }
     return m;
   }
@@ -245,6 +311,8 @@ class AdminCreateTaskSupport {
     required String kn,
     required String al,
     String pic = '',
+    String la = '',
+    String lo = '',
   }) {
     registerScreenSession();
     draftCustomer[wizardKey] = <String, String>{
@@ -252,6 +320,12 @@ class AdminCreateTaskSupport {
       'kn': kn,
       'al': al,
       'pic': pic,
+      // Customer coordinate, denormalised onto the task doc at submit time so
+      // the driver card can open a maps app without a second query on a bad
+      // signal. Empty when the customer has no point yet -- callers that do not
+      // pass them keep today's behavior.
+      'la': la,
+      'lo': lo,
     };
   }
 
@@ -588,6 +662,25 @@ class AdminCreateTaskSupport {
     return suggested > 0 ? suggested : 0;
   }
 
+  /// Sum of the `sub` field across an it[] array (spec (3) section 6b-2.2
+  /// no.3). Pure.
+  ///
+  /// Computed from the ARRAY THAT GETS WRITTEN rather than from the draft, so
+  /// `tot` and `Σ it[].sub` are structurally incapable of disagreeing.
+  ///
+  /// Reads through `coerceNum` because the elements are `Map<String, dynamic>`
+  /// (Convention #7): a line built by [DraftItem.toItMap] carries an int, but
+  /// the same shape read back from Firestore can arrive as a double or a
+  /// String. Lines with no `sub` key (purchase / refill / buy / seed)
+  /// contribute 0.
+  static int computeItTotal(List<Map<String, dynamic>> itArray) {
+    int total = 0;
+    for (final Map<String, dynamic> line in itArray) {
+      total += coerceNum(line['sub']).toInt();
+    }
+    return total;
+  }
+
   /// Assemble the complete task doc map for Firestore.
   ///
   /// Pure -- all inputs are explicit parameters.
@@ -615,6 +708,8 @@ class AdminCreateTaskSupport {
     required String kn,
     required String al,
     required String vv,
+    String la = '',
+    String lo = '',
     required String gl,
     required String cv,
     required String cn,
@@ -632,13 +727,51 @@ class AdminCreateTaskSupport {
       'kl': kl,
       'kn': kn,
       'al': al,
+      // la/lo mirror kn/al: ALWAYS present, empty string when the customer has
+      // no coordinate. Deliberately NOT the omit-when-empty idiom used for
+      // vv/ln/tdt -- absence there means "invisible to every driver feed",
+      // load-bearing semantics that do not apply to a coordinate.
+      'la': la,
+      'lo': lo,
       'gl': gl,
       'cv': cv,
       'cn': cn,
       't': t,
       'it': itArray,
-      'tablevid': tableVid,
-      'search': 'tnm\u{2605}$tnm',
+      // Planning total = sum of it[].sub (spec (3) section 6b-2.2 no.3), so
+      // the WA order-confirm template can print `{{tot|idr}}`. The template
+      // engine substitutes and repeats only -- it cannot sum -- which is why
+      // this has to be a field.
+      //
+      // ALWAYS present, never omitted. The omit-when-empty idiom on this doc
+      // is reserved for vv/ln/tdt, where ABSENCE means "invisible to every
+      // driver feed" -- load-bearing semantics a money total does not have.
+      // la/lo are the closer precedent ("ALWAYS present, empty when the
+      // customer has no coordinate"), and the sibling assembleNotaDoc writes
+      // 'tot' unconditionally too. An absent key and a 0 both render as
+      // nothing useful in the template, so shape stability wins.
+      //
+      // This is a PLANNING estimate, not the invoice: the CF prices the real
+      // invoice from item.hrg at completion time (spec section 2). The
+      // redundancy is intentional.
+      'tot': computeItTotal(itArray),
+      // Human-readable timestamp, WIB, "yyyy-MM-dd HH:mm" -- the same format
+      // and the same formatter the nota uses, which is what spec (4) section
+      // 6b-2.2 no.5 asks for ("format sama kaya nota"). Without it the
+      // `Tanggal` row of `receiptDoc` on OrderConfirm renders blank, because
+      // that widget reads its date by config name (`dateField: "ts"`) and the
+      // key simply was not there.
+      //
+      // DERIVED from this function's own `t`, deliberately NOT a parameter:
+      // a caller could pass a `ts` computed from a different clock read and the
+      // two would silently disagree. Same argument as `tot` above, which is
+      // computed from the array that gets written rather than from the draft.
+      //
+      // ALWAYS present. Mirrors the tot / la / lo rule on this doc, NOT the
+      // omit-when-empty idiom reserved for vv / ln / tdt, where ABSENCE means
+      // "invisible to every driver feed" -- load-bearing semantics a display
+      // timestamp does not have.
+      'ts': formatWibTimestamp(t),
     };
     if (vv.isNotEmpty) doc['vv'] = vv;
     if (ln.isNotEmpty) doc['ln'] = ln;
@@ -697,8 +830,6 @@ class AdminCreateTaskSupport {
       'cn': cn,
       't': t,
       'ts': ts,
-      'tablevid': tableVid,
-      'search': 'nno\u{2605}$nno',
     };
     if (sv.isNotEmpty) doc['sv'] = sv;
     if (sn.isNotEmpty) doc['sn'] = sn;

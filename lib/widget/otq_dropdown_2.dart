@@ -85,9 +85,9 @@ class _OtqDropdown2State extends State<OtqDropdown2>
 
     final String labelStr = (widget.component['label'] ?? '').toString().trim();
     final String sheetTitle =
-    (widget.component['sheetTitle'] ?? 'Pilih $labelStr').toString();
-    final String searchHint =
-    (widget.component['searchHint'] ?? 'Cari...').toString();
+        (widget.component['sheetTitle'] ?? 'Pilih $labelStr').toString();
+    final String searchHint = (widget.component['searchHint'] ?? 'Cari...')
+        .toString();
 
     showModalBottomSheet(
       context: context,
@@ -148,9 +148,11 @@ class _OtqDropdown2State extends State<OtqDropdown2>
                       onChanged: (val) {
                         setModalState(() {
                           filtered = dropdownItems
-                              .where((item) => item
-                              .toLowerCase()
-                              .contains(val.toLowerCase()))
+                              .where(
+                                (item) => item.toLowerCase().contains(
+                                  val.toLowerCase(),
+                                ),
+                              )
                               .toList();
                         });
                       },
@@ -167,7 +169,9 @@ class _OtqDropdown2State extends State<OtqDropdown2>
                         ),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.symmetric(
-                            vertical: 12, horizontal: 4),
+                          vertical: 12,
+                          horizontal: 4,
+                        ),
                       ),
                     ),
                   ),
@@ -181,7 +185,8 @@ class _OtqDropdown2State extends State<OtqDropdown2>
                     itemBuilder: (ctx, index) {
                       final String item = filtered[index];
                       final int originalIndex = dropdownItems.indexOf(item);
-                      final bool hasSub = originalIndex >= 0 &&
+                      final bool hasSub =
+                          originalIndex >= 0 &&
                           originalIndex < subtitleItems.length;
                       final bool isSelected = item == _itemSelected;
                       return InkWell(
@@ -192,8 +197,27 @@ class _OtqDropdown2State extends State<OtqDropdown2>
                           if (_position != null) {
                             txfControllerCheck(widget.scrName, _position);
                             txfController[widget.scrName]![_position]!
-                                .finalData =
-                            dataSeparated ? dataMap[item] ?? "" : item;
+                                .finalData = dataSeparated
+                                ? dataMap[item] ?? ""
+                                : item;
+                            // Slot writes are a PAIR: .finalData is the stored
+                            // value, .controller.text the display. This writer
+                            // used to set only the first half, so any widget
+                            // listening on the slot's TextEditingController for
+                            // a change (DIGIT_PAD reads its box count from a
+                            // dropdown slot) never fired. Several other slot
+                            // writers — ocrWriteToPosition, otq_get_images_2,
+                            // the RBT `run:` actions — already write both;
+                            // otq_rdo_2 and group_picker still write finalData
+                            // alone, so a slot fed by one of those stays
+                            // non-reactive. No update() call is needed: this
+                            // widget renders from its own _itemSelected state
+                            // (it reads controller.text nowhere), and the .text
+                            // assignment notifies listeners by itself.
+                            txfController[widget.scrName]![_position]!
+                                    .controller
+                                    .text =
+                                item;
                           }
                           Navigator.of(ctx).pop();
                         },
@@ -229,8 +253,11 @@ class _OtqDropdown2State extends State<OtqDropdown2>
                                 ),
                               ),
                               if (isSelected)
-                                const Icon(Icons.check,
-                                    color: Color(0xFF2563EB), size: 18),
+                                const Icon(
+                                  Icons.check,
+                                  color: Color(0xFF2563EB),
+                                  size: 18,
+                                ),
                             ],
                           ),
                         ),
@@ -276,11 +303,11 @@ class _OtqDropdown2State extends State<OtqDropdown2>
         margin: showTitle
             ? const EdgeInsets.fromLTRB(12, 0, 12, 12)
             : EdgeInsets.only(
-          top: margin[0],
-          bottom: margin[1],
-          left: widget.lPad + margin[2],
-          right: widget.rPad + margin[3],
-        ),
+                top: margin[0],
+                bottom: margin[1],
+                left: widget.lPad + margin[2],
+                right: widget.rPad + margin[3],
+              ),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(8),
@@ -288,12 +315,12 @@ class _OtqDropdown2State extends State<OtqDropdown2>
           boxShadow: showTitle
               ? []
               : [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
-            ),
-          ],
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
         ),
         child: Padding(
           padding: EdgeInsets.fromLTRB(

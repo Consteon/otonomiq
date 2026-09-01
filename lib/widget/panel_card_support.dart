@@ -287,6 +287,11 @@ Color statusColor(String status) {
       return const Color(0xFF16A34A);
     case 'info':
       return const Color(0xFF2563EB);
+    case 'muted':
+      // gray-500. Was missing, so a `muted` tier silently rendered GREEN via
+      // the default below. Same value stat_card_row.dart already uses for its
+      // own `muted` tone — one palette, not three.
+      return const Color(0xFF6B7280);
     default:
       return const Color(0xFF16A34A);
   }
@@ -303,6 +308,8 @@ Color statusBgColor(String status) {
       return const Color(0xFFDCFCE7);
     case 'info':
       return const Color(0xFFDBEAFE);
+    case 'muted':
+      return const Color(0xFFF3F4F6); // gray-100, matches stat_card_row
     default:
       return const Color(0xFFDCFCE7);
   }

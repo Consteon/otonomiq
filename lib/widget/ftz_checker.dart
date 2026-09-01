@@ -19,6 +19,7 @@ import '../global.dart';
 import '../redux/screen_transaction.dart';
 import '../widget/photo_camera.dart';
 import 'ftz_scanner_screen.dart';
+import 'menu_icon_card.dart';
 
 // import 'package:barcode_scan2/barcode_scan2.dart';
 
@@ -61,7 +62,7 @@ part '../part/build_part/ftz_checker_part.dart';
 class Controller extends GetxController {
   var count = 10.obs;
   var message = ''.obs;
-  decrease() => count--;
+  RxInt decrease() => count--;
 }
 
 class FtzChecker extends StatefulWidget {
@@ -123,7 +124,10 @@ class FtzCheckerState extends State<FtzChecker> {
                 // No return: .then() above yields Future<Null>, so the onError handler
                 // must be assignable to FutureOr<Null>. placeMark simply keeps its
                 // previous value (or the initial []) when the geocoder fails.
-                errorReport('ftz_checker placemarkFromCoordinates: $e');
+                // devPrint, not errorReport: same unactionable Android Geocoder
+                // outage as api.dart's placemark path -- see the comment there.
+                // placeMark keeps its previous value (or the initial []).
+                devPrint('ftz_checker placemarkFromCoordinates: $e');
               });
         })
         .catchError((Object e) {
@@ -932,103 +936,69 @@ class FtzCheckerState extends State<FtzChecker> {
 
     h = MediaQuery.of(context).size.height - 20;
     w = MediaQuery.of(context).size.width - 20;
-    const double defaultAspectRatio = 18 / 12;
-    var topPad = 6.0;
     double fontSize = (widget.component['fontSize'] ?? 14.0).toDouble();
     // textArray = diamondTextToList(widget.component['text']);
     Widget button1;
     button1 = Center(
-      child: Column(
-        children: [
-          Container(
-            alignment: Alignment.center,
-            width: (widget.component['width'] ?? 90).toDouble(),
-            child: Card(
-              child: InkWell(
-                child: Column(
-                  // mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: <Widget>[
-                    Container(height: topPad),
-                    AspectRatio(
-                      aspectRatio: defaultAspectRatio,
-                      child: displayImage(
-                        imageUrl: widget.component['url'] ?? defaultImage,
-                        cached: true,
-                      ),
-                      // child: FadeInImage.memoryNetwork(
-                      //   placeholder: kTransparentImage,
-                      //   image: widget.component['url'] ?? defaultImage,
-                      // ),
+      child: SizedBox(
+        width: (widget.component['width'] ?? 90).toDouble(),
+        child: menuIconCard(
+          imageUrl: widget.component['url'] ?? defaultImage,
+          label: textArray[0],
+          fontSize: fontSize,
+          onTap: () async {
+            if (!tapped) {
+              // setState(() {
+              tapped = true;
+              // });
+              String title = '';
+              String body = '';
+              bool dataOk = transactionOK();
+              if (!dataOk) {
+                title = "AlertTitle";
+                body = "NeedGreen";
+                await checkerDialog(
+                  title: textList[title],
+                  message: textList[body],
+                  okString: textArray[1],
+                );
+                //setDataOK('2');
+                tapped = false;
+              } else {
+                dataOk = dataOk && await internetConnectedCheck();
+                if (!dataOk) {
+                  //setDataOK('2');
+                  tapped = false;
+                  await checkerDialog(
+                    title: textList['NoInternetTitle'],
+                    message: textList['NoInternet'],
+                    okString: textArray[1],
+                  );
+                } else {
+                  setTransactionNotOK('ftzChecker');
+                  transactionStore.dispatch(
+                    UpdateScreenTxAction(
+                      ScreenTransaction({'#DATA_OK': false}),
                     ),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        textArray[0],
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: fontSize),
-                      ),
-                    ),
-                  ],
-                ),
-                onTap: () async {
-                  if (!tapped) {
-                    // setState(() {
-                    tapped = true;
-                    // });
-                    String title = '';
-                    String body = '';
-                    bool dataOk = transactionOK();
-                    if (!dataOk) {
-                      title = "AlertTitle";
-                      body = "NeedGreen";
-                      await checkerDialog(
-                        title: textList[title],
-                        message: textList[body],
-                        okString: textArray[1],
-                      );
-                      //setDataOK('2');
-                      tapped = false;
-                    } else {
-                      dataOk = dataOk && await internetConnectedCheck();
-                      if (!dataOk) {
-                        //setDataOK('2');
-                        tapped = false;
-                        await checkerDialog(
-                          title: textList['NoInternetTitle'],
-                          message: textList['NoInternet'],
-                          okString: textArray[1],
-                        );
-                      } else {
-                        setTransactionNotOK('ftzChecker');
-                        transactionStore.dispatch(
-                          UpdateScreenTxAction(
-                            ScreenTransaction({'#DATA_OK': false}),
-                          ),
-                        );
-                        try {
-                          // OtqState currentData =
-                          //     await OtqState().setAllDataAsync();
-                          String variant =
-                              widget.component['variant'] ?? 'qr-photo-single';
-                          await checkerAcquireData(variant, textArray);
-                          // await checkerAcquireData(
-                          //     variant, textArray, currentData);
-                        } catch (e) {
-                          setDataOK('2');
-                          errorReport(e);
-                        }
-                        tapped = false;
-                      } // end if !dataOK
-                    } // end if (!dataOk)
-                  } // end if !tapped
-                }, // end of onTap
-              ),
-            ),
-          ),
-        ],
+                  );
+                  try {
+                    // OtqState currentData =
+                    //     await OtqState().setAllDataAsync();
+                    String variant =
+                        widget.component['variant'] ?? 'qr-photo-single';
+                    await checkerAcquireData(variant, textArray);
+                    // await checkerAcquireData(
+                    //     variant, textArray, currentData);
+                  } catch (e) {
+                    setDataOK('2');
+                    errorReport(e);
+                  }
+                  tapped = false;
+                } // end if !dataOK
+              } // end if (!dataOk)
+            } // end if !tapped
+          }, // end of onTap
+        ),
       ),
     );
     return button1;
