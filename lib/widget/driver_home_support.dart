@@ -7,6 +7,8 @@ import 'package:url_launcher/url_launcher.dart'; // MapsButton -> external maps 
 
 import '../api.dart'; // getTableVid
 import '../global.dart';
+import '../global2.dart'; // txfControllerCheck
+import '../model/otq_state.dart'; // OtqState
 import '../redux/screen_transaction.dart';
 import 'dsl_eq.dart';
 import 'panel_card_support.dart';
@@ -2901,6 +2903,254 @@ String stripRouteWrapper(String raw) {
     return trimmed.substring(7, trimmed.length - 1).trim();
   }
   return trimmed;
+}
+
+// ─── Event audit row for natively-written submits ──────────────────────────
+
+/// Keys stripped from the component copy handed to `saveSend` by
+/// [emitSubmitEventRow].
+///
+/// The first five are the write-DSL verbs. A widget that reaches
+/// [emitSubmitEventRow] has ALREADY written its document natively -- it does so
+/// precisely because the DSL cannot express arrays -- so leaving a DSL verb in
+/// place would make `saveSend` compose a SECOND write of the same data. On
+/// today's configs those keys are dead (the widgets never called `saveSend`),
+/// so stripping them keeps the change at "today's behaviour + one Event row".
+///
+/// `route` is stripped for a different reason: `saveSend` calls
+/// `clearData(scrName)` when `routeExist(component['route'])` is true
+/// (api.dart:4993). `clearData` (api.dart:4658) resets every
+/// `txfController[scrName]` entry AND fires `ScreenSession.navReset(scrName)`,
+/// which clears every registered per-screen store (some with NavPolicy.all,
+/// i.e. every screen). The calling widgets clear their own draft and navigate
+/// themselves, so that is a side effect with no upside. Live configs wrap the
+/// route (`"[ROUTE:taskSuccess]"`) and `routeExist` (global.dart:1522) looks the
+/// raw string up in `linkElement`, so it is false today anyway -- stripping
+/// makes the behaviour identical for a tenant that deploys a BARE route too.
+const List<String> kEventComponentStrippedKeys = <String>[
+  'addToTable',
+  'updateTableRow',
+  'deleteFromTable',
+  'addToEvent',
+  'updateEventRow',
+  'route',
+];
+
+/// Build the component map handed to `saveSend` for the Event audit row.
+///
+/// Returns a NEW map; [component] is never mutated. Absent keys are a no-op.
+/// Everything `saveSend` actually reads off the component survives: `flag`
+/// (api.dart:4811), `desc`, `type`, `com`.
+///
+/// Convention #7: server JSON is `dynamic` BY DESIGN. The cast here is
+/// explicit and per-call -- this is not a blanket typing of the JSON tree.
+Map<String, dynamic> eventComponent(dynamic component) {
+  final Map<String, dynamic> copy =
+      Map<String, dynamic>.from(component as Map);
+  for (final String key in kEventComponentStrippedKeys) {
+    copy.remove(key);
+  }
+  return copy;
+}
+
+/// Build the `ev` geo block for a renderer-emitted Event row.
+///
+/// Wraps [getLocationString] (api.dart:882) and, when [sensor] carries NO valid
+/// fix, BLANKS the three slots that would otherwise ship dummy numbers into the
+/// report's coordinate columns:
+///
+/// | idx | slot            | no-fix value before | after |
+/// |-----|-----------------|---------------------|-------|
+/// | 4   | latitude        | `888.8888888`       | `''`  |
+/// | 5   | longitude       | `888.8888888`       | `''`  |
+/// | 7   | isoCountryCode  | `88`                | `''`  |
+/// | 16  | accuracy        | `''` (already)      | `''`  |
+///
+/// Those three are `OtqState` FIELD INITIALISERS (otq_state.dart:16-17 and :27,
+/// `invalidLocation` = global.dart:543), not measurements -- `setAllDataAsync`
+/// only assigns them inside its valid-fix branch. Index 15 (`locationStatus`)
+/// is KEPT at `No Gps` on purpose, so the report can still tell "GPS failed"
+/// apart from "geo was never captured" (spec section 5A-1 no.1).
+///
+/// The ◆ field count is LOAD-BEARING: 17 fields in, 17 out, since the
+/// GPS-accuracy slot (index 16, system token ◀17▶) was appended to
+/// getLocationString. Index 16 is blanked here too — belt-and-braces, because
+/// OtqState.accuracy is only assigned inside getDataFrom's valid-fix branch, so
+/// a no-fix sensor already carries 0.0 and getLocationString already writes ''.
+/// An empty index 4 is safe downstream -- the geocoding backfill in
+/// `historySync` is guarded by `double.tryParse(locArray[4]) != null`
+/// (table_repository.dart:3036-3042), so it is skipped, never parsed.
+///
+/// NOT the same as the standard-RBT no-GPS literal in ftz_row_of_button_2's
+/// submit closure. That one still ships its `888.8888888` values untouched —
+/// every standard submit rides it and the report's column-D formulas may key
+/// off them. It was only extended by ONE trailing ◆ so its field count matches
+/// the 17 this function now produces; nothing there was renumbered.
+///
+/// [sensor] -- an `OtqState`, normally straight out of `setAllDataAsync()`.
+String eventLocString(OtqState sensor) {
+  final String locString = getLocationString('', '', '', sensor);
+  if (sensor.latitude != invalidLocation) return locString;
+  // Plain split, NOT diamondTextToList(): that helper early-returns [] for the
+  // '--' sentinel and round-trips through jsonDecode (global.dart:1817). A
+  // plain split is the exact inverse of getLocationString's `+= diamond`.
+  final List<String> parts = locString.split(separator[1]);
+  // Convention 3 length guard. Unreachable by construction -- cleanupString
+  // (global.dart:1331) strips every forbiddenCharacter, ◆ included, from every
+  // free-text slot, so getLocationString always yields exactly 17 -- but kept
+  // as insurance against a future change there.
+  if (parts.length < 17) return locString;
+  parts[4] = ''; // latitude
+  parts[5] = ''; // longitude
+  parts[7] = ''; // isoCountryCode
+  parts[16] = ''; // GPS accuracy (◀17▶)
+  return parts.join(separator[1]);
+}
+
+/// Emit the Event-tab audit row for a submit that wrote its document natively.
+///
+/// Background: `ev`/`et`/`p` seen ON a Firestore document are injected by
+/// `buildEventDoc` (table_repository.dart:1472-1474) as a MIRROR copied FROM
+/// the history record -- they are never its source. The only producer of an
+/// Event-tab row is `saveSend -> saveSendRows -> appendToSheet`
+/// (api.dart:4781 / 5019 / 5282), where `c2` is the `ev` blob, `t` is `et`,
+/// `p` is the route and `f` is the flag. So a natively-written document is
+/// invisible to the report engine until this runs.
+///
+/// Call AFTER the native write has succeeded and BEFORE navigation. The
+/// ordering is required because `saveSend` reads the `txfController` slots
+/// SYNCHRONOUSLY and the GPS capture below is a multi-second await, so
+/// `gotoRoute` must not run first -- NOT because navigating clears anything.
+///
+/// Nothing clears `txfController[scrName]` on the outbound leg: `reloadPage`
+/// posts `clearData` for the DESTINATION route (global.dart:1532), and
+/// `saveSend`'s own `clearData` is gated on `routeExist(component['route'])`
+/// (api.dart:4993) -- a key [eventComponent] deliberately strips. The slots
+/// therefore OUTLIVE the submit, until this screen is navigated BACK to (at
+/// which point it IS the destination and `clearData` finally fires).
+///
+/// CONTRACT for a caller: `★`-slot freshness is the CALLER's job, not this
+/// helper's. Write every slot you care about unconditionally on every submit,
+/// immediately before calling this -- never assume a previous navigation left
+/// them empty. `TaskCreateSubmit.writeEventSlots` does exactly that, and
+/// `task_create_submit`'s step 5a re-seeds slot 17 for the same reason.
+///
+/// BEST-EFFORT, but scoped: the catch below covers what this function does
+/// itself -- the GPS capture, the component copy, the dispatch. It does NOT
+/// cover `saveSend`, which never throws: it swallows into its own catch and
+/// calls `setDataOK('1')` (api.dart:5013-5015), a fire-and-forget
+/// `readSettings(..., 2)` with a 15s timeout, i.e. a full proxy config re-read
+/// that this helper cannot intercept. A malformed component (e.g. a numeric
+/// `flag`, which fails the implicit downcast at api.dart:4811) lands there, not
+/// here. Within that scope the contract holds and mirrors custody_count_submit
+/// C1 block-7b ("Event/GPS fail != rollback"): the document is already written,
+/// and nothing on this path rolls it back or blocks navigation.
+///
+/// [component] -- the raw SDUI component (`widget.component`). `flag`, `desc`,
+///   `type` and `com` are read from it; nothing is written back. `gpsPosition`
+///   is deliberately NOT read: GPS capture is unconditional (round 2, spec
+///   section 5A-1 no.1). `eventComponent` still copies the key through, which
+///   is harmless -- `saveSend` never reads it.
+/// [scrName] -- the screen name, used as the history record's `p` (route) and
+///   as the `txfController` key for the `★` block.
+Future<void> emitSubmitEventRow({
+  required dynamic component,
+  required String scrName,
+}) async {
+  try {
+    // `saveSend` dereferences `txfController[scrName]!` unguarded
+    // (api.dart:4814). A screen whose components are all positionless would
+    // leave that map null, and `saveSend` would swallow the NPE into
+    // `setDataOK('1')` (api.dart:5014) -- a full readSettings + page reload.
+    // One check guarantees the map exists. Position 0 is outside saveSend's
+    // `1 <= position <= 100` window (api.dart:4834), so it adds no slot.
+    txfControllerCheck(scrName, 0);
+
+    // `appendToSheet` fires `timerBloc.add(Start(duration: ...))` whenever
+    // `#TIMER_DURATION` is an int (api.dart:5327). The standard submit widgets
+    // set that key immediately before their own saveSend -- verified at
+    // ftz_row_of_button_2.dart:243, otq_txf_2.dart:718, otq_txf.dart:590,
+    // ftz_checker.dart:370, image_upload.dart:110,
+    // attendance_qr_selfie_gps_verify.dart:246, gps_send.dart:49 and
+    // qr_gps.dart:50 -- and main_bloc.dart:122 sets it in the PIN-verify flow.
+    // Nothing ever clears it, so after any of those it is a stale int. Left
+    // alone it would drop a WaitScreen over this page (any_page.dart:183) and
+    // then navigate to the stale `#NEXTROUTE` (any_page.dart:192), hijacking
+    // the caller's own navigation. Null it so the guard actually holds; every
+    // producer above re-sets the key as part of its own flow, so this can
+    // never starve a consumer.
+    transactionStore.dispatch(
+      UpdateScreenTxAction(
+        ScreenTransaction(<String, dynamic>{'#TIMER_DURATION': null}),
+      ),
+    );
+
+    // GPS capture: ALWAYS real, no config gate. The old `gpsPosition > 0` gate
+    // was inert in production -- the deployed TASK_CREATE_SUBMIT config carries
+    // no `gpsPosition` (docs/admin_runtime/admin-create-task-op1screen.md), so
+    // every emitted row took the else branch and shipped a bare OtqState's
+    // FIELD INITIALISERS as if they were a measurement: 888.8888888 lat/lng and
+    // country 88 (live evidence, spec section 5A-1). Waiting for a builder
+    // deploy to add the key would have made the fix inert too, so the gate is
+    // deleted rather than configured. This mirrors what a savesend RBT with
+    // `gpsPosition > 0` already does (ftz_row_of_button_2.dart:442-447).
+    //
+    // ONE clock, and it is authoritative in every case: setAllDataAsync sets
+    // nowTime from getRealTime() inside its Future.wait (otq_state.dart:244),
+    // i.e. exactly the NTP value the deleted else branch fetched separately,
+    // falling back to the DateTime.now() field initialiser if NTP throws. The
+    // epoch is therefore never empty -- the one field the report can always
+    // rely on -- and is now guaranteed identical to locString index 1, since
+    // getLocationString reads nowTime off this same OtqState.
+    //
+    // BOUNDED at 8s (code-review-r1 W2). setAllDataAsync's getLocation ->
+    // getAppGps waits up to 5s on the position stream (api.dart:229, :234-240)
+    // and, when no fix is younger than 30 minutes, falls through to
+    // Geolocator.getCurrentPosition with NO timeLimit (api.dart:301-305),
+    // followed by an un-timeout'ed placemarkFromCoordinates. This await sits on
+    // the PRE-NAVIGATION path of both calling widgets, so an unbounded capture
+    // parks the user on a spinner indefinitely in the exact environment both
+    // personas work in: indoors, location ON, permission granted, fix stale.
+    // 8s and not less -- a legitimate cold capture can burn the whole 5s stream
+    // wait before the reverse-geocode even starts, so a tighter cap would
+    // truncate a capture that was going to succeed. The root-cause fix (a
+    // timeLimit inside getAppGps) is app-wide and belongs in its own round.
+    //
+    // onTimeout returns the SAME instance, never a fresh OtqState():
+    // setAllDataAsync mutates `this` from inside its Future.wait
+    // (otq_state.dart:185-248) and returns `this`, so whatever already landed
+    // -- typically the NTP nowTime from the parallel getRealTime future
+    // (otq_state.dart:244-245) -- is kept instead of thrown away. A timed-out
+    // capture then degrades to exactly the already-tested no-GPS path:
+    // `latitude` is still invalidLocation, so eventLocString blanks slots
+    // 4/5/7 and keeps `No Gps`, and the epoch is never empty (nowTime's field
+    // initialiser is DateTime.now(), otq_state.dart:14). The underlying futures
+    // may still mutate the instance after the timeout; harmless, because
+    // eventLocString reads it synchronously on the very next line.
+    final OtqState allOtqData = OtqState();
+    await allOtqData.setAllDataAsync().timeout(
+      const Duration(seconds: 8),
+      onTimeout: () => allOtqData,
+    );
+    final int timeStamp = allOtqData.nowTime.millisecondsSinceEpoch;
+    final String locString = eventLocString(allOtqData);
+
+    saveSend(
+      timeStamp,
+      scrName,
+      eventComponent(component),
+      locString,
+      defaultVid(),
+    );
+  } catch (e) {
+    // devPrint is SILENT in release (global.dart), so the trace alone would
+    // make a production failure of the Event row invisible -- the exact
+    // failure this helper exists to surface. errorReport prints
+    // unconditionally and files a non-fatal, matching the outer catch in both
+    // calling widgets.
+    devPrint('[emitSubmitEventRow] $scrName event audit failed: $e');
+    errorReport(e);
+  }
 }
 
 // -- Status exclusion filter (shared by DRIVER_STOP_CARD + future widgets) ---

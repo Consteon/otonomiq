@@ -97,8 +97,32 @@ Placeholder di-resolve sebelum string dikirim ke `updateTableRow`:
 
 | Placeholder | Sumber |
 |---|---|
-| `◀1▶` sampai `◀14▶` | `ref[0][n-1]` — 14 kolom pertama dari event row |
-| `◀15▶` dst | `ref[1][n-15]` — kolom extended dari event row |
+| `◀1▶` … `◀17▶` | `ref[0][n-1]` — slot ke-n dari blok locString milik event row |
+
+> **Koreksi (2026-08-31).** Tabel lama menulis `◀15▶ dst → ref[1][n-15]`. Itu
+> SALAH: `resolveValueTokens` selalu membaca `ref[sourceIndex]` dengan
+> `sourceIndex` default `0`, dan tidak ada pemanggil yang mengirim nilai lain.
+> `ref[1]` (blok `★` data form) hanya dijangkau lewat grammar segitiga PUTIH
+> `◁N▷` (`forbiddenCharacter[8]`/`[10]`), bukan `◀N▶`.
+>
+> Peta slot `ref[0]` (17 elemen sejak 2026-08-31):
+>
+> | Token | Isi | Token | Isi |
+> |---|---|---|---|
+> | `◀1▶` | flag submit | `◀10▶` | administrativeArea |
+> | `◀2▶` | timestamp (epoch ms) | `◀11▶` | subAdministrativeArea |
+> | `◀3▶` | position3 / fromLinkOption | `◀12▶` | locality |
+> | `◀4▶` | locId (teks QR) | `◀13▶` | subLocality |
+> | `◀5▶` | latitude | `◀14▶` | thoroughfare |
+> | `◀6▶` | longitude | `◀15▶` | subThoroughfare |
+> | `◀7▶` | imageUrl | `◀16▶` | locationStatus |
+> | `◀8▶` | isoCountryCode | **`◀17▶`** | **GPS accuracy (meter, bulat)** |
+> | `◀9▶` | postalCode | | |
+>
+> `◀17▶` **kosong** kalau tidak ada fix GPS (`OtqState.accuracy` = 0.0), supaya
+> slot config yang membacanya hilang total, bukan menampilkan `±0 m`.
+> Indeks di luar jangkauan (mis. `◀18▶`) di-resolve jadi literal `*`, bukan
+> ditinggal sebagai token — jadi jangan pernah menomori ulang slot di atas.
 
 ### Placeholder `◀n\|format▶` (formatted)
 

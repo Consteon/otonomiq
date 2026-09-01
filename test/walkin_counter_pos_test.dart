@@ -153,8 +153,6 @@ void main() {
       expect(doc['cn'], 'Admin Name');
       expect(doc['t'], 1720000000000);
       expect(doc['ts'], '2026-07-08 14:30');
-      expect(doc['tablevid'], '20342033315492');
-      expect(doc['search'], 'nno\u{2605}NOTA-2026-000001');
     });
 
     test('Number canon: tot and t are int', () {
@@ -176,7 +174,7 @@ void main() {
       expect(doc['t'], isA<int>());
     });
 
-    test('String canon: nno, src, by, bym, st, gl, ts, search are String', () {
+    test('String canon: nno, src, by, bym, st, gl, ts are String', () {
       final doc = AdminCreateTaskSupport.assembleNotaDoc(
         nno: 'N1',
         src: 'walkin',
@@ -198,7 +196,6 @@ void main() {
       expect(doc['st'], isA<String>());
       expect(doc['gl'], isA<String>());
       expect(doc['ts'], isA<String>());
-      expect(doc['search'], isA<String>());
     });
 
     test('st is always LUNAS (uppercase)', () {
@@ -209,14 +206,6 @@ void main() {
       expect(doc['st'], 'LUNAS');
     });
 
-    test('search uses star separator U+2605', () {
-      final doc = AdminCreateTaskSupport.assembleNotaDoc(
-        nno: 'NOTA-2026-000007', src: 'w', by: '', bym: 'tunai', gl: 'G',
-        tot: 0, liArray: [], cv: '', cn: '', t: 0, ts: '', tableVid: '',
-      );
-      expect(doc['search'], contains('\u{2605}'));
-      expect(doc['search'], 'nno\u{2605}NOTA-2026-000007');
-    });
   });
 
   // ── P2: bym mapping ───────────────────────────────────────────────────

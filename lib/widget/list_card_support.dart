@@ -477,3 +477,65 @@ bool isVisibleBySlotGate(
   if (concrete.contains(pointerValue)) return true;
   return wildcardLevels.contains(levelValue);
 }
+
+// ─── `limit` — top-N cut (list-card-limit) ──────────────────────────────
+
+/// Parse the optional `limit` config key into a row cap.
+///
+/// The spec writes `"limit":5` (a plain number, like `delay`/`size`), but
+/// sheet-sourced JSON is inconsistent, so a quoted `"5"` and a `jsonDecode`
+/// double (`5.0`) are accepted too. Everything that is not a positive whole
+/// number means UNLIMITED and maps to `0`: absent (`null`), `''`, `'--'` (the
+/// sheet's empty-cell sentinel), `0`, a negative, a bool, or unparseable text.
+/// `0` is the single "no cap" sentinel, so callers only ever test `> 0`.
+///
+/// A NEGATIVE must land on 0 and not reach [applyLimit]: `Iterable.take` with a
+/// negative count throws `RangeError`, i.e. one bad sheet cell would crash that
+/// tenant's screen.
+///
+/// A quoted `'5.0'` yields 0 (unlimited) — `int.tryParse` rejects it and spec
+/// §1 says unparseable = no cap. Documented in `docs/widgets/list_card.md` and
+/// asserted in `test/list_card_limit_test.dart`; change both together.
+///
+/// NOT `autheniumDecode`d: this is a number, not a ◼/⭘-encoded string, so the
+/// caller reads `component['limit']` raw and never through `_cfg()`.
+///
+/// Ladder shape mirrors the repo's private `dynamic → int` coercers
+/// (`admin_home_support.dart` `_toInt`, `asset_stock_list.dart` `_safeInt`),
+/// plus the `limit`-specific "≤ 0 means unlimited" rule.
+int parseLimit(dynamic raw) {
+  final int n;
+  if (raw == null) {
+    n = 0;
+  } else if (raw is int) {
+    n = raw;
+  } else if (raw is num) {
+    n = raw.toInt(); // jsonDecode may hand back 5.0
+  } else {
+    n = int.tryParse(raw.toString().trim()) ?? 0;
+  }
+  return n > 0 ? n : 0;
+}
+
+/// Cut a display list down to its first [limit] rows.
+///
+/// `limit <= 0` (unlimited) and `limit >= docs.length` both return the SAME
+/// list instance — every already-deployed LIST_CARD has no `limit` key, so the
+/// no-cap path allocates nothing and behaves identically to before.
+///
+/// Applied to the DISPLAY list only: after the sort in `_getServerFiltered()`
+/// and after the search bar, but BEFORE grouping. Two consequences, both
+/// deliberate:
+///   * grouped mode gets a GLOBAL cap (N rows in total across all sections,
+///     never N per section) and a group with no rows inside the cap is not
+///     rendered at all;
+///   * the header count and the stats strip read `serverFiltered`, which is
+///     never cut, so they keep reporting the original total.
+///
+/// [docs] is already `List<Map<String, dynamic>>`, so `.take().toList()` stays
+/// statically typed — this is not the `dynamic`-source `.map().toList()` trap.
+List<Map<String, dynamic>> applyLimit(
+    List<Map<String, dynamic>> docs, int limit) {
+  if (limit <= 0 || limit >= docs.length) return docs;
+  return docs.take(limit).toList();
+}

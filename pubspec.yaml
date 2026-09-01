@@ -107,9 +107,11 @@ dependencies:
   pdf: ^3.13.0
   flutter_pdfview: ^1.4.5
   share_plus: ^12.0.2
+  # Ed25519 (RFC 8032) verification for Scheme 3 QR tokens. Pure Dart, no
+  # native side, and resolves with zero new transitive dependencies.
+  cryptography: ^2.7.0
 
 #  flutter_blue_plus: ^1.35.5
-#  cryptography: ^2.7.0
 
 dev_dependencies:
   flutter_test:

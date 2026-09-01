@@ -17,6 +17,8 @@ import 'package:otonomiq/model/otq_state.dart';
 //   split[5] = longitude   (//6)
 //   split[6] = imageUrl    (//7)  ← Firebase Storage selfie URL
 //   split[7..15] = address fields + locationStatus
+//   split[16]    = GPS accuracy in whole metres (system token ◀17▶); EMPTY
+//                  when OtqState.accuracy is 0, which is the no-fix state
 
 void main() {
   final diamond = separator[1]; // ◆ (U+25C6) — never paste raw glyph
@@ -41,11 +43,11 @@ void main() {
 
   // ── getLocationString slot composition ────────────────────────────────────
   group('getLocationString — qr-selfie write shape', () {
-    test('output has exactly 16 diamond-separated segments', () {
+    test('output has exactly 17 diamond-separated segments', () {
       final parts = getLocationString(
               'LOC-QR-01', 'https://storage.googleapis.com/b/s.jpg', 'checkpoint', mkSensor())
           .split(diamond);
-      expect(parts.length, 16);
+      expect(parts.length, 17);
     });
 
     test('output starts with diamond separator', () {
@@ -93,28 +95,28 @@ void main() {
 
     // ── Mandatory edge cases ───────────────────────────────────────────────
 
-    test('empty locId → split[3] is empty, 16 parts maintained, imageUrl at split[6]', () {
+    test('empty locId → split[3] is empty, 17 parts maintained, imageUrl at split[6]', () {
       // Edge: QR text is empty (abnormal, but must not corrupt other slots)
       final parts = getLocationString(
               '', 'https://storage.googleapis.com/b/s.jpg', 'checkpoint', mkSensor())
           .split(diamond);
-      expect(parts.length, 16);
+      expect(parts.length, 17);
       expect(parts[3], '');
       expect(parts[6], 'https://storage.googleapis.com/b/s.jpg');
     });
 
-    test('empty imageUrl → split[6] is empty, 16 parts maintained, locId at split[3]', () {
+    test('empty imageUrl → split[6] is empty, 17 parts maintained, locId at split[3]', () {
       // Edge: upload failed and empty URL written (no write path should reach here,
       // but the slot structure must stay valid)
       final parts =
           getLocationString('SCANNED-QR-01', '', 'checkpoint', mkSensor())
               .split(diamond);
-      expect(parts.length, 16);
+      expect(parts.length, 17);
       expect(parts[6], '');
       expect(parts[3], 'SCANNED-QR-01');
     });
 
-    test('sparse OtqState (default invalidLocation values) → valid 16-part structure, no throw', () {
+    test('sparse OtqState (default invalidLocation values) → valid 17-part structure, no throw', () {
       // Sparse: GPS unavailable; OtqState fields stay at their default sentinels
       final sensor = OtqState(); // latitude/longitude = invalidLocation (888.888...)
       sensor.nowTime = DateTime.fromMillisecondsSinceEpoch(1700000000000);
@@ -122,7 +124,7 @@ void main() {
         () {
           final parts =
               getLocationString('QR', 'URL', 'checkpoint', sensor).split(diamond);
-          expect(parts.length, 16);
+          expect(parts.length, 17);
           expect(parts[3], 'QR');
           expect(parts[6], 'URL');
         },
@@ -138,7 +140,7 @@ void main() {
       sensor.subLocality = "O'ck";                // single-quote → /
       final parts =
           getLocationString('QR', 'URL', 'checkpoint', sensor).split(diamond);
-      expect(parts.length, 16);
+      expect(parts.length, 17);
       expect(parts[9], 'Jawa Barat'); // administrativeArea cleaned
       expect(parts[12], 'O/ck');      // subLocality cleaned
       // Critical slots unchanged in the normal case (nothing hostile to strip)
@@ -151,7 +153,7 @@ void main() {
     // verbatim and break its JSON composition, losing the attendance record.
     // No slot may carry a quote, a backslash, a control char, or any framing
     // separator — whatever the geocoder or the scanned QR hands us.
-    test('hostile geocoder text is neutralised in every slot; 16 slots survive',
+    test('hostile geocoder text is neutralised in every slot; 17 slots survive',
         () {
       const hostile = 'Jl "A" \\ B';
       final sensor = mkSensor();
@@ -169,7 +171,7 @@ void main() {
               'QR"01', 'https://x/s.jpg', 'check"point', sensor)
           .split(diamond);
 
-      expect(parts.length, 16, reason: 'framing must not shift');
+      expect(parts.length, 17, reason: 'framing must not shift');
       for (var i = 0; i < parts.length; i++) {
         expect(parts[i], isNot(contains('"')), reason: 'slot $i has a quote');
         expect(parts[i], isNot(contains('\\')),
@@ -184,6 +186,25 @@ void main() {
       // Spot-check the two slots that had no sanitiser at all before the fix
       expect(parts[7], 'ID'); // isoCountryCode
       expect(parts[8], '40174'); // postalCode
+    });
+
+    test('split[16] carries the rounded GPS accuracy; 0 writes an EMPTY slot',
+        () {
+      // Catches: writing "0" instead of "" for a no-fix sensor, which would
+      // make TIMELINE_CARD render a fake "GPS ±0 m" instead of hiding the line.
+      final sensor = mkSensor();
+      sensor.accuracy = 8.37;
+      expect(
+        getLocationString('QR', 'URL', 'checkpoint', sensor).split(diamond)[16],
+        '8',
+      );
+
+      final noFix = OtqState();
+      noFix.nowTime = DateTime.fromMillisecondsSinceEpoch(1700000000000);
+      expect(
+        getLocationString('QR', 'URL', 'checkpoint', noFix).split(diamond)[16],
+        '',
+      );
     });
   });
 

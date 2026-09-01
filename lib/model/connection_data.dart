@@ -30,7 +30,14 @@ class ConnectionData {
     result.trueTime = 0;
     result.time = 0;
     try {
-      final conn = await InternetAddress.lookup('google.com');
+      // 5s cap: this lookup had no timeout at all, so a captive-portal or
+      // dead-DNS network left it hanging with the AppBar refresh mid-flight —
+      // amber dot stuck, button locked by its own in-flight guard, no alert.
+      // An empty result falls into the else below (flag = not connected), which
+      // is exactly what a failed lookup means, so no new catch is needed.
+      final conn = await InternetAddress.lookup(
+        'google.com',
+      ).timeout(const Duration(seconds: 5), onTimeout: () => <InternetAddress>[]);
       if (conn.isNotEmpty && conn[0].rawAddress.isNotEmpty) {
         internetConnectionFlag.value = true;
         internetConnection = true;

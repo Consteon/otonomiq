@@ -59,6 +59,12 @@ class _ListCardState extends State<ListCard> {
   String _rawConditions = '';
   String _sortField = '';
   bool _sortDesc = false;
+
+  /// Optional row cap from the `limit` config key. `0` = unlimited, which is
+  /// what absent/empty/`0`/negative/unparseable all resolve to (see
+  /// [parseLimit]). Applied to the DISPLAY list only, so the header count and
+  /// the stats strip keep the uncapped total.
+  int _limit = 0;
   String _groupByField = '';
   String _leadMode = '';
   String _titleTpl = '';
@@ -69,6 +75,12 @@ class _ListCardState extends State<ListCard> {
   String _trailingTpl = '';
   String _trailingLabelTpl = '';
   String _routeStr = '';
+
+  /// Optional "see all" route for the header action button. Empty = no button.
+  /// Separate from [_routeStr] on purpose: a teaser list is usually
+  /// `route:""` (non-tappable rows) while its header still links to the full
+  /// page, so one key cannot serve both.
+  String _moreRoute = '';
   Map<String, String> _groupRoutes = const {};
 
   // Row status guard: per-row count against a SECOND table -> label + optional
@@ -146,6 +158,10 @@ class _ListCardState extends State<ListCard> {
 
     _sortField = _cfg('sortField').trim();
     _sortDesc = _cfg('sortDir').trim().toLowerCase() == 'desc';
+    // limit: a plain NUMBER, not a ◼/⭘-encoded string — read RAW, never
+    // through _cfg(). Parsed here (once) like every other config field; the
+    // Obx in build() re-runs on every keystroke of the search bar.
+    _limit = parseLimit(widget.component['limit']);
     _groupByField = _cfg('groupBy').trim();
     _leadMode = _cfg('lead').trim().toLowerCase();
     _titleTpl = _cfg('title');
@@ -156,6 +172,7 @@ class _ListCardState extends State<ListCard> {
     _trailingTpl = _cfg('trailing');
     _trailingLabelTpl = _cfg('trailingLabel');
     _routeStr = stripRouteWrapper(_cfg('route').trim());
+    _moreRoute = stripRouteWrapper(_cfg('moreRoute').trim());
     _groupRoutes = parseGroupRoutes(_cfg('groupRoutes'))
         .map((k, v) => MapEntry(k, stripRouteWrapper(v)));
 
@@ -427,6 +444,17 @@ class _ListCardState extends State<ListCard> {
     gotoRoute(route);
   }
 
+  /// Header "see all" tap. Deliberately NOT [_onCardTap]: there is no row, so
+  /// no `routeParams` to resolve (an empty doc would write junk) and no
+  /// biometric gate -- that gate guards opening a specific record, not the
+  /// unfiltered page this list is already showing a slice of.
+  void _onMoreTap() {
+    if (_moreRoute.isEmpty || !routeExist(_moreRoute)) return;
+    // routeStack.push BEFORE gotoRoute (back-nav uses routeStack)
+    routeStack.push(_moreRoute);
+    gotoRoute(_moreRoute);
+  }
+
   /// Resolve `<field>` template tokens from a doc. No computed values in v1.
   String _resolve(String template, Map<String, dynamic> doc) =>
       resolveMapTokens(template, doc, const <String, String>{});
@@ -446,19 +474,36 @@ class _ListCardState extends State<ListCard> {
           ? computeStatsCounts(_statsDefs, serverFiltered)
           : const [];
 
-      // Search bar filter for display
+      // Search bar filter, then the optional `limit` cut.
+      // Order: sort (in _getServerFiltered) -> search bar -> limit.
+      // The cut lands on the DISPLAY list ONLY. _buildHeader and
+      // computeStatsCounts above still read serverFiltered, so the count and
+      // the stats keep the uncapped total. Cutting BEFORE _buildGrouped also
+      // makes `limit` a GLOBAL cap in grouped mode (N rows total, not per
+      // section). A section the cut leaves with no rows renders nothing at
+      // all, header included -- NOT because its key disappears (_buildGrouped
+      // seeds orderedKeys from _groupLabels first, so every config-declared
+      // group value is in the render list either way) but because of
+      // _buildGrouped's existing `isNotEmpty` guard, which stays as it is.
       final List<Map<String, dynamic>> displayed =
-          _applySearchBar(serverFiltered);
+          applyLimit(_applySearchBar(serverFiltered), _limit);
 
-      final double availableH = MediaQuery.of(context).size.height * 0.79;
+      // A capped list has a known-small maximum, so it sizes to its CONTENT:
+      // no fixed viewport (which strands dead space under a 3-row teaser) and
+      // no inner scroll (the page already scrolls -- main_page.dart wraps
+      // pageElements in a SingleChildScrollView). An UNCAPPED list keeps the
+      // fixed 0.79 viewport: house convention, and the only shape that works
+      // for a list of unknown length. Keyed off `limit` rather than a new
+      // config key -- "bounded" is exactly what `limit` already declares.
+      final bool fitContent = _limit > 0;
 
-      return SizedBox(
-        height: availableH,
-        child: Padding(
+      final Widget body = Padding(
           padding: EdgeInsets.fromLTRB(
               widget.lPad, widget.tPad, widget.rPad, widget.bPad),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize:
+                fitContent ? MainAxisSize.min : MainAxisSize.max,
             children: [
               // ── Header (title + subtitle + count) ──
               if (_txt(0).isNotEmpty) ...[
@@ -476,19 +521,30 @@ class _ListCardState extends State<ListCard> {
                 const SizedBox(height: 14),
               ],
               // ── Card list (flat or grouped) ──
-              Expanded(
-                child: displayed.isEmpty
-                    ? _buildEmpty()
-                    : _groupByField.isNotEmpty
-                        ? _buildGrouped(displayed)
-                        : _buildFlat(displayed),
-              ),
+              // Expanded only in viewport mode: inside a MainAxisSize.min
+              // Column there is no free space to expand into, and Expanded
+              // there is a layout error, not just a no-op.
+              if (fitContent)
+                _buildList(displayed)
+              else
+                Expanded(child: _buildList(displayed)),
             ],
           ),
-        ),
+        );
+
+      if (fitContent) return body;
+      return SizedBox(
+        height: MediaQuery.of(context).size.height * 0.79,
+        child: body,
       );
     });
   }
+
+  Widget _buildList(List<Map<String, dynamic>> displayed) => displayed.isEmpty
+      ? _buildEmpty()
+      : _groupByField.isNotEmpty
+          ? _buildGrouped(displayed)
+          : _buildFlat(displayed);
 
   // ── Subwidgets ─────────────────────────────────────────────────────────
 
@@ -496,6 +552,12 @@ class _ListCardState extends State<ListCard> {
     final String title = _txt(0);
     final String subtitle = _txt(1);
     final String countLabel = _txt(2);
+    // Header action ("Lihat Semua"): label is text segment 5, route is the
+    // `moreRoute` key. Segment 5 is APPEND-ONLY -- every deployed config stops
+    // at segment 4 (emptyText), so _txt(5) is '' there and no button renders.
+    // Both halves required: a label with no route would be a dead tap.
+    final String moreLabel = _txt(5);
+    final bool showMore = moreLabel.isNotEmpty && _moreRoute.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -510,6 +572,19 @@ class _ListCardState extends State<ListCard> {
               Text('$totalCount $countLabel',
                   style:
                       TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+            if (showMore)
+              TextButton(
+                onPressed: _onMoreTap,
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF4338CA),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(0, 36),
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: Text(moreLabel,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600)),
+              ),
           ],
         ),
         if (subtitle.isNotEmpty)
@@ -592,11 +667,16 @@ class _ListCardState extends State<ListCard> {
   }
 
   ListView _buildFlat(List<Map<String, dynamic>> docs) {
+    final bool fit = _limit > 0;
     return ListView(
       padding: EdgeInsets.zero,
+      shrinkWrap: fit,
+      physics: fit ? const NeverScrollableScrollPhysics() : null,
       children: [
         for (final doc in docs) _buildCard(doc),
-        const SizedBox(height: 24),
+        // Bottom breathing room is for a scrollable viewport. In fit mode it
+        // is just dead space under the last card.
+        if (!fit) const SizedBox(height: 24),
       ],
     );
   }
@@ -614,8 +694,11 @@ class _ListCardState extends State<ListCard> {
       if (!orderedKeys.contains(key)) orderedKeys.add(key);
     }
 
+    final bool fit = _limit > 0;
     return ListView(
       padding: EdgeInsets.zero,
+      shrinkWrap: fit,
+      physics: fit ? const NeverScrollableScrollPhysics() : null,
       children: [
         for (final key in orderedKeys)
           if ((grouped[key] ?? const []).isNotEmpty) ...[
@@ -626,7 +709,7 @@ class _ListCardState extends State<ListCard> {
                     groupRoute: resolveGroupRoute(_groupRoutes, key)),
             const SizedBox(height: 6),
           ],
-        const SizedBox(height: 24),
+        if (!fit) const SizedBox(height: 24),
       ],
     );
   }

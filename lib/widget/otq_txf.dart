@@ -617,7 +617,10 @@ class OtqTxfState extends State<OtqTxf>
                 });
                 vibrate(duration: 150);
                 // int beepNow = await pool.play(scannerBeep);
-                saveData(scrName, separator[1] * 15);
+                // 16 diamonds = 17 fields, matching getLocationString after the
+                // GPS-accuracy slot (◀17▶) was appended. Append-only: no
+                // existing ◀N▶ index moves.
+                saveData(scrName, separator[1] * 16);
               }
             } on PlatformException {
               barcodeScanRes = textList["ScanFailed"];

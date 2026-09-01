@@ -154,7 +154,9 @@ class ImageUploadState extends State<ImageUpload> {
       txfController[scrName]![4] = InputController(
           4, TextEditingController(text: content), content, content);
       component['route'] = component['route'] ?? home; //= default route = Home
-      saveData(scrName, separator[1] * 15); //= send record to event
+      // 16 diamonds = 17 fields, matching getLocationString after the
+      // GPS-accuracy slot (◀17▶) was appended. Append-only.
+      saveData(scrName, separator[1] * 16); //= send record to event
       actionUnLock('_saveFile IMG_UPLOAD');
       String toGo = widget.component['route'] ?? home;
       routeStack.push(toGo);

@@ -1010,7 +1010,10 @@ void main() {
       expect(m.containsKey('hg'), isTrue);
     });
 
-    test('returnable deliver toItMap: byte-identical to pre-change', () {
+    // Renamed + inverted 2026-08-27 (spec (3) section 6b-2.2 no.3): a deliver
+    // line now carries hg + sub. Every qty/condition field below is unchanged.
+    test('returnable deliver toItMap: qty fields unchanged, hg + sub added',
+        () {
       final item = DraftItem(
         ii: '001',
         itemName: 'Galon 19L',
@@ -1027,7 +1030,9 @@ void main() {
       expect(m['ps'], 0);
       expect(m['cdo'], 'full');
       expect(m['cdi'], 'empty');
-      expect(m.containsKey('hg'), isFalse); // deliver has no hg
+      expect(m.containsKey('hg'), isTrue);
+      expect(m['hg'], 0); // no price passed to this DraftItem
+      expect(m['sub'], 0);
     });
 
     test('returnable sale toItMap: cdo=full, hg present', () {

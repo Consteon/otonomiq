@@ -95,6 +95,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | VehicleCargoSummary | [vehicle_cargo_summary.md](vehicle_cargo_summary.md) | draft | Intro paragraph + cargo card (Sisa di Kendaraan) and vehicleId publisher for P12 ReturnVehicle |
 | TimelinePeriodic | [timeline_periodic.md](timeline_periodic.md) | draft | Config-driven event timeline (TIMELINE variant periodic) with period selector, badge chips, gap pills, image gallery |
 | TimelineLedger | [timeline_ledger.md](timeline_ledger.md) | draft | Config-generic grouped + expandable audit timeline (TIMELINE variant ledger) with category badge palette, period filter, flat/grouped modes |
+| TimelineCard | [timeline_card.md](timeline_card.md) | draft | Day-grouped timeline card (`TIMELINE_CARD`): coloured dots, big time column, `row` 4-slot template with auto-hide, status chip inferred from the newest row, optional "see all" header link |
 | OtqFormattedText | [otq_formatted_text.md](otq_formatted_text.md) | todo | Text with formatter |
 | TimePresence | [time_presence.md](time_presence.md) | done | Check-in time, live elapsed counter, and last action in 3-column card |
 | VehicleCustodyHeader | [vehicle_custody_header.md](vehicle_custody_header.md) | draft | Vehicle custody card (plate/event/loader/loadtime) and vehicleId publisher for P5 CustodyNotification |

@@ -1246,6 +1246,20 @@ Widget buildDisplayComponent(
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     }
+  } else if (tip == 'timeline_card') {
+    try {
+      result = TimelineCard(
+        key: txfKey,
+        component: component,
+        scrName: scrName,
+        lPad: lPad,
+        tPad: tPad,
+        rPad: rPad,
+        bPad: bPad,
+      );
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    }
   } else if (tip == 'detail_card') {
     try {
       result = DetailCard(

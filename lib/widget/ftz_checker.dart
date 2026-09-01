@@ -120,7 +120,10 @@ class FtzCheckerState extends State<FtzChecker> {
         // No return: .then() above yields Future<Null>, so the onError handler
         // must be assignable to FutureOr<Null>. placeMark simply keeps its
         // previous value (or the initial []) when the geocoder fails.
-        errorReport('ftz_checker placemarkFromCoordinates: $e');
+        // devPrint, not errorReport: same unactionable Android Geocoder
+        // outage as api.dart's placemark path -- see the comment there.
+        // placeMark keeps its previous value (or the initial []).
+        devPrint('ftz_checker placemarkFromCoordinates: $e');
       });
     }).catchError((Object e) {
       errorReport('ftz_checker getLocation: $e');

@@ -5,6 +5,7 @@ import '../api.dart'; // getNowMillisecondFromEpoch
 import '../firestore_repository/table_repository.dart'; // subscribeToMapCollection
 import '../global.dart'; // transactionStore, routeStack, gotoRoute, routeExist, errorReport, diamondTextToList, autheniumDecode, mapTableContent
 import '../global2.dart'; // txfController, txfControllerCheck, generateAutoNumber, addToTxfController, WidgetUpdateController
+import '../redux/screen_transaction.dart'; // UpdateScreenTxAction, ScreenTransaction
 import 'admin_create_task_support.dart';
 import 'driver_home_support.dart'; // todayEpochMidnightWib, createNativeDoc, createNativeDocAutoId, stripRouteWrapper
 import 'admin_home_support.dart'; // AdminTierColors
@@ -175,6 +176,131 @@ class TaskCreateSubmit extends StatefulWidget {
     required int tdt,
   }) =>
       (adhocNoVehicle && adhocSkipTdt) ? null : tdt;
+
+  /// Resolve `component['routeParams']` against the task doc just written and
+  /// dispatch the pairs as BARE screenTx keys (spec (3) section 6b-2.0b).
+  ///
+  /// The destination page reads them as `{key}` tokens -- `OrderConfirm`'s
+  /// `workspaceHeader` and `whatsappSend` both search `tnm◼{taskVid}`, so the
+  /// live DSL is `taskVid◼{tnm}`. Same field, same grammar and the SAME
+  /// resolver as LIST_CARD / PICKER_LIST / SIGNAL_LIST / SCANNER already use,
+  /// which is what makes the semantics identical across all of them.
+  ///
+  /// Two dispatches, in this order:
+  ///
+  ///  1. **Blank every declared key.** screenTx is MERGE-only:
+  ///     `UpdateScreenTxAction` never removes a key and
+  ///     `DeleteAllScreenTxRowAction` is dispatched nowhere in `lib/`, so a key
+  ///     this submit cannot fill would keep the PREVIOUS task's value and the
+  ///     destination page would WhatsApp the wrong order's line items to a
+  ///     customer. Blanking first turns that from "shows the WRONG task" into
+  ///     "shows EMPTY", which every downstream evaluator is fail-closed on
+  ///     (`resolveScreenTxTokens` leaves the literal `{token}` for an empty
+  ///     value, and `filterByCharCodeEquality` returns no match for a literal).
+  ///     Same guard, same reasoning as `scannerBlankRouteParams`
+  ///     (`scanner.dart`); inlined rather than imported so a submit button does
+  ///     not pull in the camera widget.
+  ///  2. **[writeRouteParamsFromRow]** -- decode, parse, resolve `{field}` from
+  ///     [row] first, then session tokens, then dispatch the non-empty pairs.
+  ///     It decodes internally: do NOT decode [rawDsl] before handing it over.
+  ///
+  /// `autheniumDecode` is applied HERE too, for the blank map only: the pair
+  /// keys have to be parsed out of the same escaped DSL the server sent
+  /// (`◼`/`⭘` arrive as `_u25FC_`/`_u2B58_`/`_25FC_`). Skipping it would build
+  /// an EMPTY blank map from an escaped DSL and silently lose guard 1.
+  ///
+  /// Empty / absent `routeParams` returns on the first line: zero dispatches,
+  /// byte-identical to the pre-change behaviour on every live config.
+  ///
+  /// Pure enough to unit-test (it only needs a seeded `transactionStore`), and
+  /// static on the WIDGET class rather than the State so a test can reach it as
+  /// `TaskCreateSubmit.dispatchRouteParams(...)`. `_onSubmit` itself is NOT
+  /// reachable from `flutter_test` -- it calls `internetConnected`,
+  /// `generateTnm` and Firestore -- which is why every decision it makes lives
+  /// out here next to [resolveWizardVehicle] / [resolveCustomerKl] /
+  /// [resolveTaskTdt].
+  ///
+  /// [component] -- the server JSON (dynamic by design).
+  /// [row]       -- the assembled task doc; supplies `{tnm}`, `{kl}`, `{kn}`, …
+  /// [scrName]   -- screen name for the session-token fallback.
+  static void dispatchRouteParams({
+    required dynamic component,
+    required Map<String, dynamic> row,
+    required String scrName,
+  }) {
+    final String rawDsl = (component['routeParams'] ?? '').toString();
+    if (rawDsl.trim().isEmpty) return;
+    final Map<String, dynamic> blanks = <String, dynamic>{
+      for (final MapEntry<String, String> pair
+          in parseRouteParams(autheniumDecode(rawDsl) ?? rawDsl))
+        pair.key: '',
+    };
+    if (blanks.isNotEmpty) {
+      transactionStore
+          .dispatch(UpdateScreenTxAction(ScreenTransaction(blanks)));
+    }
+    writeRouteParamsFromRow(rawDsl, row, scrName);
+  }
+
+  /// Fill the Event-row `★` slots that spec section 5A-2 assigns to
+  /// `admin-create-task`, so the report gets a customer and a vehicle instead
+  /// of "a task was created at time X" (live evidence, spec section 5A-1 no.2).
+  ///
+  /// | ★  | value                              |
+  /// |----|------------------------------------|
+  /// | 11 | [kl] -- customer vid               |
+  /// | 12 | [kn] -- customer name              |
+  /// | 13 | [vv] -- vehicle (MAY be empty on the "Tugaskan Nanti" adhoc path) |
+  /// | 14 | `itArray.length` -- distinct item types, a SCALAR aggregate       |
+  /// | 15, 16 | reserved by the spec, deliberately unwritten                 |
+  /// | 17 | `tnm` -- ALREADY WORKING via `numberPos`; NOT touched here        |
+  ///
+  /// HARDCODED on purpose (owner decision), which makes it a PRECONDITION:
+  /// the page hosting this widget must declare NO component at positions
+  /// 11-16. These four slots are written unconditionally, so a component
+  /// sitting at one of them would have its submitted value overwritten
+  /// SILENTLY -- no crash, no log, no analyzer hit. Verified for tenant
+  /// 20342033315492 (docs/admin_runtime/admin-create-task-op1screen.md: zero
+  /// `position` keys across all six P4 components); NOT verified for any
+  /// other tenant -- check that tenant's recorded page JSON before enabling
+  /// this route there. A config key was still rejected: it would just be one
+  /// more thing that can silently ship dead. The numbers are literals here and
+  /// literals in the test -- no shared constant -- so the test is a contract
+  /// check against the spec, not a mirror of this code.
+  ///
+  /// `saveSend` maps form position P to `row[P + 14]`
+  /// (`input.position + sheetSystemLength - 1`, api.dart:4845,
+  /// `sheetSystemLength = 15`, global.dart:842), then joins `row[15..]` with
+  /// `★` (api.dart:5040-5043). No `+1` offset games.
+  ///
+  /// UNCONDITIONAL -- no savesend branch. The values are valid on both the
+  /// savesend and the legacy path; a branch would be more code for no gain.
+  /// [vv] is written even when empty so slot 13 is present-but-empty rather
+  /// than absent, which keeps the slot's meaning stable for the report.
+  ///
+  /// Uses `addToTxfController` (global2.dart:1023) -- the same mechanism `tnm`
+  /// already uses at step 5a -- which calls `txfControllerCheck` internally and
+  /// therefore creates `txfController[scrName]` on a positionless page, and
+  /// sets BOTH `controller.text` and `finalData` (the two fields `saveSend`
+  /// reads, api.dart:4863-4875).
+  ///
+  /// Extracted out of `_submit` so it is unit-reachable: `_submit` itself is
+  /// not (it awaits a native Firestore write).
+  ///
+  /// [itArray] is taken whole, not pre-counted, so that a future edit cannot
+  /// quietly substitute a different aggregate without failing the test.
+  static void writeEventSlots({
+    required String scrName,
+    required String kl,
+    required String kn,
+    required String vv,
+    required List<Map<String, dynamic>> itArray,
+  }) {
+    addToTxfController(11, scrName, kl);
+    addToTxfController(12, scrName, kn);
+    addToTxfController(13, scrName, vv);
+    addToTxfController(14, scrName, itArray.length.toString());
+  }
 
   @override
   State<TaskCreateSubmit> createState() => _TaskCreateSubmitState();
@@ -549,6 +675,59 @@ class _TaskCreateSubmitState extends State<TaskCreateSubmit> {
 
       // 10. Clear draft
       AdminCreateTaskSupport.clearDraft(_wizardKey);
+
+      // 10b. routeParams -> BARE screenTx keys, from the doc we just wrote.
+      //      Deliberately BEFORE the chain/route branch so BOTH navigation
+      //      paths carry the token: doChain opens a dialog whose OK button
+      //      routes later, so the keys must already be in screenTx when the
+      //      dialog is built. Spec (3) section 6b-2.0b points the chain dialog
+      //      at OrderConfirm too.
+      //      No-op when routeParams is absent -> byte-identical to today.
+      TaskCreateSubmit.dispatchRouteParams(
+        component: widget.component,
+        row: taskDoc,
+        scrName: widget.scrName,
+      );
+
+      // 10b-2. Event ★ slots (renderer-submit-event-gap round 2, spec section
+      //        5A-2). Must run AFTER the native write succeeded and BEFORE
+      //        10c: emitSubmitEventRow -> saveSend reads these slots off
+      //        txfController[scrName] to build the ★ block.
+      //        NOTHING clears these slots on the way out: `reloadPage` posts
+      //        clearData for the DESTINATION route (global.dart:1532), and
+      //        saveSend's own clearData is gated on
+      //        routeExist(component['route']) (api.dart:4993) -- a key
+      //        eventComponent strips. They outlive the submit until this
+      //        screen is navigated BACK to. Freshness is guaranteed by THIS
+      //        rewrite being unconditional on every submit, not by any clear
+      //        -- the same fact that makes step 5a re-seed slot 17.
+      //        kl / kn / vv / itArray are plain locals computed above, so they
+      //        survive step 10's draft clear.
+      TaskCreateSubmit.writeEventSlots(
+        scrName: widget.scrName,
+        kl: kl,
+        kn: kn,
+        vv: vv,
+        itArray: itArray,
+      );
+
+      // 10c. Event audit row (renderer-submit-event-gap). The task doc above
+      //      was written natively, so nothing in this flow reaches the Event
+      //      tab on its own: `ev`/`et`/`p` on a Firestore doc are a MIRROR
+      //      that buildEventDoc copies FROM the history record
+      //      (table_repository.dart:1472-1474), never its source. The only
+      //      producer is saveSend -> saveSendRows -> appendToSheet.
+      //      UNCONDITIONAL -- no config gate, works on the deployed config.
+      //      Best-effort inside the helper (Event/GPS failure never rolls back
+      //      the doc and never blocks nav), and awaited BEFORE navigation
+      //      because saveSend reads the ★ slots SYNCHRONOUSLY and the GPS
+      //      capture inside the helper is a multi-second await -- gotoRoute
+      //      must not run first. NOT because navigating clears anything; see
+      //      step 10b-2 for why nothing does.
+      await emitSubmitEventRow(
+        component: widget.component,
+        scrName: widget.scrName,
+      );
 
       // 11. Navigate (chain-aware, mirrors custody_count_submit.dart:356)
       final dynamic chain = widget.component['chain'];

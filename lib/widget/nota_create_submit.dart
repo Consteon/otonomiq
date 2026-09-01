@@ -492,6 +492,29 @@ class _NotaCreateSubmitState extends State<NotaCreateSubmit> {
       // 19. Clear draft
       AdminCreateTaskSupport.clearDraft(_wizardKey);
 
+      // 19b. Event audit row (renderer-submit-event-gap). The nota doc above
+      //      was written natively, so nothing in this flow reaches the Event
+      //      tab on its own: `ev`/`et`/`p` on a Firestore doc are a MIRROR
+      //      that buildEventDoc copies FROM the history record
+      //      (table_repository.dart:1472-1474), never its source. The only
+      //      producer is saveSend -> saveSendRows -> appendToSheet.
+      //      UNCONDITIONAL -- no config gate. One insertion covers all three
+      //      pages this widget serves (WalkIn / SupplierTransaksi /
+      //      SeedSaldoAwal): `src` changes which scalars are computed, not the
+      //      write or the nav path. Best-effort inside the helper, and awaited
+      //      BEFORE navigation because saveSend reads the txfController slots
+      //      SYNCHRONOUSLY and the GPS capture inside the helper is a
+      //      multi-second await -- gotoRoute must not run first. NOT because
+      //      navigating clears those slots: `reloadPage` posts clearData for
+      //      the DESTINATION route (global.dart:1532) and saveSend's own
+      //      clearData is gated on routeExist(component['route'])
+      //      (api.dart:4993), a key eventComponent strips. The slots outlive
+      //      the submit until this screen is navigated BACK to.
+      await emitSubmitEventRow(
+        component: widget.component,
+        scrName: widget.scrName,
+      );
+
       // 20. Navigate (chain-aware)
       // Convention #1: routeStack.push BEFORE gotoRoute.
       final dynamic chain = widget.component['chain'];

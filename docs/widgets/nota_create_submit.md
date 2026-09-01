@@ -91,6 +91,52 @@ Detected when `src == 'seed'`. Differences:
 - `days` read from `daysPosition` txfController (integer, nullable).
 - `tot` = 0 (no money).
 
+## Event audit row
+
+After a successful native write and **before** navigation, the widget calls
+`emitSubmitEventRow` (`lib/widget/driver_home_support.dart`), which routes through
+`saveSend` -> `saveSendRows` -> `appendToSheet` -> the history queue -> the Event
+tab. **Unconditional** -- no config key gates it, and one insertion covers all
+three pages this widget serves (WalkIn / SupplierTransaksi / SeedSaldoAwal).
+
+- `ev` (Event col C) = geo block (`⬤`-left) + every `txfController[scrName]` slot
+  with `1 <= position <= 100`, joined by `★`. On these pages that is the generated
+  `nno` at `numberPos`, the buyer at `buyerPosition`, the payment method at
+  `paymentPosition`, and the note/days slots when configured.
+- `p` (col B) = `scrName`. All three pages this widget serves have distinct
+  screen names, so `p` alone separates walk-in / supplier / seed.
+- `component['flag']` travels as a **prefix inside `ev` itself** -- `saveSendRows`
+  builds `'0' + flag + locString + ⬤ + ...` (api.dart:5035-5038) -- not as a
+  separate field. Blank when the config omits it; the row still lands.
+- **`w` (widget type) and `desc` never leave the device.** `historySync` writes
+  only `{"t","p","c","s"}` to Firestore (table_repository.dart:3099-3104); the
+  `toDocument2()` path that would carry `w`/`f` is commented out
+  (submit_repository.dart:54, :61). They exist in the LOCAL history row
+  (`historyAdd([t, p, c, w, f, tb])`, table_repository.dart:2500-2502) and
+  nowhere else. So with `flag` unset the report can key only on `p`.
+- **GPS is UNCONDITIONAL.** `gpsPosition` is NOT read (renderer-submit-event-gap
+  round 2): `emitSubmitEventRow` always awaits `OtqState().setAllDataAsync()`.
+  When the fix is invalid, `eventLocString` (driver_home_support.dart) BLANKS the
+  latitude / longitude / `isoCountryCode` slots rather than shipping `OtqState`'s
+  field initialisers (`888.8888888`, `88`) as if they were a measurement. The
+  `locationStatus` slot keeps its `No Gps` value -- so the report can still tell
+  "GPS failed" from "geo never captured" -- and the geo block stays at exactly
+  16 ◆-separated fields, leaving the report's column mapping unchanged.
+- The component copy handed to `saveSend` has `addToTable`, `updateTableRow`,
+  `deleteFromTable`, `addToEvent`, `updateEventRow` and `route` removed, so it can
+  never double-write or fire `clearData` mid-submit.
+- Best-effort: a GPS/compose failure logs and is swallowed, and it never rolls back the
+  nota doc. It DOES delay navigation, but **boundedly**: `emitSubmitEventRow` wraps the
+  capture in an 8-second `.timeout`, because `getAppGps` puts no `timeLimit` on its
+  `Geolocator.getCurrentPosition` fallback (api.dart:301-305) and this await sits on the
+  pre-navigation path. Worst case the user waits ~8s before the success route appears;
+  the row is still emitted, degraded to the blanked no-GPS geo block described above
+  (lat/lng and `isoCountryCode` empty, `locationStatus` = `No Gps`, still 16 ◆ fields).
+
+The nota doc itself no longer carries `search` or `tablevid` (owner decision
+2026-08-27) -- they were config parameters, not business data, and nothing read
+them.
+
 ## See Also
 
 - [task_item_builder.md](task_item_builder.md) -- item-line builder (P2)

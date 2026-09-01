@@ -5,6 +5,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../api.dart';
 import '../crypto/auth_crypto.dart';
+import '../firestore_repository/authenium_keys.dart';
 import '../firestore_repository/scanner_validate.dart';
 import '../firestore_repository/table_repository.dart';
 import '../global.dart';
@@ -83,6 +84,58 @@ Map<String, dynamic> scannerBlankRouteParams(String rawDsl) {
   return <String, dynamic>{
     for (final MapEntry<String, String> p in declared) p.key: '',
   };
+}
+
+/// Which Authenium tenants a Scheme 3 scan may verify against.
+///
+/// `component['ten']` narrows to a single tenant. Absent, empty or whitespace
+/// means **every tenant published in `public_keys`** — a badge is accepted if
+/// any published key of its version verifies it.
+///
+/// That default is a deliberate relaxation, not an oversight: the crypto layer
+/// then draws no tenant boundary, and the `table`/`search` workforce lookup is
+/// the only thing deciding whether a holder belongs here. Naming a tenant in
+/// the screen JSON restores the boundary without an app release.
+String scannerTenantId(Object? rawTen) => (rawTen ?? '').toString().trim();
+
+/// Why a Scheme 3 scan must be refused, or `null` to accept it.
+///
+/// The switch is exhaustive on purpose — no `default:`. A new
+/// [Scheme3Status] then becomes a compile error here instead of silently
+/// collapsing into the generic "tidak dikenal".
+///
+/// Three of these refusals are NOT a forged badge and must not read like one:
+/// an unsynced keyring and an out-of-date app are the device's problem, and
+/// telling the operator "QR palsu" sends them hunting a counterfeit that does
+/// not exist.
+String? scannerScheme3Reject(Scheme3Result result) {
+  switch (result.status) {
+    case Scheme3Status.ok:
+      // A valid signature proves the badge is AUTHENTIC, not that it is the
+      // right KIND. A location or asset token on a page that resolves a person
+      // is the wrong badge however good its signature.
+      return result.type == 'user' ? null : 'QR bukan kartu pekerja';
+    case Scheme3Status.badSignature:
+      return 'QR palsu';
+    case Scheme3Status.unknownKeyVersion:
+      return 'kunci belum tersinkron, sambungkan internet';
+    case Scheme3Status.unsupportedType:
+      return 'perbarui aplikasi';
+    case Scheme3Status.notScheme3:
+    case Scheme3Status.malformed:
+      return 'tidak dikenal';
+  }
+}
+
+/// The VID a Scheme 3 badge contributes, in the SAME shape [getVidUQR] yields.
+///
+/// [decodeScheme3] zero-pads to 14 digits per the wire spec; the legacy path
+/// returns `int.toString()`, unpadded. For a real 14-digit VID the two are
+/// identical, so this looks like a no-op — but a VID with a leading zero would
+/// diverge, and `#has_user_login`, `SCAN_RESULT` and the workforce lookup must
+/// not depend on which badge the operator happens to be carrying.
+String scannerScheme3Vid(Scheme3Result result) {
+  return int.tryParse(result.value)?.toString() ?? result.value;
 }
 
 /// SDUI component: in-page rounded viewport card with a **live inline camera**
@@ -269,9 +322,37 @@ class _ScannerState extends State<Scanner> with SingleTickerProviderStateMixin {
     final bool isLocationScan = qrMode == 'lqr';
     String vidStr;
 
-    if (qrMode == 'uqr') {
+    if (qrMode == 'uqr' && scheme3Token(rawQR).isNotEmpty) {
+      // SCHEME 3 path: Ed25519-signed badge, verified locally against a public
+      // keyring synced from a SECOND FirebaseApp (authenium-prod1). Runs
+      // ALONGSIDE the legacy decrypt below, selected by the token's '3' prefix
+      // -- so a card of either generation works on the same screen, and a
+      // screen that never sees a Scheme 3 badge never builds the second app.
+      //
+      // Dispatch has to happen HERE, on the format, not on the failure: a
+      // Scheme 3 URL handed to getVidUQR comes back as -1, the exact value that
+      // also means "unrecognised". See scheme3Token.
+      // Which issuers this device trusts. The token never says -- it carries a
+      // type and a key version, nothing more -- so the trust set is decided
+      // here: a named `ten` pins one tenant, empty accepts every published one.
+      final String tenantId = scannerTenantId(widget.component['ten']);
+      final Scheme3Keyring keys = await autheniumKeys(tenantId: tenantId);
+      if (!mounted) return;
+      final Scheme3Result decoded = await decodeScheme3(rawQR, keys);
+      if (!mounted) return;
+      devPrint('scanner S3 decode: $decoded '
+          'ten=${tenantId.isEmpty ? '<all tenants>' : tenantId} '
+          'keys=${keys.entries.map((e) => 'v${e.key}x${e.value.length}').join(' ')}');
+
+      final String? reject = scannerScheme3Reject(decoded);
+      if (reject != null) {
+        // Do NOT store #has_user_login -- nothing was proven.
+        _doInvalid(reject);
+        return;
+      }
+      vidStr = scannerScheme3Vid(decoded);
+    } else if (qrMode == 'uqr') {
       // DECRYPT path: getVidUQR decrypts the encrypted URL -> VID int, or -1.
-      //    auth_crypto.dart is a gitignored secret; CALL ONLY, never modify.
       //    Mirrors getQRContent qrType=='U' path (api.dart).
       final int vid = await getVidUQR(rawQR);
       if (!mounted) return;

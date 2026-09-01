@@ -1539,6 +1539,7 @@ List<Widget> reloadPage(String page) {
         List<Widget>.of(linkElement[page]!.map((widget) => widget));
     transactionStore.dispatch(
         UpdateScreenTxAction(ScreenTransaction({'#CURRENT_ROUTE': page})));
+    crashBreadcrumb(page);
   } else {
     // TODO if page not found, put error page here for application debug
     // newPageElement.addAll(linkElement[home]!); // format for output
@@ -1549,6 +1550,7 @@ List<Widget> reloadPage(String page) {
         (linkElement[home] ?? const <Widget>[]).map((widget) => widget));
     transactionStore.dispatch(
         UpdateScreenTxAction(ScreenTransaction({'#CURRENT_ROUTE': home})));
+    crashBreadcrumb(home);
   }
   return newPageElement;
 }
@@ -2028,6 +2030,32 @@ bool isConnectionAbortError(dynamic e) =>
 bool skipCrashReport(dynamic e, bool online) =>
     isNetworkDownError(e) &&
     (!online || isNoRouteError(e) || isConnectionAbortError(e));
+
+/// Stamp Crashlytics with the screen the user is on and the tenant they are,
+/// so a fatal from the server-driven renderer names WHICH screen and WHOSE
+/// sheet config produced it. Without it a report says only
+/// `buildDisplayComponent` / `handleNavTap` — true of every screen in the app.
+///
+/// Fire-and-forget on purpose. Both are async platform calls, and in this app
+/// an un-awaited rejection reaches `platformDispatcher.onError` as a FATAL
+/// (main.dart:80), so a breadcrumb must never leave a Future unhandled —
+/// `.ignore()` marks it handled. The try/catch covers the synchronous case:
+/// Crashlytics or transactionStore touched before they exist. A breadcrumb
+/// must never turn a navigation into a crash.
+///
+/// Keys are sticky until overwritten, so a crash that happens while idle on a
+/// screen still carries that screen. Both no-op in debug (collection off).
+void crashBreadcrumb(String screen) {
+  try {
+    final crashlytics = FirebaseCrashlytics.instance;
+    crashlytics.setCustomKey('screen', screen).ignore();
+    crashlytics
+        .setUserIdentifier('${transactionStore.state.screenTx['#VID'] ?? ''}')
+        .ignore();
+  } catch (_) {
+    // Crashlytics / Redux store not ready yet — nothing to report against.
+  }
+} //crashBreadcrumb
 
 void errorReport(dynamic e, [StackTrace? stack]) {
   if (skipCrashReport(e, internetConnectionFlag.value)) {

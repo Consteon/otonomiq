@@ -120,6 +120,83 @@ class TaskItemBuilder extends StatefulWidget {
   /// (interview decision D2).
   static bool isSellOutright(String cat) => cat != 'returnable';
 
+  /// Unit price to seed a newly-picked line with, keyed off the EFFECTIVE tx.
+  ///
+  /// Per-mode rules:
+  ///   * `supplier` -- all tx types priced from `priceSourceField`. Checked
+  ///     FIRST, so a supplier `deliver`/`sale` never falls into the order arm.
+  ///   * `order` + (`deliver` | `sale`) -- `priceSourceField` FIRST, falling
+  ///     back to `itemPriceField` when that yields 0. See below.
+  ///   * `sale` in any other mode -- `priceSourceField` in walkin,
+  ///     `itemPriceField` elsewhere. Unchanged.
+  ///   * `purchase` / `refill` / `seed` -- unpriced; they move goods FROM the
+  ///     customer, and the CF's invoice rule (spec section 2) skips them.
+  ///
+  /// WHY the order arm reads `priceSourceField` first (spec (4) section 6b-2.2
+  /// no.3a). The item catalog's real price field is `hrg`: walkin and supplier
+  /// both read it, and the Cloud Function prices the real invoice from
+  /// `item.hrg`. Order mode used to read `itemPriceField` (`harga`) only, found
+  /// nothing, and shipped every `it[]` line at `hg: 0` -- so `sub` was 0, `tot`
+  /// was 0, and the `receiptDoc` on `OrderConfirm` printed
+  /// `PERKIRAAN TOTAL Rp 0` (reported on order TASK-2026-000561).
+  ///
+  /// WHY it is a FALLBACK and not a swap. `_itemPriceField`'s doc comment
+  /// claims `harga` is a live schema. If that is true for any tenant, a hard
+  /// swap would silently regress them from a correct price to 0 -- no crash, no
+  /// log, no analyzer finding, just wrong money. The fallback costs one branch.
+  ///
+  /// ACCEPTED CEILING: an item with `hrg: 0` (deliberately free) AND a non-zero
+  /// `itemPriceField` falls back to that non-zero value. `coerceNum` maps a
+  /// missing key and a literal 0 to the same 0, so "free" and "absent" are not
+  /// distinguishable here without a config flag nobody asked for. Both fields
+  /// zero still yields 0.
+  ///
+  /// ORDERING IS LOAD-BEARING. The order arm sits BETWEEN the `supplier` arm
+  /// and the generic `sale` arm: above `sale`, or order+sale would be captured
+  /// by `sale` and keep reading `itemPriceField`; below `supplier`, or supplier
+  /// mode would lose its all-tx-types rule.
+  ///
+  /// [itemDoc] comes from Firestore (Convention #7: dynamic) -- every read goes
+  /// through `coerceNum`, so a sheet storing `"20000"` as a String or `20000.0`
+  /// as a double still yields the int 20000, and a missing field yields 0.
+  ///
+  /// Pure + static so a test can kill each arm; the picker callback that calls
+  /// it is a State closure behind a bottom sheet and is not reachable from
+  /// `flutter_test`.
+  static int seedPriceFor({
+    required String mode,
+    required String addTx,
+    required Map<String, dynamic> itemDoc,
+    required String itemPriceField,
+    required String priceSourceField,
+  }) {
+    if (mode == 'supplier') {
+      return coerceNum(itemDoc[priceSourceField]).toInt();
+    }
+    if (mode == 'order' && (addTx == 'deliver' || addTx == 'sale')) {
+      final int p = coerceNum(itemDoc[priceSourceField]).toInt();
+      return p != 0 ? p : coerceNum(itemDoc[itemPriceField]).toInt();
+    }
+    if (addTx == 'sale') {
+      return coerceNum(
+              itemDoc[mode == 'walkin' ? priceSourceField : itemPriceField])
+          .toInt();
+    }
+    return 0;
+  }
+
+  /// Whether a newly-added line KEEPS its seeded unit price on the DraftItem.
+  ///
+  /// Was `tx == 'sale'`. The `order` + `deliver` term is NEW and is the second
+  /// half of spec (3) section 6b-2.2 no.3 -- seeding the price without this
+  /// would have been thrown away one line later.
+  ///
+  /// The `mode == 'order'` term keeps walkin's forced sale-only picker
+  /// (`types = const ['sale']`) unaffected even if a future config feeds it a
+  /// deliver tx.
+  static bool keepsPrice({required String mode, required String tx}) =>
+      tx == 'sale' || (mode == 'order' && tx == 'deliver');
+
   /// Compute the "exchange" component of a pickup breakdown.
   /// Exchange = empties returned in exchange for drops = min(pd, pp).
   static int pickupExchange(int pd, int pp) => pd < pp ? pd : pp;
@@ -210,8 +287,13 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
   String get _wizardKey =>
       (widget.component['wizardKey'] ?? 'admin_create_task').toString().trim();
 
-  /// Config: field name on the item catalog doc that holds the default price.
-  /// Default 'harga' matches the live item collection schema.
+  /// Config: FALLBACK field name on the item catalog doc for the default price.
+  /// Default 'harga'. In `order` mode this is read only when
+  /// `priceSourceField` yields 0 (spec (4) section 6b-2.2 no.3a); in `walkin`
+  /// it is never read; in `supplier` it is never read. It is still the primary
+  /// source for a `sale` line in any OTHER mode. Kept as a fallback rather than
+  /// deleted because a tenant catalog really carrying 'harga' would otherwise
+  /// silently regress to a 0 price.
   String get _itemPriceField =>
       (widget.component['itemPriceField'] ?? 'harga').toString().trim();
 
@@ -220,9 +302,12 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
   String get _mode =>
       (widget.component['mode'] ?? 'order').toString().trim().toLowerCase();
 
-  /// Config: field name on the item catalog doc that holds the walkin default
-  /// price. Default 'hrg' matches the new master item field for POS pricing.
-  /// Only read when _mode == 'walkin'; order mode uses _itemPriceField.
+  /// Config: PRIMARY field name on the item catalog doc for the default price.
+  /// Default 'hrg' -- the master item field the whole system prices from: POS
+  /// walkin, supplier, and the Cloud Function that builds the real invoice
+  /// (spec (4) section 2). Read in `walkin`, `supplier` AND `order` mode; only
+  /// `order` falls back to `itemPriceField` when this yields 0. The former
+  /// "walkin only" note was true until spec (4) section 6b-2.2 no.3a.
   String get _priceSourceField =>
       (widget.component['priceSourceField'] ?? 'hrg').toString().trim();
 
@@ -526,20 +611,18 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
             addTx = isConsumable ? 'sale' : txType;
           }
 
-          // Seed price: supplier from priceSourceField, sale from the mode's
-          // price field. Keys off the EFFECTIVE tx (addTx) so a consumable
-          // override (addTx=='sale') still seeds. Convention #7: coerceNum
-          // guards the dynamic field.
-          final int seedPrice;
-          if (_mode == 'supplier') {
-            seedPrice = coerceNum(item[_priceSourceField]).toInt();
-          } else if (addTx == 'sale') {
-            final String priceField =
-                _mode == 'walkin' ? _priceSourceField : _itemPriceField;
-            seedPrice = coerceNum(item[priceField]).toInt();
-          } else {
-            seedPrice = 0;
-          }
+          // Seed price. Keys off the EFFECTIVE tx (addTx) so a consumable
+          // override (addTx=='sale') still seeds. Extracted to a pure static so
+          // each arm is reachable from a test -- see
+          // [TaskItemBuilder.seedPriceFor] for the per-mode rules and for why
+          // order+deliver now seeds at all.
+          final int seedPrice = TaskItemBuilder.seedPriceFor(
+            mode: _mode,
+            addTx: addTx,
+            itemDoc: item,
+            itemPriceField: _itemPriceField,
+            priceSourceField: _priceSourceField,
+          );
 
           _addItem(
             ii: (item[idField] ?? '').toString().trim(),
@@ -603,7 +686,7 @@ class _TaskItemBuilderState extends State<TaskItemBuilder> {
           cdo: defaultCdo,
           cdi: defaultCdi,
           wt: defaultWt,
-          hg: tx == 'sale' ? hg : 0,
+          hg: TaskItemBuilder.keepsPrice(mode: _mode, tx: tx) ? hg : 0,
         ),
       );
     }

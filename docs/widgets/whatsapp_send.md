@@ -41,6 +41,8 @@ WhatsAppSend({
 | `vidtable` | `String` | App VID for Firestore subscription |
 | `phoneField` | `String` | Field in doc for phone number (e.g. `hpic`) |
 | `phoneFallback` | `String` | Token fallback if phoneField empty (e.g. `{custPhone}`) |
+| `phoneTable` | `String` | **Optional.** Collection that holds the phone number when it is NOT on the message doc (e.g. `84214220504259//stock_location`). Requires `phoneSearch`. |
+| `phoneSearch` | `String` | **Optional.** `field◼value` search for that collection. May reference a field of the MAIN (`messageTable`) doc: `lv◼{kl}` where `kl` is the customer FK on the `task`. Requires `phoneTable`. |
 | `allowContactPick` | `String` | `TRUE` to show contact picker button |
 | `countryCode` | `String` | Phone locale; only `62` implemented (YAGNI) |
 | `messageTable` | `String` | Collection path for message source doc (e.g. `84214220504259//nota`) |
@@ -80,6 +82,42 @@ Mirrors `template_printer.dart` dialect (same for sheet authors):
   too, matching `_parseAttributes`. The bare `<LOOP li>` shorthand is also
   accepted for back-compat. An unknown source renders nothing — a raw `<LOOP>`
   tag must never reach the customer's message.
+- `<IFSET source='tot'>...</IFSET>` -- emit the body **only when `doc['tot']` is
+  SET**; otherwise the whole block disappears, literal text (separators, labels)
+  included. "Set" means: not `null`, not blank after `trim()`, **and not
+  numerically zero** (`0`, `'0'`, `0.0` all count as unset). A non-numeric value
+  such as `LUNAS` is SET — the zero test runs only after `num.tryParse`
+  succeeds, so a String field is never silently dropped.
+  - Purpose: a pickup-only task (purchase/refill only) has `tot == 0`, and
+    `*Perkiraan total: Rp 0*` must not reach a customer. One template serves
+    every task on the destination page, so wrapping the line is the only fix
+    that leaves priced tasks intact.
+  - Same attribute grammar as `<LOOP>` (`source='x'`, `source="x"`, `source=x`,
+    and the bare `<IFSET x>` shorthand). A missing or empty `source=` drops the
+    block — fail-closed on a typo.
+  - Runs **BEFORE** the `<LOOP>` pass and before `{{field}}` substitution — one
+    reason covers both: any value an earlier pass substitutes into the string
+    becomes control flow for a later one. Control structure therefore comes only
+    from the TEMPLATE, never from doc data — for top-level fields *and* for
+    `{{item.*}}` values.
+  - Not the reason: "a kept body still gets its `{{tot|idr}}` filled in". It
+    does, but that is true under every pass order — kept- and dropped-body
+    output is byte-identical whether `<IFSET>` runs before `<LOOP>`, between
+    `<LOOP>` and `{{field}}`, or after `{{field}}`. Only the injection
+    behaviour below distinguishes them.
+  - **This ordering was changed on purpose.** While `<IFSET>` ran after
+    `<LOOP>`, the `<LOOP>` pass had already substituted item values into the
+    string, so a catalog item whose name contained a literal
+    `<IFSET …>…</IFSET>` was **executed** and could delete itself from the
+    customer's message silently. Running first makes such a tag leak verbatim
+    into the editable preview sheet, where the admin can see it.
+  - **Nesting:** `<IFSET>` inside a `<LOOP>` body, and `<LOOP>` inside an
+    `<IFSET>` body, both render exactly as they did before the pass order
+    changed. Note an `<IFSET>` inside a `<LOOP>` body is evaluated **once,
+    against the top-level doc** — it cannot test a per-item field.
+  - **Do not INTERLEAVE tags** — `<IFSET …>A<LOOP …>B</IFSET>C</LOOP>` is
+    undefined: the lazy `*?` pairs the first `</IFSET>` with the first
+    `<IFSET>`. Close each tag inside the block that opened it.
 - `\n` -- newline
 
 ## State / Dependencies
@@ -95,6 +133,10 @@ Mirrors `template_printer.dart` dialect (same for sheet authors):
 
 ## Important Behavior
 
+- **Phone resolution order** (spec (3) §6b-2.1). 1. `phoneTable` **and** `phoneSearch` both non-empty → read `phoneField` from the doc found in `phoneTable`. 2. Either empty → read `phoneField` from the `messageTable` doc (the original behaviour; every pre-2026-08-27 config takes this path). 3. Still empty → `phoneFallback` token → manual entry / `allowContactPick`.
+- **`phoneSearch` token resolution** is main-doc-first: `resolveSearchWithRow` runs `autheniumDecode` → `resolveRowCurlyTokens(mainDoc)` → `resolveDriverCurlyTokens` → `resolveScreenTxTokens`, stopping as soon as no `{` remains. That is what lets `lv◼{kl}` read the customer FK off the `task` doc rather than off a route parameter.
+- **The phone lookup is SKIPPED entirely when the main doc was not found.** A `{kl}` that cannot resolve from a row would otherwise fall through to a stale bare screenTx `kl` and prefill the previous customer's number. Blank is the safe failure.
+- A configured phone lookup that finds no doc **degrades to rule 2**, not to "no number" — for a `task` main doc that reads an absent `hpic` and lands on rule 3.
 - Phone normalization via `phoneCanonical62` (global.dart). Empty result disables launch button.
 - Launch-first order: `launchUrl` is called BEFORE `writeNativeFields`. On launch failure (throw or `false`), the sheet stays open, no marker is written, no badge shows. The admin's edited message is preserved for retry.
 - `writeNativeFields` failure shows a snackbar but does NOT undo the sent badge. **Nothing is queued for later** -- `writeNativeFields` is online-only and returns `false` on a 0-match or >1-match search, so `iv` stays empty and the coordination tier KEEPS showing the signal. This is deliberate: the admin sees the signal again and retries, and a duplicate WhatsApp message beats a lost invoice. The badge is session-local feedback only, not a durable state claim.

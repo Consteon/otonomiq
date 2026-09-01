@@ -449,7 +449,10 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
           timeStamp = await getRealTime();
           locString = '${separator[1]}$timeStamp';
           locString +=
-              '${separator[1] * 3}$invalidLocation${separator[1]}$invalidLocation${separator[1] * 10}';
+              // *11 (was *10): one extra trailing ◆ so this literal carries the
+              // same 17 fields getLocationString now emits. The 888.8888888
+              // values keep their indexes 4/5 — nothing is renumbered.
+              '${separator[1] * 3}$invalidLocation${separator[1]}$invalidLocation${separator[1] * 11}';
         }
         if (children[i]['type'] == null) {
           children[i]['type'] = 'rbt';

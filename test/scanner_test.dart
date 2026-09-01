@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otonomiq/crypto/auth_crypto.dart';
 import 'package:otonomiq/firestore_repository/scanner_validate.dart';
 import 'package:otonomiq/global.dart';
 import 'package:otonomiq/widget/scanner.dart';
@@ -381,6 +382,112 @@ void main() {
       expect(scannerBlankRouteParams('   '), isEmpty);
       // No ◼ separator -> parseRouteParams skips the pair.
       expect(scannerBlankRouteParams('justakey'), isEmpty);
+    });
+  });
+
+  // ── Scheme 3 badge handling (new user-QR format, alongside the old) ──
+  //
+  // Both helpers are top-level and pure precisely so they can be exercised
+  // here: the branch that calls them lives inside a State method that cannot
+  // be pumped (live MobileScanner -> MissingPluginException).
+
+  Scheme3Result res(Scheme3Status status,
+          {String type = '', String value = ''}) =>
+      Scheme3Result(status: status, type: type, value: value, keyVersion: 1);
+
+  group('scannerScheme3Reject', () {
+    test('a verified USER badge is accepted', () {
+      expect(
+          scannerScheme3Reject(
+              res(Scheme3Status.ok, type: 'user', value: '21567954487028')),
+          isNull);
+    });
+
+    test('a verified NON-user badge is refused on a person-scanning page', () {
+      for (final t in const ['location', 'asset', 'other']) {
+        expect(scannerScheme3Reject(res(Scheme3Status.ok, type: t, value: '1')),
+            'QR bukan kartu pekerja',
+            reason: 'a valid $t token is still the wrong kind of badge');
+      }
+    });
+
+    test('only badSignature reads as a forgery', () {
+      expect(scannerScheme3Reject(res(Scheme3Status.badSignature)), 'QR palsu');
+    });
+
+    test('an unsynced keyring must NOT be reported as a forgery', () {
+      final msg = scannerScheme3Reject(res(Scheme3Status.unknownKeyVersion));
+      expect(msg, isNot('QR palsu'));
+      expect(msg, contains('sambungkan internet'));
+    });
+
+    test('an unreadable token type asks for an app update', () {
+      expect(scannerScheme3Reject(res(Scheme3Status.unsupportedType)),
+          'perbarui aplikasi');
+    });
+
+    test('format failures collapse to the legacy wording', () {
+      expect(scannerScheme3Reject(res(Scheme3Status.notScheme3)),
+          'tidak dikenal');
+      expect(
+          scannerScheme3Reject(res(Scheme3Status.malformed)), 'tidak dikenal');
+    });
+
+    test('every status is handled and only ok can return null', () {
+      for (final s in Scheme3Status.values) {
+        final msg = scannerScheme3Reject(res(s, type: 'user', value: '1'));
+        if (s == Scheme3Status.ok) {
+          expect(msg, isNull);
+        } else {
+          expect(msg, isNotNull, reason: '$s must produce a message');
+          expect(msg, isNotEmpty);
+        }
+      }
+    });
+  });
+
+  group('scannerScheme3Vid (same shape as the legacy getVidUQR path)', () {
+    test('a real 14-digit VID is unchanged', () {
+      expect(
+          scannerScheme3Vid(
+              res(Scheme3Status.ok, type: 'user', value: '21567954487028')),
+          '21567954487028');
+    });
+
+    test('the zero-padding decodeScheme3 adds is stripped back off', () {
+      // getVidUQR would return int.toString() == '258' for the same person.
+      expect(
+          scannerScheme3Vid(
+              res(Scheme3Status.ok, type: 'user', value: '00000000000258')),
+          '258');
+    });
+
+    test('a non-numeric value is passed through untouched', () {
+      expect(scannerScheme3Vid(res(Scheme3Status.ok, type: 'other', value: 'x')),
+          'x');
+    });
+  });
+
+  group('scannerTenantId (which issuers this device trusts)', () {
+    test('an absent ten means EVERY published tenant', () {
+      expect(scannerTenantId(null), '');
+    });
+
+    test('empty and whitespace also mean every tenant', () {
+      expect(scannerTenantId(''), '');
+      expect(scannerTenantId('   '), '');
+    });
+
+    test('a screen that names a tenant narrows to it', () {
+      expect(scannerTenantId('10002000300040'), '10002000300040');
+    });
+
+    test('a named tenant is trimmed', () {
+      expect(scannerTenantId('  10002000300040 '), '10002000300040');
+    });
+
+    test('a non-string value is coerced, not crashed on', () {
+      expect(scannerTenantId(62000000000000), '62000000000000');
     });
   });
 }

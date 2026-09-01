@@ -92,6 +92,7 @@ export 'task_item_builder.dart';
 export 'task_manifest_list.dart';
 export 'table_picker.dart';
 export 'timeline.dart';
+export 'timeline_card.dart';
 export 'timeline_ledger.dart';
 export 'timeline_ledger_support.dart';
 export 'timeline_periodic.dart';

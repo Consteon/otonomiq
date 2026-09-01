@@ -99,7 +99,8 @@ not-found (ambiguous); otherwise found + first row. Unit-tested.
 | `route` | `String` | yes | Page to navigate to after success |
 | `routeParams` | `String` | no | `key◼{token}⭘key◼{token}…` — same DSL as `LIST_CARD` / `routeBtn`. Tokens resolve from the **document the validation lookup matched**, then dispatch as BARE screen-tx keys for the destination page. Empty/absent = pre-existing behaviour, byte-for-byte |
 | `addToTable` | `String` | yes | Event-write DSL passed to saveSend |
-| `qr` | `String` | no | QR decode mode: `"uqr"` = worker card, decrypt via `getVidUQR`; `"lqr"` = location point, decrypt via `lqrVerify`; absent/empty/other = plain (raw scan IS the value) |
+| `qr` | `String` | no | QR decode mode: `"uqr"` = worker card — accepts **both** badge generations, see below; `"lqr"` = location point, decrypt via `lqrVerify`; absent/empty/other = plain (raw scan IS the value) |
+| `ten` | `String` | no | Authenium tenant id — the `public_keys` document id in Firebase project `authenium-prod1`. **Absent/empty trusts EVERY published tenant**: a badge is accepted if any published key of its version verifies it. Name a tenant to narrow back to one issuer. Legacy badges ignore it entirely |
 | `table` | `String` | yes | Validation table name (e.g. `"workforce"` or `"docId//subColl"`) |
 | `search` | `String` | yes | Search field name(s), `★`-separated for multi-field (v1: first only) |
 | `width` | `int` | yes | Display width in px (clamped to screen width) |
@@ -245,6 +246,71 @@ document's own id — the same token set `LIST_CARD` exposes.
   "displayMode": "full-screen"
 }
 ```
+
+### Worker card, accepting BOTH badge generations
+
+Any existing `qr:"uqr"` screen already accepts Scheme 3 badges alongside the
+legacy encrypted ones. **No JSON change is needed** — the config below is the
+live `DriverScanLogin` shape, unmodified:
+
+```json
+{
+  "type": "scanner",
+  "qr": "uqr",
+  "com": "con",
+  "table": "84214220504259//workforce",
+  "search": "vid",
+  "route": "driverHome",
+  "text": "Scan kartu ID◆Arahkan QR...◆◆◆◆◆◆Berhasil!◆OK◆QR salah◆QR tidak terdaftar◆Scan Lagi"
+}
+```
+
+**Which issuers are trusted.** A Scheme 3 token carries a type and a key
+version — never its issuer. `public_keys` holds one document per tenant, and
+several tenants publish a key at version `1` with different bytes, so a version
+number alone does not identify a key.
+
+By default the app trusts **every** tenant in that collection: the keyring holds
+all candidates for a version and a badge is accepted if any of them verifies.
+
+⚠ That is a deliberate relaxation, chosen so cards from any issuer can be
+trialled. With it, any tenant whose key is published can mint a badge this
+device accepts as genuine — the crypto layer no longer draws a tenant boundary,
+and the `table`/`search` workforce lookup becomes the only thing deciding
+whether a holder belongs here. Setting `ten` on a screen restores the boundary,
+config-only, with no app release.
+
+**How the two formats are told apart.** `scannerScheme3Reject` never sees a
+legacy badge: `scheme3Token(rawQR)` claims a scan only when the token (after a
+`…/l/` wrapper is stripped) starts with `3`. A legacy card is
+`https://…/qr/<cipher>` — path segment `/qr/`, and the a64 cipher alphabet has
+no `/` — so it falls through to `getVidUQR` exactly as before.
+
+Dispatching on the **format** rather than on the failure is deliberate. A
+Scheme 3 URL handed to `getVidUQR` survives its `http` gate, misses `/qr/`, and
+comes back as `-1` — the very value that also means "unrecognised". Without the
+prefix test a valid new badge would show as "QR salah" with nothing in the log
+to say otherwise.
+
+**Verification is offline, the keyring is not.** The signature check needs no
+network, but the public keyring must have synced from `authenium-prod1` at least
+once. A device that has never been online cannot verify — it also cannot log in,
+so this is not reachable in practice. If a *new* key version is issued while a
+device is offline, badges signed with it report "kunci belum tersinkron,
+sambungkan internet" until it syncs. That wording matters: it is not a forgery,
+and telling the operator "QR palsu" would send them hunting a counterfeit that
+does not exist.
+
+**What the signature does and does not prove.** It proves the badge was minted
+by the issuer. It does **not** prove the holder is still employed: Ed25519 has
+no per-badge revocation, and rotating a key version revokes *everyone* signed
+with it. The `table`/`search` lookup remains the per-person gate and still runs
+on every scan. A photograph of a valid badge is also a valid badge — pair with
+GPS/selfie where replay matters.
+
+A verified badge of the wrong **kind** (a location or asset token) is refused
+with "QR bukan kartu pekerja". A valid signature is not a licence to treat a
+place as a person.
 
 ### Location scan carrying identity to the destination (`routeParams`)
 

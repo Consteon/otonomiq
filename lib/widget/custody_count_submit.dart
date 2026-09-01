@@ -472,12 +472,6 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
       //    Phase B: `cdt`/`ldt` are Number (epoch-ms) per the runtime type
       //    contract (eq-match {today}); `t` is int (chronological sort).
       // rawCheckTable already declared above (trip sequence count).
-      // I3: envelope tablevid so the native opening doc matches the shape of
-      //     DSL-created vehicle_check docs (vidtable override, else docId).
-      final String tableVid =
-          (widget.component['vidtable'] ?? '').toString().trim().isNotEmpty
-          ? (widget.component['vidtable'] ?? '').toString().trim()
-          : parseTablePath(rawCheckTable).tableDocId;
       final Map<String, dynamic> openingDoc = <String, dynamic>{
         'cnm': genCnm,
         'cty': 'opening',
@@ -490,8 +484,6 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
         'ldt': nowMs, // Phase B: Number (epoch-ms now)
         't': nowMs,
         'ie': ieArray,
-        'tablevid': tableVid,
-        'search': 'cnm\u{2605}$genCnm',
       };
 
       // 4. Write opening doc natively (ONE set, offline-safe)
@@ -792,12 +784,6 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
 
       // 4. Build closing doc map (scalars + ip[] + dp[] + rs)
       // rawCheckTable already declared above (trip sequence resolution).
-      // I3 pattern (from O1): envelope tablevid
-      final String tableVid =
-          (widget.component['vidtable'] ?? '').toString().trim().isNotEmpty
-          ? (widget.component['vidtable'] ?? '').toString().trim()
-          : parseTablePath(rawCheckTable).tableDocId;
-
       // I2: `ldt` (load datetime) is an OPENING concept; the closing doc uses
       // `t` (int, sort) only. `t` is int (sort); `cdt` is Number (epoch-ms).
       final Map<String, dynamic> closingDoc = <String, dynamic>{
@@ -812,8 +798,6 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
         'ip': ipArray,
         'dp': reconcile.dp,
         'rs': reconcile.rs,
-        'tablevid': tableVid,
-        'search': 'cnm\u{2605}$closingCnm',
       };
 
       // 5. Write closing doc natively (ONE set, offline-safe)
@@ -917,8 +901,6 @@ class _CustodyCountSubmitState extends State<CustodyCountSubmit> {
             'cv': checkerVid,
             'cn': checkerName,
             't': nowMs,
-            'tablevid': tableVid,
-            'search': 'vnm\u{2605}$investigationVnm',
           };
           final bool investCreated = await createNativeDocAutoId(
             component: widget.component,

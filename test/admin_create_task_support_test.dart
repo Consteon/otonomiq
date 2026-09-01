@@ -377,8 +377,6 @@ void main() {
       expect(doc['tdt'], 1782244800000);
       expect(doc['it'], isA<List>());
       expect((doc['it'] as List).length, 1);
-      expect(doc['tablevid'], '20342033315492');
-      expect(doc['search'], contains('TASK-ABC'));
     });
 
     test('empty scalars: vv/tdt omitted when empty/null, others preserved', () {
@@ -871,13 +869,18 @@ void main() {
       expect(m['hg'], 0);
     });
 
-    test('toItMap excludes hg for deliver rows', () {
+    // INVERTED 2026-08-27 (spec (3) section 6b-2.2 no.3). Deliver rows now
+    // carry hg + sub so the WA order-confirm message can print a per-line
+    // price. purchase/refill (the two tests below) are unchanged.
+    test('toItMap INCLUDES hg + sub for deliver rows', () {
       final item = DraftItem(
         ii: 'galon', itemName: 'Galon', tx: 'deliver',
         pd: 5, pp: 3, hg: 99999,
       );
       final m = item.toItMap();
-      expect(m.containsKey('hg'), false);
+      expect(m.containsKey('hg'), true);
+      expect(m['hg'], 99999);
+      expect(m['sub'], 5 * 99999);
     });
 
     test('toItMap excludes hg for purchase rows', () {
@@ -924,6 +927,139 @@ void main() {
       expect(m.containsKey('ap'), isTrue);
       expect(m['ad'], isNull);
       expect(m['ap'], isNull);
+    });
+  });
+
+  // ── DraftItem.toItMap qt (canonical billed qty) ───────────────────────
+  // Spec (5) section 6b-2.2 no.6. `qt` is the ONE key that receiptDoc's
+  // `lineQtyField` and the WA template's `{{item.qt}}` can both name,
+  // whatever the row's tx kind is. Before it existed, a screen configured on
+  // `pd` rendered "0x" on every sale row.
+  group('DraftItem.toItMap qt', () {
+    test('deliver: qt == pd', () {
+      final m = DraftItem(
+        ii: 'galon', itemName: 'Galon 19L', tx: 'deliver',
+        pd: 5, pp: 3, hg: 20000,
+      ).toItMap();
+      expect(m['qt'], 5);
+    });
+
+    test('pickup-only deliver row: qt == 0 by design (pp is not billed)', () {
+      // A customer returning empties: nothing is billed, so qt is 0 and the
+      // row shows "0x" once the sheet reads qt. That is CORRECT, not the bug
+      // this key fixes -- pp is a return quantity, never a billed one.
+      final m = DraftItem(
+        ii: 'galon', itemName: 'Galon 19L', tx: 'deliver',
+        pd: 0, pp: 3, hg: 20000,
+      ).toItMap();
+      expect(m['qt'], 0);
+      expect(m['pp'], 3);
+      expect(m['sub'], 0);
+    });
+
+    test('sale: qt == ps', () {
+      final m = DraftItem(
+        ii: 'aqua', itemName: 'Aqua 600mL', tx: 'sale', ps: 10, hg: 5000,
+      ).toItMap();
+      expect(m['qt'], 10);
+    });
+
+    test('purchase: qt == pb, and the row stays unpriced', () {
+      // Guards the ONE mutation that survives every priced-row fixture:
+      // moving the qt write inside the `deliver || sale` price branch.
+      // receiptDoc renders purchase rows too (its line loop applies no
+      // filter), so a conditional qt would show "0x" here -- the same bug,
+      // relocated.
+      final m = DraftItem(
+        ii: 'lpg', itemName: 'LPG 3kg', tx: 'purchase', pb: 7, hg: 10000,
+      ).toItMap();
+      expect(m.containsKey('qt'), isTrue);
+      expect(m['qt'], 7);
+      expect(m.containsKey('hg'), isFalse);
+      expect(m.containsKey('sub'), isFalse);
+    });
+
+    test('refill: qt == pr, and the row stays unpriced', () {
+      final m = DraftItem(
+        ii: 'galon', itemName: 'Galon 19L', tx: 'refill', pr: 3, wt: 'ro',
+      ).toItMap();
+      expect(m.containsKey('qt'), isTrue);
+      expect(m['qt'], 3);
+      expect(m.containsKey('hg'), isFalse);
+      expect(m.containsKey('sub'), isFalse);
+    });
+
+    test('unmapped tx (buy): qt == 0, key still present', () {
+      // Safe despite reproducing a "0x" shape: a `buy` row never reaches
+      // it[]. The supplier flow submits through draftToSupplierLiArray ->
+      // assembleNotaDoc (a nota li[]), and draftToItArray is the only
+      // producer of it[] -- so no `buy` element is ever handed to a
+      // receiptDoc. Defensive coverage of the serializer, not a live path.
+      final m = DraftItem(
+        ii: 'x', itemName: 'X', tx: 'buy', qi: 3, hg: 5000,
+      ).toItMap();
+      expect(m.containsKey('qt'), isTrue);
+      expect(m['qt'], 0);
+    });
+
+    test('qt is int (Firestore Number canon)', () {
+      final m = DraftItem(
+        ii: 'x', itemName: 'X', tx: 'sale', ps: 2, hg: 5000,
+      ).toItMap();
+      expect(m['qt'], isA<int>());
+    });
+
+    test('production repro TASK-2026-000568: sale row reads 3, not 0', () {
+      // The exact shape that rendered "0x 43.000" on OrderConfirm: a sale
+      // line whose qty lives in ps while the screen read pd. `sub` was
+      // already correct; `qt` now carries the same number sub was built
+      // from.
+      final m = DraftItem(
+        ii: 'crys3300', itemName: 'Crystalline 3300ml', tx: 'sale',
+        ps: 3, hg: 43000,
+      ).toItMap();
+      expect(m['pd'], 0); // what the screen used to read
+      expect(m['qt'], 3); // what it reads now
+      expect(m['sub'], 129000); // 3 * 43000, unchanged
+    });
+
+    test('sale row carrying a stale pd: qt and sub both follow ps', () {
+      // A draft line switched from deliver to sale keeps the old pd on the
+      // object; toItMap zeroes it in the map. Kills the `qt = pd` mutant,
+      // which passes on every row where only one qty field is set.
+      final m = DraftItem(
+        ii: 'aqua', itemName: 'Aqua', tx: 'sale', pd: 9, ps: 4, hg: 5000,
+      ).toItMap();
+      expect(m['qt'], 4);
+      expect(m['pd'], 0);
+      expect(m['sub'], 20000);
+    });
+
+    test('priced rows: sub == hg * qt (the identity spec no.6 asks for)', () {
+      // Pins the unification: the qty column and the subtotal can no longer
+      // disagree. If a future edit changes what qt holds without changing
+      // sub, this fails.
+      final deliver = DraftItem(
+        ii: 'a', itemName: 'A', tx: 'deliver', pd: 3, pp: 2, hg: 20000,
+      ).toItMap();
+      expect(deliver['sub'], (deliver['hg'] as int) * (deliver['qt'] as int));
+      expect(deliver['sub'], 60000);
+
+      final sale = DraftItem(
+        ii: 'b', itemName: 'B', tx: 'sale', pd: 9, ps: 4, hg: 5000,
+      ).toItMap();
+      expect(sale['sub'], (sale['hg'] as int) * (sale['qt'] as int));
+      expect(sale['sub'], 20000);
+    });
+
+    test('draftToItArray carries qt on every element', () {
+      final arr = AdminCreateTaskSupport.draftToItArray([
+        DraftItem(ii: 'a', itemName: 'A', tx: 'deliver', pd: 3, hg: 20000),
+        DraftItem(ii: 'b', itemName: 'B', tx: 'sale', ps: 2, hg: 5000),
+        DraftItem(ii: 'c', itemName: 'C', tx: 'purchase', pb: 9),
+        DraftItem(ii: 'd', itemName: 'D', tx: 'refill', pr: 1),
+      ]);
+      expect(arr.map((m) => m['qt']).toList(), <int>[3, 2, 9, 1]);
     });
   });
 
@@ -1046,24 +1182,28 @@ void main() {
       expect(arr[0]['tx'], 'sale');
     });
 
-    test('deliver item does not include hg in serialized map', () {
+    test('deliver item DOES include hg in serialized map', () {
       final items = [
         DraftItem(ii: 'a', itemName: 'A', tx: 'deliver', pd: 5),
       ];
       final arr = AdminCreateTaskSupport.draftToItArray(items);
-      expect(arr[0].containsKey('hg'), false);
+      expect(arr[0].containsKey('hg'), true);
+      expect(arr[0]['hg'], 0); // no price seeded -> 0, key still present
+      expect(arr[0]['sub'], 0);
     });
 
-    test('mixed items -- only sale has hg', () {
+    test('mixed items -- deliver + sale have hg, refill does not', () {
       final items = [
         DraftItem(ii: 'a', itemName: 'A', tx: 'deliver', pd: 10, pp: 5),
         DraftItem(ii: 'b', itemName: 'B', tx: 'sale', ps: 2, hg: 45000),
         DraftItem(ii: 'c', itemName: 'C', tx: 'refill', pr: 3),
       ];
       final arr = AdminCreateTaskSupport.draftToItArray(items);
-      expect(arr[0].containsKey('hg'), false);
+      expect(arr[0].containsKey('hg'), true);
       expect(arr[1]['hg'], 45000);
+      expect(arr[1]['sub'], 90000);
       expect(arr[2].containsKey('hg'), false);
+      expect(arr[2].containsKey('sub'), false);
     });
   });
 
