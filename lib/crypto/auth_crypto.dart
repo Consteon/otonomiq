@@ -10,6 +10,11 @@ import 'package:pointycastle/export.dart'; // Replaced 'argon2' with 'pointycast
 // import 'package:argon2_ffi_base/argon2_ffi_base.dart';
 // full registry
 // import 'package:flutter_sodium/flutter_sodium.dart';
+// Import cycle, deliberate: authenium_keys imports this file back for
+// `Scheme3Keyring` and `scheme3ParseKey`. Dart resolves it; breaking it would
+// mean moving the keyring TYPES out of the crypto layer, which costs more than
+// the cycle does. Only `getVidUQR` reaches across, and only for a Scheme 3 token.
+import '../firestore_repository/authenium_keys.dart';
 import '../ftz_secret.dart';
 import '../global.dart';
 // import 'package:encrypt/encrypt.dart' as encrypt; // Removed encrypt package
@@ -405,6 +410,24 @@ String makeLqrCode(String text) {
 } // end of makeLqrCode
 
 Future<String> lqrVerify(String p, String q, var rawQrText) async {
+  // Scheme 3 point badges verify themselves; dispatch on the FORMAT, ahead of
+  // the `/qr/` cut below. Left alone, a Scheme 3 location URL is cut at the
+  // LAST `/` -- and a Base45 body carries `/` -- so the token is sliced
+  // mid-string, aecDecrypt finds no `case '3'` (it has only '0' and '2'), and
+  // the whole thing falls out as errorString: "tidak dikenal", no log.
+  //
+  // Here rather than in a wrapper, for the same reason as getVidUQR: the four
+  // callers already write `lqrVerify(...)`, and a wrapper only works for the
+  // ones someone remembers to change. `getQRContent` qrType 'L' -- the path
+  // otq_txf_2 and otq_txf take -- is the one that matters most.
+  if (scheme3Token(rawQrText.toString()).isNotEmpty) {
+    final String code = await scheme3LqrCode(
+      rawQrText.toString(),
+      await autheniumKeys(),
+    );
+    return code.isEmpty ? errorString : code;
+  }
+
   String qrValid = empty;
   String qrText = rawQrText;
   String returnValue = errorString;
@@ -1026,6 +1049,25 @@ String aec2Decrypt(String key, String encrypted) {
 
 Future<int> getVidUQR(String rawQrText) async {
   // get vid (integer) from user qr
+
+  // Scheme 3 badges verify themselves; dispatch on the FORMAT, here, before
+  // the legacy stripper below ever sees them. Left alone, a Scheme 3 URL
+  // clears the `http` gate, misses `/qr/`, is handed to aec1D which does not
+  // know version 3, and falls out as -1 -- the exact value that also means
+  // "unrecognised", so no caller can tell a new badge from a bad one.
+  //
+  // The gate goes HERE rather than in a separate wrapper because a wrapper is
+  // opt-in: every later `getVidUQR(...)` -- the obvious call, already written
+  // in four places -- would silently miss Scheme 3 again, and the failure is
+  // silent by construction. Callers that CAN show a reason (scanner.dart) go
+  // to decodeScheme3 directly and never reach this line.
+  //
+  // A legacy scan pays nothing: scheme3Token is a pure string test, so
+  // autheniumKeys -- and Firestore with it -- is never touched for one.
+  if (scheme3Token(rawQrText).isNotEmpty) {
+    return scheme3Vid(rawQrText, await autheniumKeys());
+  }
+
   String vidValid = emptyString;
   String qrText = rawQrText;
   int returnValue = -1;
@@ -1326,25 +1368,75 @@ Scheme3Result scheme3Unpack(int typeId, int keyVersion, List<int> payload) {
 /// cheap, and free of both crypto and the keyring, so a caller can decide WHICH
 /// decoder to run before paying for either.
 ///
-/// ★ The path segment carries NO information — production mints Scheme 3 user
-/// badges at `https://autsorz.com/qr/3MQE…`, the SAME `/qr/` path the legacy
-/// encrypted badges use, while `flutter_integration_guide.md` documents
-/// `https://autsorz/l/3…`. Keying on `/l/` silently misses every real badge, so
-/// only the `3` prefix may decide. base64url contains no `/`, so cutting at the
-/// last one can never truncate a token.
+/// ★ The path segment carries NO information — production has minted Scheme 3
+/// user badges at `https://autsorz.com/qr/3MQE…` (the SAME `/qr/` path the
+/// legacy encrypted badges use) and at `https://autsorz.com/u/3Z86…`, while
+/// `flutter_integration_guide.md` documents `https://autsorz/l/3…`. Keying on
+/// any one of those silently misses every badge minted under the others, so
+/// only the `3` prefix may decide.
+///
+/// ★★★ Do NOT cut at the LAST `/`. A Base45 body contains `/` — it is in the
+/// RFC 9285 alphabet — so the old rule sliced a real badge
+/// (`…4OEX/KP*A` → `KP*A`) into rubble that then fell through to [getVidUQR]
+/// and surfaced as "unrecognised", with nothing in the log to say why. The cut
+/// is at the FIRST `/3`, which is always the URL's own delimiter: every `/`
+/// the token itself owns lies to the right of the token's start.
+///
+/// A bare token (no URL) is returned untouched, so a `/3` occurring INSIDE its
+/// body is never mistaken for a delimiter.
 ///
 /// Legacy badges stay unclaimed on the prefix alone: their a64 cipher starts
-/// with the aec version character (`1` or `2`), never `3`.
+/// with the aec version character (`1` or `2`), never `3`, and holds no `/`.
 ///
 /// Dispatch on this, not on the failure. A Scheme 3 URL reaching [getVidUQR]
 /// clears its `http` gate, has its `/qr/` stripped, is handed to [aec1D] which
 /// does not know version `3` and returns the input untouched, and falls out as
 /// `-1` — the exact value that also means "unrecognised badge".
 String scheme3Token(String input) {
-  String token = input.trim();
-  final int slash = token.lastIndexOf('/');
-  if (slash >= 0) token = token.substring(slash + 1);
-  return (token.isNotEmpty && token[0] == '3') ? token : '';
+  final String trimmed = input.trim();
+  if (trimmed.isEmpty) return '';
+  if (trimmed[0] == '3') return trimmed;
+  final int mark = trimmed.indexOf('/3');
+  return mark >= 0 ? trimmed.substring(mark + 1) : '';
+}
+
+/// RFC 9285 alphabet. `$` is escaped; the SPACE at index 36 is significant —
+/// real badges carry one, and it survives only because [scheme3Token] trims
+/// the ends and nothing in between.
+const String _base45Alphabet =
+    '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ \$%*+-./:';
+
+/// Decodes RFC 9285 Base45. Returns `[]` for anything that is not valid Base45
+/// — an out-of-alphabet character (lowercase, `_`), a leftover single char, or
+/// a group whose value overflows its byte width.
+///
+/// Rejecting rather than salvaging is what makes this usable as the first half
+/// of a two-encoding probe: base64url bodies almost always carry lowercase, so
+/// they land here as `[]` and fall through. See [decodeScheme3].
+List<int> scheme3Base45Decode(String s) {
+  final List<int> v = <int>[];
+  for (int i = 0; i < s.length; i++) {
+    final int d = _base45Alphabet.indexOf(s[i]);
+    if (d < 0) return const <int>[];
+    v.add(d);
+  }
+  // 2 chars -> 1 byte, 3 chars -> 2 bytes. A lone trailing char encodes nothing.
+  if (v.length % 3 == 1) return const <int>[];
+
+  final List<int> out = <int>[];
+  int i = 0;
+  for (; i + 3 <= v.length; i += 3) {
+    final int n = v[i] + v[i + 1] * 45 + v[i + 2] * 2025;
+    if (n > 0xFFFF) return const <int>[];
+    out.add(n >> 8);
+    out.add(n & 0xFF);
+  }
+  if (i < v.length) {
+    final int n = v[i] + v[i + 1] * 45;
+    if (n > 0xFF) return const <int>[];
+    out.add(n);
+  }
+  return out;
 }
 
 /// Decodes and cryptographically verifies a Scheme 3 QR.
@@ -1366,14 +1458,34 @@ Future<Scheme3Result> decodeScheme3(String input, Scheme3Keyring keys) async {
     );
   }
 
+  // TWO encodings are live. The guides document base64url; production mints
+  // Base45 (sheet column I, and every badge seen on a real card). Base45 is
+  // tried FIRST because it is the stricter alphabet: a base64url body carrying
+  // any lowercase or `_` decodes to `[]` here and falls through, whereas a
+  // Base45 body handed to base64 throws on its space, `*`, `.`, `:`, `%`, `$`.
+  //
+  // The 67-byte floor, not merely "it decoded", is what selects: a 96-char
+  // base64url token IS valid Base45 and yields 64 bytes, which is short. So the
+  // fallback is genuinely reachable rather than dead — the case that reaches it
+  // is an all-uppercase base64url token, covered by test.
+  //
+  // A wrong guess can only under-accept: header and payload are both inside the
+  // signed message, so a misread badge fails verification. It never yields a
+  // wrong VID.
+  final String body = token.substring(1);
+  final List<int> b45 = scheme3Base45Decode(body);
   Uint8List raw;
-  try {
-    raw = base64.decode(base64.normalize(token.substring(1)));
-  } on FormatException catch (e) {
-    return Scheme3Result(
-      status: Scheme3Status.malformed,
-      detail: 'base64: ${e.message}',
-    );
+  if (b45.length >= 67) {
+    raw = Uint8List.fromList(b45);
+  } else {
+    try {
+      raw = base64.decode(base64.normalize(body));
+    } on FormatException catch (e) {
+      return Scheme3Result(
+        status: Scheme3Status.malformed,
+        detail: 'base45 ${b45.length}B, base64: ${e.message}',
+      );
+    }
   }
 
   // 2 header + at least 1 payload byte + 64 signature.
@@ -1445,6 +1557,72 @@ Future<Scheme3Result> decodeScheme3(String input, Scheme3Keyring keys) async {
   }
 
   return scheme3Unpack(typeId, keyVersion, raw.sublist(2, msgLen));
+}
+
+/// The VID a Scheme 3 badge yields, or `-1` — the same failure sentinel
+/// [getVidUQR] has always returned, and the one every caller already tests
+/// (`ftz_checker.dart`, `getQRContent`).
+///
+/// Collapsing five statuses into one number DOES lose the reason, and that
+/// loss is real: `unknownKeyVersion` deserves "kunci belum tersinkron,
+/// sambungkan internet", not "QR salah". It is accepted here only because the
+/// `int` callers have never been able to say anything else. A screen that CAN
+/// tell the operator why — `scanner.dart` — must keep calling [decodeScheme3]
+/// directly and reading the status.
+///
+/// ★★★ `ok` is NOT enough — the type must be `user`. A LOCATION badge signed
+/// by a published key verifies perfectly and, when its payload is short enough
+/// to take the numeric branch of [scheme3Unpack], hands back a plain number:
+/// the guide's own location vector unpacks to `101`. Returned unguarded, a
+/// point badge scanned on a `uqr` screen becomes "VID 101" and the operator is
+/// told a person is missing from the workforce list rather than that they
+/// scanned the wrong kind of card. The table lookup happens to stop it from
+/// going further — that is luck, not a check.
+///
+/// [keys] arrives as a parameter rather than being fetched, which is what
+/// keeps this whole mapping testable with no Firebase at all.
+/// The location code a Scheme 3 point badge yields, or `''`.
+///
+/// The `String` twin of [scheme3Vid], for [lqrVerify]'s callers. `value` for a
+/// 19-byte point payload is already a `'0'`-prefixed 23-char id — the shape the
+/// publisher writes in its own `Location ID` column — so it is returned
+/// untouched and looked up in `#LQR_LIST` exactly as a legacy code is.
+///
+/// ★★★ `ok` is not enough here either: a verified USER badge is a 14-digit
+/// number, and returning it would have `getQRContent` look a person up in the
+/// geofence table. The type is inside the signed message, so the test is free.
+Future<String> scheme3LqrCode(String raw, Scheme3Keyring keys) async {
+  final Scheme3Result r = await decodeScheme3(raw, keys);
+  if (r.status != Scheme3Status.ok || r.type != 'location') return '';
+
+  // ★★★ Return the id WITH its leading '0'. Measured, not reasoned: a live
+  // `#LQR_LIST` on a real device holds keys like
+  // `0lefc05bc4c884bd590a3a13c8d99663b1dfd371d8` -- the marker is part of the
+  // key. An earlier version stripped it, on the strength of `lqr_code_test`
+  // round-tripping `makeLqrCode` through `lqrVerify` as `code.substring(1)`;
+  // that test feeds makeLqrCode's output straight in as if it were the whole
+  // QR string, and makeLqrCode calls ITSELF a stand-in for a generator whose
+  // real algorithm is unknown. It describes the mechanics, never production.
+  //
+  // So a real location QR is '0' + the id, aecDecrypt eats the outer version
+  // character, and what comes back still opens with the id's own '0'. Scheme 3
+  // hands back exactly what the publisher writes in its `Location ID` column,
+  // and that column keeps the marker too.
+  return r.value;
+}
+
+Future<int> scheme3Vid(String raw, Scheme3Keyring keys) async {
+  final Scheme3Result r = await decodeScheme3(raw, keys);
+  // The status test is redundant TODAY -- `type` is only ever set to 'user'
+  // after verification, so the second half already covers it, and a mutation
+  // deleting the first half survives. Kept anyway: leaning on that coupling
+  // means one future edit that sets `type` in a failure branch opens the gate
+  // silently. A test pins the invariant rather than trusting it.
+  if (r.status != Scheme3Status.ok || r.type != 'user') return -1;
+  // ponytail: unreachable today -- a verified user payload is a uint48, so it
+  // always parses. Kept because the alternative is int.parse throwing out of a
+  // function whose whole contract is "a VID, or -1"; no caller handles a throw.
+  return int.tryParse(r.value) ?? -1;
 }
 
 int _bigEndian(List<int> bytes, int start, int end) {

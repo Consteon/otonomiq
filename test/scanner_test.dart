@@ -468,6 +468,90 @@ void main() {
     });
   });
 
+  group('scannerScheme3Lqr (Scheme 3 point badge -> location code)', () {
+    // Straight off the production lqr sheet, tenant 62000000000000: a 19-byte
+    // payload unpacks to a '0'-prefixed 23-char id, the same shape lqrVerify
+    // yields and #LQR_LIST is keyed by.
+    const String kRealPoint = '0qwISXE0sLhk9_GrbQljy9g';
+
+    test('a real 19-byte point id passes through untouched', () {
+      expect(
+          scannerScheme3Lqr(
+              res(Scheme3Status.ok, type: 'location', value: kRealPoint)),
+          kRealPoint);
+    });
+
+    test('the short numeric form still gets its leading zero', () {
+      // 8-byte payload: 2B country, 1B subtype, 5B id. The guide's own vector.
+      expect(
+          scannerScheme3Lqr(
+              res(Scheme3Status.ok, type: 'location', value: '101')),
+          '0101');
+    });
+
+    // ★★★ REGRESSION. A verified USER badge on a point screen. Its value is a
+    // 14-digit number, and scannerLqrCode prefixes '0' onto anything lacking
+    // one, so without the type gate this returns '021567954487028' — shaped
+    // exactly like a location code and looked up as a place.
+    test('a verified USER badge is refused, not reshaped into a point', () {
+      expect(
+          scannerScheme3Lqr(
+              res(Scheme3Status.ok, type: 'user', value: '21567954487028')),
+          '');
+    });
+
+    test('a verified ASSET badge is refused too', () {
+      expect(
+          scannerScheme3Lqr(
+              res(Scheme3Status.ok, type: 'asset', value: '0Gq6GPyO_gd')),
+          '');
+    });
+
+    test('every non-ok status yields empty', () {
+      for (final s in Scheme3Status.values) {
+        if (s == Scheme3Status.ok) continue;
+        expect(scannerScheme3Lqr(res(s, type: 'location', value: kRealPoint)),
+            '', reason: '$s');
+      }
+    });
+
+    // ★★★ REGRESSION. scannerScheme3Reject hard-coded `type == 'user'`, so the
+    // lqr branch refused every genuine point badge with "QR bukan kartu
+    // pekerja" BEFORE scannerScheme3Lqr was ever reached. Nothing above this
+    // line could see it — the two helpers are correct in isolation and only
+    // the branch wiring was wrong.
+    test('the location screen accepts a point badge', () {
+      expect(
+          scannerScheme3Reject(res(Scheme3Status.ok, type: 'location'),
+              expect: 'location'),
+          isNull);
+    });
+
+    test('the location screen refuses a user badge, in its own words', () {
+      expect(
+          scannerScheme3Reject(res(Scheme3Status.ok, type: 'user'),
+              expect: 'location'),
+          'QR bukan kartu titik');
+    });
+
+    test('the default expectation is still user, so uqr is unchanged', () {
+      expect(scannerScheme3Reject(res(Scheme3Status.ok, type: 'user')), isNull);
+      expect(scannerScheme3Reject(res(Scheme3Status.ok, type: 'location')),
+          'QR bukan kartu pekerja');
+    });
+
+    test('a wrong-kind badge never reports as a forgery', () {
+      // "QR palsu" accuses the holder. The wrong kind of card is not a forgery.
+      for (final t in const ['user', 'asset', 'other']) {
+        expect(
+            scannerScheme3Reject(res(Scheme3Status.ok, type: t),
+                expect: 'location'),
+            isNot('QR palsu'),
+            reason: t);
+      }
+    });
+  });
+
   group('scannerTenantId (which issuers this device trusts)', () {
     test('an absent ten means EVERY published tenant', () {
       expect(scannerTenantId(null), '');

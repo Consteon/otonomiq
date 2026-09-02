@@ -10,7 +10,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 /// canonical number AND is safe-int sized (<=15 digits). Otherwise falls back
 /// to `isEqualTo: stringValue`.
 ///
-/// Guard (consistent with `dsl_eq.dart eq()`):
+/// Guard (same ceiling as `dsl_eq.dart eq()`, expressed in digits not chars —
+/// see [numArmValue]):
 ///   - `num.tryParse` succeeds
 ///   - `.toString()` reproduces the trimmed input (no leading-zero loss)
 ///   - digit-only portion is <=15 characters (precision safe)
@@ -34,7 +35,15 @@ Query<T> whereEqTypeTolerant<T>(Query<T> query, String field, String value) {
 ///   3. The digit-only portion is <=15 characters (safe-int precision)
 ///
 /// This is the server-side counterpart of the client-side guard in
-/// `dsl_eq.dart eq()`. Same semantics, same boundary.
+/// `dsl_eq.dart eq()` — same intent, **deliberately different unit**.
+///
+/// ★ DO NOT "sync" the two numbers. `eq()` guards on total STRING LENGTH
+/// (`<= 17`) because it also sees doc-side values that Firestore returned as
+/// `double`, which carry a `.0` suffix. This function only ever sees the
+/// CONFIG side — a clean digit string, never `.0` — so it guards on DIGIT
+/// COUNT (`<= 15`). 15 digits and 17 chars describe the SAME safe ceiling in
+/// the two different shapes. Copying `17` into this digit-count check would
+/// admit 17-digit values, well past 2^53, where `num.==` stops being exact.
 num? numArmValue(String value) {
   final String v = value.trim();
   if (v.isEmpty) return null;

@@ -281,10 +281,49 @@ whether a holder belongs here. Setting `ten` on a screen restores the boundary,
 config-only, with no app release.
 
 **How the two formats are told apart.** `scannerScheme3Reject` never sees a
-legacy badge: `scheme3Token(rawQR)` claims a scan only when the token (after a
-`…/l/` wrapper is stripped) starts with `3`. A legacy card is
-`https://…/qr/<cipher>` — path segment `/qr/`, and the a64 cipher alphabet has
-no `/` — so it falls through to `getVidUQR` exactly as before.
+legacy badge: `scheme3Token(rawQR)` claims a scan only when the token starts
+with `3`. The URL wrapper is cut at the **first `/3`**, never at the last `/`.
+A legacy card is `https://…/qr/<cipher>` — the a64 cipher alphabet holds no `/`
+and opens with the aec version `1` or `2` — so it finds no `/3` and falls
+through to `getVidUQR` exactly as before.
+
+**The token body carries two encodings.** Both guides document base64url;
+production actually mints **RFC 9285 Base45** (`https://autsorz.com/u/3Z86…`).
+Base45's alphabet includes a **space** and a **`/`**, so a real badge holds
+both — that is why the wrapper cut moved off the last `/`, and why nothing may
+strip interior whitespace from a scan. `decodeScheme3` tries Base45 first and
+falls back to base64url, selecting on the 67-byte minimum rather than on "it
+decoded", because a 96-char base64url body is also legal Base45 (it comes out
+64 bytes, short). A wrong guess can only under-accept: the header and payload
+are both inside the signed message, so a misread badge fails verification
+rather than yielding a wrong VID.
+
+> `%` is a legal Base45 character, so a percent-escape is **not** decoded. If
+> the minting side ever emits `%20` in place of the literal space, the token
+> will fail verification — blindly un-escaping would corrupt roughly one badge
+> in eight hundred that happens to contain `%2` before a `0`.
+
+**`lqr` dispatches Scheme 3 too.** A point badge (`typeId` 1) is minted at
+`https://autsorz.com/l/3X62…`, Base45, with a 19-byte payload — 2B country
+(`62`), 1B subtype, 16B id — that unpacks to a `0`-prefixed 23-char id, exactly
+the shape `lqrVerify` yields and `#LQR_LIST` is keyed by. The dispatch is on the
+format, ahead of the legacy branch, for the same reason as the user path:
+`lqrVerify` cuts at `lastIndexOf('/qr/')`, a Base45 body carries `/`, and
+`aecDecrypt` has no `case '3'` — so an undispatched point badge is sliced
+mid-token and answers `'--'`.
+
+`scannerScheme3Lqr` requires `type == 'location'`, not merely `ok`. A verified
+USER badge carries a 14-digit number and `scannerLqrCode` prefixes `'0'` onto
+anything lacking one, so an ungated user badge would come back shaped exactly
+like a point code and be looked up as a place. The same gate exists on the
+other side: `scheme3Vid` requires `type == 'user'`, because a location payload
+short enough to take the numeric branch unpacks to a plain number (the guide's
+own vector gives `101`).
+
+`ten` is per screen: user screens pin `00000000000000`, point screens pin
+`62000000000000`. Note this reaches only `scanner.dart` — `getVidUQR`'s own
+Scheme 3 dispatch has no `component`, so `ftz_checker` and `getQRContent` always
+trust every published tenant.
 
 Dispatching on the **format** rather than on the failure is deliberate. A
 Scheme 3 URL handed to `getVidUQR` survives its `http` gate, misses `/qr/`, and

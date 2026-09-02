@@ -303,7 +303,7 @@ Widget buildDisplayComponent(
           gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
             maxCrossAxisExtent: (component['width'] ?? 90.0).toDouble(),
           ),
-          children: buildGridList(component['children'], fontSize),
+          children: buildGridList(component['children'], fontSize, scrName),
         ),
       );
     } catch (e) {
@@ -325,7 +325,7 @@ Widget buildDisplayComponent(
           physics: const NeverScrollableScrollPhysics(),
           padding: EdgeInsets.zero,
           childAspectRatio: 0.85,
-          children: buildGridList(component['children'], fontSize),
+          children: buildGridList(component['children'], fontSize, scrName),
         ),
       );
     } catch (e) {

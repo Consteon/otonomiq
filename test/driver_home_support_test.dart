@@ -2159,11 +2159,11 @@ void main() {
   // `vv◼<vid>⭘tdt◼<today>` matches regardless of whether `tdt` is stored as
   // String, int, or double in the doc.  Also pins the two safety guards in
   // eq(): leading-zero barcode NOT numerically coerced (round-trip guard), and
-  // long-id (>15 chars) staying in string-only compare (safe-integer guard).
+  // long-id (>17 chars) staying in string-only compare (safe-integer guard).
   group('tdt type-tolerance (filterByMultiClause + eq)', () {
     // Use a fixed epoch-midnight value for deterministic assertions.
-    // 1782925200000 = 2026-07-02 00:00 WIB (fits in 13 chars, well under the
-    // 15-char safe-integer guard in eq()).
+    // 1782925200000 = 2026-07-02 00:00 WIB (13 chars, and 15 as a `.0`
+    // double — both well under the 17-char safe-integer guard in eq()).
     const String kToday = '1782925200000';
     const String kVehicle = 'V-TEST-01';
 
@@ -2247,19 +2247,36 @@ void main() {
       expect(r2.first['code'], '1234');
     });
 
-    test('long id >15 chars falls back to string compare (safe-integer guard)',
+    test('long id >17 chars falls back to string compare (safe-integer guard)',
         () {
-      // Strings longer than 15 chars skip the numeric branch (guard in eq()).
-      // Both sides must be compared as strings to avoid precision loss.
-      const String longId = '1234567890123456'; // 16 chars
+      // Strings longer than 17 chars skip the numeric branch (guard in eq()).
+      // Both sides must be compared as strings to avoid precision loss —
+      // above 2^53 `num.==` promotes the int operand to double and two
+      // DIFFERENT integers can compare equal.
+      const String longId = '123456789012345678'; // 18 chars
       final docs = <Map<String, dynamic>>[
         {'id': longId},
-        {'id': '1234567890123457'}, // one digit different
+        {'id': '123456789012345679'}, // one digit different
       ];
       // Exact match must find only the first doc
       final r = filterByMultiClause(docs, 'id\u{25FC}$longId');
       expect(r.length, 1);
       expect(r.first['id'], longId);
+    });
+
+    test('16-char id is INSIDE the guard and discriminates numerically', () {
+      // The guard was raised 15 -> 17 on 2026-09-02, so a 16-char id now takes
+      // the NUMERIC branch. It must still tell neighbouring ids apart — this
+      // is what the old ">15 chars" version of the test above used to cover
+      // via the string branch, kept here so the coverage is not lost.
+      const String id16 = '1234567890123456';
+      final docs = <Map<String, dynamic>>[
+        {'id': id16},
+        {'id': '1234567890123457'}, // one digit different
+      ];
+      final r = filterByMultiClause(docs, 'id\u{25FC}$id16');
+      expect(r.length, 1);
+      expect(r.first['id'], id16);
     });
   });
 

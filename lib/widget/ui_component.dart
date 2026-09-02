@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:get/get.dart'; // Obx — MENU BADGE live rebuild in buildGridList
 
 import '../api.dart';
 import '../global.dart';
@@ -397,7 +398,11 @@ List<Widget> buildBannerList(var bannerList, double aspectRatio) {
   return bannerComponent;
 }
 
-List<Widget> buildGridList(var gridList, double fontSize) {
+/// [scrName] is required by the MENU BADGE path: `filterDriverHomeDocs`
+/// resolves `{driverVid}` / `{vehicleId}` / `{today}` per screen. Both call
+/// sites (`vgr` and `hgr` in build_display_component.dart) already have it in
+/// scope as the `buildDisplayComponent` parameter.
+List<Widget> buildGridList(var gridList, double fontSize, String scrName) {
   // gridList is server JSON (component['children']); empty/null/non-List →
   // the deferred Builder/onTap closures below index gridList[i] at LAYOUT time,
   // outside the try/catch, throwing RangeError → fatal. Guard at the source.
@@ -409,17 +414,32 @@ List<Widget> buildGridList(var gridList, double fontSize) {
     try {
       final item = gridList[i];
       final bool first = i == 0;
+      // MENU BADGE: resolve the vid-scoped code and start the stream ONCE, here
+      // at page-build time (buildGridList runs from constructPageElements, not
+      // per frame). '' = this child has no `badgeTable` -> the tile below takes
+      // the pre-badge path with no Obx and no subscription.
+      final String badgeCode = MenuBadge.codeFor(item);
       gridComponent.add(Builder(
         builder: (BuildContext context) {
-          return menuIconCard(
+          // ONE definition of the card so the tap body below is written once.
+          Widget buildCard(int badgeCount) => menuIconCard(
             imageUrl: (item['url'] ?? defaultImage).toString(),
             label: (item['text'] ?? '').toString(),
             fontSize: fontSize,
+            badgeCount: badgeCount,
             onTap: () {
               final route = item['route'];
               if (route != null &&
                   route != rootThis.pageName &&
                   routeExist(route)) {
+                // MENU BADGE: stamp "visited now" INSIDE the navigate guard and
+                // BEFORE routeStack.push — a tap that does not navigate (same
+                // page, unknown route) must NOT clear the badge. This is not a
+                // navigation call, so routeStack.push remains first among the
+                // navigation calls (the AppBar back button pops routeStack, not
+                // the Flutter Navigator). Runs off build, so the seenRev bump
+                // is safe.
+                MenuBadge.markSeen(route.toString());
                 routeStack.push(route);
                 if (route.length >= 4 &&
                     route.substring(0, 4).toLowerCase() == 'http') {
@@ -458,6 +478,35 @@ List<Widget> buildGridList(var gridList, double fontSize) {
               }
             },
           );
+          // No badgeTable on this child -> exactly the pre-change widget tree:
+          // badgeCount 0 takes menuIconCard's original SizedBox/displayImage
+          // subtree, and there is no Obx and no subscription.
+          if (badgeCode.isEmpty) return buildCard(0);
+          return Obx(() {
+            // ★ FIRST unconditional observable reads. An Obx closure that
+            // registers ZERO observables throws "[Get] the improper use of a
+            // GetX has been detected" — NEVER hoist a guard, early return,
+            // ternary or `??` short-circuit above these two lines.
+            //
+            // RxMap.operator[] routes through the reporting `value` getter
+            // (get-4.7.3 rx_map.dart:29), so this registers even while `code`
+            // is absent from the map — which is exactly the first-frame case.
+            final List<Map<String, dynamic>> docs =
+                List<Map<String, dynamic>>.from(
+                    mapTableContent[badgeCode] ??
+                        const <Map<String, dynamic>>[]);
+            // Repaint dependency for markSeen(); `prefs` is not reactive.
+            MenuBadge.seenRev.value;
+            return buildCard(MenuBadge.countFor(
+              badgeTable: (item['badgeTable'] ?? '').toString(),
+              docs: docs,
+              // RAW — filterDriverHomeDocs runs autheniumDecode internally.
+              rawSearch: (item['badgeSearch'] ?? '').toString(),
+              tsField: (item['badgeTs'] ?? '').toString(),
+              seen: MenuBadge.seenEpoch((item['route'] ?? '').toString()),
+              scrName: scrName,
+            ));
+          });
         },
       ));
     } catch (_) {

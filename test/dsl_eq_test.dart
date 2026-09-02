@@ -54,7 +54,7 @@ void main() {
     });
 
     test('barcode "8886008101138" matches same value as int', () {
-      // Both are canonical numeric representations under 15 chars
+      // Both are canonical numeric representations under 17 chars
       expect(eq('8886008101138', 8886008101138), true);
     });
 
@@ -123,19 +123,23 @@ void main() {
       expect(eq(' 42 ', 42), true);
     });
 
-    test('safe-integer guard: >15 char numeric string uses string compare', () {
-      // 16 chars -> numeric branch skipped; string fallback still matches
-      // identical digit strings (Dart int64 holds 16 digits exactly, so the
-      // int operand's toString equals the string operand).
+    test('safe-integer guard: >17 char numeric string uses string compare', () {
+      // 18 chars -> numeric branch skipped; string fallback still matches
+      // identical digit strings (Dart int64 holds 18 digits, so the int
+      // operand's toString equals the string operand).
+      expect(eq('123456789012345678', '123456789012345678'), true);
+      expect(eq('123456789012345678', 123456789012345678), true);
+      // 16 chars is now INSIDE the guard (limit raised 15 -> 17 on 2026-09-02)
+      // and takes the numeric branch; identical digits still match.
       expect(eq('1234567890123456', '1234567890123456'), true);
       expect(eq('1234567890123456', 1234567890123456), true);
     });
 
-    test('13-digit epoch under 15-char limit works numerically', () {
+    test('13-digit epoch under the char limit works numerically', () {
       expect(eq('1782838800000', 1782838800000), true);
     });
 
-    test('14-digit vid under 15-char limit works numerically', () {
+    test('14-digit vid under the char limit works numerically', () {
       expect(eq('84214220504259', 84214220504259), true);
     });
 
@@ -163,12 +167,13 @@ void main() {
   // which stringifies WITHOUT a decimal ("1782838800000") and therefore passes
   // under the OLD strict `==` too — so they do NOT actually exercise the fix.
   // The true production shape is a 13-digit epoch that Firestore returns as a
-  // `double`, stringifying to "1782838800000.0" (exactly 15 chars — sitting ON
-  // the `<= 15` guard boundary). These tests pin that boundary.
+  // `double`, stringifying to "1782838800000.0" (15 chars). The guard boundary
+  // itself moved to 17 on 2026-09-02; the boundary tests live in the
+  // "boundary crossing" and "UPPER-BOUND FENCE" cases below.
 
   group('eq() — CR-I1 epoch-as-double boundary', () {
     test('.0-double String (15 chars) matches clean int-String', () {
-      // sa="1782838800000.0" (13 digits + ".0" = 15 chars) -> within <=15 guard.
+      // sa="1782838800000.0" (13 digits + ".0" = 15 chars) -> within the guard.
       //   num.tryParse -> double 1782838800000.0, round-trips to "1782838800000.0".
       // sb="1782838800000" (13 chars) -> int 1782838800000, round-trips.
       // numeric branch: 1782838800000.0 == 1782838800000 -> true.
@@ -185,23 +190,68 @@ void main() {
       expect(eq(1782838800000.0, 1782838800000), true);
     });
 
-    test('REGRESSION TRIPWIRE: 15-char "1782838800000.0" must stay matched', () {
-      // TRIPWIRE — do not delete. "1782838800000.0" is EXACTLY 15 chars and sits
-      // on the `sa.trim().length <= 15` guard boundary. If a future edit weakens
-      // `<= 15` to `< 15`, the numeric branch is skipped, the string fallback
-      // runs ("1782838800000.0" != "1782838800000"), and this assertion flips to
-      // false -> RED. That red is the whole point: it catches the silent
-      // regression the int-sourced integration tests cannot.
+    test('REGRESSION TRIPWIRE: 17-char "999999999999999.0" must stay matched', () {
+      // TRIPWIRE — do not delete. This sits ON the guard boundary, so it goes
+      // RED the moment someone tightens the limit again. It moved from the
+      // 15-char value to the 17-char one when the guard was raised 15 -> 17
+      // (2026-09-02); a tripwire that no longer sits on the boundary tests
+      // nothing.
+      //
+      // "999999999999999.0" is EXACTLY 17 chars (15 exact digits + ".0"). Lower
+      // the limit and the numeric branch is skipped, the string fallback runs
+      // ("999999999999999.0" != "999999999999999"), and this flips to false.
+      // That red is the whole point: it catches the silent regression the
+      // int-sourced integration tests cannot.
+      expect(eq('999999999999999.0', '999999999999999'), true);
+      // The old 15-char boundary value must keep matching too.
       expect(eq('1782838800000.0', '1782838800000'), true);
     });
 
-    test('boundary crossing: 13-digit .0 (15 chars) matches; 14-digit .0 (16 chars) string-compares', () {
-      // 13 int digits + ".0" = 15 chars -> within guard -> numeric match -> true.
+    test('boundary crossing: .0 tolerance holds through 15 digits (17 chars), lost at 16 (18 chars)', () {
+      // 13 int digits + ".0" = 15 chars -> numeric match.
       expect(eq('1782838800000.0', '1782838800000'), true);
-      // 14 int digits + ".0" = 16 chars -> exceeds guard -> string fallback ->
-      // "17828388000000.0" != "17828388000000" -> false. The .0 tolerance is
-      // deliberately LOST past 15 chars (int64/double precision protection).
-      expect(eq('17828388000000.0', '17828388000000'), false);
+      // 14 int digits + ".0" = 16 chars. This asserted FALSE until 2026-09-02,
+      // when the guard was 15. That was the live menu-badge bug: Firestore
+      // returns an `index◼…★N`-promoted 14-digit tenant VID as a `double`, so
+      // `search "7◼83674161979544"` compared "83674161979544.0" against
+      // "83674161979544" and matched none of 17 documents, silently.
+      expect(eq('17828388000000.0', '17828388000000'), true);
+      // 15 int digits + ".0" = 17 chars -> ON the new boundary -> still numeric.
+      expect(eq('999999999999999.0', '999999999999999'), true);
+      // 16 int digits + ".0" = 18 chars -> past the guard -> string fallback.
+      // This is NOT a gap to close: see the UPPER-BOUND FENCE test below for
+      // why 18 would be unsafe.
+      expect(eq('9007199254740992.0', '9007199254740992'), false);
+    });
+
+    test('UPPER-BOUND FENCE: 17 is a ceiling — raising it re-creates the bug', () {
+      // FENCE — do not delete, do not "fix" by raising the limit.
+      //
+      // `num.==` is NOT exact above 2^53: Dart promotes the int operand to
+      // double, so 9007199254740993 and 9007199254740992.0 — two DIFFERENT
+      // integers — compare equal as `num`. Measured, not assumed.
+      expect(num.parse('9007199254740993') == num.parse('9007199254740992.0'),
+          true);
+      //
+      // At the current limit of 17 that pair can never reach the numeric
+      // branch: "9007199254740992.0" is 18 chars. So eq() correctly says they
+      // differ. Raise the guard to 18 and this assertion flips to true — a
+      // silent false match between two different VIDs, the same bug class the
+      // 15 -> 17 raise fixed one size down.
+      expect(eq('9007199254740993', '9007199254740992.0'), false);
+      // The reason 18 is reachable at all: any double >= 1e15 stringifies to
+      // at least 18 chars, so 17 is exactly the largest provably-safe limit.
+      expect((1e15).toString().length, 18);
+      expect((999999999999999.0).toString().length, 17);
+    });
+
+    test('REGRESSION: the exact production value that failed (menu-badge)', () {
+      // op1Screen!P175 badgeSearch "7◼83674161979544" vs doc['7'] returned by
+      // Firestore as double 83674161979544.0 -> "83674161979544.0" (16 chars).
+      expect(eq('83674161979544.0', '83674161979544'), true);
+      expect(eq(83674161979544.0, '83674161979544'), true);
+      // and it must still not over-match a DIFFERENT vid
+      expect(eq('83674161979544.0', '83674161979545'), false);
     });
   });
 

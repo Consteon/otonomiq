@@ -367,6 +367,7 @@ Error when executing method get() from document reference. Should be gone when a
     '@guestScreenUI' = guest/login screenUIComponent snapshot. Written at guest bootstrap, restored on signOut for instant login page render.
     '@guestSystemUI' = guest/login systemUIComponent snapshot. Written at guest bootstrap, restored on signOut for instant login page render.
     '@authedSystemUI' = last authenticated systemUIComponent snapshot. Written by readSettings/readSettingsContext/proxy System refresh when settingKey (or proxy ssid) is not the guest/signup key. NOT cleared on signOut; survives across sessions. Used for cache-first navbar restore on login so the full bottomBar paints on the first authenticated frame.
+    'badgeSeen_<route>' = last-visit epoch (int, ms) for an HGR/VGR grid child that carries `badgeTable`. Written in buildGridList's tap handler (before routeStack.push), read by MenuBadge.countFor to count docs newer than the last visit. Per-route and PERSISTENT: not cleared by clearData/ScreenSession, not cleared on logout. Deliberately un-prefixed (menu-badge dictionary). Not reused for anything else.
 
 # GetX State management
 ## Directory

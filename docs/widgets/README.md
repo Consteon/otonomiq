@@ -132,7 +132,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 ### Action / Button
 | Widget | File | Status | Description |
 |---|---|---|---|
-| menuIconCard | [menu_icon_card.md](menu_icon_card.md) | done | Shared white-card shell for home-menu icon buttons (`horizontal_icon` children + single modes) |
+| menuIconCard | [menu_icon_card.md](menu_icon_card.md) | done | Shared white-card shell for home-menu icon buttons (`horizontal_icon` children + single modes) + the `HGR`/`VGR` menu badge (`badgeTable`/`badgeSearch`/`badgeTs`) |
 | FtzRowOfButton | [ftz_row_of_button.md](ftz_row_of_button.md) | todo | Button row |
 | FtzRowOfButton2 | [ftz_row_of_button_2.md](ftz_row_of_button_2.md) | draft | Button row v2 |
 | ChoiceButtonGroup | [choice_button_group.md](choice_button_group.md) | done | Selectable button grid with chain actions (navigation, dialog, API call) |
