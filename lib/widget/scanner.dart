@@ -109,13 +109,21 @@ String scannerTenantId(Object? rawTen) => (rawTen ?? '').toString().trim();
 /// an unsynced keyring and an out-of-date app are the device's problem, and
 /// telling the operator "QR palsu" sends them hunting a counterfeit that does
 /// not exist.
-String? scannerScheme3Reject(Scheme3Result result) {
+/// [expect] is the badge kind THIS screen resolves — `'user'` for a `uqr`
+/// screen, `'location'` for an `lqr` one. It is not cosmetic: hard-coded to
+/// `'user'`, this function rejected every genuine point badge on the location
+/// path with "QR bukan kartu pekerja", and no unit test could see it because
+/// the branch that calls it lives inside a State method needing a camera.
+String? scannerScheme3Reject(Scheme3Result result, {String expect = 'user'}) {
   switch (result.status) {
     case Scheme3Status.ok:
       // A valid signature proves the badge is AUTHENTIC, not that it is the
       // right KIND. A location or asset token on a page that resolves a person
       // is the wrong badge however good its signature.
-      return result.type == 'user' ? null : 'QR bukan kartu pekerja';
+      if (result.type == expect) return null;
+      return expect == 'location'
+          ? 'QR bukan kartu titik'
+          : 'QR bukan kartu pekerja';
     case Scheme3Status.badSignature:
       return 'QR palsu';
     case Scheme3Status.unknownKeyVersion:
@@ -137,6 +145,23 @@ String? scannerScheme3Reject(Scheme3Result result) {
 /// not depend on which badge the operator happens to be carrying.
 String scannerScheme3Vid(Scheme3Result result) {
   return int.tryParse(result.value)?.toString() ?? result.value;
+}
+
+/// The location code a Scheme 3 point badge contributes, or `''`.
+///
+/// ★ `status == ok` is NOT enough — the type must be `location`. A verified
+/// USER badge carries a 14-digit number, and [scannerLqrCode] prefixes a
+/// leading `'0'` onto anything that lacks one, so an ungated user badge comes
+/// back shaped exactly like a location code and is looked up as a place. The
+/// type sits inside the signed message, so testing it costs nothing and cannot
+/// be forged.
+///
+/// A 19-byte location payload already yields a `0`-prefixed 23-char id, so
+/// [scannerLqrCode] passes it through untouched — the same shape the legacy
+/// `lqrVerify` path produces and `#LQR_LIST` is keyed by.
+String scannerScheme3Lqr(Scheme3Result result) {
+  if (result.status != Scheme3Status.ok || result.type != 'location') return '';
+  return scannerLqrCode(result.value);
 }
 
 /// SDUI component: in-page rounded viewport card with a **live inline camera**
@@ -389,6 +414,35 @@ class _ScannerState extends State<Scanner> with SingleTickerProviderStateMixin {
         return;
       }
       vidStr = vid.toString();
+    } else if (qrMode == 'lqr' && scheme3Token(rawQR).isNotEmpty) {
+      // SCHEME 3 LOCATION path, twin of the user branch above. Dispatch has to
+      // happen HERE, on the format: lqrVerify cuts its input at
+      // lastIndexOf('/qr/') and a Base45 body carries '/', so a Scheme 3
+      // location URL reaching it is sliced mid-token; aecDecrypt then has no
+      // case '3' and answers '--', which surfaces as "tidak dikenal".
+      final String tenantId = scannerTenantId(widget.component['ten']);
+      final Scheme3Keyring keys = await autheniumKeys(tenantId: tenantId);
+      if (!mounted) return;
+      final Scheme3Result decoded = await decodeScheme3(rawQR, keys);
+      if (!mounted) return;
+      devPrint(
+        'scanner S3 LQR decode: $decoded '
+        'ten=${tenantId.isEmpty ? '<all tenants>' : tenantId} '
+        'keys=${keys.entries.map((e) => 'v${e.key}x${e.value.length}').join(' ')}',
+      );
+
+      final String? reject = scannerScheme3Reject(decoded, expect: 'location');
+      if (reject != null) {
+        // Do NOT store any session key -- this path never wrote one.
+        _doInvalid(reject);
+        return;
+      }
+      final String located = scannerScheme3Lqr(decoded);
+      if (located.isEmpty) {
+        _doInvalid('tidak dikenal');
+        return;
+      }
+      vidStr = located;
     } else if (qrMode == 'lqr') {
       // LOCATION path (adopted from otq_txf_2.dart:344-349 + the qrType 'L'
       // branch of getQRContent, api.dart:986-991). Same two-secret call shape,

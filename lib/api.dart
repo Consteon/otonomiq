@@ -1056,6 +1056,17 @@ Future<String> getQRContent(
         } else {
           refTable = transactionStore.state.screenTx['#TABLE$tableCode'];
         }
+        // errString 98 and 02 render as the SAME operator text ("QR tidak
+        // dikenal", both mapped to textList["QRError"]), so a signature
+        // failure and a point that is simply not in the geofence list are
+        // indistinguishable on screen. This is the only place they separate.
+        devPrint(
+          'getQRContent L: lqr=$lqr '
+          'table=${tableCode == null || tableCode.isEmpty ? '#LQR_LIST' : '#TABLE$tableCode'} '
+          'size=${refTable is Map ? refTable.length : -1} '
+          'hit=${refTable is Map && refTable[lqr] != null} '
+          'keys=${refTable is Map && refTable.length <= 30 ? refTable.keys.toList() : '(too many)'}',
+        );
         resultOk = (refTable[lqr]) != null ? lqr : empty;
         if (resultOk == empty || resultOk == errorString) {
           result = '${errString}02';
@@ -1466,6 +1477,22 @@ String timeOfDayToGSheet(TimeOfDay myTime, bool utc) {
   return result;
 } // end of dateTimeToGSheet
 
+/// The lif whose geofence list was last pulled from readSS in this process.
+String? _lqrFetchedForLif;
+
+/// True when [lif]'s geofence list still has to be pulled from readSS.
+///
+/// `runSheetStartup` calls `getLqrList` on every `getConnection`, and the AppBar
+/// refresh runs `getConnection` on every tap — so this POST raced the refresh's
+/// own readSS pull on the same slow, serialized backend. The list changes per
+/// login, not per tap, so skip it once the SAME lif has been fetched AND the
+/// list is still populated. A signOut drops `#LQR_LIST`, which re-opens the
+/// fetch — that is the whole reason this call sits outside the `appStartupRun`
+/// gate: a logout/login inside one process must refetch, or the geofences stay
+/// empty and attendance stops working.
+bool lqrFetchNeeded(String? lif, String? fetchedForLif, dynamic liveLqr) =>
+    fetchedForLif != lif || liveLqr is! Map || liveLqr.isEmpty;
+
 void getLqrList(String? proxySsid) async {
   Map<String, dynamic> lqr = {};
   String? lqrString;
@@ -1482,6 +1509,12 @@ void getLqrList(String? proxySsid) async {
     }
   } catch (er) {
     errorReport(er);
+  }
+
+  final dynamic liveLqr = transactionStore.state.screenTx['#LQR_LIST'];
+  if (!lqrFetchNeeded(proxySsid, _lqrFetchedForLif, liveLqr)) {
+    debugPrint('[getLqrList] already fetched for this lif, skip readSS');
+    return;
   }
 
   try {
@@ -1518,6 +1551,7 @@ void getLqrList(String? proxySsid) async {
       ];
     } // end for in lqrArray
     lqr = fresh;
+    _lqrFetchedForLif = proxySsid;
   } catch (eLoc) {
     errorReport(eLoc);
   }
@@ -2922,6 +2956,39 @@ bool looksLikeJson(String body) {
   return b.isNotEmpty && (b[0] == '[' || b[0] == '{');
 }
 
+/// POSTs through [send], repeating the request once when the first attempt
+/// throws.
+///
+/// Reads only. `/readSS` holds a silent socket for 6-20s (tail ~79s) and a
+/// mobile network tears an idle socket down inside that window; dart:io reports
+/// the already-closed fd as `ClientException` ("Bad file descriptor",
+/// "Software caused connection abort"), so a single transient blip used to fail
+/// a whole refresh and pop an alert. Never wire a write through this — a
+/// repeated write can double.
+///
+/// Returns null when both attempts failed. Only the second failure is reported
+/// as a non-fatal; the first is dev-log only, since the retry usually covers it.
+Future<http.Response?> postWithOneRetry(
+  Future<http.Response> Function() send, {
+  Duration backoff = const Duration(seconds: 1),
+}) async {
+  for (int attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await send();
+    } catch (e) {
+      if (attempt == 0) {
+        // A dropped socket usually means the radio is mid-handover; give it a
+        // moment instead of hammering the same dead path.
+        devPrint('postWithOneRetry: attempt failed, retrying: $e');
+        await Future.delayed(backoff);
+        continue;
+      }
+      errorReport(e);
+    }
+  }
+  return null;
+}
+
 /// Returns true only when fresh pages were fetched, decoded AND applied.
 /// False means the cached UI was kept untouched (network error, non-JSON body,
 /// or a decode failure). The caller must report that instead of painting a
@@ -2961,31 +3028,27 @@ Future<bool> readSettingsContext(
     ),
   );
 
-  http.Response? response;
-  try {
-    FunctionBody functionBody;
-    if (opt == 1) {
-      functionBody = getFunctionBody(settingKey, [
-        systemJsonRange,
-        screenJsonRange,
-        lifSetting,
-      ]);
-    } else {
-      //opt == 2
-      functionBody = getFunctionBody(settingKey, [screenJsonRange]);
-    }
-    response = await http.post(
+  // One transport blip on this read used to fail the whole refresh: the throw
+  // was caught, `response` stayed null and the caller alerted. It is a read, so
+  // repeat it once before giving up. No showAlert here either: the caller gets
+  // `false` back and owns the user-facing message.
+  final http.Response? response = await postWithOneRetry(() async {
+    final FunctionBody functionBody = opt == 1
+        ? getFunctionBody(settingKey, [
+            systemJsonRange,
+            screenJsonRange,
+            lifSetting,
+          ])
+        : getFunctionBody(settingKey, [screenJsonRange]); // opt == 2
+    final http.Response posted = await http.post(
       Uri.parse(functionBody.url),
       body: functionBody.body,
     );
-    print('data response: $response');
+    print('data response: $posted');
     print('data response: ${functionBody.body}');
     print('data response: ${functionBody.url}');
-  } catch (e) {
-    // No showAlert here: the caller now gets `false` back and owns the
-    // user-facing message, and this dialog leaked raw exception text.
-    errorReport(e);
-  }
+    return posted;
+  });
   if (response != null) {
     // The settings/pages payload is always a JSON array/object. A gateway or
     // proxy hiccup returns a plain-text body instead (e.g. "upstream request

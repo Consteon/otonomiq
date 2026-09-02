@@ -213,6 +213,7 @@ import 'widget/driver_home_support.dart';
   0.9.103.01 (260811) HH : version update
   0.9.104.01 (260814) OO : add otqPdfViewer remote and local pdf, fix crashlytics, multiclause search table, relative path doc_viewer, doc_download, avoid_relative_lib_imports false
   0.9.105.01 (260901) OO : widget ocr, driver pick location, whatsapp send, timeline, scan qr schema 3, refresh cache, add dSYM to firebase crashlytics
+  0.9.106.01 (260902) OO : badge count in menu, schema qr v3
 */
 
 // ========= Constants ==========================
@@ -223,7 +224,7 @@ const clearHistory =
 int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
-const String version = '0.9.105';
+const String version = '0.9.106';
 const String subVersion = '.01';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
