@@ -17,6 +17,10 @@ platform :ios do
     
     UI.message("Found IPA file: #{ipa_path}")
     
+    if ipa_path.nil? || !File.exist?(ipa_path)
+      UI.user_error!("❌ No .ipa file found in build output directories. The archive was created, but Xcode could not export the IPA. Please open Xcode -> Settings -> Accounts and ensure your Apple ID session (admin@autsorz.io) is signed in and active.")
+    end
+    
     if p8_files.any?
       p8_file = File.expand_path(p8_files.first)
       key_id = File.basename(p8_file, ".p8").sub("AuthKey_", "")

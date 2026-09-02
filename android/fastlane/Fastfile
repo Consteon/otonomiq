@@ -14,16 +14,70 @@ platform :android do
     
     UI.message("Uploading AAB file: #{aab_path} for package: #{package_name} to Google Play Internal Track using key: #{key_file}")
     
-    upload_to_play_store(
-      package_name: package_name,
-      track: "internal",
-      aab: aab_path,
-      json_key: key_file,
-      skip_upload_apk: true,
-      skip_upload_metadata: true,
-      skip_upload_images: true,
-      skip_upload_screenshots: true,
-      skip_upload_changelogs: true
-    )
+    begin
+      upload_to_play_store(
+        package_name: package_name,
+        track: "internal",
+        aab: aab_path,
+        json_key: key_file,
+        skip_upload_apk: true,
+        skip_upload_metadata: true,
+        skip_upload_images: true,
+        skip_upload_screenshots: true,
+        skip_upload_changelogs: true
+      )
+    rescue => ex
+      if ex.message.to_s.include?("already been used") || ex.message.to_s.include?("Version code")
+        UI.important("⚠️ Google Play Version Code collision detected. Incrementing build number in pubspec.yaml and rebuilding...")
+        
+        pubspec_path = File.expand_path("../../pubspec.yaml", __dir__)
+        if File.exist?(pubspec_path)
+          content = File.read(pubspec_path)
+          if content =~ /^version:\s*([^\s+]+)\+(\d+)/
+            ver_name = $1
+            old_build = $2.to_i
+            new_build = old_build + 1
+            new_version_line = "version: #{ver_name}+#{new_build}"
+            
+            updated_content = content.sub(/^version:.*/, new_version_line)
+            File.write(pubspec_path, updated_content)
+            
+            main_pubspec = "/Users/harryhuang/Library/CloudStorage/GoogleDrive-hsangkanparan@consteon.com/Shared drives/authenium/Main/01_Authenium/Dev/apps/frontez-engine/otonomiq-main/pubspec.yaml"
+            if File.exist?(main_pubspec)
+              m_content = File.read(main_pubspec)
+              File.write(main_pubspec, m_content.sub(/^version:.*/, new_version_line))
+              sh("cd '#{File.dirname(main_pubspec)}' && git add pubspec.yaml 2>/dev/null && git commit -m 'Auto-bump version to #{new_version_line} [ci skip]' 2>/dev/null && git push origin main 2>/dev/null || true")
+            end
+
+            UI.message("Updated pubspec.yaml version to: #{new_version_line}")
+
+            # Rebuild AAB
+            sh("unset GEM_HOME GEM_PATH RUBYLIB; cd ../.. && flutter build appbundle --release")
+            
+            new_aab = File.expand_path("../../build/app/outputs/bundle/release/app-release.aab", __dir__)
+            
+            UI.message("Retrying Google Play upload with newly built AAB: #{new_aab}")
+            
+            upload_to_play_store(
+              package_name: package_name,
+              track: "internal",
+              aab: new_aab,
+              json_key: key_file,
+              skip_upload_apk: true,
+              skip_upload_metadata: true,
+              skip_upload_images: true,
+              skip_upload_screenshots: true,
+              skip_upload_changelogs: true
+            )
+          else
+            raise ex
+          end
+        else
+          raise ex
+        end
+      else
+        raise ex
+      end
+    end
   end
 end
