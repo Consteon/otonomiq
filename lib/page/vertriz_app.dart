@@ -5,7 +5,6 @@ import 'package:redux_dev_tools/redux_dev_tools.dart';
 
 import '../bloc_submit/bloc.dart';
 import '../global.dart';
-import '../login/api/user_repository.dart';
 import '../main_bloc/bloc.dart';
 import '../page/main_page.dart';
 import '../redux/screen_transaction.dart';
@@ -44,61 +43,31 @@ Color themeColor(String key, Color fallback) {
 
 class VertrizApp extends StatelessWidget {
   // This widget is the root of your application.
-  final UserRepository _userRepository;
-
-  const VertrizApp({required Key key, required this._userRepository})
-    : super(key: key);
+  const VertrizApp({required Key key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: thisAppName,
       theme: ThemeData(
-        //useMaterial3: true,
-        //primaryColor: Colors.red,
-        // colorSchemeSeed: const Color(0xff6750a4), useMaterial3: true,
-        // ColorSchemeSeed: const Color(0xff6750a4), useMaterial3: true,
         primaryColor: themeColor(
           'primaryColor',
           const Color(_defaultPrimaryColor),
         ),
-        // buttonTheme: ButtonThemeData(
-        // buttonColor: systemUIComponent[theme]['buttonColor'] == null
-        //     ? Colors.yellow
-        //     : Color(systemUIComponent[theme]['buttonColor']),
-        //   buttonColor: Colors.yellow,
-        //
-        // ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ButtonStyle(
-            // side: MaterialStateProperty.resolveWith<BorderSide>(
-            //         (states) => BorderSide(color: borderColor ?? Colors.black)),
             backgroundColor: WidgetStateProperty.resolveWith<Color>(
               (states) => themeColor('buttonColor', Colors.grey[400]!),
             ),
             foregroundColor: WidgetStateProperty.resolveWith<Color>(
               (states) => themeColor('buttonText', Colors.black87),
             ),
-            // backgroundColor: MaterialStateProperty.resolveWith<Color>(
-            //         (states) => systemUIComponent[theme]['buttonColor'] == null
-            //         ? Colors.grey[400]!
-            //         : Colors.grey[400]!,
             shape: WidgetStateProperty.resolveWith<OutlinedBorder>((_) {
               return RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(4),
               );
             }),
-            // textStyle: MaterialStateProperty.resolveWith<TextStyle>(
-            //     (states) => TextStyle(color: Colors.red)),
           ),
-          // style: ElevatedButton.styleFrom(
-          //   primary: systemUIComponent[theme]['buttonColor'] == null
-          //       ? Colors.grey[400]
-          //       : Color(systemUIComponent[theme]['buttonColor']),
-          //   onPrimary: systemUIComponent[theme]['buttonText'] == null
-          //       ? Colors.black
-          //       : Color(systemUIComponent[theme]['buttonText']),
-          // ),
         ),
         textButtonTheme: TextButtonThemeData(
           style: TextButton.styleFrom(
@@ -111,8 +80,6 @@ class VertrizApp extends StatelessWidget {
             const Color(_defaultBottomAppBarColor),
           ),
         ),
-        // toggleableActiveColor: Color(systemUIComponent[theme]['toggleableActiveColor'].toInt()??4280391411), // blue
-        // disabledColor: Color(systemUIComponent[theme]['disabledColor'].toInt()??4288585374), // grey
       ),
 
       home: MultiBlocProvider(
@@ -126,9 +93,6 @@ class VertrizApp extends StatelessWidget {
                 ..add(LoadSubmit());
             },
           ),
-          //        BlocProvider<TimerBloc>(
-          //          builder: (BuildContext context) => TimerBloc(),
-          //        ),
         ],
         child: BlocBuilder<MainBloc, MainState>(
           builder: (context, state) {
@@ -147,35 +111,23 @@ class VertrizApp extends StatelessWidget {
             // "table ... has already subscribed" spam. A const ValueKey keeps the
             // single MainPageState alive, matching the shell's render-once design.
             return const MainPage(key: ValueKey('mainPage'));
-            // return BlocBuilder<SubmitBloc, SubmitState> (
-            //   builder: (context, state) {
-            //     return MainPage();
-            //   }, // SubmitBloc builder
-            // );
           }, // MainBloc builder
         ),
       ),
-      //      home: BlocProvider<MainBloc>(
-      //        builder: (context) => MainBloc(),
-      //        child: BlocBuilder<MainBloc,MainState>(
-      //          builder: (context, state) => MainPage(),
-      //        ),
-      //      ),
     );
   }
 }
 
 class LinkReduxApp extends StatelessWidget {
   final DevToolsStore<ScreenTransaction> store;
-  final UserRepository _userRepository;
 
-  const LinkReduxApp(this.store, this._userRepository, {super.key});
+  const LinkReduxApp(this.store, {super.key});
 
   @override
   Widget build(BuildContext context) {
     return StoreProvider<ScreenTransaction>(
       store: transactionStore,
-      child: VertrizApp(key: UniqueKey(), userRepository: _userRepository),
+      child: VertrizApp(key: UniqueKey()),
     );
   }
 }

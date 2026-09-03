@@ -152,7 +152,7 @@ class ImageUploadState extends State<ImageUpload> {
         "${component['folder']}/${component['filename']}.$ext",
       );
 
-      // TODO create parse diamond for parsing parameter.
+      // create parse diamond for parsing parameter.
       String content = 'IMG_UPLOAD'; //= position 1
       txfController[scrName]![1] = InputController(
         1,

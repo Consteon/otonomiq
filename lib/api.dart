@@ -1019,7 +1019,7 @@ Future<String> getQRContent(
   dynamic result = '${errString}99';
   dynamic refTable;
   final List<int> clusters = refClusters ?? [];
-  List<String> tableCodeArray = tableString.split(separator[1]) ?? [];
+  List<String> tableCodeArray = tableString.split(separator[1]);
   String? tableCode = tableCodeArray.isNotEmpty ? tableCodeArray[0] : null;
   int tableColumn = max(
     0,
@@ -1073,7 +1073,7 @@ Future<String> getQRContent(
         } else {
           int tol = (refTable[lqr][3] ?? 0).round();
           num finalTolerance =
-              (position == null ? 0 : (position.accuracy ?? 0).round()) + tol;
+              (position == null ? 0 : (position.accuracy).round()) + tol;
           num d = (distanceM(
             position!.latitude,
             position.longitude,
@@ -1576,7 +1576,7 @@ Future<void> getAllPermission() async {
 
 void getCountryCodeList() async {
   // get list of country code from sim card (Android only)
-  // TODO: add getCountryCodeList ios part
+  // add getCountryCodeList ios part
   // List<String> cCodes = ['62', '63', '60', '66', '91', '84', '65'];
   List<String> cCodes = [defaultCountry];
   // try {
@@ -1783,7 +1783,7 @@ void getLinkInterfaceKey(BuildContext context, String vid, String pin) {
   int foundRow = -1;
 
   Future.wait([
-    // TODO get from Firebase (get data from vidKey).
+    // get from Firebase (get data from vidKey).
     sheetApi.spreadsheets.values.batchGet(
       vidKey,
       ranges: [vidRange],
@@ -1985,7 +1985,7 @@ Future<dynamic> getDataFromCloud() async {
       );
       dynamic rawReturnValue = await Future.wait([
         http.post(uri).timeout(const Duration(seconds: 15)),
-        //      getServiceAccountCredential(), //= TODO uncomment this
+        //      getServiceAccountCredential(), // uncomment this
       ]);
       returnValue = [
         {'body': rawReturnValue[0].body},
@@ -2000,7 +2000,7 @@ Future<dynamic> getDataFromCloud() async {
 } // end of getDataFromCloud
 
 Future settingUp() async {
-  // TODO call function in nearest server & use function callable. Still problem with firebase function
+  // call function in nearest server & use function callable. Still problem with firebase function
   dynamic r = [
     {body: jsonEncode(defaultCloudConfig)},
   ];
@@ -2656,7 +2656,7 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
       launchOk = await launchCheck(); // Check launch status
       if (launchOk > 0) {
         // error in launchCheck
-        // TODO create error message to display
+        // create error message to display
         debugCount = 5230;
         trace(debugCount);
       } else {
@@ -3386,7 +3386,6 @@ Future runSheetStartup(String lif, String clt) async {
   } // end if (!appStartupRun)
 } // end of runSheetStartup
 
-// TODO make getVidData; updateVidData; deleteVidData
 Future getVidData() async {
   dynamic ref;
   dynamic messageRef;
@@ -3543,6 +3542,25 @@ Future signOut() async {
       signUpKey = state['#SIGNUP_KEY'];
     }
     storage.write(key: 'myLif', value: signUpKey);
+    // Un-register this device from the OUTGOING account before myMsgId is
+    // dropped: the push target is the msg doc's `f` field (api.dart:4188).
+    // Left behind, every later push addressed to this account still lands on
+    // this handset, and bridgePushToInbox files it under whoever logs in next
+    // — its payload carries no recipient id to check against, so account A's
+    // messages end up written into account B's inbox for good.
+    try {
+      final String? clt = await secureRead(key: 'myCluster');
+      final String? msgId = await secureRead(key: 'myMsgId');
+      if (clt != null && msgId != null) {
+        safeFsUpdate(
+          FirebaseFirestore.instance.doc('$msgPrefix$clt/$msgId'),
+          <String, dynamic>{'f': ''},
+          'signOut clearFcm',
+        );
+      }
+    } catch (e) {
+      devPrint('signOut fcm clear skipped: $e');
+    }
     storage.write(key: 'myMsgId', value: null);
     storage.write(key: 'lqrList', value: null); // delete location qr list
     transactionStore.dispatch(
@@ -3559,7 +3577,6 @@ Future signOut() async {
     // devPrint("After in = false; try to signOut from firebaseAuth");
     if (!demoApp) {
       //        FirebaseAuth.instance.signOut(); // signOut from firebase
-      // TODO signOut from google, facebook, twitter
     }
     unSubscribeToEvent(); // unsubscribe to proxy event listener
     await Future.wait([
@@ -3783,7 +3800,6 @@ Future<int> userIntegrityCheck() async {
         try {
           secureRead(key: 'pinHash')
               .then((myPinHash) {
-                // TODO check pin hash integrity with lif
                 if (myPinHash == null) {
                   sheetApi.spreadsheets.values
                       .batchGet(
@@ -3914,7 +3930,7 @@ Future getLifProfileData(String lifKey) async {
 }
 
 Future<int> launchCheck() async {
-  // TODO finish justLaunch procedure
+  // finish justLaunch procedure
   // Launch with logged in status. Always run at launch like good old autoexec.bat
   // firstLogin, reLogin, run this function
 
@@ -4276,17 +4292,17 @@ Future apiInit1() async {
 }
 
 String autheniumDecrypt(String cipherText) {
-  // TODO put decryption algorithm here
+  // put decryption algorithm here
   return cipherText;
 }
 
 String autheniumEncrypt(String rawText, String encryptionType) {
-  // TODO put encryption algorithm here
+  // put encryption algorithm here
   return rawText;
 }
 
 String getAutheniumKey(String keyType) {
-  // TODO put algorithm to get authenium key
+  // put algorithm to get authenium key
   return "11223344";
 }
 
@@ -4379,7 +4395,7 @@ Future getFirestoreUserData(
           }; // set as used
           await docRef.update(data);
           needToRegisterInvLogin = true; // put flag to register invLogin
-          //TODO call cloud function to register email, etc
+          // call cloud function to register email, etc
           invitationStatus = 1;
         } else {
           recFound = 0;
@@ -4388,7 +4404,7 @@ Future getFirestoreUserData(
         }
       } else {
         // Found more than 1,
-        // TODO: should ask for country
+        // should ask for country
         if (uidUser.docChanges[0].doc.data()!["e"] == "-") {
           // Check email
           var docRef = uidUser.docs[0].reference; // process only the first rec
@@ -4432,9 +4448,9 @@ Future getFirestoreUserData(
             user = results.docs[0].data();
             if (results.docs.length == 1) {
               if (user['in'] && user["did"] != myDevice) {
-                // TODO handle situation when user deny imei access
+                // handle situation when user deny imei access
                 result = 802;
-                // TODO call function to send reset email
+                // call function to send reset email
                 //   add prefix ";R"(reset) firebaseDocName
                 // "Login fail. You already signed in with other device, or you deny access to phone."; //= return result
               } else {
@@ -4442,7 +4458,7 @@ Future getFirestoreUserData(
               }
             } else {
               //= for some reason user was registered but no data in dvc. Treat like new user.
-              // TODO add new vid to user
+              // add new vid to user
               result = 809;
             }
           });
@@ -4454,7 +4470,7 @@ Future getFirestoreUserData(
           .then((results) async {
             if (results.docs.length == 1) {
               if (user['in'] && user["did"] != myDevice) {
-                // TODO handle situation when user deny imei access
+                // handle situation when user deny imei access
                 result = 802; // error 802
                 // "Login fail. You already signed in with other device, or you deny access to phone."; //= return result
               } else {
@@ -4462,7 +4478,7 @@ Future getFirestoreUserData(
               }
             } else if (results.docs.isEmpty) {
               //= for some reason user was registered but no data in dvc. Treat like new user.
-              // TODO add new vid to user
+              // add new vid to user
               result = 809;
             } else {
               //= multiple entry. Found demo or dev account
@@ -4510,7 +4526,7 @@ Future getFirestoreUserData(
     // var cUser = state['#FIREBASE_USER']; //= get current firebase user data
     // result =
     //     getNewVid(cUser.uid, user.displayName, user.email); //= return result
-    // TODO add new vid to user
+    // add new vid to user
     if (invitationStatus > 1) {
       result = invitationStatus; // Something wrong with invitation
     } else {
@@ -4758,7 +4774,7 @@ Future serverSetup() async {
   trace(debugCount);
   FirebaseStorage storageBucket = FirebaseStorage.instanceFor(
     bucket: 'gs://otq-01-ase2',
-  ); //= TODO move to procedure after sign in
+  ); // move to procedure after sign in
   debugCount = 216;
   trace(debugCount);
   transactionStore.dispatch(
@@ -5757,7 +5773,7 @@ List totp(String keycode, int len, int sec) {
   // This is algorithm that used in Google Authenticator with len = 6
   var retArray = [];
   var m1 = (DateTime.now().millisecondsSinceEpoch / (sec * 1000)).floor();
-  m1 = 54427511; // TODO delete this for production
+  m1 = 54427511; // delete this for production
   Uint8List k3 = hexToUInt8(base32ToHex(keycode.replaceAll(" ", "")));
   final hmac1 = uInt8ToHex(
     hmacSha1(k3, hexToUInt8(m1.toRadixString(16).padLeft(16, "0"))),

@@ -90,7 +90,6 @@ void main() async {
   // app replaces it with a second runApp() once the home shell is ready.
   debugCount = -3;
   trace(debugCount);
-  // await apiTest();
   // debugCount = -4;
   // trace(debugCount);
   dynamic state;
@@ -401,7 +400,7 @@ void main() async {
               },
             ),
           ],
-          child: App(key: UniqueKey(), userRepository: userRepository),
+          child: App(key: UniqueKey()),
         ),
       ); // end of runApp
     }
@@ -450,10 +449,7 @@ void getSettingJson(var rawData) {
 }
 
 class App extends StatelessWidget {
-  final UserRepository _userRepository;
-
-  const App({required Key key, required this._userRepository})
-    : super(key: key);
+  const App({required Key key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -494,10 +490,8 @@ class App extends StatelessWidget {
             ret = const SplashScreen();
           }
           if (state is Unauthenticated) {
-            //            return LoginScreen(userRepository: _userRepository);
             ret = LinkReduxApp(
               transactionStore,
-              _userRepository,
             ); // <<=== display Home screen
           }
           if (state is TosReview) {
@@ -506,7 +500,6 @@ class App extends StatelessWidget {
           if (state is Authenticated) {
             ret = LinkReduxApp(
               transactionStore,
-              _userRepository,
             ); // <<=== display Home screen
           }
           return ret;
@@ -629,4 +622,3 @@ class _MyHomePageState extends State<MyHomePage> {
 }
 
 //======== end of IOS
-// TODO internationalization

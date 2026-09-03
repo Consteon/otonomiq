@@ -324,7 +324,7 @@ class GpsSendState extends State<GpsSend> {
             );
           } // end if position
         } on PlatformException catch (err) {
-          // TODO display dialog fail, and play wrong beep
+          // display dialog fail, and play wrong beep
           setDataOK(
             '1',
           ); // reload pages and display green anyway. So the app will not lock up

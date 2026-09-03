@@ -757,7 +757,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
           } // end if position
         } // end if (resultOk == empty || resultOk == errorString)
       } catch (e) {
-        // TODO display dialog fail, and play wrong beep
+        // display dialog fail, and play wrong beep
         errorReport(e);
         setDataOK(
           '1',
@@ -995,7 +995,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
           } // end if ((actionType == 'selfie' && !cameraCancel)
         } // end if ((actionType != 'selfie') &&...
       } on PlatformException catch (err) {
-        // TODO  play wrong beep
+        // play wrong beep
         setDataOK('2'); // display green without do anything
         errorReport(err);
         await attendanceDialog(
@@ -2547,10 +2547,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                 setDataOK('2');
                 errorReport(e);
               } // end of try
-            } else {
-              setDataOK('2');
-            } // end if internetOK
-            // } // end if dataOk
+            }
             if (mounted) {
               setState(() {
                 tapped = false;

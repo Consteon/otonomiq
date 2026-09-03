@@ -318,9 +318,7 @@ class PhotoCameraState extends State<PhotoCamera> with WidgetsBindingObserver {
     bool kIsWeb = false;
     final CameraController cameraController = CameraController(
       cameraDescription,
-      kIsWeb
-          ? ResolutionPreset.max
-          : (widget.preset ?? ResolutionPreset.medium),
+      (widget.preset ?? ResolutionPreset.medium),
       // enableAudio: enableAudio,
       imageFormatGroup: ImageFormatGroup.jpeg,
     );

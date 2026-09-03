@@ -811,7 +811,7 @@ Future<List<String>> writeToTable(String? inp, String eventRowString) async {
       List<dynamic> ref = parseEventString(eventRow);
       //   print ('ref=$ref');
       String decodedInp = autheniumDecode(inp) ?? '';
-      List<dynamic> splitInput = splitTableInput(decodedInp ?? '');
+      List<dynamic> splitInput = splitTableInput(decodedInp);
       List<Future> tableWriteList = [];
       for (int i = 0; i < splitInput.length; i++) {
         String tempResult = '';
@@ -2346,9 +2346,7 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
         ssid = null;
       }
       if (ssid != null && ssid != loginSsid) {
-        var docRef = firestoreDb
-            .collection(proxyCollectionName)
-            .doc(ssid ?? 'ErrorInLoadHistory');
+        var docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
         try {
           dynamic proxyData = (await docRef.get()).data();
           if (proxyData['i'] == null || proxyData['i'] == 'null') {
@@ -2372,7 +2370,7 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
         // clear imageMap every app startup
         devPrint('Clearing imageMap because of clearHistoryImageMap = true');
         imageMapStr = '{}';
-        await imageMapInit(jsonDecode(imageMapStr ?? '{}'));
+        await imageMapInit(jsonDecode(imageMapStr));
         storage.write(key: imageMapSecureName, value: imageMapStr);
         if (internetConnected()) {
           try {
@@ -2381,9 +2379,7 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
               '#INTERFACE_KEY',
               20,
             )).toString();
-            var docRef = firestoreDb
-                .collection(proxyCollectionName)
-                .doc(ssid ?? 'ErrorInLoadHistory');
+            var docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
             safeFsUpdate(docRef, {'i': imageMapStr}, 'saveImageMap');
           } catch (fErr) {
             // error in firebase, do nothing
@@ -2419,9 +2415,7 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
         ssid = null;
       }
       if (ssid != null && ssid != loginSsid) {
-        var docRef = firestoreDb
-            .collection(proxyCollectionName)
-            .doc(ssid ?? 'ErrorInLoadHistory');
+        var docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
         try {
           dynamic proxyData = (await docRef.get()).data();
           if (proxyData['h'] == null || proxyData['h'] == 'null') {
@@ -2459,9 +2453,7 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
               '#INTERFACE_KEY',
               20,
             )).toString();
-            var docRef = firestoreDb
-                .collection(proxyCollectionName)
-                .doc(ssid ?? 'ErrorInLoadHistory');
+            var docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
             safeFsUpdate(docRef, {'h': historyStr}, 'saveHistory');
           } catch (fErr) {
             // error in firebase, do nothing
