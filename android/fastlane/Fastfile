@@ -14,12 +14,18 @@ platform :android do
     
     UI.message("Uploading AAB file: #{aab_path} for package: #{package_name} to Google Play Internal Track using key: #{key_file}")
     
+    max_retries = 3
+    attempt = 0
+    current_aab = aab_path
+
     begin
+      attempt += 1
       upload_to_play_store(
         package_name: package_name,
         track: "internal",
-        aab: aab_path,
+        aab: current_aab,
         json_key: key_file,
+        timeout: 1800,
         skip_upload_apk: true,
         skip_upload_metadata: true,
         skip_upload_images: true,
@@ -27,7 +33,8 @@ platform :android do
         skip_upload_changelogs: true
       )
     rescue => ex
-      if ex.message.to_s.include?("already been used") || ex.message.to_s.include?("Version code")
+      err_msg = ex.message.to_s
+      if err_msg.include?("already been used") || err_msg.include?("Version code")
         UI.important("⚠️ Google Play Version Code collision detected. Incrementing build number in pubspec.yaml and rebuilding...")
         
         pubspec_path = File.expand_path("../../pubspec.yaml", __dir__)
@@ -54,27 +61,20 @@ platform :android do
             # Rebuild AAB
             sh("unset GEM_HOME GEM_PATH RUBYLIB; cd ../.. && flutter build appbundle --release")
             
-            new_aab = File.expand_path("../../build/app/outputs/bundle/release/app-release.aab", __dir__)
+            current_aab = File.expand_path("../../build/app/outputs/bundle/release/app-release.aab", __dir__)
             
-            UI.message("Retrying Google Play upload with newly built AAB: #{new_aab}")
-            
-            upload_to_play_store(
-              package_name: package_name,
-              track: "internal",
-              aab: new_aab,
-              json_key: key_file,
-              skip_upload_apk: true,
-              skip_upload_metadata: true,
-              skip_upload_images: true,
-              skip_upload_screenshots: true,
-              skip_upload_changelogs: true
-            )
+            UI.message("Retrying Google Play upload with newly built AAB: #{current_aab}")
+            retry
           else
             raise ex
           end
         else
           raise ex
         end
+      elsif (err_msg.include?("execution expired") || err_msg.include?("timeout") || err_msg.include?("Timeout") || err_msg.include?("Connection reset") || err_msg.include?("EOFError")) && attempt < max_retries
+        UI.important("⚠️ Google Play upload network timeout / connection expired on attempt #{attempt}/#{max_retries}. Waiting 10s and retrying...")
+        sleep(10)
+        retry
       else
         raise ex
       end
