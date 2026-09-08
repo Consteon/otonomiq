@@ -29,7 +29,9 @@ import '../otq_icons.dart';
 import '../redux/screen_transaction.dart';
 import 'ftz_array_search.dart';
 import 'ftz_contact_picker.dart';
-import 'otq_txf.dart';
+import 'ftz_scanner_screen.dart';
+
+part '../part/build_part/otq_txf_part.dart';
 
 // import 'package:flutter_native_contact_picker/flutter_native_contact_picker.dart';
 // import 'package:barcode_scan2/barcode_scan2.dart';

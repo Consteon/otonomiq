@@ -64,7 +64,7 @@ export 'nota_create_submit.dart';
 export 'notice_bar.dart';
 export 'ocr_capture.dart';
 export 'otq_switch.dart';
-export 'otq_txf.dart';
+export 'otq_txf_2.dart';
 export 'otq_txt.dart';
 export 'payout_list.dart';
 export 'pdf_viewer.dart';

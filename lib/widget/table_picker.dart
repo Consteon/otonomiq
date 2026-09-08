@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 import '../firestore_repository/table_repository.dart'; // subscribeToMapCollection
 import '../global.dart'; // diamondTextToList, mapTableContent, emptyString
 import '../global2.dart'; // txfController, txfControllerCheck, getPosition
+import '../otq_icons.dart'; // otqIcons
 import '../screen_session.dart';
 import 'driver_home_support.dart'; // resolveAppVid
 import 'panel_card_support.dart'; // parseTablePath, TablePath
@@ -69,6 +70,17 @@ class TablePicker extends StatefulWidget {
   }
 
   // ── Pure static helpers (testable without SDUI globals) ─────────────────
+
+  /// Resolve the header icon for a config `icon` key.
+  ///
+  /// Any `otqIcons` key works -- same contract as SELECTABLE_BTN. An empty or
+  /// unknown key returns the generic list glyph instead of null: a picker card
+  /// keeps the same header chip as its siblings on a sheet row that never set
+  /// `icon`, which is every row shipped before this widget grew a header.
+  static IconData resolveHeaderIcon(String key) {
+    final Object? resolved = otqIcons[key.trim()];
+    return resolved is IconData ? resolved : Icons.list_alt;
+  }
 
   /// Resolve the value to capture from a doc row.
   /// Empty [valueField] -> doc id (`__docId`). Otherwise -> doc[valueField].
@@ -181,6 +193,14 @@ class _TablePickerState extends State<TablePicker> {
   String get _title => (widget.component['title'] ?? '').toString().trim();
 
   String get _hint => (widget.component['hint'] ?? '').toString().trim();
+
+  /// Header icon. `icon` takes any `otqIcons` key -- same contract as
+  /// SELECTABLE_BTN. An ABSENT or UNKNOWN key falls back to a generic list
+  /// glyph rather than dropping the chip, so every picker card carries the same
+  /// header as its siblings on a page whose sheet row never set `icon`.
+  IconData get _headerIcon => TablePicker.resolveHeaderIcon(
+    (widget.component['icon'] ?? '').toString(),
+  );
 
   /// Text segment helper with defaults.
   String _t(int i, String def) => TablePicker.textSegment(_textArray, i, def);
@@ -377,85 +397,125 @@ class _TablePickerState extends State<TablePicker> {
       final Set<String> selected = _selectedVids;
       final Map<String, String> labels = _labelMap;
 
-      return Padding(
-        padding: EdgeInsets.fromLTRB(
+      return Container(
+        margin: EdgeInsets.fromLTRB(
           widget.lPad,
           widget.tPad,
           widget.rPad,
           widget.bPad,
         ),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE5E7EB), width: 1.2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Title
+            // Header row -- same shell as SELECTABLE_BTN (selectable_btn.dart:206)
+            // so a picker and a choice group on one page read as one system.
             if (_title.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  _title,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF374151), // gray-700
-                  ),
-                ),
-              ),
-            // Tap target
-            GestureDetector(
-              onTap: _openSheet,
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 12,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: const Color(0xFFD1D5DB),
-                  ), // gray-300
-                ),
-                child: selected.isEmpty
-                    ? Text(
-                        _hint.isNotEmpty ? _hint : _t(0, 'Pilih...'),
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Icon(
+                        _headerIcon,
+                        size: 14,
+                        color: const Color(0xFF64748B),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _title,
                         style: const TextStyle(
                           fontSize: 13,
-                          color: Color(0xFF9CA3AF), // gray-400
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1E293B),
+                          letterSpacing: 0.3,
                         ),
-                      )
-                    : Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: selected.map((vid) {
-                          final String label = labels[vid] ?? vid;
-                          return _chip(label, primary, () {
-                            setState(() {
-                              _selectedVids.remove(vid);
-                              _labelMap.remove(vid);
-                              _writeToController();
-                            });
-                          });
-                        }).toList(),
                       ),
-              ),
-            ),
-            // Count label for multi
-            if (!_isSingle && selected.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  _t(
-                    5,
-                    '{n} dipilih',
-                  ).replaceAll('{n}', selected.length.toString()),
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Color(0xFF6B7280), // gray-500
-                  ),
+                    ),
+                  ],
                 ),
               ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Tap target
+                  GestureDetector(
+                    onTap: _openSheet,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: selected.isEmpty
+                          ? Text(
+                              _hint.isNotEmpty ? _hint : _t(0, 'Pilih...'),
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Color(0xFF9CA3AF), // gray-400
+                              ),
+                            )
+                          : Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: selected.map((vid) {
+                                final String label = labels[vid] ?? vid;
+                                return _chip(label, primary, () {
+                                  setState(() {
+                                    _selectedVids.remove(vid);
+                                    _labelMap.remove(vid);
+                                    _writeToController();
+                                  });
+                                });
+                              }).toList(),
+                            ),
+                    ),
+                  ),
+                  // Count label for multi
+                  if (!_isSingle && selected.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        _t(
+                          5,
+                          '{n} dipilih',
+                        ).replaceAll('{n}', selected.length.toString()),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF6B7280), // gray-500
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ],
         ),
       );

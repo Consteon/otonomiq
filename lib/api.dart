@@ -55,6 +55,7 @@ import 'widget/ftz_webview.dart';
 import 'widget/logout_transition_support.dart';
 import 'widget/photo_camera.dart';
 import 'widget/ui_component.dart';
+import 'widget/visible_when.dart';
 
 /// Login perf instrumentation. Mirrors UserRepository.loginPerfTrace.
 /// Set to false (or remove) after root-cause confirmation.
@@ -1019,7 +1020,7 @@ Future<String> getQRContent(
   dynamic result = '${errString}99';
   dynamic refTable;
   final List<int> clusters = refClusters ?? [];
-  List<String> tableCodeArray = tableString.split(separator[1]);
+  List<String> tableCodeArray = tableString.split(separator[1]) ?? [];
   String? tableCode = tableCodeArray.isNotEmpty ? tableCodeArray[0] : null;
   int tableColumn = max(
     0,
@@ -1073,7 +1074,7 @@ Future<String> getQRContent(
         } else {
           int tol = (refTable[lqr][3] ?? 0).round();
           num finalTolerance =
-              (position == null ? 0 : (position.accuracy).round()) + tol;
+              (position == null ? 0 : (position.accuracy ?? 0).round()) + tol;
           num d = (distanceM(
             position!.latitude,
             position.longitude,
@@ -1576,7 +1577,7 @@ Future<void> getAllPermission() async {
 
 void getCountryCodeList() async {
   // get list of country code from sim card (Android only)
-  // add getCountryCodeList ios part
+  // TODO: add getCountryCodeList ios part
   // List<String> cCodes = ['62', '63', '60', '66', '91', '84', '65'];
   List<String> cCodes = [defaultCountry];
   // try {
@@ -1783,7 +1784,7 @@ void getLinkInterfaceKey(BuildContext context, String vid, String pin) {
   int foundRow = -1;
 
   Future.wait([
-    // get from Firebase (get data from vidKey).
+    // TODO get from Firebase (get data from vidKey).
     sheetApi.spreadsheets.values.batchGet(
       vidKey,
       ranges: [vidRange],
@@ -1985,7 +1986,7 @@ Future<dynamic> getDataFromCloud() async {
       );
       dynamic rawReturnValue = await Future.wait([
         http.post(uri).timeout(const Duration(seconds: 15)),
-        //      getServiceAccountCredential(), // uncomment this
+        //      getServiceAccountCredential(), //= TODO uncomment this
       ]);
       returnValue = [
         {'body': rawReturnValue[0].body},
@@ -2000,7 +2001,7 @@ Future<dynamic> getDataFromCloud() async {
 } // end of getDataFromCloud
 
 Future settingUp() async {
-  // call function in nearest server & use function callable. Still problem with firebase function
+  // TODO call function in nearest server & use function callable. Still problem with firebase function
   dynamic r = [
     {body: jsonEncode(defaultCloudConfig)},
   ];
@@ -2656,7 +2657,7 @@ Future<void> readSettingsStart(String? lifKey, int opt) async {
       launchOk = await launchCheck(); // Check launch status
       if (launchOk > 0) {
         // error in launchCheck
-        // create error message to display
+        // TODO create error message to display
         debugCount = 5230;
         trace(debugCount);
       } else {
@@ -3386,6 +3387,7 @@ Future runSheetStartup(String lif, String clt) async {
   } // end if (!appStartupRun)
 } // end of runSheetStartup
 
+// TODO make getVidData; updateVidData; deleteVidData
 Future getVidData() async {
   dynamic ref;
   dynamic messageRef;
@@ -3542,25 +3544,6 @@ Future signOut() async {
       signUpKey = state['#SIGNUP_KEY'];
     }
     storage.write(key: 'myLif', value: signUpKey);
-    // Un-register this device from the OUTGOING account before myMsgId is
-    // dropped: the push target is the msg doc's `f` field (api.dart:4188).
-    // Left behind, every later push addressed to this account still lands on
-    // this handset, and bridgePushToInbox files it under whoever logs in next
-    // — its payload carries no recipient id to check against, so account A's
-    // messages end up written into account B's inbox for good.
-    try {
-      final String? clt = await secureRead(key: 'myCluster');
-      final String? msgId = await secureRead(key: 'myMsgId');
-      if (clt != null && msgId != null) {
-        safeFsUpdate(
-          FirebaseFirestore.instance.doc('$msgPrefix$clt/$msgId'),
-          <String, dynamic>{'f': ''},
-          'signOut clearFcm',
-        );
-      }
-    } catch (e) {
-      devPrint('signOut fcm clear skipped: $e');
-    }
     storage.write(key: 'myMsgId', value: null);
     storage.write(key: 'lqrList', value: null); // delete location qr list
     transactionStore.dispatch(
@@ -3577,6 +3560,7 @@ Future signOut() async {
     // devPrint("After in = false; try to signOut from firebaseAuth");
     if (!demoApp) {
       //        FirebaseAuth.instance.signOut(); // signOut from firebase
+      // TODO signOut from google, facebook, twitter
     }
     unSubscribeToEvent(); // unsubscribe to proxy event listener
     await Future.wait([
@@ -3800,6 +3784,7 @@ Future<int> userIntegrityCheck() async {
         try {
           secureRead(key: 'pinHash')
               .then((myPinHash) {
+                // TODO check pin hash integrity with lif
                 if (myPinHash == null) {
                   sheetApi.spreadsheets.values
                       .batchGet(
@@ -3930,7 +3915,7 @@ Future getLifProfileData(String lifKey) async {
 }
 
 Future<int> launchCheck() async {
-  // finish justLaunch procedure
+  // TODO finish justLaunch procedure
   // Launch with logged in status. Always run at launch like good old autoexec.bat
   // firstLogin, reLogin, run this function
 
@@ -4292,17 +4277,17 @@ Future apiInit1() async {
 }
 
 String autheniumDecrypt(String cipherText) {
-  // put decryption algorithm here
+  // TODO put decryption algorithm here
   return cipherText;
 }
 
 String autheniumEncrypt(String rawText, String encryptionType) {
-  // put encryption algorithm here
+  // TODO put encryption algorithm here
   return rawText;
 }
 
 String getAutheniumKey(String keyType) {
-  // put algorithm to get authenium key
+  // TODO put algorithm to get authenium key
   return "11223344";
 }
 
@@ -4395,7 +4380,7 @@ Future getFirestoreUserData(
           }; // set as used
           await docRef.update(data);
           needToRegisterInvLogin = true; // put flag to register invLogin
-          // call cloud function to register email, etc
+          //TODO call cloud function to register email, etc
           invitationStatus = 1;
         } else {
           recFound = 0;
@@ -4404,7 +4389,7 @@ Future getFirestoreUserData(
         }
       } else {
         // Found more than 1,
-        // should ask for country
+        // TODO: should ask for country
         if (uidUser.docChanges[0].doc.data()!["e"] == "-") {
           // Check email
           var docRef = uidUser.docs[0].reference; // process only the first rec
@@ -4448,9 +4433,9 @@ Future getFirestoreUserData(
             user = results.docs[0].data();
             if (results.docs.length == 1) {
               if (user['in'] && user["did"] != myDevice) {
-                // handle situation when user deny imei access
+                // TODO handle situation when user deny imei access
                 result = 802;
-                // call function to send reset email
+                // TODO call function to send reset email
                 //   add prefix ";R"(reset) firebaseDocName
                 // "Login fail. You already signed in with other device, or you deny access to phone."; //= return result
               } else {
@@ -4458,7 +4443,7 @@ Future getFirestoreUserData(
               }
             } else {
               //= for some reason user was registered but no data in dvc. Treat like new user.
-              // add new vid to user
+              // TODO add new vid to user
               result = 809;
             }
           });
@@ -4470,7 +4455,7 @@ Future getFirestoreUserData(
           .then((results) async {
             if (results.docs.length == 1) {
               if (user['in'] && user["did"] != myDevice) {
-                // handle situation when user deny imei access
+                // TODO handle situation when user deny imei access
                 result = 802; // error 802
                 // "Login fail. You already signed in with other device, or you deny access to phone."; //= return result
               } else {
@@ -4478,7 +4463,7 @@ Future getFirestoreUserData(
               }
             } else if (results.docs.isEmpty) {
               //= for some reason user was registered but no data in dvc. Treat like new user.
-              // add new vid to user
+              // TODO add new vid to user
               result = 809;
             } else {
               //= multiple entry. Found demo or dev account
@@ -4526,7 +4511,7 @@ Future getFirestoreUserData(
     // var cUser = state['#FIREBASE_USER']; //= get current firebase user data
     // result =
     //     getNewVid(cUser.uid, user.displayName, user.email); //= return result
-    // add new vid to user
+    // TODO add new vid to user
     if (invitationStatus > 1) {
       result = invitationStatus; // Something wrong with invitation
     } else {
@@ -4774,7 +4759,7 @@ Future serverSetup() async {
   trace(debugCount);
   FirebaseStorage storageBucket = FirebaseStorage.instanceFor(
     bucket: 'gs://otq-01-ase2',
-  ); // move to procedure after sign in
+  ); //= TODO move to procedure after sign in
   debugCount = 216;
   trace(debugCount);
   transactionStore.dispatch(
@@ -4977,10 +4962,40 @@ void saveSend(
       row[4] = '';
     } // end (component['type'].toString().trim().toLowerCase() == 'checker')
 
+    // visibleWhen (dev spec §3.3): a position whose ONLY declaring widgets are
+    // currently hidden must not contribute its value to the record.
+    //
+    // BLANK the slot to '', never skip it. Skipping would leave maxPosition
+    // mis-sized, and `row` is sublist'ed to `maxPosition + 15` a few lines
+    // below — the array shape must not move. Blanking preserves positional
+    // alignment for every later reader.
+    //
+    // This ONE guard covers BOTH token families, verified end to end:
+    //   * {{POS(n)}} — replacePlaceholders reads `ref`, built from this same
+    //     `row` right after the loop.
+    //   * ◁N▷ — saveSendRows serialises row[15..] into the history content and
+    //     resolveValueTokens (table_repository.dart) resolves ◁N▷ off that at
+    //     SYNC time as ref[1][N-1].
+    //
+    // A position that no widget declares conditional is never in the set, so a
+    // page without `visibleWhen` submits byte-for-byte as before.
+    final Set<int> vwHiddenPositions = hiddenVisibleWhenPositions(
+      (screenUIComponent is Map && screenUIComponent[scrName] is Map)
+          ? screenUIComponent[scrName]['children']
+          : null,
+      visibleWhenReader(txfController[scrName]),
+      scrName: scrName,
+    );
     txfController[scrName]!.forEach((k, input) {
       try {
         if (1 <= input.position && input.position <= 100) {
-          if (input.table != null) {
+          // visibleWhen: the record slot and this static-table write are two
+          // halves of ONE widget's submit contribution, so hiding must
+          // suppress both (spec 3.3 "Nilai widget tersembunyi TIDAK ikut").
+          // Without this condition a hidden MULTI_SCAN blanks its slot below
+          // but still writes its scanned-codes static table.
+          if (input.table != null &&
+              !vwHiddenPositions.contains(input.position)) {
             // if table is not null or empty
             input.table!.forEach((documentName, content) {
               String finalName = replacePlaceHoldersFromTxfController(
@@ -4994,33 +5009,29 @@ void saveSend(
           maxPosition = input.position > maxPosition
               ? input.position
               : maxPosition;
+          // visibleWhen: hidden -> submit '' (see the note above the loop).
+          // The duplicated selection expression is hoisted so the guard cannot
+          // be applied to one branch and forgotten on the other.
+          final String cellValue = vwHiddenPositions.contains(input.position)
+              ? ''
+              : (input.finalData == emptyString
+                    ? (stringCleanUp(input.controller.text) ?? '').replaceAll(
+                        "\n",
+                        "\\n",
+                      )
+                    : (stringCleanUp(input.finalData) ?? '').replaceAll(
+                        "\n",
+                        "\\n",
+                      ));
           if (pos >= row.length) {
             int dif = pos - row.length;
             for (var ii = 0; ii < dif; ii++) {
               row.add('');
             }
-            row.add(
-              input.finalData == emptyString
-                  ? (stringCleanUp(input.controller.text) ?? "").replaceAll(
-                      "\n",
-                      "\\n",
-                    )
-                  : (stringCleanUp(input.finalData) ?? '').replaceAll(
-                      "\n",
-                      "\\n",
-                    ),
-            ); // get data from txf controller
+            row.add(cellValue); // get data from txf controller
             int d = 1;
           } else {
-            row[pos] = input.finalData == emptyString
-                ? (stringCleanUp(input.controller.text) ?? '').replaceAll(
-                    "\n",
-                    "\\n",
-                  )
-                : (stringCleanUp(input.finalData) ?? '').replaceAll(
-                    "\n",
-                    "\\n",
-                  ); // get data from txf controller
+            row[pos] = cellValue; // get data from txf controller
           } // end if if (pos >= row.length)
         } // end if input.position > 0
       } catch (eEach) {
@@ -5529,7 +5540,9 @@ FunctionBody getFunctionBody(String ssid, var range) {
     "clt": defaultCluster,
     "job": job,
   };
-  var url = "https://$autsorzFunctionDomain${functionName['readSS']}";
+  var url = readSSUrl.startsWith('https://')
+      ? readSSUrl
+      : "https://$autsorzFunctionDomain${functionName['readSS']}";
   FunctionBody result = FunctionBody(url, qParams);
   return result;
   //  return http.post(url, body: qParams);
@@ -5773,7 +5786,7 @@ List totp(String keycode, int len, int sec) {
   // This is algorithm that used in Google Authenticator with len = 6
   var retArray = [];
   var m1 = (DateTime.now().millisecondsSinceEpoch / (sec * 1000)).floor();
-  m1 = 54427511; // delete this for production
+  m1 = 54427511; // TODO delete this for production
   Uint8List k3 = hexToUInt8(base32ToHex(keycode.replaceAll(" ", "")));
   final hmac1 = uInt8ToHex(
     hmacSha1(k3, hexToUInt8(m1.toRadixString(16).padLeft(16, "0"))),

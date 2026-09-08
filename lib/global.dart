@@ -214,6 +214,7 @@ import 'widget/driver_home_support.dart';
   0.9.104.01 (260814) OO : add otqPdfViewer remote and local pdf, fix crashlytics, multiclause search table, relative path doc_viewer, doc_download, avoid_relative_lib_imports false
   0.9.105.01 (260901) OO : widget ocr, driver pick location, whatsapp send, timeline, scan qr schema 3, refresh cache, add dSYM to firebase crashlytics
   0.9.106.01 (260902) OO : badge count in menu, schema qr v3
+  0.9.107.01 (260908) OO : fix refresh, widget water meter
 */
 
 // ========= Constants ==========================
@@ -224,7 +225,7 @@ const clearHistory =
 int debugTime = launchTime;
 String defaultCountry = '62'; // indonesia, change this later
 int debugCount = 0;
-const String version = '0.9.106';
+const String version = '0.9.107';
 const String subVersion = '.01';
 // String versionShown = ''; // use this for production
 const retentionDefault = 30160; // default retention period in seconds = 35 days
@@ -463,6 +464,22 @@ String mobile = 'Mobile';
 String theme = 'ThemeAgenia';
 String locale = 'Locale';
 String locRange = empty;
+
+/// Full URL of the readSS endpoint.
+///
+/// A constant, because the cutover is controlled by a staged store rollout and
+/// not by a server switch (spec §2.1). Deliberately a variable rather than a
+/// literal inside getFunctionBody: if `/appSettings3` ever ships a `readSSUrl`
+/// field (spec §3), one assignment line is enough and getFunctionBody stays
+/// untouched. Do NOT fill it from `/appSettings3` today — the field does not
+/// exist, so an unconditional assignment would blank this constant at boot,
+/// before the first readSS call, and silently revert the cutover.
+///
+/// Empty (or any value not starting with `https://`) falls back to the legacy
+/// URL: `autsorzFunctionDomain` + `functionName['readSS']`. Clearing it is the
+/// release-based rollback.
+String readSSUrl =
+    'https://asia-southeast1-authenium-prod1.cloudfunctions.net/readSSg';
 String fsCollection = empty;
 String fsMsgCollection = empty;
 String firestoreEventCollection = empty;

@@ -8,7 +8,12 @@ import 'global2.dart';
 String getInitialValue(String scrName, dynamic component) {
   String result = "";
 
-  if (component['currentValue'].toString().trim().isNotEmpty) {
+  // `currentValue` is ABSENT from many page rows (e.g. TABLE_PICKER /
+  // NUMBER on vertikaTeknoLokaciptaAssignExtraWork). `null.toString()` is
+  // the 4-char string "null", which passed this gate and fell through to
+  // the generic branch below, seeding the literal "null" into finalData --
+  // rendered as a picked chip / a visible "null" label. Null-coalesce first.
+  if ((component['currentValue'] ?? '').toString().trim().isNotEmpty) {
     String tip = (component['type'] ?? emptyString).toString().toLowerCase();
     if (tip == 'get_images' || tip == 'getimage') {
       result = getImageInitValue(scrName, component);

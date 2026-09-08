@@ -208,6 +208,13 @@ class StickyBarRenderer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Obx(() {
+      // Obx zero-observable guard (six shipped "improper use of a GetX"
+      // fatals). _buildIncident is a pass-through and reads no observable at
+      // all, so a screen carrying only incident bars would otherwise leave
+      // this closure with zero registered dependencies. currentRow is the
+      // observable both bar types repaint on; the inner FtzRowOfButton2 Obx
+      // does the per-child work.
+      ItemCardDetail.currentRow.value;
       List<Widget> bars = [];
       for (final config in configs) {
         Widget bar;
@@ -405,17 +412,21 @@ class StickyBarRenderer extends StatelessWidget {
   }
 
   Widget _buildIncident(StickyBarConfig config) {
-    List<dynamic> row = ItemCardDetail.currentRow.value;
-    if (row.isEmpty) return const SizedBox.shrink();
+    // Pass-through. The child `search` filter moved into FtzRowOfButton2.build
+    // (rbt_visibility.dart) so it runs for EVERY RBT, not just sticky ones --
+    // that was the whole bug. Same predicate, same evaluateRbtSearch for
+    // integer-keyed clauses, so the 45 live sticky children are unaffected.
+    //
+    // The old `if (row.isEmpty) return const SizedBox.shrink();` is gone on
+    // purpose: it blanked the ENTIRE bar on any page without an
+    // ITEM_CARD_DETAIL, which is the fate/MeterRead "sticky renders an error"
+    // class (spec §11 row 4). Zero of the 45 live sticky children carry an
+    // empty `search`, so nothing that used to render stops rendering.
+    //
+    // The deep copy stays: buildButtonList MUTATES children
+    // (`children[i]['type'] = 'rbt'`), and the stored config must not be
+    // mutated.
     final copy = _deepCopy(config.component) as Map<dynamic, dynamic>;
-    List<dynamic> allChildren = copy['children'] as List<dynamic>? ?? [];
-    List<dynamic> visible = allChildren.where((child) {
-      String cs = (child['search'] ?? '').toString().trim();
-      if (cs.isEmpty) return true;
-      return evaluateRbtSearch(cs, row);
-    }).toList();
-    if (visible.isEmpty) return const SizedBox.shrink();
-    copy['children'] = visible;
     return FtzRowOfButton2(
       key: config.widgetKey,
       component: copy,

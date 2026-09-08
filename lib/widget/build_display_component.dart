@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
+import 'package:get/get.dart' show GetBuilder;
 
 import '../api.dart';
 import '../crypto/auth_crypto.dart';
@@ -37,6 +38,7 @@ import 'otq_txf_2.dart';
 import 'progress_bar.dart';
 import 'tasklist.dart';
 import 'time_presence.dart';
+import 'visible_when.dart';
 import 'worker_card_detail_keyed.dart';
 
 Widget buildDisplayComponent(
@@ -2363,5 +2365,50 @@ Widget buildDisplayComponent(
   //   }
   //   break; // end of case pin
 
-  return result;
+  // ── visibleWhen (dev spec §3.3) ────────────────────────────────────────
+  //
+  // ONE insertion point for EVERY component type, at the function's only
+  // FUNCTION-LEVEL return. Measured, so a reviewer cannot falsify a true
+  // claim: this file holds 22 `return` statements, but
+  // `grep -nE '^ {0,8}return( |;)'` finds exactly ONE — the other 21 sit at
+  // 10-space indent inside `Builder(builder:)` closures and return that
+  // builder's child, never this function's result.
+  //
+  // Not a dispatch branch: `visibleWhen` is a cross-cutting field, not a
+  // component type.
+  //
+  // FAST PATH FIRST, and it is mandatory. With no `visibleWhen` the original
+  // widget is returned completely unwrapped — no GetBuilder, no extra element,
+  // no extra rebuild. That is what delivers acceptance §9 item 1 ("config lama
+  // -> nol perubahan perilaku"). `grep -rn visibleWhen lib/ test/ docs/` was
+  // 0 hits when this landed, so today EVERY component takes this path.
+  //
+  // Reactive by necessity, not by taste: buildPage caches built widgets in
+  // linkElement[scrName] and reloadPage re-renders THE SAME instances, so a
+  // form change never re-runs this function. The GetBuilder is the only thing
+  // that can re-evaluate the condition. GetBuilder (not Obx) also sidesteps
+  // the "improper use of a GetX" zero-observable fatal entirely.
+  //
+  // Wider than spec §8's "v1 top-level page only": buildPage is also what
+  // builds DO_BOTTOM_SHEET / DO_DIALOG / DisplayList children, so those get the
+  // capability too. Accepted as a superset with zero regression risk, because
+  // no config anywhere uses the key yet.
+  //
+  // Renders nothing when hidden. It does NOT defer the side effects that ran
+  // ABOVE this line (txfControllerCheck, the getInitialValue seed,
+  // ApproverStickyBar.register) — see the plan §4.4.
+  final String rawVisibleWhen = visibleWhenOf(component);
+  if (rawVisibleWhen.isEmpty) return result;
+  final Widget conditionalChild = result;
+  return GetBuilder<WidgetUpdateController>(
+    id: InputController.kVisibleWhenRebuildId,
+    builder: (_) =>
+        visibleWhenVisible(
+          rawVisibleWhen,
+          visibleWhenReader(txfController[scrName]),
+          scrName: scrName,
+        )
+        ? conditionalChild
+        : const SizedBox.shrink(),
+  );
 } // end of buildDisplayComponent

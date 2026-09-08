@@ -38,7 +38,7 @@ class MainBloc extends Bloc<MainEvent, MainState> {
       yield* _mapNewPinSubmitToState(event.pin);
     } else if (event is WrongPin) {
       yield* _mapWrongPinToState(event.message1, event.message2);
-      //    } else if (event is NeedPinHash) {  // uncomment this line and fix pinput
+      //    } else if (event is NeedPinHash) {  // TODO uncomment this line and fix pinput
       //      yield* _mapNeedPinHashState();
     } else if (event is ResetAll) {
       yield* _mapResetAllToState();
@@ -89,13 +89,13 @@ class MainBloc extends Bloc<MainEvent, MainState> {
       ); // store pinHash in secure & persistent storage
       // put in LIF
       storage.read(key: 'myLif').then((lifKey) {
-        // call something like writeSSA1 to write to spreadhseet
+        // TODO call something like writeSSA1 to write to spreadhseet
         // writeToSheetRange(lifKey!, 'Settings!G10:G10', [
         //   [theHash]
         // ]);
       });
-      // put pin hash in firestore
-      // put pin hash in blockchain
+      // TODO put pin hash in firestore
+      // TODO put pin hash in blockchain
     });
     transactionStore.dispatch(
       UpdateScreenTxAction(ScreenTransaction({'#NEED_PINHASH': false})),
@@ -116,7 +116,7 @@ class MainBloc extends Bloc<MainEvent, MainState> {
     String data,
   ) async* {
     //    var storeHash = await storage.read(key: 'pinHash');
-    // cut & concat $argon2id$v=19$m=65536,t=2,p=1$
+    // TODO cut & concat $argon2id$v=19$m=65536,t=2,p=1$
     //    var verified = await argon2VerifyPassword(pin, storeHash);
     var verified = true;
     if (verified) {
@@ -126,9 +126,9 @@ class MainBloc extends Bloc<MainEvent, MainState> {
         ),
       ); // set state #NEXTROUTE route that will be displayed after waitScreen
       // saveSendRecord(scrName);
-      // find a way to record pin here
+      // TODO find a way to record pin here
       yield MainState.empty();
-      // send message here
+      // TODO send message here
       //      var mTo = [777250221000, 777250221003, 922250226073];
       //      var mDisplay = "This is my message.";
       //      var mData = {"action": "GOTO", "route": "Profile"};
@@ -140,6 +140,9 @@ class MainBloc extends Bloc<MainEvent, MainState> {
       var pgName = home;
       routeStack.push(pgName);
       gotoRoute(pgName);
+    } else {
+      var message = errorMid.toString(); // TODO search in textList
+      yield MainState.wrongPin('Error', message);
     }
   }
 
@@ -236,7 +239,7 @@ class MainBloc extends Bloc<MainEvent, MainState> {
         }
     }
     int duration = 2; // duration before switch back to contScan state
-    // implement duration in scanFeedBack
+    // TODO implement duration in scanFeedBack
     if (feedBackAction > 0) {
       saveSendSingle(scrName, position, rawResult);
     }
