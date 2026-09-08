@@ -12,11 +12,20 @@ platform :android do
       key_file = File.expand_path("google-play-key.json", __dir__)
     end
     
-    UI.message("Uploading AAB file: #{aab_path} for package: #{package_name} to Google Play Internal Track using key: #{key_file}")
+    # Copy AAB to /tmp to avoid Google Drive cloud sync locks or slow I/O buffering during upload
+    local_aab = "/tmp/#{File.basename(aab_path)}"
+    if File.exist?(aab_path) && aab_path != local_aab
+      FileUtils.cp(aab_path, local_aab)
+      upload_file = local_aab
+    else
+      upload_file = aab_path
+    end
+
+    UI.message("Uploading AAB file: #{upload_file} for package: #{package_name} to Google Play Internal Track using key: #{key_file}")
     
     max_retries = 3
     attempt = 0
-    current_aab = aab_path
+    current_aab = upload_file
 
     begin
       attempt += 1
@@ -61,7 +70,10 @@ platform :android do
             # Rebuild AAB
             sh("unset GEM_HOME GEM_PATH RUBYLIB; cd ../.. && flutter build appbundle --release")
             
-            current_aab = File.expand_path("../../build/app/outputs/bundle/release/app-release.aab", __dir__)
+            new_built_aab = File.expand_path("../../build/app/outputs/bundle/release/app-release.aab", __dir__)
+            local_new_aab = "/tmp/#{File.basename(aab_path).sub(/_\d+\.aab$/, "_#{new_build}.aab")}"
+            FileUtils.cp(new_built_aab, local_new_aab)
+            current_aab = local_new_aab
             
             UI.message("Retrying Google Play upload with newly built AAB: #{current_aab}")
             retry
@@ -71,9 +83,9 @@ platform :android do
         else
           raise ex
         end
-      elsif (err_msg.include?("execution expired") || err_msg.include?("timeout") || err_msg.include?("Timeout") || err_msg.include?("Connection reset") || err_msg.include?("EOFError")) && attempt < max_retries
-        UI.important("⚠️ Google Play upload network timeout / connection expired on attempt #{attempt}/#{max_retries}. Waiting 10s and retrying...")
-        sleep(10)
+      elsif attempt < max_retries
+        UI.important("⚠️ Google Play upload failed with error: #{err_msg.strip} (attempt #{attempt}/#{max_retries}). Retrying in 15 seconds...")
+        sleep(15)
         retry
       else
         raise ex
