@@ -470,6 +470,22 @@ String mobile = 'Mobile';
 String theme = 'ThemeAgenia';
 String locale = 'Locale';
 String locRange = empty;
+
+/// Full URL of the readSS endpoint.
+///
+/// A constant, because the cutover is controlled by a staged store rollout and
+/// not by a server switch (spec §2.1). Deliberately a variable rather than a
+/// literal inside getFunctionBody: if `/appSettings3` ever ships a `readSSUrl`
+/// field (spec §3), one assignment line is enough and getFunctionBody stays
+/// untouched. Do NOT fill it from `/appSettings3` today — the field does not
+/// exist, so an unconditional assignment would blank this constant at boot,
+/// before the first readSS call, and silently revert the cutover.
+///
+/// Empty (or any value not starting with `https://`) falls back to the legacy
+/// URL: `autsorzFunctionDomain` + `functionName['readSS']`. Clearing it is the
+/// release-based rollback.
+String readSSUrl =
+    'https://asia-southeast1-authenium-prod1.cloudfunctions.net/readSSg';
 String fsCollection = empty;
 String fsMsgCollection = empty;
 String firestoreEventCollection = empty;

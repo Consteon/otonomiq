@@ -35,7 +35,6 @@ dependencies:
     sdk: flutter # Added for localization
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^1.0.9
   image_picker: ^1.2.2
   file_picker: ^11.0.2
   geolocator: ^14.0.2
@@ -87,7 +86,6 @@ dependencies:
   redux_dev_tools: ^0.7.0
   fast_contacts: ^5.0.1
   flutter_widget_from_html: ^0.17.2
-  image_watermark: ^0.1.0
   path_provider: ^2.0.15
   sign_in_with_apple: ^8.1.0
   #  barcode_scan2: ^4.3.3

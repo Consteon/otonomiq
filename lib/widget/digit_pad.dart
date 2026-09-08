@@ -12,18 +12,28 @@
 // caught twice, more cheaply, by the backward and spike verdicts. Do not
 // resurrect it from memory.
 //
-// OCR was re-tasked to check IDENTITY instead — the one thing the two numeric
-// verdicts are structurally blind to is an officer standing at the WRONG METER,
-// where the number is right but belongs to another unit. `serialField` names a
-// field on the `meter` doc (`msn`); ML Kit reads the photo in the
-// `photoPosition` slot and looks for that serial inside it. Blank serialField,
-// blank doc value, or no usable photo -> ZERO ML Kit calls and a silent screen.
+// The identity check survived that cancellation but its SOURCE did not.
+// digit-pad-deltamax-serial (2026-09-04) deleted the whole in-widget OCR path:
+// the "Foto Muka Meter" widget was removed from MeterRead, so `photoPosition`
+// pointed at a slot with no widget on the page at all. The serial now comes
+// from `serialSourcePosition` — an ordinary form slot (a TXF filled by
+// OCR_CAPTURE and then corrected by a human), read SYNCHRONOUSLY inside
+// _content. There is no ML Kit, no async seam, no static verdict memo and no
+// in-flight key in this widget any more. Do not resurrect them: spec §10
+// "Not Doing" item 1 names the OCR-inside-digitPad path a corpse.
 //
-// `ocrPattern` is RETIRED (§3.2). It was only ever §7.8's, this widget never
-// read it, and SduiSpec ignores keys nobody asks for — so a sheet that still
-// carries the column is ignored silently with no code doing the ignoring.
-// `text` segment 6 changed MEANING in place ({ocr} -> {serial}); segments 0-14
-// did not shift, so older config still resolves correctly.
+// `photoPosition` and `ocrPattern` are both RETIRED and read by NOBODY.
+// SduiSpec only reads keys it is asked for, so a sheet that still ships either
+// column (spec §6 leaves them in the shared template) is ignored silently with
+// no code doing the ignoring.
+//
+// `text` grew two segments at the TAIL — 15 (spike with no avg) and 16 (serial
+// missing). Segments 0-14 did not shift, so older config still resolves.
+//
+// ★ m³ BASIS (2026-09-04). The stand is stored raw; `deltaMax` is authored in
+// m³ and `avgField` is authored in m³/month, so the verdict divides value and
+// prev by 10^red BEFORE comparing, and every token renders m³. This pays off
+// the "finest unit" debt recorded in docs/widgets/digit_pad.md.
 //
 // ── Deliberate design points ────────────────────────────────────────────────
 //  * NO TextField / TextFormField anywhere in this tree. That is the only way
@@ -53,7 +63,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart'; // SchedulerPhase
 import 'package:get/get.dart';
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
 import '../firestore_repository/table_repository.dart'; // subscribeToMapCollection
 import '../global.dart'; // mapTableContent, screenUIComponent, devPrint
@@ -71,55 +80,6 @@ import 'driver_home_support.dart'; // resolveAppVid, filterDriverHomeDocs
 // to keep in sync with clearData.
 import 'ocr_capture_support.dart'; // ocrWriteToPosition
 import 'panel_card_support.dart'; // TablePath, parseTablePath
-
-/// Test seam: ML Kit cannot run under `flutter test` (the plugin is a
-/// MethodChannel and throws MissingPluginException there, as
-/// lib/dev/ocr_spike_main.dart's header already records), so widget tests
-/// replace this with a counting fake. That is also what makes acceptance §11's
-/// "nol ML Kit dipanggil" a countable assertion instead of a claim.
-Future<String> Function(String path) digitPadOcrRead = _digitPadMlKitRead;
-
-/// Spec §3.1 step 1: OCR the whole photo and take ALL recognised text.
-///
-/// `RecognizedText.text` is the plugin's own "string containing all the text
-/// identified in an image", so there is nothing to flatten — ocr_capture's
-/// `ocrFlattenElements` answers a different question (per-element boxes) and is
-/// deliberately not reused.
-///
-/// Throws are NOT caught here: _applySerial owns the fail-open decision and
-/// needs to see the cause to devPrint it. The `finally` only releases the
-/// native recogniser.
-Future<String> _digitPadMlKitRead(String path) async {
-  TextRecognizer? recognizer;
-  try {
-    recognizer = TextRecognizer(script: TextRecognitionScript.latin);
-    final RecognizedText out =
-        await recognizer.processImage(InputImage.fromFilePath(path));
-    return out.text;
-  } finally {
-    try {
-      await recognizer?.close();
-    } catch (e) {
-      devPrint('DigitPad ocr close: $e');
-    }
-  }
-}
-
-/// One position's serial verdict: the key it was computed from and its answer.
-///
-/// ONE object rather than two parallel maps, deliberately: DigitPadState's
-/// _memoRecord writes both fields together and is the memo's ONLY writer, so
-/// "the verdict always belongs to the key next to it" is structural instead of
-/// a rule someone has to keep.
-///
-/// ★ TERMINAL. An instance means an ANSWER, never a pass in flight: a
-/// non-empty [ocrKey] always has a real [match] beside it. An entry carrying a
-/// key with no answer is exactly what made the check unrepeatable in r2 (W4) —
-/// what is in flight is tracked per-State, never here.
-class _DigitPadSerialMemo {
-  String ocrKey = '';
-  bool? match;
-}
 
 class DigitPad extends StatefulWidget {
   const DigitPad({
@@ -153,7 +113,7 @@ class DigitPad extends StatefulWidget {
   /// with no extra hook.
   ///
   /// On the WIDGET class rather than the State class because
-  /// screen_session_entries.dart reaches the two statics below through
+  /// screen_session_entries.dart reaches the static below through
   /// `DigitPad.` and Dart does not forward statics from a State.
   static final Map<String, Map<int, String>> _sheetRaised =
       <String, Map<int, String>>{};
@@ -167,37 +127,10 @@ class DigitPad extends StatefulWidget {
       DigitPad.clearSheetRaised,
       rebuild: RebuildPolicy.none,
     );
-    // ensure() is idempotent by NAME, so registering both from the same call
-    // site costs one map lookup after the first pad on the first screen.
-    ScreenSession.ensure(
-      'DigitPad.serialMemo',
-      DigitPad.clearSerialMemo,
-      rebuild: RebuildPolicy.none,
-    );
   }
 
   static void clearSheetRaised(String scrName) {
     _sheetRaised.remove(scrName);
-  }
-
-  /// The serial verdict already computed for a position: its
-  /// `'<photo slot value>|<doc serial>'` key and the answer.
-  ///
-  /// ★ static for the SAME reason _sheetRaised is — and it was a defect that it
-  /// was not (r1 W2). AnyPage's ListView.builder destroys DigitPadState on
-  /// scroll, so while this memo lived on the State, scrolling the pad away and
-  /// back (a) re-ran ML Kit on every return, and (b) handed _applySheet an
-  /// empty sheet key, whose re-arm branch DELETED the latch and let the
-  /// dismissed sheet rise again unprompted — §4c rule 3, from the other side.
-  ///
-  /// Same policies as _sheetRaised: nav:screen (a different meter is a
-  /// different verdict) plus rebuild:none (a background readSettings refresh
-  /// must not re-run the OCR).
-  static final Map<String, Map<int, _DigitPadSerialMemo>> _serialMemo =
-      <String, Map<int, _DigitPadSerialMemo>>{};
-
-  static void clearSerialMemo(String scrName) {
-    _serialMemo.remove(scrName);
   }
 
   @override
@@ -243,13 +176,44 @@ class DigitPadState extends State<DigitPad> {
   late final num _spikeMultiplier;
   late final bool _blockOnBackward;
 
-  // ── meter-serial-verify ──
-  /// `getImages` slot whose photo the serial check reads. NULLED when it names
-  /// this pad's own position — see the assignment in initState.
-  late final int? _photoPosition;
+  /// Absolute usage ceiling in **m³** (`deltaMax`). `0` = the branch is off,
+  /// which is every value a blank / `0` / negative / unparseable cell can
+  /// produce, and is byte-for-byte the pre-2026-09-04 behaviour.
+  ///
+  /// ★ Since meter-block-alias-dmx (2026-09-07) this is the FALLBACK, not the
+  /// ceiling. The `meter` doc's own [_deltaMaxField] wins whenever it is
+  /// present and positive — see `deltaMaxEff` in _content, which is the value
+  /// both the verdict and the {deltaMax} token actually use.
+  late final num _deltaMax;
+
+  /// Name of the PER-POINT ceiling field on the `meter` doc (`dmx`), in m³.
+  ///
+  /// ★★ There is deliberately NO "blank ⇒ per-doc override off" state, and an
+  /// `isNotEmpty` guard on this string would be DEAD CODE that is always true.
+  /// SduiSpec.str is BLANK-AWARE (lib/sdui_spec.dart: `if (raw.trim().isEmpty)
+  /// return def`), so an absent key, a blank cell and a whitespace-only cell
+  /// ALL yield 'dmx'. That is why this field does not carry the
+  /// `.isNotEmpty` guard its neighbours _compareField / _avgField /
+  /// _serialField carry: those are read with NO default, this one is not.
+  ///
+  /// The off-switch is the DOC, not the config. A `meter` doc carrying no
+  /// `dmx` reads null and [_deltaMax] governs, which is byte-for-byte the
+  /// pre-2026-09-07 behaviour and is exactly the "0/absen = pakai default
+  /// config" the spec asks for. Do not "fix" this back into a guard.
+  late final String _deltaMaxField;
+
+  // ── serial identity check (source: a form slot, since 2026-09-04) ──
+  /// Form slot holding the serial the officer has already seen and corrected
+  /// (`serialSourcePosition`; the live consumer is a TXF at 16 fed by
+  /// OCR_CAPTURE `ocrTargets:"16"`). NULLED when it names this pad's own
+  /// position — see the assignment in initState. `null` ⇒ the whole serial
+  /// check is off, which is what MeterSurvey relies on.
+  late final int? _serialSourcePosition;
 
   /// Name of the serial field on the `meter` doc. Blank = the whole serial
-  /// check is dead, and ZERO ML Kit calls are made (acceptance §11).
+  /// check is dead, ZERO warnings and ZERO gate (acceptance §11). Nothing in
+  /// this widget calls ML Kit any more — the whole OCR seam was deleted on
+  /// 2026-09-04 and the serial now comes from a form slot.
   late final String _serialField;
 
   /// `TRUE` = a serial mismatch kills the page's save button.
@@ -286,6 +250,17 @@ class DigitPadState extends State<DigitPad> {
   bool _gateWanted = false;
   bool _gatePending = false;
 
+  /// One-shot: the "nothing to gate" log fires once per State, not once per
+  /// build. The gate re-asserts every build by design and this pad rebuilds on
+  /// every keystroke in the serial slot, so an unlatched devPrint would bury
+  /// the debug console.
+  bool _gateVoidLogged = false;
+
+  /// Same one-shot rule for "serialSourcePosition names a slot no component on
+  /// this page owns" — a config error that would otherwise log on every
+  /// keystroke.
+  bool _serialSlotVoidLogged = false;
+
   @override
   void initState() {
     super.initState();
@@ -314,6 +289,17 @@ class DigitPadState extends State<DigitPad> {
     _compareField = _spec.str('compareField');
     _avgField = _spec.str('avgField');
     _spikeMultiplier = num.tryParse(_spec.str('spikeMultiplier')) ?? 4;
+    // Read exactly the way _spikeMultiplier is: the live sheet sends
+    // `"deltaMax":100` as a JSON NUMBER, SduiSpec.str stringifies it, and
+    // num.tryParse handles "100", "100.5" and a blank cell alike. Every failure
+    // mode collapses to 0, and digitPadVerdict guards on `> 0`.
+    _deltaMax = num.tryParse(_spec.str('deltaMax')) ?? 0;
+    // Default 'dmx' (interview D1): the feature works on already-installed
+    // builds with ZERO change to the page JSON — no deploy coupling — while a
+    // builder can still rename the doc field. A blank cell can never reach
+    // here; see the field's doc comment for why, and why there is no
+    // `.isNotEmpty` guard anywhere downstream of it.
+    _deltaMaxField = _spec.str('deltaMaxField', 'dmx');
     _blockOnBackward = _spec.str('blockOnBackward').toUpperCase() == 'TRUE';
     _serialField = _spec.str('serialField');
     _blockOnSerialMismatch =
@@ -323,10 +309,12 @@ class DigitPadState extends State<DigitPad> {
     // self-notifying loop rev d removed the digitsPosition listener for. Same
     // doctrine as _writeSlot, which refuses our own position for its own
     // reasons. `_position` is already assigned above, so this comparison is
-    // safe here and nowhere earlier.
-    final int? photoSlot = digitPadParsePosition(_spec.str('photoPosition'));
-    _photoPosition =
-        (photoSlot != null && photoSlot == _position) ? null : photoSlot;
+    // safe here and nowhere earlier. (`photoPosition` carried this same guard
+    // for this same reason before it was retired.)
+    final int? serialSlot =
+        digitPadParsePosition(_spec.str('serialSourcePosition'));
+    _serialSourcePosition =
+        (serialSlot != null && serialSlot == _position) ? null : serialSlot;
     DigitPad.registerScreenSession();
     _subscribe();
   }
@@ -387,85 +375,93 @@ class DigitPadState extends State<DigitPad> {
   // mapTableContent (the meter doc landing), the GetBuilder id
   // '$scrName-$position' (clearData and isEnabled writes), and setState (taps).
 
-  // ── photoPosition IS an input slot, and it DOES need a listener ───────────
+  // ── serialSourcePosition IS an input slot, and it DOES need a listener ───
   //
   // This is not a walk-back of the paragraph above. rev d removed a listener on
   // digitsPosition — a slot this widget WRITES, where a listener fires on our
-  // own post-frame write and setStates on ourselves. photoPosition is the
-  // opposite: an INPUT slot owned by otq_get_images_2, which this widget never
-  // writes. No loop is possible.
+  // own post-frame write and setStates on ourselves. The serial slot is the
+  // opposite: an INPUT slot owned by a TXF (filled by OCR_CAPTURE and corrected
+  // by hand), which this widget never writes. No loop is possible, and the one
+  // config shape that could recreate it — serialSourcePosition equal to our own
+  // position — is refused in initState.
   //
-  // It is REQUIRED because none of the three rebuild sources above can see a
-  // photo being taken: otq_get_images_2 repaints only its OWN position, and our
-  // GetBuilder id is our own. Without this listener the officer takes the photo
-  // and nothing here ever runs again — the exact silent-nothing shape the
-  // digitsPosition/SELECTABLE_BTN field failure had (§12).
+  // It is REQUIRED because none of this widget's three rebuild sources can see
+  // that slot change: ocrWriteToPosition and otq_txf_2 both repaint only their
+  // OWN position id, and our GetBuilder id is our own. Without this listener
+  // the officer captures the serial and nothing here ever runs again — the
+  // exact silent-nothing shape the digitsPosition/SELECTABLE_BTN field failure
+  // had (§12).
   //
   // Attached from the _scheduleSide POST-FRAME callback, never from initState:
-  // the getImages component may sit anywhere in the page's `children`, so its
+  // the source component may sit anywhere in the page's `children`, so its
   // InputController may not exist yet while we are building. By the end of the
   // first frame every component on the page has been built, so one post-frame
   // pass is enough — and re-checking each build costs one map lookup and
   // survives buildPage(clear:true) re-minting txfController[scrName].
+  //
+  // ★ ocrWriteToPosition assigns `controller.text` BEFORE `finalData`
+  // (ocr_capture_support.dart), so the notification fires one statement early.
+  // Harmless and deliberately not "fixed": _onSerialChanged only marks this
+  // element dirty, and the rebuild that reads finalData happens later in the
+  // frame, by which time both halves are written.
 
   /// The controller we are currently listening to, held by REFERENCE.
   ///
   /// ★ Held, never re-looked-up at detach time: buildPage(clear:true) re-mints
   /// txfController[scrName], so the map entry at dispose() time can be a
   /// DIFFERENT controller and the listener would survive on the old one.
-  TextEditingController? _photoCtl;
-  bool _photoDirty = false;
+  TextEditingController? _serialCtl;
+  bool _serialDirty = false;
 
-  void _ensurePhotoWatch() {
-    final int? photoPosition = _photoPosition;
-    // Feature off, or nothing to watch: attach nothing at all. Acceptance §11
-    // measures "nol delay tambahan" for serialField:"" — a listener that never
-    // fires would still be a thing to keep in sync with dispose.
-    if (photoPosition == null || _serialField.isEmpty) return;
-    final InputController? ic = txfController[widget.scrName]?[photoPosition];
+  void _ensureSerialWatch() {
+    final int? slot = _serialSourcePosition;
+    // Feature off, or nothing to watch: attach nothing at all. A listener that
+    // never fires would still be a thing to keep in sync with dispose.
+    if (slot == null || _serialField.isEmpty) return;
+    final InputController? ic = txfController[widget.scrName]?[slot];
     // Slot not minted yet: the next build's post-frame tries again. Do NOT
     // txfControllerCheck it into existence here — buildDisplayComponent owns
     // the seeding of initialValue/isEnabled for that slot and creating it early
     // would race that.
     if (ic == null) return;
-    if (identical(_photoCtl, ic.controller)) return;
-    _detachPhotoWatch();
-    _photoCtl = ic.controller;
-    ic.controller.addListener(_onPhotoChanged);
+    if (identical(_serialCtl, ic.controller)) return;
+    _detachSerialWatch();
+    _serialCtl = ic.controller;
+    ic.controller.addListener(_onSerialChanged);
   }
 
-  void _detachPhotoWatch() {
-    final TextEditingController? c = _photoCtl;
-    _photoCtl = null;
+  void _detachSerialWatch() {
+    final TextEditingController? c = _serialCtl;
+    _serialCtl = null;
     if (c == null) return;
     try {
       // removeListener is explicitly documented safe on an already-disposed
       // ChangeNotifier ("This method is allowed to be called on disposed
       // instances for usability reasons"), so no liveness check is needed.
-      c.removeListener(_onPhotoChanged);
+      c.removeListener(_onSerialChanged);
     } catch (e) {
-      devPrint('DigitPad photo watch detach: $e');
+      devPrint('DigitPad serial watch detach: $e');
     }
   }
 
-  /// The photo slot changed — rebuild so _content can restage the serial key.
+  /// The serial slot changed — rebuild so _content can re-derive the state.
   ///
-  /// ★ Deferred ONLY during SchedulerPhase.persistentCallbacks. otq_get_images_2
-  /// assigns controller.text from its own initState, which runs inside the
+  /// ★ Deferred ONLY during SchedulerPhase.persistentCallbacks. A source widget
+  /// may assign controller.text from its own initState, which runs inside the
   /// build phase; marking an already-built element dirty there is a "setState()
   /// called during build" assertion. Every other phase is safe, and setState is
   /// what SCHEDULES the frame — addPostFrameCallback only appends to a list and
   /// does not schedule one, so deferring unconditionally would drop the rebuild
-  /// whenever the write arrives at idle (a plain tap callback, which is the
-  /// normal case).
-  void _onPhotoChanged() {
+  /// whenever the write arrives at idle (a plain tap or keystroke callback,
+  /// which is the normal case here).
+  void _onSerialChanged() {
     if (!mounted) return;
     if (WidgetsBinding.instance.schedulerPhase ==
         SchedulerPhase.persistentCallbacks) {
-      if (_photoDirty) return;
-      _photoDirty = true;
+      if (_serialDirty) return;
+      _serialDirty = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _photoDirty = false;
+        _serialDirty = false;
         if (mounted) setState(() {});
       });
       return;
@@ -475,7 +471,7 @@ class DigitPadState extends State<DigitPad> {
 
   @override
   void dispose() {
-    _detachPhotoWatch();
+    _detachSerialWatch();
     super.dispose();
   }
 
@@ -523,7 +519,24 @@ class DigitPadState extends State<DigitPad> {
       );
       // Nothing gateable on this page (e.g. a savesend button with no
       // position). Nothing to record either — the next build re-runs this.
-      if (positions.isEmpty) return;
+      //
+      // ★ Say so ONCE when we actually wanted to block. As of 2026-09-04 the
+      // live MeterRead page ships BOTH savesend children without a `position`
+      // (the second is nested two levels deep inside a `chain`), so
+      // digitPadSaveSendPositions returns [] and every block this widget
+      // raises — backward, unfilled picker, serial — is a silent no-op. That
+      // is a CONFIG gap, not a crash, so it is devPrint and not errorReport;
+      // the fix is one JSON key on the sheet (see the builder note in
+      // docs/widgets/digit_pad.md). ⚠ devPrint is kDebugMode-only, so this is
+      // diagnosable on a debug device and invisible in the field.
+      if (positions.isEmpty) {
+        if (block && !_gateVoidLogged) {
+          _gateVoidLogged = true;
+          devPrint('DigitPad gate: wanted to block "${widget.scrName}" but no '
+              'savesend child carries a position — nothing to disable');
+        }
+        return;
+      }
       final List<String> ids = <String>[];
       for (final int pos in positions) {
         final InputController? ic = txfController[widget.scrName]?[pos];
@@ -567,184 +580,6 @@ class DigitPadState extends State<DigitPad> {
   String _wantSheetKey = '';
   bool _sidePending = false;
 
-  // ── meter-serial-verify: the async seam ──
-  //
-  // _content stays FULLY SYNCHRONOUS — there is deliberately no Future
-  // anywhere in build. The OCR runs in the existing _scheduleSide post-frame
-  // callback and publishes its answer through setState, exactly like the meter
-  // doc landing does through the Obx.
-
-  /// `'<raw photo slot value>|<raw doc serial>'` the verdict below was computed
-  /// from — the key of an ANSWER, never of a read in flight.
-  ///
-  /// ★ This memo IS the "photo replaced ⇒ recompute" rule of spec §7.7: a new
-  /// photo mints a new key, and no stored answer carries it.
-  ///
-  /// ★★ Backed by DigitPad._serialMemo, NOT by a State field (r1 W2). A scroll
-  /// destroys this State; a State-local memo would therefore re-run ML Kit and
-  /// re-raise the dismissed sheet every time the pad came back on screen.
-  ///
-  /// ★★★ TERMINAL ONLY (r2 W4). r2 claimed the key here BEFORE the await and
-  /// wrote the answer after it, so a pass abandoned in between — an unmount, or
-  /// a throw — left a claimed key with no answer, and every later pass then
-  /// returned at the guard below. The serial check, and with
-  /// blockOnSerialMismatch:"TRUE" its gate, went silently dead for that photo
-  /// until a new photo or a navigation. What is in flight now lives in
-  /// [_dispatchedOcrKey], which is per-State and dies with it.
-  String get _ocrKey => _memoRead()?.ocrKey ?? '';
-
-  /// null = never answered, or not applicable. false = the serial was NOT found.
-  ///
-  /// Only honoured while its key still matches — see `serialMismatch` in
-  /// _content, which is what kills a stale verdict in the SAME frame the photo
-  /// changes.
-  ///
-  /// Stored alongside [_ocrKey] in ONE object, so the pair cannot drift apart.
-  bool? get _serialMatch => _memoRead()?.match;
-
-  /// This position's memo, or null when there is none yet.
-  ///
-  /// A null [_position] cannot reach here — build() renders the
-  /// "position missing" marker and returns before _content — so the null branch
-  /// is a guard, not a state the feature runs in.
-  _DigitPadSerialMemo? _memoRead() {
-    final int? position = _position;
-    if (position == null) return null;
-    return DigitPad._serialMemo[widget.scrName]?[position];
-  }
-
-  /// Records the TERMINAL verdict for [key] — both halves together, and the
-  /// only write the memo ever takes.
-  ///
-  /// [scrName] and [position] are handed in rather than read off `widget` and
-  /// the State because this has to work after this State is disposed. That is
-  /// the whole point of the memo: an answer must outlive the State that asked
-  /// for it, or an officer who scrolls during the OCR loses the check.
-  ///
-  /// [live] is the caller's `mounted`. A live State always writes — it owns this
-  /// slot. A DEAD one still records its answer (that IS the W4 fix) but never
-  /// over an entry holding a DIFFERENT key: a newer State has since answered
-  /// for a newer photo, and overwriting that would make an on-screen mismatch,
-  /// and its gate, disappear.
-  static void _memoRecord(String scrName, int? position, String key, bool match,
-      {required bool live}) {
-    if (position == null) return;
-    final _DigitPadSerialMemo? answered =
-        DigitPad._serialMemo[scrName]?[position];
-    if (!live && answered != null && answered.ocrKey != key) return;
-    final _DigitPadSerialMemo memo = answered ??
-        (DigitPad._serialMemo[scrName] ??= <int, _DigitPadSerialMemo>{})
-            .putIfAbsent(position, () => _DigitPadSerialMemo());
-    memo.ocrKey = key;
-    memo.match = match;
-  }
-
-  /// Staged by _content for the post-frame pass, same idiom as _wantBlack.
-  String _wantSerial = '';
-  String _wantPhotoRaw = '';
-  String _wantOcrKey = '';
-
-  /// The key this State has already DISPATCHED a read for. Per-State, and
-  /// never cleared.
-  ///
-  /// ★ Deliberately NOT in the memo. A State that dies holding an
-  /// "in flight" mark in a STATIC map poisons that key for every State after it
-  /// (r2 W4); a State that dies holding it here takes it to the grave, which is
-  /// precisely what "the next State may try once more" means.
-  String _dispatchedOcrKey = '';
-
-  /// Spec §3.1 + §7.1-4. NEVER throws, NEVER blocks on failure.
-  Future<void> _applySerial() async {
-    final String key = _wantOcrKey;
-    // ★★★ TWO facts, TWO fields (r2 W4). "An answer exists for this key" is
-    // the memo, which is static and outlives this State. "A read is in flight
-    // for this key" is _dispatchedOcrKey, which is per-State. r2 kept both in
-    // the memo, so a pass abandoned mid-flight left a key with no answer under
-    // it and no later pass could get past this line.
-    if (key == _ocrKey) return; // answered already, by this State or another
-    // One attempt per key per State lifetime — the semantics r1 got for free by
-    // being State-local. It carries two jobs: re-entrancy (a second post-frame
-    // pass in the same State cannot start a second read, since _sidePending
-    // dedupes per FRAME and not per key), and, because a throw leaves the memo
-    // untouched on purpose, it is the only thing between a build with no ML Kit
-    // plugin and one native call per keystroke.
-    if (key == _dispatchedOcrKey) return;
-    _dispatchedOcrKey = key;
-    // Nothing invalidates the previous answer here any more, deliberately: the
-    // terminal write below replaces both halves at once, and _content's
-    // `ocrKey == _ocrKey` term already stops a verdict rendering for a photo
-    // that has left the slot — one frame EARLIER than this pass could. r2
-    // nulled `match` while leaving `ocrKey` set, which is the very shape W4 is
-    // about: let the photo come back to that key and the entry would match with
-    // nothing in it, blocking the recompute for good.
-    //
-    // Captured BEFORE the await: the write at the bottom has to work when this
-    // State is already gone, and reaching through `widget` then is not a thing
-    // to depend on.
-    final String scrName = widget.scrName;
-    final int? position = _position;
-    // ── the four TOTAL-SILENCE conditions (spec §7.1-2, acceptance §11) ──
-    // Each returns BEFORE digitPadOcrRead, which is what makes the ML Kit call
-    // count provably zero rather than merely quiet.
-    if (_serialField.isEmpty) return; // feature never requested
-    if (digitPadNormalizeSerial(_wantSerial).isEmpty) {
-      return; // no serial recorded on this meter -> nothing to compare
-    }
-    final List<String> paths = digitPadPhotoPaths(_wantPhotoRaw);
-    if (paths.isEmpty) {
-      // ★ The ONE silence on this path that is not "the feature was never
-      // requested": serialField is set, a serial IS recorded and the slot is
-      // NOT empty — the check was asked for and simply cannot run. Reachable on
-      // an EDIT page (currentValue seeds the slot with a plain https Storage
-      // URL) and after a cancelled camera (emptyImageUrl); ML Kit can open
-      // neither from a file path. Logged so the field can tell this apart from
-      // an unconfigured serialField, which is silent by design.
-      devPrint('DigitPad serial: no local photo path in the slot');
-      return;
-    }
-    bool match = false;
-    try {
-      // ★ Per photo, NEVER concatenated. Joining the texts first would let a
-      // serial that straddles two photos' texts read as a match on neither
-      // photo — a FALSE match on the one thing this check exists to catch.
-      for (final String path in paths) {
-        final String text = await digitPadOcrRead(path);
-        if (digitPadSerialSatisfied(ocrText: text, serial: _wantSerial)) {
-          match = true;
-          break;
-        }
-      }
-    } catch (e) {
-      // FAIL OPEN, and this one is a RATIFIED product decision rather than the
-      // repo's usual gate rule: spec §10 lists "blokir waktu OCR gagal baca apa
-      // pun" under Not Doing, and product #17 says the officer always wins. A
-      // missing file, a MissingPluginException on a build without the plugin,
-      // or an ML Kit model resolution failure all land here and leave
-      // _serialMatch null -> no sheet, no gate, nothing on screen.
-      //
-      // ★ Deliberate (r2 W4 asked for this decision to be made, not
-      // inherited): the memo is left UNTOUCHED, so nothing here can block a
-      // later attempt, while _dispatchedOcrKey stops THIS State retrying. A new
-      // State — a scroll back, a navigation — tries once more, which is r1's
-      // behaviour and the right one for the transient half of this branch (an
-      // ML Kit first-call model init). A permanent cause simply fails again,
-      // once per State, silently.
-      devPrint('DigitPad serial OCR: $e');
-      return;
-    }
-    // The photo was replaced again while we were awaiting: a newer pass in this
-    // same State owns the slot and has already started its own read.
-    if (key != _dispatchedOcrKey) return;
-    // ★★★ Recorded BEFORE the mounted check, and that ordering IS the W4 fix.
-    // A scroll during the 100-500 ms ML Kit round-trip disposes this State, but
-    // the answer it just computed is still the right answer for a photo that is
-    // still in the slot: discarding it is what left the check permanently dead.
-    // It saves an ML Kit call on the way back, too.
-    _memoRecord(scrName, position, key, match, live: mounted);
-    if (!mounted) return;
-    setState(() {});
-  }
-
   /// finalData of another slot ('' when that slot does not exist yet).
   String _slotValue(int? position) {
     if (position == null) return '';
@@ -757,16 +592,13 @@ class DigitPadState extends State<DigitPad> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _sidePending = false;
       if (!mounted) return;
-      // ★ Attach FIRST: without the photo-slot listener nothing here ever runs
-      // again after the officer takes the photo (see the photoPosition section
-      // above). Cheap and idempotent — one map lookup plus an identity check.
-      _ensurePhotoWatch();
+      // ★ Attach FIRST: without the serial-slot listener nothing here ever runs
+      // again after the officer fills the serial (see the
+      // serialSourcePosition section above). Cheap and idempotent — one map
+      // lookup plus an identity check.
+      _ensureSerialWatch();
       _applyOutputs();
       _applySheet();
-      // Unawaited on purpose: the post-frame callback must stay synchronous.
-      // _applySerial owns its own mounted/staleness re-checks after the await
-      // and never throws out of itself.
-      _applySerial();
     });
   }
 
@@ -816,7 +648,8 @@ class DigitPadState extends State<DigitPad> {
     // value is a new value and deserves a fresh raise — which is what makes
     // segment 12 ("Perbaiki angkanya") and clearData-on-navigation work with no
     // extra hook, byte for byte as rev e did. The SERIAL half only ever changes
-    // when the photo does (§7.7). An entry empty on BOTH axes is removed, so
+    // when the serial STATE does — off/ok/missing/mismatch — never when the
+    // value being typed does. An entry empty on BOTH axes is removed, so
     // '' stays the single re-arm signal digitPadSheetKey documents.
     final String next = digitPadNextSheetLatch(
       previous: DigitPad._sheetRaised[widget.scrName]?[position] ?? '',
@@ -1019,21 +852,99 @@ class DigitPadState extends State<DigitPad> {
     final bool enabled = ic.isEnabled;
 
     // ── verdict (spec §7.5) — FAILS OPEN ──
+    //
+    // ★★ m³ BASIS (2026-09-04). The meter stores the RAW whole integer; the m³
+    // value is that integer / 10^red. Comparing before that division was a live
+    // defect on TWO axes:
+    //   * `avgField` is authored in m³/month — the same page's DETAIL_CARD
+    //     renders it as "<avg> m³/bln" — while `compareField` is raw, so
+    //     `(value - prev) > avg * spikeMultiplier` compared two different units
+    //     and a dgm:2 point needed a 100x real spike to trip;
+    //   * `deltaMax` is specified in m³ (spec §2), and a dgm:2 point whose raw
+    //     stand rose 10.000 has used 100 m³, not 10.000.
+    // Segments 2 and 3 already said "m³" while the tokens rendered raw units —
+    // this is the "finest unit" debt in docs/widgets/digit_pad.md, paid off.
+    //
+    // `layout.red` and NOT the doc's raw digitsRedField: the officer's picker
+    // choice wins over the doc for the BOXES, so it has to win here too, or the
+    // m³ boundary the officer can SEE (the comma) would disagree with the
+    // boundary the verdict uses. One value, one source.
+    //
+    // `avg` is deliberately NOT converted — it is already m³/month.
+    //
+    // FLOAT BASIS, chosen over an exact-integer comparison against
+    // `deltaMax * pow10`: the tokens have to render m³ anyway, so driving the
+    // DECISION and the DISPLAY off the same number is what stops a sheet
+    // reading "150 m³ — melewati batas 100 m³" on a reading that did not trip.
+    //
+    // ★★ ONE DIVISION, of the DIFFERENCE. digitPadDelta((rawValue - rawPrev),
+    // pow10) is the delta; digitPadVerdict compares it and the token map
+    // renders it. The first cut of this divided each side and subtracted the
+    // two quotients, and that is NOT the same number: a difference of two
+    // correctly-rounded values is not itself correctly rounded, so at dgm:2 a
+    // prev of 2802 plus exactly 10000 raw came out as 100.00000000000001,
+    // tripped `deltaMax: 100`, and printed that string into segment 15. The
+    // guarantee only exists for ONE division, so there is only one. Pinned by
+    // the widget test `at deltaMax with an INEXACT prev quotient it is still
+    // sane`, which was measured RED against that first cut.
+    //
+    // Non-whole results print through digitPadFmt, which drops a trailing `.0`
+    // and otherwise uses Dart's shortest-round-trip toString ("126.01", not
+    // "126.00999...").
+    //
+    // BACKWARD is scale-invariant: dividing both sides by the same positive
+    // constant preserves ordering, so no point's backward verdict can change.
+    final int pow10 = digitPadPow10(layout.red);
     DigitPadVerdict verdict = DigitPadVerdict.none;
     num? prev;
     num? avg;
     num? value;
+    num? delta;
+    // ★ Declared HERE, beside prev/avg/value/delta, for EXACTLY the reason
+    // those four are: it is written inside the try and read after it. The token
+    // map below is OUTSIDE the try (~190 lines down) and has to see this value,
+    // while the doc read that produces it has to stay INSIDE — product #17's
+    // fail-open catch must keep covering every dynamic Firestore read in this
+    // block. Seeded with the config ceiling, so a throw leaves the
+    // pre-2026-09-07 value in place and the verdict falls to `none` anyway.
+    num deltaMaxEff = _deltaMax;
     try {
-      value = submit.isEmpty ? null : num.tryParse(submit);
+      // RAW stays raw until the last possible moment. `value`/`prev` are
+      // divided ONLY to render `{value}`/`{prev}`; the verdict and `{delta}`
+      // both take the RAW pair and let digitPadDelta do the one division.
+      final num? rawValue = submit.isEmpty ? null : num.tryParse(submit);
+      num? rawPrev;
       if (_compareField.isNotEmpty && docs.isNotEmpty) {
-        prev = digitPadNum(docs.first[_compareField]);
+        rawPrev = digitPadNum(docs.first[_compareField]);
         if (_avgField.isNotEmpty) avg = digitPadNum(docs.first[_avgField]);
+        // ── PER-POINT ceiling (meter-block-alias-dmx §4a) ──
+        //
+        // The doc wins when it carries a positive value; otherwise the config
+        // `deltaMax` governs. Both absent / 0 / negative leaves deltaMaxEff at
+        // 0, and digitPadVerdict's own `deltaMax > 0` guard switches the
+        // absolute branch off — the pre-2026-09-04 behaviour, unchanged.
+        //
+        // Inside THIS block rather than a separate `docs.isNotEmpty`, on
+        // purpose: a ceiling only ever bounds a delta, a delta needs `prev`,
+        // and `prev` needs _compareField. With no compareField digitPadVerdict
+        // returns `none` before it reaches the ceiling branch, so a wider guard
+        // would be a second branch that can never change an outcome.
+        //
+        // digitPadNum, never a cast: Firestore flips this field between num and
+        // String per tenant, and the spec authors it as a Number.
+        final num? docDmx = digitPadNum(docs.first[_deltaMaxField]);
+        if (docDmx != null && docDmx > 0) deltaMaxEff = docDmx;
       }
+      value = digitPadCubic(rawValue, pow10);
+      prev = digitPadCubic(rawPrev, pow10);
+      delta = digitPadDelta(value: rawValue, prev: rawPrev, pow10: pow10);
       verdict = digitPadVerdict(
-        value: value,
-        prev: prev,
+        value: rawValue,
+        prev: rawPrev,
         avg: avg,
         spikeMultiplier: _spikeMultiplier,
+        deltaMax: deltaMaxEff,
+        pow10: pow10,
       );
     } catch (e) {
       // Product #17: a verdict failure NEVER blocks and NEVER surfaces.
@@ -1066,45 +977,117 @@ class DigitPadState extends State<DigitPad> {
     //
     // `block` deliberately does NOT carry the term — _scheduleGate(block &&
     // enabled) below applies it once, at the only place `block` is consumed.
-    // ── meter-serial-verify (spec §3.1/§7) ──
+    // ── serial identity check (source: a form slot, since 2026-09-04) ──
     //
-    // Resolved HERE and not in the post-frame pass so that _content stays the
-    // single place that decides what is on screen this frame.
+    // Resolved HERE, fully SYNCHRONOUSLY — it is a string compare now. That is
+    // what let the whole async design (ML Kit, the static verdict memo, the
+    // per-State in-flight key, the fail-open catch around a round-trip) be
+    // DELETED rather than ported. Do not reintroduce any of it.
     //
-    // `photoRaw` is read only when the feature is on: with serialField blank
-    // this whole feature costs one String.isEmpty per build and nothing else.
-    final String photoRaw =
-        _serialField.isEmpty ? '' : _slotValue(_photoPosition);
+    // The feature needs BOTH ends wired: a field on the doc to compare against
+    // and a slot to read the officer's value from. Either missing = totally
+    // silent, zero warnings, zero gate — which is exactly what MeterSurvey
+    // (serialField:"", serialSourcePosition:"") relies on, and what the owner's
+    // second sentence demands ("gak ada seri = aman, nol apa pun").
+    //
+    // ★★ AND the named slot must actually EXIST on this page. _slotValue
+    // cannot tell "the officer has not typed yet" from "no component owns
+    // position 16": both are ''. Read undiscriminated, a typo'd
+    // serialSourcePosition — or a TXF later deleted from the sheet — yields
+    // `missing` -> serialBlock -> a page with NO control anywhere that can
+    // clear it. That is the exact decay that retired photoPosition:"3", where
+    // it failed OPEN; failing CLOSED on it would be this widget's fourth
+    // officer-cannot-clear gate.
+    //
+    // The CONTROLLER is the discriminator, and it is sound because minting is
+    // EAGER while mounting is LAZY: buildPage (lib/widget/ui_component.dart)
+    // calls buildDisplayComponent for componentList[0] and then every
+    // remaining index synchronously before it returns, and
+    // buildDisplayComponent runs txfControllerCheck(scrName, position) at the
+    // TOP for every component whose position is non-null — before any widget
+    // is constructed. The clear:true re-mint path clears txfController[scrName]
+    // BEFORE that same loop, so it refills within the one call too. AnyPage's
+    // ListView then mounts those already-built widgets lazily, but every
+    // positioned slot's InputController already exists. So a null controller
+    // here, in _content and in the post-frame pass that follows it, means no
+    // component on this page owns that position: a CONFIG error, not a timing
+    // window.
+    //
+    // Treated as the feature being OFF — silent, zero warnings, zero gate --
+    // with one devPrint, the same shape as the gate-void diagnostic above.
+    final InputController? serialIc = _serialSourcePosition == null
+        ? null
+        : txfController[widget.scrName]?[_serialSourcePosition];
+    if (_serialField.isNotEmpty &&
+        _serialSourcePosition != null &&
+        serialIc == null &&
+        !_serialSlotVoidLogged) {
+      _serialSlotVoidLogged = true;
+      devPrint('DigitPad serial: "${widget.scrName}" has no component at '
+          'serialSourcePosition $_serialSourcePosition — check OFF');
+    }
+    final bool serialOn = _serialField.isNotEmpty &&
+        _serialSourcePosition != null &&
+        serialIc != null;
     // Firestore values are dynamic and flip between String and num per tenant:
     // stringify, never cast. A null field yields '' and silences the check.
-    final String serialRaw = (_serialField.isNotEmpty && doc != null)
+    final String serialRaw = (serialOn && doc != null)
         ? (doc[_serialField] ?? '').toString().trim()
         : '';
-    final String ocrKey = (photoRaw.isEmpty || serialRaw.isEmpty)
-        ? ''
-        : '$photoRaw|$serialRaw';
-    // ★ The SYNCHRONOUS staleness guard. _serialMatch belongs to the photo it
-    // was computed from; the moment the officer retakes the photo `ocrKey`
-    // changes and the old verdict stops rendering IN THIS FRAME — one frame
-    // before _applySerial's post-frame pass can null it. Without this term a
-    // dismissed "wrong meter" warning could flash back over a corrected photo.
-    final bool serialMismatch =
-        _serialMatch == false && ocrKey.isNotEmpty && ocrKey == _ocrKey;
-    // Who gets the sheet when both have something to say — the NUMERIC verdict
-    // wins (see digitPadSerialOwnsSheet for why).
+    // finalData, like every other cross-slot read in this widget: it is what
+    // saveSend submits, and otq_txf_2's onChanged writes it per keystroke.
+    final String serialReadRaw =
+        serialOn ? _slotValue(_serialSourcePosition) : '';
+    final DigitPadSerialState serialState = digitPadSerialState(
+      recorded: serialRaw,
+      read: serialReadRaw,
+    );
+    // ONE switch owns the whole serial gate — mismatch and missing alike
+    // (spec §3: skipping the capture is NOT an escape hatch, or an officer at
+    // the wrong meter could simply not fill the field).
+    final bool serialProblem = serialState == DigitPadSerialState.mismatch ||
+        serialState == DigitPadSerialState.missing;
+    // ★ `&& enabled` for the SAME reason the two gates below carry it: on a
+    // disabled pad the officer can neither retype the serial nor clear the
+    // block, and §2.6's deliberate lack of a gate memo makes it re-assert on
+    // every build — permanent, not transient, and it takes the whole page down
+    // with it. A gate the officer cannot clear is a brick.
+    //
+    // ★★ AND `serialSourceEnabled` — the SAME doctrine applied to the SOURCE
+    // slot. On an isEnabled:"FALSE" TXF at serialSourcePosition the officer
+    // cannot retype the serial, so a gate raised on it could never be cleared
+    // by the only action that clears it. The state still computes, so the
+    // sheet and the banner still WARN; only the block is withheld. (The absent
+    // -slot shape above is different and louder: there the check goes silent
+    // altogether, because there is nothing to warn ABOUT.)
+    final bool serialSourceEnabled = serialIc?.isEnabled ?? false;
+    final bool serialBlock = _blockOnSerialMismatch &&
+        serialProblem &&
+        enabled &&
+        serialSourceEnabled;
+    // ★ Whichever problem is LOCKING owns the modal. Only the serial message
+    // names the thing the officer can do to unlock, and with the gate engaged
+    // _sheetBlocked suppresses the segment-13 acknowledge button — so a sheet
+    // carrying the SPIKE copy would demand a correction that cannot lift the
+    // block (the rev-e "gerbang yang petugas tak bisa bersihkan" shape). When
+    // the serial problem does NOT block, the numeric verdict wins exactly as
+    // before. Nothing is hidden either way: the card's inline banner keeps
+    // rendering the NUMERIC verdict in every case (spec §5 gives the serial the
+    // sheet and nothing else).
     final bool serialOwns = digitPadSerialOwnsSheet(
       verdict: verdict,
-      serialMismatch: serialMismatch,
+      serialMismatch: serialProblem,
+      serialBlocking: serialBlock,
     );
-    // ★ `&& enabled` for the SAME reason the two gates below carry it, and it
-    // is the conservative direction here: on a disabled pad the whole page is
-    // normally read-only, so the retake that would clear this gate is not
-    // available either. See the widget doc for the residual — with the pad
-    // ENABLED and blockOnSerialMismatch:"TRUE" the officer's only exit is
-    // retaking the photo in a DIFFERENT widget, which is why spec §10 mandates
-    // FALSE for v1.
-    final bool serialBlock =
-        _blockOnSerialMismatch && serialMismatch && enabled;
+    // The SERIAL half of the raise-once key. Keyed on the STATE, never on the
+    // value being typed — see digitPadSerialKey for the keystroke arithmetic
+    // that makes that load-bearing — and the MISSING half waits for a complete
+    // reading so the sheet does not greet the officer on every page entry.
+    final String serialKey = digitPadSerialKey(
+      state: serialState,
+      recorded: serialRaw,
+      readingComplete: submit.isNotEmpty,
+    );
 
     final bool verdictBlock =
         (digitPadShouldBlock(verdict, _blockOnBackward) && enabled) ||
@@ -1140,13 +1123,25 @@ class DigitPadState extends State<DigitPad> {
     final Map<String, String> tokens = <String, String>{
       if (value != null) 'value': digitPadFmt(value),
       if (prev != null) 'prev': digitPadFmt(prev),
-      if (value != null && prev != null) 'delta': digitPadFmt(value - prev),
+      if (delta != null) 'delta': digitPadFmt(delta),
       if (avg != null) 'avg': digitPadFmt(avg),
       'n': holes.toString(),
       // §11: {serial} shows the serial that is RECORDED on the doc, never what
       // OCR read off the photo. Omitted when blank so the pending-safe dialect
       // leaves it literal instead of printing "()".
       if (serialRaw.isNotEmpty) 'serial': serialRaw,
+      // Supplied only when the branch is armed, so an unconfigured cell leaves
+      // `{deltaMax}` LITERAL rather than printing "0" into a sentence that
+      // would then claim a ceiling that does not exist. With BOTH ceilings
+      // absent deltaMaxEff is 0 and that rule still holds.
+      //
+      // ★ deltaMaxEff, NEVER _deltaMax: the sentence has to name the ceiling
+      // the verdict actually used. A point with `dmx: 15` under a config
+      // `deltaMax: 100` must read "melewati batas 15 m³" (acceptance C1).
+      // Same doctrine as the FLOAT BASIS note above and as `layout.red`: one
+      // number drives the DECISION and the DISPLAY, or the sheet ends up
+      // claiming a limit the reading never crossed.
+      if (deltaMaxEff > 0) 'deltaMax': digitPadFmt(deltaMaxEff),
       // 'ocr' is RETIRED by meter-serial-verify §3.2, not merely unbuilt: with
       // §3.1's substring rule there is no single "OCR value" to display. It was
       // removed from _digitPadToken too, so {ocr} stays literal either way.
@@ -1171,7 +1166,18 @@ class DigitPadState extends State<DigitPad> {
         verdictText = _spec.text(2);
         break;
       case DigitPadVerdict.spike:
-        verdictText = _spec.text(3);
+        // ★ Segment 15 when there is no avg to talk about: segment 3's
+        // "biasanya {avg} m³/bulan" clause would render a literal `{avg}` under
+        // the pending-safe dialect. `avg <= 0` counts as absent for the same
+        // documented reason digitPadVerdict treats it that way — a CF-computed
+        // 0 means "no history yet".
+        //
+        // ⚠ Residual, documented in docs/widgets/digit_pad.md, not fixed here:
+        // a point that HAS an avg and trips ONLY the deltaMax branch still
+        // reads segment 3, whose "biasanya" clause is then a non-sequitur. The
+        // numbers are right, the copy is loose. Reopen with product.
+        verdictText =
+            (avg == null || avg <= 0) ? _spec.text(15) : _spec.text(3);
         verdictFg = _spikeFg;
         verdictBg = _spikeBg;
         verdictIcon = Icons.warning_amber_outlined;
@@ -1203,7 +1209,15 @@ class DigitPadState extends State<DigitPad> {
     // feature existed — zero regression on §4b/§4c.
     final String bannerMessage =
         verdictText.isEmpty ? '' : digitPadFillTokens(verdictText, tokens);
-    final String sheetText = serialOwns ? _spec.text(6) : verdictText;
+    // Segment 6 = the serials disagree. Segment 16 = one was never captured.
+    // Two different asks of the officer, so two segments. A blank segment
+    // silences that message (§3.1) — see the config constraint in
+    // docs/widgets/digit_pad.md about pairing a blank one with
+    // blockOnSerialMismatch:"TRUE".
+    final String serialSegment = serialState == DigitPadSerialState.missing
+        ? _spec.text(16)
+        : _spec.text(6);
+    final String sheetText = serialOwns ? serialSegment : verdictText;
     _sheetMessage =
         sheetText.isEmpty ? '' : digitPadFillTokens(sheetText, tokens);
     // Segment 6 borrows the spike palette: it is a warning, not a hard error.
@@ -1212,12 +1226,13 @@ class DigitPadState extends State<DigitPad> {
     _sheetIcon =
         serialOwns ? Icons.warning_amber_outlined : verdictIcon;
     _sheetBlocked = verdictBlock;
-    _wantSerial = serialRaw;
-    _wantPhotoRaw = photoRaw;
-    _wantOcrKey = ocrKey;
+    // `ocrKey:` keeps its 2026-08 name for continuity with the two-axis latch
+    // design (digitPadSheetKeySerial splits on the FIRST `|`, which is what
+    // lets the serial half carry a `|` of its own). Since 2026-09-04 it carries
+    // the SERIAL-STATE key; there is no OCR anywhere in this widget.
     _wantSheetKey = digitPadSheetKey(
       submitValue: submit,
-      ocrKey: ocrKey,
+      ocrKey: serialKey,
       serialOwns: serialOwns,
     );
     _wantSheet = digitPadShouldRaiseAnySheet(

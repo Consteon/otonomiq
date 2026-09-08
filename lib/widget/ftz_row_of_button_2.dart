@@ -25,6 +25,8 @@ import 'driver_home_support.dart';
 import 'get_images_required_support.dart';
 import 'item_execution_list.dart';
 import 'item_execution_submit.dart';
+import 'rbt_visibility.dart';
+import 'visible_when.dart';
 import 'where_eq_type_tolerant.dart';
 
 // display a row of buttons
@@ -770,7 +772,17 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
                                     : null;
                             final GetImagesRequirement? photoBlock =
                                 getImagesRequiredBlock(
-                              gatePageMap is Map ? gatePageMap['children'] : null,
+                              // visibleWhen (dev spec §3.3): a hidden required
+                              // GET_IMAGES must not block the submit. Filtering
+                              // the children here keeps the pure gate in
+                              // get_images_required_support.dart untouched.
+                              visibleWhenChildren(
+                                gatePageMap is Map
+                                    ? gatePageMap['children']
+                                    : null,
+                                visibleWhenReader(txfController[scrName]),
+                                scrName: scrName,
+                              ),
                               (int slotPosition) {
                                 final InputController? ic =
                                     txfController[scrName]?[slotPosition];
@@ -1354,6 +1366,35 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
   Widget build(BuildContext context) {
     super.build(context);
 
+    final List<dynamic> allChildren = widget.component['children'] ?? [];
+
+    // Fast path: no child declares a `search`, so nothing can be hidden. The
+    // widget tree is byte-identical to before -- no Obx wrapper, no repaint on
+    // unrelated table snapshots. ~200 of the 209 live RBT occurrences.
+    if (!anyRbtChildConditional(allChildren)) return _buildBar(allChildren);
+
+    // Conditional path. Child `search` is a VISIBILITY predicate, evaluated
+    // here for EVERY RBT -- inline, sticky (ApproverStickyBar._buildIncident
+    // hands its children straight to this widget) and nested inside
+    // DO_DIALOG / DO_BOTTOM_SHEET chains. Obx: visibleRbtChildren reads
+    // mapTableContent + ItemCardDetail.currentRow, so a Firestore snapshot
+    // after savesend -> historySync repaints the row and the button
+    // disappears without leaving the page.
+    return Obx(() {
+      final List<dynamic> visible =
+          visibleRbtChildren(allChildren, widget.scrName);
+      // Every child hidden -> render nothing at all, padding included, rather
+      // than an empty padded Container.
+      if (visible.isEmpty) return const SizedBox.shrink();
+      return _buildBar(visible);
+    });
+  }
+
+  /// Render the bar for [btns]. [btns] MUST be the same list used for both the
+  /// Row/Wrap decision and buildButtonList: buildButtonList wraps buttons in
+  /// `Expanded` when `children.length > 1`, and `Expanded` inside a `Wrap`
+  /// asserts. Never read widget.component['children'] again in here.
+  Widget _buildBar(List<dynamic> btns) {
     return Container(
       margin: EdgeInsets.only(
           top: (widget.component['beforeSpacing'] ?? 0.0).toDouble(),
@@ -1365,7 +1406,6 @@ class _FtzRowOfButton2State extends State<FtzRowOfButton2>
           widget.bPad),
       child: BlocBuilder<TimerBloc, TimerState>(
         builder: (context, state) {
-          final List<dynamic> btns = widget.component['children'] ?? [];
           final bool useRow =
               btns.length > 1 && btns.every((b) => b['width'] is! num);
           final buttonWidgets = buildButtonList(

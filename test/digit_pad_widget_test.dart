@@ -14,25 +14,21 @@
 // Firebase. Seeding it drives comparator -> verdict -> banner -> submit gate
 // end to end. The gate tests below do exactly that.
 //
-// ★ ML KIT NEVER RUNS HERE AND CANNOT. The plugin is a MethodChannel and throws
-// MissingPluginException under flutter_test, so setUp below replaces the
-// top-level `digitPadOcrRead` seam with a counting fake. Two consequences worth
-// stating: acceptance §11's "nol ML Kit dipanggil" becomes a countable
-// assertion (`ocrCalls`), and NOTHING here is evidence that ML Kit reads a real
-// meter photo — the native side of this plugin has never been compiled in this
-// repo. That is device work.
+// ★ THERE IS NO OCR IN THIS WIDGET ANY MORE. digit-pad-deltamax-serial
+// (2026-09-04) deleted the ML Kit path, the async seam and the static verdict
+// memo: the serial check is a synchronous string compare against a form slot.
+// So there is no `digitPadOcrRead` seam to install, no call counter, and no
+// memo to clear between tests — only DigitPad.clearSheetRaised remains.
 //
-// No restore in tearDown: `flutter test` gives every FILE its own isolate, so
-// the fake cannot leak into another suite; setUp re-installs it per test, which
-// is what keeps the counters from leaking BETWEEN tests in this file.
+// `photoPosition` and `ocrPattern` are still present in every component() below
+// on purpose: spec §6 leaves both columns in the shared sheet template, and
+// every test in this file therefore doubles as proof that they are inert.
 //
 // ★ WHAT A GREEN RUN HERE STILL DOES NOT PROVE: the real Firestore
 // subscription (subscribeToMapCollection), `search` resolution through
 // filterDriverHomeDocs (no component here sets `search`, so that path is never
 // entered), and the real `meter` doc's shape and field types — which are
 // unratified anyway. Those stay device work (§7.3 manual flow).
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
@@ -54,33 +50,19 @@ void main() {
   // '<appVid>/<tableDocId>/<subColl>'.
   const String docVid = '4242';
   const String docCode = '$docVid/meter/content';
-  const int photoSlot = 3;
-  const String serialA = 'A21-4471908';
-  const String photoA = '/data/user/0/app/otq_images/OTQC_a.jpg';
-  const String photoB = '/data/user/0/app/otq_images/OTQC_b.jpg';
+  const int serialSlot = 16;
+  /// As stamped on the meter and recorded on the doc.
+  const String serialA = 'B21-4471902';
   const String seg6 =
       'Nomor seri di foto tidak cocok dengan yang tercatat ({serial}). '
       'Yakin ini meteran unit ini?';
   const String seg6Resolved =
-      'Nomor seri di foto tidak cocok dengan yang tercatat (A21-4471908). '
+      'Nomor seri di foto tidak cocok dengan yang tercatat (B21-4471902). '
       'Yakin ini meteran unit ini?';
-
-  /// How many times the ML Kit seam was entered — acceptance §11's "nol ML Kit
-  /// dipanggil" measured, not asserted by absence of a warning.
-  int ocrCalls = 0;
-  List<String> ocrPaths = <String>[];
-  Map<String, String> ocrTextByPath = <String, String>{};
-  bool ocrThrows = false;
-
-  /// Holds the seam OPEN, per photo path. While a path has an entry here the
-  /// fake awaits it before answering (or throwing), which is the only way to
-  /// still be INSIDE the ML Kit round-trip when something else happens to the
-  /// pad — and that round-trip is where r2's W4 lived.
-  ///
-  /// Per PATH rather than one global gate so a test can also choose which of
-  /// two in-flight reads answers FIRST, which is what "an older read answers
-  /// last" needs. `ocrCalls` still counts at DISPATCH, not at answer.
-  Map<String, Completer<void>> ocrGates = <String, Completer<void>>{};
+  const String seg15 =
+      'Pemakaian {delta} m³ — melewati batas {deltaMax} m³. Cek lagi angkanya.';
+  const String seg16 = 'Nomor serinya belum difoto — foto dulu nomor serinya '
+      'sebelum simpan, biar yakin ini meteran unit yang benar.';
 
   setUpAll(() {
     TestWidgetsFlutterBinding.ensureInitialized();
@@ -114,26 +96,6 @@ void main() {
     // that raised the sheet for '9999' would silently suppress the raise in the
     // next test that types the same value.
     DigitPad.clearSheetRaised(scr);
-    // ★ The serial memo is static for the SAME reason (it must survive the
-    // State destruction a scroll causes — r1 W2), so it leaks between tests the
-    // same way: without this, the second test to pump the SAME photo + serial
-    // would find _ocrKey already answered, skip the OCR entirely and assert
-    // ocrCalls == 1 against a seam that never ran. Measured, not assumed —
-    // eight tests in this file fail if this line is removed.
-    DigitPad.clearSerialMemo(scr);
-    ocrCalls = 0;
-    ocrPaths = <String>[];
-    ocrTextByPath = <String, String>{};
-    ocrThrows = false;
-    ocrGates = <String, Completer<void>>{};
-    digitPadOcrRead = (String path) async {
-      ocrCalls++;
-      ocrPaths.add(path);
-      final Completer<void>? gate = ocrGates[path];
-      if (gate != null) await gate.future;
-      if (ocrThrows) throw StateError('MissingPluginException (simulated)');
-      return ocrTextByPath[path] ?? '';
-    };
   });
 
   /// The `meter` doc's serial field, alongside pv/avg.
@@ -143,30 +105,49 @@ void main() {
     ];
   }
 
-  /// Write the getImages slot exactly as otq_get_images_2 does: BOTH halves,
-  /// each photo wrapped `aum__<path>__mua`, joined by separator[5] (◇).
+  /// Write the serial slot exactly as its two real writers do — BOTH halves.
   ///
-  /// ★ `.controller.text` last, and that is load-bearing: assigning it is what
-  /// notifies the pad's photo listener, which is the whole 0a mechanism.
-  void writePhotoSlot(List<String> paths) {
-    txfControllerCheck(scr, photoSlot);
-    final String v = paths
-        .map((String p) => '$localImagePrefix$p$localImagePostfix')
-        .join(whiteDiamond);
-    txfController[scr]![photoSlot]!.finalData = v;
-    txfController[scr]![photoSlot]!.controller.text = v;
+  /// ocrWriteToPosition (OCR_CAPTURE `ocrTargets:"16"`) and otq_txf_2's
+  /// onChanged (a human edit) each set finalData and controller.text.
+  /// `.controller.text` LAST here, and that is load-bearing: assigning it is
+  /// what notifies the pad's listener, which is the whole reactivity mechanism.
+  void writeSerialSlot(String v) {
+    txfControllerCheck(scr, serialSlot);
+    txfController[scr]![serialSlot]!.finalData = v;
+    txfController[scr]![serialSlot]!.controller.text = v;
   }
 
-  /// The same slot, written RAW — no `aum__` wrapping.
-  ///
-  /// Two real shapes reach the pad this way and neither is a local file: an
-  /// EDIT page seeds the slot from `currentValue`, where a previously synced
-  /// photo is a plain https Storage URL, and a cancelled camera leaves
-  /// [emptyImageUrl] (`aum__--__mua`).
-  void writeRawPhotoSlot(String value) {
-    txfControllerCheck(scr, photoSlot);
-    txfController[scr]![photoSlot]!.finalData = value;
-    txfController[scr]![photoSlot]!.controller.text = value;
+  /// A `meter` doc with no `avg` at all — the shape of EVERY point with fewer
+  /// than two readings, and the hole `deltaMax` exists to close. The one live
+  /// doc in Firestore has exactly this shape.
+  void seedMeterDocNoAvg({num pv = 1000, dynamic dmx}) {
+    // [dmx] = the PER-POINT ceiling in m³ (meter-block-alias-dmx §3).
+    // `dynamic`, mirroring `component()`'s `dynamic deltaMax`, because
+    // Firestore flips numeric fields between num and String per tenant. OMITTED
+    // when null, so "the doc has no dmx" stays distinguishable from "the doc
+    // has dmx: 0" — those are two different tests below.
+    mapTableContent[''] = <Map<String, dynamic>>[
+      <String, dynamic>{'pv': pv, if (dmx != null) 'dmx': dmx},
+    ];
+  }
+
+  /// A dgm:2 (Lodge) point: 4 black + 2 red, so 10^red is 100 and every raw
+  /// stand is a hundredth of its m³ value.
+  /// [avg] is OMITTED unless asked for: the one live `meter` doc has no `avg`
+  /// field, which is the shape `deltaMax` exists to cover.
+  void seedLodgeDoc({num pv = 12600, num? avg, dynamic dmx}) {
+    mapTableContent[''] = <Map<String, dynamic>>[
+      <String, dynamic>{
+        'pv': pv,
+        'dgh': 4,
+        'dgm': 2,
+        if (avg != null) 'avg': avg,
+        // Same omit-when-null rule as seedMeterDocNoAvg. This is the only
+        // seeder whose pow10 is not 1, so it is the only one that can see the
+        // m³ basis of the dmx comparison.
+        if (dmx != null) 'dmx': dmx,
+      },
+    ];
   }
 
   /// The `meter` doc the verdict compares against, reachable with zero Firebase:
@@ -179,12 +160,21 @@ void main() {
   }
 
   /// The digit-count source slot, plus the DIGIT_PAD slot itself.
+  ///
+  /// ★ The SERIAL slot is minted here too, empty, because that is what the live
+  /// page does: buildPage (ui_component.dart) calls buildDisplayComponent — and
+  /// therefore txfControllerCheck — for EVERY component before Flutter mounts
+  /// any of them, so slot 16's InputController exists before the pad's first
+  /// build even though the TXF sits after the pad in `children`. Without it
+  /// _ensureSerialWatch finds nothing to attach to, and a test that then writes
+  /// the slot would be measuring the harness rather than the widget.
   void seedSlots({String digits = '5'}) {
     txfControllerCheck(scr, digitsSlot);
     txfController[scr]![digitsSlot]!.finalData = digits;
     txfControllerCheck(scr, pos);
     txfController[scr]![pos]!.initialValue = '';
     txfController[scr]![pos]!.finalData = '';
+    txfControllerCheck(scr, serialSlot);
   }
 
   /// A page whose only RBT child is a savesend button at [saveSendSlot].
@@ -221,11 +211,14 @@ void main() {
     String digitsRedOptions = '',
     String blockOnBackward = 'FALSE',
     String isEnabled = 'TRUE',
-    String photoPosition = '$photoSlot',
+    String serialSourcePosition = '$serialSlot',
     String serialField = '',
     String blockOnSerialMismatch = 'FALSE',
     String serialText = seg6,
-    String ocrPattern = '',
+    String missingSerialText = seg16,
+    // dynamic: the live sheet sends `"deltaMax":100` as a JSON NUMBER, and a
+    // test must be able to pass that shape, not only a string.
+    dynamic deltaMax = '',
   }) =>
       <String, dynamic>{
         'type': 'DIGIT_PAD',
@@ -242,14 +235,17 @@ void main() {
         'compareField': 'pv',
         'avgField': 'avg',
         'spikeMultiplier': 4,
+        'deltaMax': deltaMax,
         'blockOnBackward': blockOnBackward,
-        'photoPosition': photoPosition,
-        // Retired by §3.2 and read by NOBODY. Present here so the acceptance
-        // line "ocrPattern masih ada di config -> diabaikan diam-diam, widget
-        // tidak di-drop" is actually exercised rather than assumed.
-        'ocrPattern': ocrPattern,
+        'serialSourcePosition': serialSourcePosition,
         'serialField': serialField,
         'blockOnSerialMismatch': blockOnSerialMismatch,
+        // ★ RETIRED 2026-09-04 and read by NOBODY. Unconditional (not behind a
+        // parameter) because spec §6 leaves both columns in the shared sheet
+        // template: every test in this file therefore exercises their
+        // inertness, and one named test below says so out loud.
+        'photoPosition': '3',
+        'ocrPattern': r'\d{4,9}',
         'currentValue': '',
         'isEnabled': isEnabled,
         'text': <String>[
@@ -268,8 +264,17 @@ void main() {
           /* 12 */ 'Perbaiki angkanya',
           /* 13 */ 'Angkanya memang segitu',
           /* 14 */ 'Kalau kamu yakin, disimpan apa adanya',
+          /* 15 */ seg15,
+          /* 16 */ missingSerialText,
         ].join(d),
       };
+
+  Map<String, dynamic> lodgeComponent({dynamic deltaMax = 100}) => component(
+        digitsField: 'dgh',
+        digitsRedField: 'dgm',
+        digitsRedPosition: '13',
+        deltaMax: deltaMax,
+      );
 
   /// A component wired to a REAL doc source, still with zero Firebase.
   ///
@@ -1486,942 +1491,995 @@ void main() {
     expect(find.byKey(const ValueKey<String>('digitPadSheetAccept')),
         findsOneWidget);
   });
-  // ── meter-serial-verify ───────────────────────────────────────────────────
+  // ── deltaMax: the ABSOLUTE ceiling (digit-pad-deltamax-serial §3) ─────────
 
-  // Acceptance §11 line 1. RED if: the `_serialField.isEmpty` guard leaves
-  // _applySerial. This is the ONLY assertion that measures "nol ML Kit
-  // dipanggil"; a "no sheet appeared" assertion would pass with the OCR running
-  // on every build.
-  testWidgets('serialField blank never enters the OCR seam',
-      (WidgetTester t) async {
-    seedSlots();
-    seedMeterDocWithSerial(msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'SOMETHING ELSE ENTIRELY';
-    await t.pumpWidget(subject(component(serialField: '')));
-    await t.pumpAndSettle();
-
-    expect(ocrCalls, 0);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-    expect(find.text('Angka di meter sekarang'), findsOneWidget);
-  });
-
-  // Acceptance §11 line 2. RED if: the
-  // `digitPadNormalizeSerial(_wantSerial).isEmpty` guard is removed — the OCR
-  // would run and (with an empty needle) the pad would fall to whatever
-  // digitPadSerialSatisfied's empty case does, on every point in the fleet.
-  testWidgets('a doc with an empty serial never enters the OCR seam',
-      (WidgetTester t) async {
-    seedSlots();
-    seedMeterDocWithSerial(msn: '');
-    writePhotoSlot(<String>[photoA]);
-    await t.pumpWidget(subject(component(serialField: 'msn')));
-    await t.pumpAndSettle();
-
-    expect(ocrCalls, 0);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-  });
-
-  // RED if: the `paths.isEmpty` guard is removed. The call count alone would
-  // NOT go red there (an empty loop calls nothing) — what goes red is the
-  // sheet: without the guard `match` stays false and the pad declares a
-  // mismatch on a point that has no photo at all.
-  testWidgets('a serial with no photo yet is silent, not a mismatch',
-      (WidgetTester t) async {
-    seedSlots();
-    seedMeterDocWithSerial(msn: serialA);
-    await t.pumpWidget(subject(component(serialField: 'msn')));
-    await t.pumpAndSettle();
-
-    expect(ocrCalls, 0);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-  });
-
-  // ★★ ONE pumpWidget PER TEST. Load-bearing, not style — do NOT merge the two
-  // tests below back into one.
-  //
-  // subject() builds DigitPad with NO Key at a fixed position in the tree, and
-  // DigitPadState has NO didUpdateWidget. Widget.canUpdate is therefore true on
-  // a second pumpWidget: the element is updated IN PLACE and initState never
-  // runs again. Every config field this feature adds is `late final`, read once
-  // in initState through _spec — so a second pump carrying a DIFFERENT
-  // component() silently keeps the FIRST pump's values, and every assertion
-  // after it certifies nothing at all. No other test in this file pumps twice;
-  // these two must not become the first.
-
-  // RED if: digitPadParsePosition stops returning null for a blank string, or a
-  // blank photoPosition acquires a "helpful" default. The photo IS in slot 3
-  // here (the component() default) carrying text that would mismatch, so ANY
-  // resolution other than "no slot at all" turns ocrCalls into 1 and raises the
-  // sheet.
-  testWidgets('a blank photoPosition is silent', (WidgetTester t) async {
-    seedSlots();
-    seedMeterDocWithSerial(msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'NOTHING USEFUL';
-    await t.pumpWidget(
-        subject(component(serialField: 'msn', photoPosition: '')));
-    await t.pumpAndSettle();
-
-    expect(ocrCalls, 0);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-  });
-
-  // ★ RED if: the `photoSlot == _position` nulling in initState is removed
-  // (§6.4 M6).
-  //
-  // What this measures is the LISTENER, not the OCR call, and that is
-  // deliberate: `ocrCalls` could NEVER catch this. _content writes
-  // `ic.finalData = submit` for this pad's own slot on every build, BEFORE the
-  // serial block reads photoRaw from it — so the pad's own slot can only ever
-  // hold a digit string, digitPadPhotoPaths finds no aum__ wrapper in it, and
-  // the OCR branch is unreachable through it whether the nulling is there or
-  // not. A test that asserted only `ocrCalls == 0` would be green on both
-  // sides, which is exactly the hole the r1 draft of this test carried.
-  //
-  // The probe is a REBUILD probe instead, and it works because this pad has
-  // exactly three rebuild sources: the Obx on mapTableContent, the GetBuilder
-  // id '$scrName-$position' (its OWN id), and its own setState. Writing another
-  // slot's controller.text touches none of them — which is the whole reason the
-  // photoPosition listener has to exist ('replacing the photo recomputes the
-  // verdict' leans on the same fact from the opposite side).
-  //
-  // So: write THIS pad's own controller.text from outside, then pump. Correct
-  // behaviour = no listener = no rebuild = _content never re-runs = finalData
-  // keeps the '' the first build wrote. Delete the nulling and the listener
-  // attaches to the pad's own controller, the write notifies it, setState
-  // rebuilds, _content writes finalData = '12345' AND a spike verdict raises
-  // the sheet — two independent assertions go RED.
-  testWidgets('a self-referential photoPosition attaches no listener',
-      (WidgetTester t) async {
-    seedSlots();
-    seedMeterDocWithSerial(msn: serialA);
-    await t.pumpWidget(
-        subject(component(serialField: 'msn', photoPosition: '$pos')));
-    await t.pumpAndSettle();
-    // The first build wrote '' (a 5-hole buffer is an incomplete reading).
-    expect(txfController[scr]![pos]!.finalData, '');
-
-    // The write otq_get_images_2 would make — aimed, by THIS config, at the
-    // pad's own slot. '12345' is a complete 5-box buffer, so a rebuild would be
-    // unmistakable in finalData.
-    txfController[scr]![pos]!.controller.text = '12345';
-    await t.pumpAndSettle();
-
-    expect(ocrCalls, 0);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-    // ★ THE assertion. '' means _content did not re-run, which means nothing
-    // was listening to this pad's own controller.
-    expect(txfController[scr]![pos]!.finalData, '');
-    expect(noPumpException(), isTrue);
-  });
-
-  // Acceptance §11 line 3. RED if: digitPadSerialSatisfied's result is
-  // inverted, or the aum__ unwrapping in digitPadPhotoPaths is dropped — the
-  // seam would then be handed `aum__/…__mua` instead of a real path, which the
-  // `ocrPaths` assertion pins.
-  testWidgets('the right meter photo shows nothing at all',
+  // ★★ Acceptance §11 line 3, and the CONTROL for the pair below it. On its
+  // own this test would still pass with the entire deltaMax feature deleted —
+  // it only has force NEXT TO its twin, which changes nothing but the cell.
+  // RED if: the `deltaMax > 0` guard is dropped (an absent cell is 0, so every
+  // reading would flag).
+  testWidgets('a blank deltaMax leaves the verdict exactly as it was',
       (WidgetTester t) async {
     seedSlots();
     seedPage();
-    seedMeterDocWithSerial(msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'PDAM\nA21 4471908\n039010\nBudi -6.29,106.66';
-    await t.pumpWidget(subject(component(serialField: 'msn')));
+    // avg 100 * spikeMultiplier 4 = 400, so delta 150 is comfortably sane
+    // under the RELATIVE rule alone.
+    seedMeterDoc(pv: 1000, avg: 100);
+    await t.pumpWidget(subject(component()));
+    await t.pumpAndSettle();
+    for (final String k in <String>['0', '1', '1', '5', '0']) {
+      await tapKey(t, k);
+    }
     await t.pumpAndSettle();
 
-    expect(ocrCalls, 1);
-    expect(ocrPaths, <String>[photoA]);
+    expect(find.text('Masuk akal — selisih 150 m³ dari 1000'), findsOneWidget);
     expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
     expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
   });
 
-  // Acceptance §11 lines 4 + 11 in one. Also spec §5's sketch: the sheet rises
-  // on the PHOTO alone, with the digit boxes still empty.
-  // RED if: the `_wantSheetKey.isEmpty` widening in _applySheet is reverted
-  // (the old `_wantSheetValue.isEmpty` re-arm would swallow this raise), or if
-  // {serial} is filled from the OCR text instead of the doc.
-  testWidgets('the wrong meter raises segment 6 with the RECORDED serial',
+  // ★★ The twin. ONE cell different — and it arrives as a JSON NUMBER, the
+  // production shape (§2.1), not a string.
+  // RED if: _deltaMax is never parsed, or the deltaMax branch never runs.
+  // Also pins interview decision 3's documented residual: this point HAS an
+  // avg, so it reads segment 3 even though only the deltaMax branch tripped.
+  testWidgets('deltaMax 100 turns the same reading into a spike',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDoc(pv: 1000, avg: 100);
+    await t.pumpWidget(subject(component(deltaMax: 100)));
+    await t.pumpAndSettle();
+    for (final String k in <String>['0', '1', '1', '5', '0']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    // Banner + sheet.
+    expect(find.text('Lonjakan jauh — 150 m³'), findsNWidgets(2));
+    // A spike NEVER blocks (spec §10: leaks are real and must be reported).
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+  });
+
+  // ★★ Acceptance §11 line 1 — the new-point hole, closed. RED if: segment 15
+  // is not selected when avg is absent (segment 3 would render a literal
+  // `{avg}` at the officer), or if `{deltaMax}` never reaches the token map.
+  testWidgets('an avg-less point trips deltaMax and reads segment 15',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocNoAvg(pv: 1000);
+    await t.pumpWidget(subject(component(deltaMax: 100)));
+    await t.pumpAndSettle();
+    for (final String k in <String>['0', '1', '1', '5', '0']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    expect(
+      find.text('Pemakaian 150 m³ — melewati batas 100 m³. Cek lagi angkanya.'),
+      findsNWidgets(2),
+    );
+    expect(find.text('Lonjakan jauh — 150 m³'), findsNothing);
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+  });
+
+  // ── the m³ basis on a dgm:2 point ────────────────────────────────────────
+  //
+  // ★★ These four are the ONLY tests in either suite that can see the m³
+  // conversion. Every other component here resolves red = 0, where 10^red is 1
+  // and digitPadCubic returns its argument untouched.
+
+  // ★ Acceptance §11 line 2. RED if: the delta is compared raw — 5000 > 100
+  // would flag a perfectly ordinary month. The `dari 126` in the expected
+  // string is the second half of the mutation: {prev} must be m³ too.
+  testWidgets('a dgm 2 point compares in m³, not in raw stand units',
+      (WidgetTester t) async {
+    txfControllerCheck(scr, pos);
+    seedPage();
+    seedLodgeDoc(pv: 12600);
+    await t.pumpWidget(subject(lodgeComponent()));
+    await t.pumpAndSettle();
+    // 4 black + 2 red = 6 boxes.
+    expect(find.byKey(const ValueKey<String>('digitPadBox-5')), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('digitPadComma')), findsOneWidget);
+
+    // raw 17600 - 12600 = 5000 -> 50 m³, well under deltaMax 100.
+    for (final String k in <String>['0', '1', '7', '6', '0', '0']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    expect(find.text('Masuk akal — selisih 50 m³ dari 126'), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
+    // The RAW integer is still what gets submitted — the division is for the
+    // verdict and the copy, never for storage (§2.1).
+    expect(txfController[scr]![pos]!.finalData, '17600');
+  });
+
+  // ★★ ISSUE-1 (plan audit W1) — the UNCONVERTED `avg`, pinned.
+  //
+  // `avg` is deliberately left in the doc's own unit while value and prev are
+  // divided by 10^red, because it is authored in m³/month already: the same
+  // page's DETAIL_CARD renders it `Rata-rata` + `<avg>` + ` m³/bln`. That
+  // premise is UNMEASURED — the one live `meter` doc has no `avg` field at all,
+  // so nothing was read from data. Owner check owed before the first dgm > 0
+  // point goes live; until then this test pins today's treatment so a change to
+  // that line is deliberate rather than drift.
+  //
+  // ★ RED if: `avg` is passed through digitPadCubic like value and prev
+  // (mutation M6). The spike threshold would collapse from 30 * 4 = 120 m³ to
+  // 0.3 * 4 = 1.2 m³ and this ordinary 50 m³ month would read as a spike.
+  testWidgets('a dgm 2 point measures the avg branch against an UNCONVERTED avg',
+      (WidgetTester t) async {
+    txfControllerCheck(scr, pos);
+    seedPage();
+    seedLodgeDoc(pv: 12600, avg: 30);
+    await t.pumpWidget(subject(lodgeComponent()));
+    await t.pumpAndSettle();
+    // raw 17600 - 12600 = 5000 -> 50 m³: under avg 30 * 4 = 120 m³ and under
+    // deltaMax 100. An ordinary month, and it must stay one.
+    for (final String k in <String>['0', '1', '7', '6', '0', '0']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    expect(find.text('Masuk akal — selisih 50 m³ dari 126'), findsOneWidget);
+    expect(find.text('Lonjakan jauh — 50 m³'), findsNothing);
+    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
+  });
+
+  // ★ The boundary. raw +10000 is EXACTLY 100 m³, and the threshold is strict
+  // `>` ("melewati batas"), so this is sane. RED if: the branch uses `>=`.
+  testWidgets('exactly at deltaMax is still sane', (WidgetTester t) async {
+    txfControllerCheck(scr, pos);
+    seedPage();
+    seedLodgeDoc(pv: 12600);
+    await t.pumpWidget(subject(lodgeComponent()));
+    await t.pumpAndSettle();
+    for (final String k in <String>['0', '2', '2', '6', '0', '0']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    expect(find.text('Masuk akal — selisih 100 m³ dari 126'), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
+  });
+
+  // ★★ The SAME boundary on a prev whose quotient is NOT exact — the shape
+  // both older boundary tests miss. They pick prev = 12600 (126.0) and prev =
+  // 1000 at pow10 1, where the two quotients happen to be exactly
+  // representable and any implementation agrees. 2802/100 is not: it is the
+  // binary64 nearest 28.02, and so is 12802/100, so subtracting the two
+  // quotients yields 100.00000000000001 — a false spike at exactly the ceiling
+  // on 1.64% of raw prev values, measured. Dividing the raw DIFFERENCE once
+  // gives exactly 100.0.
+  //
+  // ★ RED if: the delta reaching the deltaMax comparison OR the delta reaching
+  // the {delta} token is a difference of two separately-divided quotients. This
+  // test was confirmed RED against the pre-fix code (it rendered segment 15
+  // with 'Pemakaian 100.00000000000001 m³'), so both halves of the assertion
+  // below are live, not decorative.
+  testWidgets('at deltaMax with an INEXACT prev quotient it is still sane',
+      (WidgetTester t) async {
+    txfControllerCheck(scr, pos);
+    seedPage();
+    seedLodgeDoc(pv: 2802);
+    await t.pumpWidget(subject(lodgeComponent()));
+    await t.pumpAndSettle();
+    // raw 12802 - 2802 = 10000 -> EXACTLY 100 m³, and the threshold is strict.
+    for (final String k in <String>['0', '1', '2', '8', '0', '2']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    // Segment 2, with {delta} rendering the same number the verdict used.
+    expect(
+        find.text('Masuk akal — selisih 100 m³ dari 28.02'), findsOneWidget);
+    // Not segment 15, and not the float artefact that the old arithmetic put
+    // into it.
+    expect(find.textContaining('melewati batas'), findsNothing);
+    expect(find.textContaining('100.00000000000001'), findsNothing);
+    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
+  });
+
+  // ★ One m³ past it trips, and with no avg on the doc it reads segment 15
+  // with BOTH tokens resolved.
+  testWidgets('one m³ past deltaMax raises segment 15',
+      (WidgetTester t) async {
+    txfControllerCheck(scr, pos);
+    seedPage();
+    seedLodgeDoc(pv: 12600);
+    await t.pumpWidget(subject(lodgeComponent()));
+    await t.pumpAndSettle();
+    for (final String k in <String>['0', '2', '2', '7', '0', '0']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    expect(
+      find.text('Pemakaian 101 m³ — melewati batas 100 m³. Cek lagi angkanya.'),
+      findsNWidgets(2),
+    );
+  });
+
+  // RED if: the conversion is applied to only ONE side of the comparison.
+  testWidgets('backward survives the m³ conversion unchanged',
+      (WidgetTester t) async {
+    txfControllerCheck(scr, pos);
+    seedPage();
+    seedLodgeDoc(pv: 12600);
+    await t.pumpWidget(subject(lodgeComponent()));
+    await t.pumpAndSettle();
+    // raw 10000 -> 100 m³ < 126 m³.
+    for (final String k in <String>['0', '1', '0', '0', '0', '0']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    expect(find.text('Angka lebih kecil dari 126'), findsNWidgets(2));
+  });
+
+  // ── dmx: the PER-POINT ceiling (meter-block-alias-dmx §4a) ────────────────
+  //
+  // ONE rule: the effective ceiling is `doc.dmx` when present and > 0,
+  // otherwise the config `deltaMax`. Everything else about the deltaMax branch
+  // — the m³ basis, the avg-less segment-15 path, the strict `>` — is
+  // unchanged, and the tests above still pin all of it.
+  //
+  // Matched PAIRS, the same discipline as the deltaMax group above: identical
+  // seed and identical keystrokes, exactly one thing different. Every doc here
+  // is avg-less, which is both the shape of every brand-new point and the shape
+  // that routes a spike to segment 15 — the only segment carrying {deltaMax}.
+
+  // ★★ Acceptance §11 C1, first half. The config says 100, the POINT says 15,
+  // and 16 m³ is over the point's ceiling but nowhere near the config's.
+  //
+  // ★ RED if: the verdict call still passes `_deltaMax` (16 <= 100 would read
+  // sane and nothing would render), or the token map still renders `_deltaMax`
+  // (the sentence would say "batas 100").
+  testWidgets('doc dmx 15 overrides a config deltaMax of 100',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocNoAvg(pv: 1000, dmx: 15);
+    await t.pumpWidget(subject(component(deltaMax: 100)));
+    await t.pumpAndSettle();
+    // 5 boxes, pow10 1: 1016 - 1000 = 16 m³.
+    for (final String k in <String>['0', '1', '0', '1', '6']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    // Banner + sheet, and the sentence names the POINT's ceiling.
+    expect(
+      find.text('Pemakaian 16 m³ — melewati batas 15 m³. Cek lagi angkanya.'),
+      findsNWidgets(2),
+    );
+    expect(find.textContaining('Masuk akal'), findsNothing);
+    // A spike NEVER blocks (spec §10). `dmx` moves the threshold, not the
+    // doctrine — this is the pin that says so.
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+  });
+
+  // ★★ Acceptance §11 C1, the sane half. Identical seed, identical component,
+  // ONE keystroke different: 14 m³ is under the point's 15. Without this twin
+  // the test above would pass just as well against a mutant that flagged
+  // EVERYTHING.
+  testWidgets('doc dmx 15 leaves 14 m³ sane', (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocNoAvg(pv: 1000, dmx: 15);
+    await t.pumpWidget(subject(component(deltaMax: 100)));
+    await t.pumpAndSettle();
+    for (final String k in <String>['0', '1', '0', '1', '4']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    expect(find.text('Masuk akal — selisih 14 m³ dari 1000'), findsOneWidget);
+    expect(find.textContaining('melewati batas'), findsNothing);
+  });
+
+  // ★★ Acceptance §11 C1, second half — the TOKEN, isolated. Same scenario as
+  // the pair's first half; the ASSERTIONS are what differ, and they are the
+  // only ones in either suite aimed squarely at the token map.
+  //
+  // The first expect is load-bearing, not decoration: without it a mutant that
+  // never trips at all would satisfy the second one VACUOUSLY.
+  //
+  // ★ RED if: the token map still renders `_deltaMax` (second expect finds 2),
+  // or the verdict call still passes `_deltaMax` (first expect finds 0).
+  testWidgets('the segment-15 message names the POINT ceiling, not the config',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocNoAvg(pv: 1000, dmx: 15);
+    await t.pumpWidget(subject(component(deltaMax: 100)));
+    await t.pumpAndSettle();
+    for (final String k in <String>['0', '1', '0', '1', '6']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    expect(find.textContaining('melewati batas'), findsNWidgets(2));
+    expect(find.textContaining('melewati batas 100'), findsNothing);
+    expect(find.textContaining('melewati batas 15 m³'), findsNWidgets(2));
+  });
+
+  // ★★ Acceptance §11 line 2 — zero regression — and the CONTROL that makes
+  // the pair above attributable: identical seed and identical keystrokes to
+  // 'doc dmx 15 overrides a config deltaMax of 100', with exactly ONE map entry
+  // removed. 16 m³ is comfortably under the config's 100, so it stays sane.
+  //
+  // ⚠ This test is a CONTROL and is NOT mutation-sensitive by construction. It
+  // asserts the ABSENCE of a change, and every plausible mutation of the
+  // `: _deltaMax` fallback either RAISES the effective ceiling or switches it
+  // off — neither can turn a sane 16 m³ into a spike. The config path itself
+  // stays pinned by 'deltaMax 100 turns the same reading into a spike' and
+  // 'an avg-less point trips deltaMax and reads segment 15' above; the plan's
+  // mutation table (Verification M3) names the run that demonstrates that split
+  // rather than pretending this test catches it.
+  testWidgets('a doc with no dmx leaves the config deltaMax governing',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocNoAvg(pv: 1000);
+    await t.pumpWidget(subject(component(deltaMax: 100)));
+    await t.pumpAndSettle();
+    for (final String k in <String>['0', '1', '0', '1', '6']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    expect(find.text('Masuk akal — selisih 16 m³ dari 1000'), findsOneWidget);
+    expect(find.textContaining('melewati batas'), findsNothing);
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+  });
+
+  // ★ Acceptance §11 line 3 — `dmx` is compared in m³, AFTER the ÷10^dgm,
+  // exactly like the config ceiling: at pow10 100 the point's 15 bounds the
+  // 14 m³ month, never the raw 1400 stand units.
+  //
+  // ⚠ HONEST ABOUT ITS OWN POWER, because the plan audit measured it: this
+  // pump asserts a SANE outcome and reads green before this round, after it,
+  // and under every mutation in the plan's table. It is DOCUMENTATION of the
+  // basis, not a detector of it. The m³ basis is structurally guaranteed
+  // rather than mutation-pinned — the ÷10^dgm lives entirely inside
+  // digitPadDelta / digitPadVerdict (lib/widget/digit_pad_support.dart), which
+  // this round does not touch, and `deltaMaxEff` is handed to the very same
+  // `deltaMax` parameter `_deltaMax` was handed to, so no edit in this round
+  // can produce a raw comparison. The DETECTOR for the per-point ceiling on a
+  // dgm:2 point is its twin immediately below.
+  //
+  // NOTE the harness difference from the tests above: NO seedSlots() here, for
+  // the same reason the existing m³ tests omit it — seeding slot 9 with '5'
+  // would latch 5 black boxes and the doc's `dgh: 4` would never be read.
+  testWidgets('a dgm 2 point compares dmx in m³, not in raw stand units',
+      (WidgetTester t) async {
+    txfControllerCheck(scr, pos);
+    seedPage();
+    seedLodgeDoc(pv: 12600, dmx: 15);
+    await t.pumpWidget(subject(lodgeComponent()));
+    await t.pumpAndSettle();
+    // 4 black + 2 red = 6 boxes, pow10 100.
+    // raw 14000 - 12600 = 1400 -> 14 m³, under the point's 15.
+    for (final String k in <String>['0', '1', '4', '0', '0', '0']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    expect(find.text('Masuk akal — selisih 14 m³ dari 126'), findsOneWidget);
+    expect(find.textContaining('melewati batas'), findsNothing);
+  });
+
+  // ★★ THE TWIN, added by the plan audit (I-W4), and the only new test that
+  // exercises the per-point ceiling on a `pow10 != 1` point at all. Identical
+  // seed and identical keystrokes to the pump above; ONE thing different — the
+  // point's ceiling is 13, so the same 14 m³ month is now over it, while the
+  // config's 100 is nowhere near either number.
+  //
+  // raw 14000 - 12600 = 1400 -> 14 m³. The asserted sentence pins BOTH halves
+  // at once: the BASIS (a raw comparison of 1400 against 13 would spike here
+  // too, but it would also spike against the config's 100, and the surviving
+  // sane sibling above forbids that reading) and the SOURCE (only the point's
+  // 13 can put "batas 13" in the sentence — the config cannot).
+  //
+  // ★ RED if: the verdict call still passes `_deltaMax` (14 <= 100 reads sane
+  // and nothing renders), or the token map still renders `_deltaMax` (the
+  // sentence would say "batas 100").
+  testWidgets('a dgm 2 point trips dmx 13 on 14 m³, not on the raw 1400',
+      (WidgetTester t) async {
+    txfControllerCheck(scr, pos);
+    seedPage();
+    seedLodgeDoc(pv: 12600, dmx: 13);
+    await t.pumpWidget(subject(lodgeComponent()));
+    await t.pumpAndSettle();
+    for (final String k in <String>['0', '1', '4', '0', '0', '0']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    expect(
+      find.text('Pemakaian 14 m³ — melewati batas 13 m³. Cek lagi angkanya.'),
+      findsNWidgets(2),
+    );
+    // The config ceiling never reaches the sentence.
+    expect(find.textContaining('melewati batas 100'), findsNothing);
+  });
+
+  // ★★ `dmx: 0` means "no ceiling on this point", never "a ceiling of zero":
+  // the config falls back in. Spec §3 spells `0/absent` out as one case.
+  //
+  // A NEGATIVE dmx and an UNPARSEABLE one route through the same two clauses —
+  // `docDmx != null` (already unit-pinned for null / '' / '--' / 'null' /
+  // 'abc' by the digitPadNum group at test/digit_pad_support_test.dart:43-53)
+  // and `docDmx > 0` (this test) — so they deliberately get no separate pump.
+  // Three near-identical pumps would exercise one branch three times.
+  //
+  // ★ RED if: the guard is `>= 0`, or the `> 0` term is dropped, or
+  // `deltaMaxEff` is seeded with 0 instead of `_deltaMax`. Each makes the
+  // effective ceiling 0, digitPadVerdict's own `deltaMax > 0` switches the
+  // absolute branch off, and this 150 m³ month reads sane.
+  testWidgets('a doc dmx of 0 falls back to the config deltaMax',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocNoAvg(pv: 1000, dmx: 0);
+    await t.pumpWidget(subject(component(deltaMax: 100)));
+    await t.pumpAndSettle();
+    for (final String k in <String>['0', '1', '1', '5', '0']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    expect(
+      find.text('Pemakaian 150 m³ — melewati batas 100 m³. Cek lagi angkanya.'),
+      findsNWidgets(2),
+    );
+  });
+
+  // ★★ The sharpest pin on the TOKEN plumbing. With no `deltaMax` cell at all
+  // `_deltaMax` is 0, so a token map that still read it would omit the entry
+  // entirely and the pending-safe dialect would print a LITERAL `{deltaMax}` at
+  // the officer — while a verdict call that still read it would not trip at
+  // all. The doc arms the ceiling on its own.
+  //
+  // ★ RED if: EITHER site still reads `_deltaMax`.
+  testWidgets('doc dmx arms the ceiling with no config deltaMax at all',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocNoAvg(pv: 1000, dmx: 15);
+    // component() ships deltaMax: '' — the unconfigured cell.
+    await t.pumpWidget(subject(component()));
+    await t.pumpAndSettle();
+    for (final String k in <String>['0', '1', '0', '1', '6']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    expect(
+      find.text('Pemakaian 16 m³ — melewati batas 15 m³. Cek lagi angkanya.'),
+      findsNWidgets(2),
+    );
+    expect(find.textContaining('{deltaMax}'), findsNothing);
+  });
+
+  // ★ Acceptance §11 line 4 — zero hardcoded strings. `deltaMaxField` is an
+  // operator-facing INTERFACE: a builder may rename the doc field, and a typo
+  // in the Dart spelling of the key would fail SILENTLY (an unknown component
+  // key is ignored — no crash, no log, no analyzer finding). This test spells
+  // the key out loud so a rename goes RED instead of quiet.
+  //
+  // The decoy `dmx: 999` on the same doc is what makes it airtight: if the
+  // 'dmx' default silently won, the ceiling would be 999 and 16 m³ would read
+  // sane.
+  //
+  // ★ RED if: 'dmx' is hardcoded at the read site, or the config key is read
+  // under any name other than 'deltaMaxField'.
+  testWidgets('deltaMaxField renames the doc field the ceiling is read from',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    mapTableContent[''] = <Map<String, dynamic>>[
+      <String, dynamic>{'pv': 1000, 'maxm3': 15, 'dmx': 999},
+    ];
+    final Map<String, dynamic> c = component(deltaMax: 100)
+      ..['deltaMaxField'] = 'maxm3';
+    await t.pumpWidget(subject(c));
+    await t.pumpAndSettle();
+    for (final String k in <String>['0', '1', '0', '1', '6']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    expect(
+      find.text('Pemakaian 16 m³ — melewati batas 15 m³. Cek lagi angkanya.'),
+      findsNWidgets(2),
+    );
+  });
+
+  // ── the serial identity check, sourced from a form slot ──────────────────
+
+  // ★ Acceptance §11 line 6 — the owner's second sentence, and the doctrine
+  // this widget refuses to break: never train officers to dismiss a signal.
+  // RED if: a blank recorded serial stops short-circuiting to `off`.
+  testWidgets('a blank msn means zero checks, zero warnings and zero gate',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocWithSerial(msn: '');
+    await t.pumpWidget(subject(
+        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
+    await t.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
+    expect(find.text(seg16), findsNothing);
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+  });
+
+  // RED if: serialField stops gating the whole feature.
+  testWidgets('a blank serialField is totally silent', (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocWithSerial(msn: serialA);
+    await t.pumpWidget(subject(
+        component(serialField: '', blockOnSerialMismatch: 'TRUE')));
+    await t.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+  });
+
+  // ★ THE MeterSurvey shape (D562: serialField:"", serialSourcePosition:"").
+  // RED if: digitPadParsePosition stops returning null for a blank string, or
+  // a blank serialSourcePosition acquires a "helpful" default.
+  testWidgets('a blank serialSourcePosition is totally silent',
       (WidgetTester t) async {
     seedSlots();
     seedPage();
     seedMeterDocWithSerial(msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'PDAM\nA21 4471999\n041220';
-    await t.pumpWidget(subject(component(serialField: 'msn')));
-    await t.pumpAndSettle();
-
-    expect(ocrCalls, 1);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')),
-        findsOneWidget);
-    // ★ The RECORDED serial, never the one OCR read (which was A21 4471999).
-    expect(find.text(seg6Resolved), findsOneWidget);
-    // The digit boxes were never touched.
-    expect(txfController[scr]![pos]!.finalData, '');
-  });
-
-  // Acceptance §11 line 11: zero hardcoded strings. RED if: any part of segment
-  // 6 is baked into the widget.
-  testWidgets('segment 6 comes entirely from the sheet',
-      (WidgetTester t) async {
-    seedSlots();
-    seedMeterDocWithSerial(msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'WRONG UNIT';
     await t.pumpWidget(subject(component(
       serialField: 'msn',
-      serialText: 'Seri beda: {serial}. Cek lagi.',
+      serialSourcePosition: '',
+      blockOnSerialMismatch: 'TRUE',
     )));
     await t.pumpAndSettle();
 
-    expect(find.text('Seri beda: A21-4471908. Cek lagi.'), findsOneWidget);
-    expect(find.text(seg6Resolved), findsNothing);
+    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
   });
 
-  // §3.1 "segmen kosong = fitur itu diam".
-  // RED if: the `sheetText.isEmpty` guard leaves digitPadShouldRaiseAnySheet.
-  testWidgets('a blank segment 6 silences the serial verdict entirely',
+  // ★ RED if: the `serialSlot == _position` nulling in initState is removed.
+  // Without it the pad reads its OWN slot — which holds the digit buffer, is
+  // empty on the first build, and would therefore report MISSING and kill the
+  // save button on every page the officer has not typed into yet. It would
+  // also attach a listener to its own controller: a self-setState loop.
+  testWidgets('a self-referential serialSourcePosition is refused',
       (WidgetTester t) async {
     seedSlots();
+    seedPage();
     seedMeterDocWithSerial(msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'WRONG UNIT';
-    await t.pumpWidget(
-        subject(component(serialField: 'msn', serialText: '')));
+    await t.pumpWidget(subject(component(
+      serialField: 'msn',
+      serialSourcePosition: '$pos',
+      blockOnSerialMismatch: 'TRUE',
+    )));
     await t.pumpAndSettle();
 
-    expect(ocrCalls, 1); // the check still RAN
     expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+    expect(noPumpException(), isTrue);
   });
 
-  // Acceptance §11 line 5, ALL THREE halves of it: the save button lives,
-  // segment 13 is offered, AND "bacaan tersimpan apa adanya" — the reading the
-  // officer already typed survives the mismatch untouched.
+  // ★★ The config decay this round's W1 named. serialSourcePosition names a
+  // slot NO component on the page owns — a typo, or a TXF later deleted from
+  // the sheet. _slotValue returns '' for that exactly as it does for "the
+  // officer has not typed yet", so read undiscriminated it is `missing` ->
+  // serialBlock -> a page with no control anywhere that can clear it. The
+  // retired photoPosition:"3" decayed this way and failed OPEN; this must too.
   //
-  // RED if: the `_blockOnSerialMismatch &&` term is dropped from serialBlock
-  // (the save button would die on a warning-only config, which is the v1 shape
-  // spec §10 mandates), or if anything on the serial path writes back to the
-  // pad's own slot — finalData is the value saveSend actually submits, and it
-  // is born '--' here, so "the reading survived" is not self-evident and has to
-  // be asserted.
+  // The controller is the discriminator: minting is EAGER (buildPage calls
+  // buildDisplayComponent, hence txfControllerCheck, for every positioned
+  // component before it returns) while mounting is LAZY, so a null controller
+  // means nobody owns the slot.
   //
-  // ★ The reading is SEEDED into controller.text before the pump, never typed
-  // after it. _content re-establishes the buffer from controller.text on every
-  // build (which is how an edit page arrives with a reading already in place),
-  // and typing is not an option here: the mismatch sheet is already up by the
-  // time the pad is interactive, and showModalBottomSheet's barrier absorbs
-  // every tap aimed at the numpad underneath — the same trap documented on
-  // 'correcting the reading restores savesend to initialIsEnabled'.
+  // ★ RED if: the null-controller case falls back to '' and is read as
+  // `missing`. THE OTHER DIRECTION is pinned by
+  // `msn filled + an empty slot blocks with segment 16`, which is this same
+  // config with serialSourcePosition left on slot 16 — it asserts the gate
+  // DOES engage, so "silent" here cannot be a broken lookup.
+  testWidgets('a serialSourcePosition no component owns is OFF, not a gate',
+      (WidgetTester t) async {
+    seedSlots(); // mints 9, 7 and 16 — never 19.
+    seedPage();
+    seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
+    await t.pumpWidget(subject(component(
+      serialField: 'msn',
+      serialSourcePosition: '19',
+      blockOnSerialMismatch: 'TRUE',
+    )));
+    await t.pumpAndSettle();
+    // The premise, asserted rather than assumed.
+    expect(txfController[scr]![19], isNull);
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+
+    for (final String k in <String>['0', '1', '1', '0', '0']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    // Totally silent: not the sheet, not the message, not the gate.
+    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
+    expect(find.text(seg16), findsNothing);
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+    expect(noPumpException(), isTrue);
+  });
+
+  // ★★ The sibling shape: the slot EXISTS but ships isEnabled:"FALSE". The
+  // officer cannot retype a serial in a field he cannot focus, so a gate
+  // raised on it could never be cleared by the one action that clears it -
+  // the same doctrine as the pad's own `&& enabled`, applied to the SOURCE
+  // slot. Fail OPEN, but NOT silent: there is something real to warn about
+  // here (a recorded serial and an empty capture), so the sheet still says so.
   //
-  // 01100 -> submit '1100'. 1100 > pv 1000 and delta 100 <= avg 30 * 4, so the
-  // numeric verdict is `sane` and the serial keeps the sheet (digitPadSerialOwnsSheet).
+  // ★ RED if: `serialSourceEnabled` is dropped from serialBlock (the save
+  // button dies with no way back), or if the disabled slot is instead treated
+  // like the absent one (the warning disappears too).
+  testWidgets('a DISABLED serial source slot warns but never gates',
+      (WidgetTester t) async {
+    seedSlots();
+    txfController[scr]![serialSlot]!.isEnabled = false;
+    seedPage();
+    seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
+    await t.pumpWidget(subject(
+        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
+    await t.pumpAndSettle();
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+
+    for (final String k in <String>['0', '1', '1', '0', '0']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    // WARNED — segment 16 is on screen ...
+    expect(find.text(seg16), findsOneWidget);
+    // ... but NOT gated, and the acknowledge button is available because the
+    // sheet is not blocking.
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+    expect(txfController[scr]![pos]!.finalData, '1100');
+  });
+
+  // ★ Acceptance §11 line 4, first half — normalisation on BOTH sides.
+  // RED if: digitPadNormalizeSerial stops being applied to the slot value.
+  testWidgets('a matching serial is silent, punctuation and case aside',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocWithSerial(msn: serialA); // 'B21-4471902'
+    writeSerialSlot('b21 4471902');
+    await t.pumpWidget(subject(
+        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
+    await t.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+  });
+
+  // ★ Acceptance §11 line 4, second half. The sheet rises on the FIELD alone,
+  // with the digit boxes still empty (spec §5's sketch).
+  // RED if: the mismatch state stops keying the sheet, or {serial} is filled
+  // from the slot instead of the doc.
+  testWidgets('a wrong serial raises segment 6 with the RECORDED serial',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocWithSerial(msn: serialA);
+    writeSerialSlot('X99-1234567');
+    await t.pumpWidget(subject(
+        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
+    await t.pumpAndSettle();
+
+    expect(find.text(seg6Resolved), findsOneWidget);
+    // blockOnSerialMismatch TRUE -> no "memang segitu" for a serial. The only
+    // ways out are correcting the field or the page's own "Tidak bisa dibaca"
+    // chain, which digitPadSaveSendPositions structurally cannot gate.
+    expect(find.byKey(const ValueKey<String>('digitPadSheetAccept')),
+        findsNothing);
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isFalse);
+    expect(txfController[scr]![pos]!.finalData, '');
+  });
+
+  // RED if: the `_blockOnSerialMismatch &&` term is dropped from serialBlock.
   testWidgets('blockOnSerialMismatch FALSE warns but never disables savesend',
       (WidgetTester t) async {
     seedSlots();
     seedPage();
     seedMeterDocWithSerial(msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'WRONG UNIT';
-    txfController[scr]![pos]!.controller.text = '01100';
+    writeSerialSlot('X99-1234567');
     await t.pumpWidget(subject(
         component(serialField: 'msn', blockOnSerialMismatch: 'FALSE')));
     await t.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')),
-        findsOneWidget);
-    // The serial message, not the sane verdict, is what took the sheet.
     expect(find.text(seg6Resolved), findsOneWidget);
-    // Segment 13 present: the officer can accept and move on.
     expect(find.byKey(const ValueKey<String>('digitPadSheetAccept')),
         findsOneWidget);
-    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
-    expect(find.text('Perbaiki dulu'), findsNothing);
-    // ★ "bacaan tersimpan apa adanya" — the typed reading is intact in the slot
-    // saveSend composes from, warning or no warning.
-    expect(txfController[scr]![pos]!.finalData, '1100');
-  });
-
-  // Acceptance §11 line 6. RED if: `|| serialBlock` is dropped from EITHER
-  // _scheduleGate (savesend stays alive) or verdictBlock (segment 13 comes
-  // back and segment 5 disappears). Two independent mutations, both caught.
-  testWidgets('blockOnSerialMismatch TRUE kills savesend and hides segment 13',
-      (WidgetTester t) async {
-    seedSlots();
-    seedPage();
-    seedMeterDocWithSerial(msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'WRONG UNIT';
-    await t.pumpWidget(subject(
-        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
-    await t.pumpAndSettle();
-
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')),
-        findsOneWidget);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetAccept')),
-        findsNothing);
-    // Segment 5 appears twice: the sheet's blocked foot and the card footer.
-    expect(find.text('Perbaiki dulu'), findsNWidgets(2));
-    expect(txfController[scr]![saveSendSlot]!.isEnabled, isFalse);
-  });
-
-  // ★★ Acceptance §11 line 8, AND the only in-harness proof of the 0a
-  // mechanism. Nothing touches the pad here — the photo slot is written the way
-  // otq_get_images_2 writes it, and only the LISTENER can turn that into a
-  // rebuild.
-  // RED (two independent mutations):
-  //   * remove the photoPosition listener      -> ocrCalls stays 1, no sheet
-  //   * drop photoRaw from the _ocrKey memo    -> ocrCalls stays 1, no sheet
-  testWidgets('replacing the photo recomputes the verdict', (WidgetTester t) async {
-    seedSlots();
-    seedPage();
-    seedMeterDocWithSerial(msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'PDAM A21 4471908 039010'; // the RIGHT meter
-    ocrTextByPath[photoB] = 'PDAM A21 4471999 041220'; // a DIFFERENT meter
-    await t.pumpWidget(subject(component(serialField: 'msn')));
-    await t.pumpAndSettle();
-    expect(ocrCalls, 1);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-
-    // The officer retakes the photo. No tap on the pad, no rebuild forced.
-    writePhotoSlot(<String>[photoB]);
-    await t.pumpAndSettle();
-
-    expect(ocrCalls, 2);
-    expect(ocrPaths, <String>[photoA, photoB]);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')),
-        findsOneWidget);
-    expect(find.text(seg6Resolved), findsOneWidget);
-  });
-
-  // ★ Multi-photo. RED if: the per-photo loop is "improved" into one
-  // concatenated string — the two halves below would then join into
-  // A214471908 and a WRONG meter would read as correct. This is the single
-  // most dangerous simplification in the feature.
-  testWidgets('a serial straddling two photos is NOT a match',
-      (WidgetTester t) async {
-    seedSlots();
-    seedMeterDocWithSerial(msn: serialA);
-    writePhotoSlot(<String>[photoA, photoB]);
-    ocrTextByPath[photoA] = 'PDAM A21-44';
-    ocrTextByPath[photoB] = '71908 SNI';
-    await t.pumpWidget(subject(component(serialField: 'msn')));
-    await t.pumpAndSettle();
-
-    expect(ocrCalls, 2);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')),
-        findsOneWidget);
-  });
-
-  // RED if: the loop stops short-circuiting, or stops scanning past photo 1.
-  testWidgets('any photo containing the serial is a match',
-      (WidgetTester t) async {
-    seedSlots();
-    seedMeterDocWithSerial(msn: serialA);
-    writePhotoSlot(<String>[photoA, photoB]);
-    ocrTextByPath[photoA] = 'BLURRED';
-    ocrTextByPath[photoB] = 'A21 4471908';
-    await t.pumpWidget(subject(component(serialField: 'msn')));
-    await t.pumpAndSettle();
-
-    expect(ocrCalls, 2);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-  });
-
-  // ★ The FAIL-OPEN branch, and it is a ratified product decision (spec §10
-  // "blokir waktu OCR gagal baca apa pun" is Not Doing; product #17), NOT the
-  // repo's usual fail-closed gate rule.
-  // RED if: the catch in _applySerial sets _serialMatch = false instead of
-  // returning — a device without the ML Kit model would then brick every
-  // MeterRead page that ships blockOnSerialMismatch:"TRUE".
-  testWidgets('an OCR throw is silent and never blocks, even with block TRUE',
-      (WidgetTester t) async {
-    seedSlots();
-    seedPage();
-    seedMeterDocWithSerial(msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrThrows = true;
-    await t.pumpWidget(subject(
-        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
-    await t.pumpAndSettle();
-
-    expect(ocrCalls, 1);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
     expect(find.text('Perbaiki dulu'), findsNothing);
     expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
-    expect(noPumpException(), isTrue);
   });
 
-  // ★ Precedence (spec §12 / interview decision 5). RED if:
-  // digitPadSerialOwnsSheet loses its verdict terms — segment 6 would take the
-  // sheet and the backward reading, the ONE thing product #21 exists for, would
-  // be hidden behind a false-positive-prone serial warning.
-  testWidgets('a backward reading beats the serial message for the sheet',
+  // ★★ Acceptance §11 line 5. Skipping the capture is NOT an escape hatch.
+  // RED if: the `missing` state stops producing a key, or segment 16 is not
+  // selected for it (segment 6's "tidak cocok" would be a lie).
+  testWidgets('msn filled + an empty slot blocks with segment 16',
       (WidgetTester t) async {
     seedSlots();
     seedPage();
     seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'WRONG UNIT';
-    // ★ SEEDED before the pump, never typed after it. The serial mismatch
-    // raises its sheet on the FIRST frame — the digit boxes are still empty,
-    // which is precisely spec §5's sketch — and from then on
-    // showModalBottomSheet's barrier absorbs every tap aimed at the numpad
-    // underneath, so a tap loop here lands on nothing at all. Same trap and
-    // same workaround as the sibling test 'blockOnSerialMismatch FALSE warns
-    // but never disables savesend': _content re-establishes the buffer from
-    // controller.text on every build. 00900 -> submit '900' < pv 1000.
-    txfController[scr]![pos]!.controller.text = '00900';
-    await t.pumpWidget(subject(component(
-      serialField: 'msn',
-      blockOnBackward: 'TRUE',
-    )));
+    await t.pumpWidget(subject(
+        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
+    await t.pumpAndSettle();
+    // The gate is on from the first build; the SHEET waits for a reading.
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isFalse);
+    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
+
+    // 01100 -> '1100'; 100 over pv 1000 is inside avg 30 * 4, so the NUMERIC
+    // verdict is `sane` and the locking serial problem owns the sheet.
+    for (final String k in <String>['0', '1', '1', '0', '0']) {
+      await tapKey(t, k);
+    }
     await t.pumpAndSettle();
 
-    // Segment 4, not segment 6 — and TWICE, the inline card banner plus the
-    // sheet, which is the count both pre-existing backward tests in this file
-    // already assert.
-    expect(find.text('Angka lebih kecil dari 1000'), findsNWidgets(2));
+    expect(find.text(seg16), findsOneWidget);
     expect(find.text(seg6Resolved), findsNothing);
+    expect(find.byKey(const ValueKey<String>('digitPadSheetAccept')),
+        findsNothing);
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isFalse);
+    // The reading itself is captured, exactly as typed.
+    expect(txfController[scr]![pos]!.finalData, '1100');
+  });
+
+  // ★★ RED if: digitPadSerialKey stops gating the MISSING half on
+  // readingComplete. An empty slot is the birth state of EVERY meter, so this
+  // is the difference between "one sheet when it matters" and "a modal on 100%
+  // of page entries", which is §4c rule 1's exact failure mode.
+  testWidgets('the missing-serial sheet does NOT greet the officer on entry',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocWithSerial(msn: serialA);
+    await t.pumpWidget(subject(
+        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
+    await t.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
+    expect(find.text(seg16), findsNothing);
+    // The gate is NOT deferred — an incomplete reading submits '' anyway.
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isFalse);
+  });
+
+  // ★★ Acceptance §11 line 7 — the point that killed the photoPosition path.
+  // Nothing touches the pad here: the slot is written the way its real writers
+  // write it, and ONLY the listener can turn that into a rebuild.
+  // RED if: the serial-slot listener is removed, or _ensureSerialWatch stops
+  // being called from the post-frame pass. (The pass is also what survives
+  // buildPage(clear:true) re-minting txfController[scrName] — a one-shot
+  // attach in initState would hold a stale controller after a page rebuild.)
+  testWidgets('a serial written AFTER the first build lifts the gate',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocWithSerial(msn: serialA);
+    await t.pumpWidget(subject(
+        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
+    await t.pumpAndSettle();
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isFalse);
+
+    writeSerialSlot(serialA);
+    await t.pumpAndSettle();
+
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
+  });
+
+  // ★★★ THE anti-keystroke test, and the reason digitPadSerialKey is keyed on
+  // the STATE. The serial slot is an ordinary TXF: its controller notifies this
+  // pad on EVERY character and otq_txf_2's onChanged writes finalData per
+  // character. A value-keyed latch would mint a new key per keystroke and, the
+  // sheet being MODAL, force the officer to dismiss a bottom sheet between
+  // every two characters — r1's W1 defect through a different door.
+  //
+  // TWO sheets are correct here (one `missing`, one `mismatch`). A third is the
+  // bug. RED if: the key carries the read value.
+  testWidgets('editing a wrong serial raises the sheet ONCE, not per keystroke',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
+    // FALSE so segment 13 exists and the modal can be dismissed between steps;
+    // with TRUE the barrier would swallow the taps.
+    await t.pumpWidget(subject(
+        component(serialField: 'msn', blockOnSerialMismatch: 'FALSE')));
+    await t.pumpAndSettle();
+
+    for (final String k in <String>['0', '1', '1', '0', '0']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+    // Sheet #1 — MISSING, now that the reading is complete.
+    expect(find.text(seg16), findsOneWidget);
+    await t.tap(find.byKey(const ValueKey<String>('digitPadSheetAccept')));
+    await t.pumpAndSettle();
+
+    // The officer starts typing. 'B' is 1 char, so the < 4 rule demands exact
+    // equality and this is a MISMATCH — new state, one new sheet.
+    writeSerialSlot('B');
+    await t.pumpAndSettle();
+    expect(find.text(seg6Resolved), findsOneWidget);
+    await t.tap(find.byKey(const ValueKey<String>('digitPadSheetAccept')));
+    await t.pumpAndSettle();
+
+    // ★ Two more characters. Still MISMATCH, still the same key: NO new sheet.
+    for (final String v in <String>['B2', 'B21']) {
+      writeSerialSlot(v);
+      await t.pumpAndSettle();
+      expect(find.byKey(const ValueKey<String>('digitPadSheetFix')),
+          findsNothing,
+          reason: 'typing "$v" must not raise a third sheet');
+    }
+
+    // 'B214' is 4 chars, so substring matching applies and it matches.
+    writeSerialSlot('B214');
+    await t.pumpAndSettle();
+    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
+    // The reading survived every one of those rebuilds untouched.
+    expect(txfController[scr]![pos]!.finalData, '1100');
+  });
+
+  // ★★ Interview decision 10. RED if: the serialBlocking short circuit is
+  // dropped from digitPadSerialOwnsSheet — the SPIKE would take the sheet,
+  // segment 13 would be suppressed by the serial gate, and the officer would
+  // be told to fix a number that cannot lift his block.
+  testWidgets('a LOCKING serial problem owns the sheet even over a spike',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
+    writeSerialSlot('X99-1234567');
+    // ★ SEEDED before the pump, never typed after it: the serial sheet is
+    // already up on the first frame and showModalBottomSheet's barrier absorbs
+    // every tap aimed at the numpad underneath. _content re-establishes the
+    // buffer from controller.text on every build, which is also how an edit
+    // page arrives with a reading already in place.
+    // 09999 -> '9999'; 8999 over pv 1000 is far past avg 30 * 4.
+    txfController[scr]![pos]!.controller.text = '09999';
+    await t.pumpWidget(subject(
+        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
+    await t.pumpAndSettle();
+
+    // The SHEET carries the serial message...
+    expect(find.text(seg6Resolved), findsOneWidget);
+    // ...and the CARD still carries the numeric one. findsOneWidget, not two:
+    // the banner is on screen, the sheet is not showing it. Nothing is hidden.
+    expect(find.text('Lonjakan jauh — 8999 m³'), findsOneWidget);
     expect(find.byKey(const ValueKey<String>('digitPadSheetAccept')),
         findsNothing);
     expect(txfController[scr]![saveSendSlot]!.isEnabled, isFalse);
   });
 
-  // Acceptance §11 line 10 — a retired key must be inert, not fatal.
-  // RED if: anyone "implements" ocrPattern, or SduiSpec starts rejecting
-  // unknown keys.
-  testWidgets('a leftover ocrPattern in the config is ignored silently',
+  // ★ The other side of the same rule: when nothing is locking, the numeric
+  // verdict keeps the sheet exactly as it did before this round.
+  // RED if: serialBlocking is ORed in without the blocking condition.
+  testWidgets('a NON-locking serial problem yields the sheet to the numbers',
       (WidgetTester t) async {
     seedSlots();
-    seedMeterDocWithSerial(msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'A21 4471908';
+    seedPage();
+    seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
+    writeSerialSlot('X99-1234567');
+    txfController[scr]![pos]!.controller.text = '09999';
     await t.pumpWidget(subject(
-        component(serialField: 'msn', ocrPattern: r'\d{4,9}')));
+        component(serialField: 'msn', blockOnSerialMismatch: 'FALSE')));
+    await t.pumpAndSettle();
+
+    expect(find.text('Lonjakan jauh — 8999 m³'), findsNWidgets(2));
+    expect(find.text(seg6Resolved), findsNothing);
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+  });
+
+  // ★ Same doctrine as the two disabled-pad tests above: a gate the officer
+  // cannot clear is a brick. On a disabled pad he can neither retype the serial
+  // nor correct anything, and §2.6's lack of a gate memo makes the block
+  // permanent — taking the page's photos, GPS and every other field with it.
+  // RED if: the `&& enabled` term leaves serialBlock.
+  testWidgets('a disabled pad never gates on a serial problem',
+      (WidgetTester t) async {
+    txfControllerCheck(scr, pos);
+    txfController[scr]![pos]!.isEnabled = false;
+    seedSlots();
+    txfController[scr]![pos]!.isEnabled = false;
+    seedPage();
+    seedMeterDocWithSerial(msn: serialA);
+    writeSerialSlot('X99-1234567');
+    await t.pumpWidget(subject(component(
+      serialField: 'msn',
+      blockOnSerialMismatch: 'TRUE',
+      isEnabled: 'FALSE',
+    )));
+    await t.pumpAndSettle();
+
+    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+    expect(find.text('Perbaiki dulu'), findsNothing);
+    expect(noPumpException(), isTrue);
+  });
+
+  // §3.1 "segmen kosong = fitur itu diam" — MeterSurvey's 15-segment `text`
+  // reaches segment 16 out of range, and SduiSpec.text is a length guard.
+  // RED if: either segment acquires a hardcoded fallback.
+  testWidgets('a blank segment 16 silences the missing-serial message',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
+    await t.pumpWidget(subject(component(
+      serialField: 'msn',
+      missingSerialText: '',
+      blockOnSerialMismatch: 'FALSE',
+    )));
+    await t.pumpAndSettle();
+    for (final String k in <String>['0', '1', '1', '0', '0']) {
+      await tapKey(t, k);
+    }
+    await t.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
+  });
+
+  // Acceptance §11 line 10 — a retired key must be inert, not fatal. Both
+  // photoPosition and ocrPattern are present in EVERY component() here.
+  // RED if: anyone "implements" either, or SduiSpec starts rejecting unknown
+  // keys.
+  testWidgets('leftover photoPosition and ocrPattern are ignored silently',
+      (WidgetTester t) async {
+    seedSlots();
+    seedPage();
+    seedMeterDocWithSerial(msn: serialA);
+    writeSerialSlot(serialA);
+    await t.pumpWidget(subject(
+        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
     await t.pumpAndSettle();
 
     expect(find.text('Angka di meter sekarang'), findsOneWidget);
     expect(find.byKey(const ValueKey<String>('digitPadBox-0')), findsOneWidget);
-    expect(ocrCalls, 1);
-    expect(noPumpException(), isTrue);
-  });
-
-  // ── r2: SEQUENCES ────────────────────────────────────────────────────────
-  //
-  // Every one of the 45 tests r1 added asserts a SINGLE state, which is exactly
-  // why W1 and W2 survived a green 154. A test that pumps once and asserts one
-  // condition cannot see either defect: both live in what the SECOND event does
-  // to the memory the FIRST one left behind.
-
-  // ★★ r1 W1, measured at runtime by the orchestrator as FIVE modal sheets for
-  // ONE mismatch. §12 concedes a mismatch is COMMON (an unreadable photo reads
-  // as one), so this is the normal path, and a sheet on every keystroke cycle
-  // manufactures precisely the habit §4c rule 1 exists to prevent — the officer
-  // learns to close the sheet unread, and the BACKWARD verdict goes with it.
-  //
-  // RED if: digitPadShouldRaiseAnySheet compares the latch WHOLE again, or its
-  // serial branch goes back to an unconditional `return true`. The failure
-  // lands on the assertion right after the type loop.
-  testWidgets(
-      'a live serial mismatch raises the sheet ONCE, however the reading '
-      'changes', (WidgetTester t) async {
-    seedSlots();
-    seedPage();
-    seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'WRONG UNIT';
-    await t.pumpWidget(subject(component(serialField: 'msn')));
-    await t.pumpAndSettle();
-    // Spec §5's sketch: the sheet rises on the PHOTO alone, boxes still empty.
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')),
-        findsOneWidget);
-    expect(ocrCalls, 1);
-
-    // Segment 13 closes the sheet and nothing else. From here the modal barrier
-    // is gone and the numpad is tappable again — which is the only reason this
-    // test can type at all (see the seed-before-pump note on its siblings).
-    await t.tap(find.byKey(const ValueKey<String>('digitPadSheetAccept')));
-    await t.pumpAndSettle();
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-
-    // 01100 -> submit '1100'. 100 over pv 1000 is well inside avg 30 * 4, so
-    // the numeric verdict is `sane` and the serial keeps the sheet.
-    for (final String k in <String>['0', '1', '1', '0', '0']) {
-      await tapKey(t, k);
-    }
-    await t.pumpAndSettle();
-    // ★ RAISE #2 on r1: completing the buffer minted a new composite key.
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-
-    await tapBack(t);
-    await t.pumpAndSettle();
-    // ★ RAISE #3 on r1: an incomplete buffer put the key back to '|<ocr>'.
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-
-    await tapKey(t, '0');
-    await t.pumpAndSettle();
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-
-    // Neither the photo nor the serial changed, so the verdict was computed
-    // exactly once.
-    expect(ocrCalls, 1);
-    // The pad is alive and showing the NUMERIC verdict inline, which is the
-    // whole point of keeping the serial message on the sheet only (spec §5).
-    //
-    // ★ There is deliberately no `digitPadVerdictRow` to assert here: that
-    // compact row is only tappable for spike/backward, and the serial verdict
-    // has no inline surface at all — measured, not assumed. Its consequence is
-    // out of scope for this round and recorded in the walkthrough.
-    expect(find.text('Masuk akal — selisih 100 m³ dari 1000'), findsOneWidget);
-    expect(txfController[scr]![pos]!.finalData, '1100');
-  });
-
-  // ★ The residual the OBVIOUS two-line W1 fix would have left behind. With one
-  // latch entry that keys on whichever axis raised last, a spike between two
-  // serial states evicts the serial memory and backspacing re-raises the sheet
-  // the officer closed two taps ago.
-  //
-  // Two sheets here are CORRECT — one serial, one spike. A third is the bug.
-  // RED if: digitPadNextSheetLatch stops keeping the previous serial half
-  // through a numeric raise.
-  testWidgets('a spike sheet between two serial states does not re-open the '
-      'dismissed serial sheet', (WidgetTester t) async {
-    seedSlots();
-    seedPage();
-    seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'WRONG UNIT';
-    await t.pumpWidget(subject(component(serialField: 'msn')));
-    await t.pumpAndSettle();
-    // Sheet #1 — the serial.
-    expect(find.text(seg6Resolved), findsOneWidget);
-    await t.tap(find.byKey(const ValueKey<String>('digitPadSheetAccept')));
-    await t.pumpAndSettle();
-
-    // 09999 -> submit '9999'. 8999 over pv 1000 is far past avg 30 * 4, so the
-    // NUMERIC verdict takes the sheet back (digitPadSerialOwnsSheet).
-    for (final String k in <String>['0', '9', '9', '9', '9']) {
-      await tapKey(t, k);
-    }
-    await t.pumpAndSettle();
-    // Sheet #2 — the spike, NOT the serial.
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')),
-        findsOneWidget);
-    expect(find.text(seg6Resolved), findsNothing);
-    await t.tap(find.byKey(const ValueKey<String>('digitPadSheetAccept')));
-    await t.pumpAndSettle();
-
-    // The officer starts correcting the number the spike sheet told him to fix.
-    await tapBack(t);
-    await t.pumpAndSettle();
-
-    // ★ THE assertion: no third sheet. The serial verdict has not changed, and
-    // the photo has not changed, so there is nothing new to say.
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-    expect(ocrCalls, 1);
-  });
-
-  // ★★ r1 W2. _ocrKey and _serialMatch used to be State-local while the latch
-  // they feed was static — and AnyPage renders through a ListView.builder with
-  // no keep-alive (any_page.dart), so scrolling the pad off screen DESTROYS the
-  // State. On the way back the memo was empty, the sheet key collapsed to '',
-  // _applySheet took its re-arm branch and DELETED the latch, and the dismissed
-  // sheet came back as soon as the re-run OCR landed.
-  //
-  // Unmounting and re-pumping is that scroll: an element removed from the tree
-  // is disposed, and the third pump builds a brand-new DigitPadState with
-  // initState run again. `find.byType(DigitPad) findsNothing` in the middle is
-  // what keeps this test from passing vacuously if the tree ever stops being
-  // torn down.
-  //
-  // RED if: _ocrKey / _serialMatch go back to being State fields (both
-  // assertions fail — the sheet returns AND the OCR runs a second time).
-  testWidgets('a State re-creation neither re-raises the dismissed sheet nor '
-      're-runs the OCR', (WidgetTester t) async {
-    seedSlots();
-    seedPage();
-    seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'WRONG UNIT';
-    final Map<String, dynamic> c = component(serialField: 'msn');
-    await t.pumpWidget(subject(c));
-    await t.pumpAndSettle();
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')),
-        findsOneWidget);
-    expect(ocrCalls, 1);
-
-    await t.tap(find.byKey(const ValueKey<String>('digitPadSheetAccept')));
-    await t.pumpAndSettle();
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-
-    // Scrolled away: SingleChildScrollView -> SizedBox is a runtimeType change,
-    // so the subtree is unmounted rather than updated in place.
-    await t.pumpWidget(
-        const MaterialApp(home: Scaffold(body: SizedBox.shrink())));
-    await t.pumpAndSettle();
-    expect(find.byType(DigitPad), findsNothing);
-
-    // Scrolled back.
-    await t.pumpWidget(subject(c));
-    await t.pumpAndSettle();
-
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-    // ★ The second half of W2, and the one with a device cost: a fresh native
-    // recogniser per return, plus (with blockOnSerialMismatch TRUE) savesend
-    // re-enabled for the whole in-flight window.
-    expect(ocrCalls, 1);
-    expect(noPumpException(), isTrue);
-  });
-
-  // ── r2 W4: the memo may hold ANSWERS, never a claim ──────────────────
-  //
-  // r2 claimed the memo key BEFORE the await and wrote the answer after it, so
-  // a pass abandoned in between left `ocrKey = K, match = null` in a STATIC map
-  // and every later pass returned at `key == _ocrKey`. No sheet, no gate, no
-  // log, for that photo, until a new photo or a navigation.
-  //
-  // The `a State re-creation ...` test above CANNOT see this: it lets the OCR
-  // complete before the State is disturbed. The two below hold the seam open
-  // with a Completer and destroy the State while the read is still in flight,
-  // which is the real field sequence — AnyPage's ListView.builder destroys the
-  // State on a scroll, and the officer scrolls in exactly the seconds after the
-  // photo is taken, i.e. inside the 100-500 ms round-trip.
-  //
-  // RED if: the memo write moves back below `if (!mounted) return;`, or the key
-  // is claimed in the memo before the await again.
-  testWidgets(
-      'a State destroyed MID-read still records the verdict, and the next '
-      'mount raises it', (WidgetTester t) async {
-    seedSlots();
-    seedPage();
-    seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'WRONG UNIT';
-    final Completer<void> gate = Completer<void>();
-    ocrGates[photoA] = gate;
-    final Map<String, dynamic> c =
-        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE');
-    await t.pumpWidget(subject(c));
-    await t.pumpAndSettle();
-    // Dispatched and PENDING. There is no verdict yet, so no sheet and — the
-    // §12 residual, recorded not fixed — no gate either during the window.
-    expect(ocrCalls, 1);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
     expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
-
-    // Scrolled away DURING the round-trip.
-    await t.pumpWidget(
-        const MaterialApp(home: Scaffold(body: SizedBox.shrink())));
-    await t.pumpAndSettle();
-    expect(find.byType(DigitPad), findsNothing);
-
-    // ML Kit answers a State that no longer exists.
-    gate.complete();
-    await t.pumpAndSettle();
-
-    // Scrolled back.
-    await t.pumpWidget(subject(c));
-    await t.pumpAndSettle();
-
-    // ★ THE assertion pair. On r2 this was `findsNothing` + `isTrue`: the
-    // check was dead for this photo and the officer could save the wrong meter.
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')),
-        findsOneWidget);
-    expect(find.text(seg6Resolved), findsOneWidget);
-    expect(txfController[scr]![saveSendSlot]!.isEnabled, isFalse);
-    // The abandoned pass's answer was KEPT, so nothing had to be recomputed.
-    expect(ocrCalls, 1);
     expect(noPumpException(), isTrue);
   });
 
-  // ★ The other half of the same wedge, and the worse half: with the key
-  // claimed before the await, ONE transient ML Kit failure (a first-call model
-  // init) killed the check for that photo permanently. r1 retried on the next
-  // State; the memo is left untouched by the catch so that r1 behaviour is back.
-  //
-  // RED if: the catch writes anything into the memo, or _dispatchedOcrKey is
-  // moved into the static memo (it must die with its State).
-  testWidgets(
-      'a MID-read throw leaves the memo re-armable: the next mount reads again',
+  // ★ §2.4's live shape: BOTH savesend children ship without a `position`, so
+  // digitPadSaveSendPositions returns [] and every block is a silent no-op.
+  // This pins that the widget does not crash and does not write anything; the
+  // devPrint itself is kDebugMode-only and has no seam, so it is deliberately
+  // NOT asserted here (see the mutation list).
+  testWidgets('a positionless savesend page is a no-op, never a crash',
       (WidgetTester t) async {
     seedSlots();
-    seedPage();
-    seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'WRONG UNIT';
-    ocrThrows = true;
-    final Completer<void> gate = Completer<void>();
-    ocrGates[photoA] = gate;
-    final Map<String, dynamic> c =
-        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE');
-    await t.pumpWidget(subject(c));
-    await t.pumpAndSettle();
-    expect(ocrCalls, 1);
-
-    await t.pumpWidget(
-        const MaterialApp(home: Scaffold(body: SizedBox.shrink())));
-    await t.pumpAndSettle();
-    expect(find.byType(DigitPad), findsNothing);
-
-    // The throw lands on a State that is already gone.
-    gate.complete();
-    await t.pumpAndSettle();
-
-    // The transient cause is over — a real first-call model init succeeds on
-    // the retry, which is the whole reason this branch must stay re-armable.
-    ocrThrows = false;
-    ocrGates.remove(photoA);
-    await t.pumpWidget(subject(c));
-    await t.pumpAndSettle();
-
-    // ★ A SECOND read: nothing the failed pass left behind can block it.
-    expect(ocrCalls, 2);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')),
-        findsOneWidget);
-    expect(txfController[scr]![saveSendSlot]!.isEnabled, isFalse);
-    expect(noPumpException(), isTrue);
-  });
-
-  // ★★ Constraint 3 of the W4 fix, measured. A throw leaves the memo
-  // untouched on purpose, so nothing in the STATIC store can stop a retry —
-  // only the per-State _dispatchedOcrKey can. _applySerial runs from
-  // _scheduleSide's post-frame pass on EVERY build (_sidePending dedupes per
-  // FRAME, not per key), so on a build with no ML Kit plugin, where every pass
-  // throws, dropping that marker means one native call per keystroke.
-  //
-  // RED if: `if (key == _dispatchedOcrKey) return;` is dropped, or the marker
-  // is cleared anywhere.
-  testWidgets('a build with no ML Kit plugin reads ONCE, not once per keystroke',
-      (WidgetTester t) async {
-    seedSlots();
-    seedPage();
-    seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrThrows = true;
-    await t.pumpWidget(subject(
-        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
-    await t.pumpAndSettle();
-    expect(ocrCalls, 1);
-
-    // 01100 over pv 1000 is `sane`, so no sheet and no modal barrier: every tap
-    // below lands on the numpad, and every tap is another build.
-    for (final String k in <String>['0', '1', '1', '0', '0']) {
-      await tapKey(t, k);
-    }
-    await t.pumpAndSettle();
-    await tapBack(t);
-    await t.pumpAndSettle();
-    await tapKey(t, '0');
-    await t.pumpAndSettle();
-
-    expect(ocrCalls, 1);
-    // Fail-open still holds while it is quiet (spec §10, product #17).
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
-  });
-
-  // ★★ Constraint 5 of the W4 fix, the CROSS-State half. Recording from a dead
-  // State is the fix; recording BLINDLY from one is a fresh hole. Here the
-  // officer scrolls away mid-read, the photo is retaken while the pad is off
-  // screen, he scrolls back and the NEW photo's mismatch lands first. Only then
-  // does the OLD photo's read answer — about a photo that has left the slot,
-  // and it says "match". Letting that overwrite would release a gate the
-  // officer is looking at, with nothing on screen to explain it.
-  //
-  // RED if: `live: mounted` becomes `live: true`, or _memoRecord's !live branch
-  // is dropped.
-  testWidgets('a dead State never overwrites a newer verdict',
-      (WidgetTester t) async {
-    seedSlots();
-    seedPage();
-    seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'PDAM A21 4471908 039010'; // the RIGHT meter
-    ocrTextByPath[photoB] = 'WRONG UNIT'; // a DIFFERENT meter
-    final Completer<void> slowA = Completer<void>();
-    ocrGates[photoA] = slowA;
-    final Map<String, dynamic> c =
-        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE');
-    await t.pumpWidget(subject(c));
-    await t.pumpAndSettle();
-    expect(ocrCalls, 1);
-
-    // Scrolled away mid-read; the photo is retaken while the pad is gone.
-    await t.pumpWidget(
-        const MaterialApp(home: Scaffold(body: SizedBox.shrink())));
-    await t.pumpAndSettle();
-    writePhotoSlot(<String>[photoB]);
-
-    // Scrolled back. The new photo is read by a NEW State and answers at once.
-    await t.pumpWidget(subject(c));
-    await t.pumpAndSettle();
-    expect(ocrCalls, 2);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')),
-        findsOneWidget);
-    expect(txfController[scr]![saveSendSlot]!.isEnabled, isFalse);
-
-    // The first read finally answers, on a State that no longer exists.
-    slowA.complete();
-    await t.pumpAndSettle();
-
-    // A real repaint, so this is not asserted by absence. Same channel as the
-    // gate-re-assert test above: a pointer event would be eaten by the sheet's
-    // modal barrier, and blockOnSerialMismatch:"TRUE" hides segment 13, so
-    // there is no accept button to dismiss it with either.
-    Get.find<WidgetUpdateController>().update(<String>['$scr-$pos']);
-    await t.pump();
-    await t.pump(); // post-frame gate
-
-    expect(txfController[scr]![saveSendSlot]!.isEnabled, isFalse);
-    expect(find.text(seg6Resolved), findsOneWidget);
-    expect(ocrCalls, 2);
-  });
-
-  // ★★ Constraint 5 again, the SAME-State half — r2 spelled this guard
-  // `key != _ocrKey` and no test ever drove it. Two reads are in flight inside
-  // ONE State (the officer retakes the photo with the pad on screen) and the
-  // OLDER one answers LAST, about a photo that has left the slot.
-  //
-  // RED if: `if (key != _dispatchedOcrKey) return;` above the memo write goes.
-  testWidgets('an older read answering last never overwrites the newer verdict',
-      (WidgetTester t) async {
-    seedSlots();
-    seedPage();
-    seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'PDAM A21 4471908 039010'; // the RIGHT meter
-    ocrTextByPath[photoB] = 'WRONG UNIT';
-    final Completer<void> slowA = Completer<void>();
-    final Completer<void> slowB = Completer<void>();
-    ocrGates[photoA] = slowA;
-    ocrGates[photoB] = slowB;
-    await t.pumpWidget(subject(
-        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
-    await t.pumpAndSettle();
-    expect(ocrCalls, 1);
-
-    // Retaken with the pad still on screen: the SAME State dispatches a second
-    // read while the first is still out.
-    writePhotoSlot(<String>[photoB]);
-    await t.pumpAndSettle();
-    expect(ocrCalls, 2);
-
-    // The newer read answers FIRST.
-    slowB.complete();
-    await t.pumpAndSettle();
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')),
-        findsOneWidget);
-    expect(txfController[scr]![saveSendSlot]!.isEnabled, isFalse);
-
-    // ... and the older one arrives after it.
-    slowA.complete();
-    await t.pumpAndSettle();
-    Get.find<WidgetUpdateController>().update(<String>['$scr-$pos']);
-    await t.pump();
-    await t.pump(); // post-frame gate
-
-    expect(txfController[scr]![saveSendSlot]!.isEnabled, isFalse);
-    expect(find.text(seg6Resolved), findsOneWidget);
-    expect(ocrCalls, 2);
-  });
-
-  // ★★★ The other way to mint an entry that cannot be re-armed, and it took a
-  // mutation to find: r2 also nulled `match` while LEAVING `ocrKey` set,
-  // whenever a new key arrived. Follow that with a pass that never answers —
-  // here the slot is replaced by an https Storage URL, which returns at
-  // `paths.isEmpty` — and the entry sits there as `key K, no answer`. Bring the
-  // same photo back and `key == _ocrKey` matches something empty: no sheet, no
-  // gate, for a photo that is in the slot and IS the wrong meter.
-  //
-  // The shipped code has no partial write at all: the previous answer is left
-  // alone and replaced whole, so the verdict is still there when the photo is.
-  //
-  // RED if: any invalidation that writes one half of the memo without the other
-  // comes back (measured — restoring r2's null-the-match block leaves every
-  // other test in this file green).
-  testWidgets('a photo that comes back finds its verdict still there',
-      (WidgetTester t) async {
-    seedSlots();
-    seedPage();
-    seedMeterDocWithSerial(pv: 1000, avg: 30, msn: serialA);
-    writePhotoSlot(<String>[photoA]);
-    ocrTextByPath[photoA] = 'WRONG UNIT';
-    await t.pumpWidget(subject(
-        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
-    await t.pumpAndSettle();
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')),
-        findsOneWidget);
-    expect(txfController[scr]![saveSendSlot]!.isEnabled, isFalse);
-    expect(ocrCalls, 1);
-
-    // The slot is re-seeded with something ML Kit cannot open, so this pass
-    // ends at paths.isEmpty with no answer of its own. The gate follows the
-    // SLOT, so it releases here — correctly: nothing is known about this value.
-    writeRawPhotoSlot(
-        'https://firebasestorage.googleapis.com/v0/b/otq/o/OTQC_a.jpg?alt=media');
-    await t.pumpAndSettle();
-    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
-    expect(ocrCalls, 1);
-
-    // The original photo is back.
-    writePhotoSlot(<String>[photoA]);
-    await t.pumpAndSettle();
-
-    // ★ Its verdict was never destroyed, so the gate is back with it and no
-    // second ML Kit call was needed.
-    expect(txfController[scr]![saveSendSlot]!.isEnabled, isFalse);
-    expect(find.text(seg6Resolved), findsOneWidget);
-    expect(ocrCalls, 1);
-  });
-
-  // ── r2 I1 / orchestrator O1: the paths.isEmpty guard, finally pinned ──────
-  //
-  // Deleting `if (paths.isEmpty) return;` left the whole widget suite GREEN on
-  // r1 — the guard was completely unpinned. It is NOT an equivalent mutant:
-  // `ocrKey` is built from the RAW slot string, so a slot holding something ML
-  // Kit cannot open is still a non-empty key and still reaches this line.
-  //
-  // blockOnSerialMismatch:"TRUE" here on purpose — without the guard this shape
-  // kills the save button on every edit-page load with ZERO OCR having run,
-  // which is the 'gate the officer cannot clear' class this widget has been
-  // burned by four times.
-  // RED (both tests) if: the guard is removed.
-  testWidgets('an https photo URL in the slot is silent, not a mismatch',
-      (WidgetTester t) async {
-    seedSlots();
-    seedPage();
+    screenUIComponent[scr] = <String, dynamic>{
+      'children': <dynamic>[
+        <String, dynamic>{
+          'type': 'rbt',
+          'children': <dynamic>[
+            <String, dynamic>{'action': 'savesend', 'text': 'Simpan & lanjut'},
+          ],
+        },
+      ],
+    };
     seedMeterDocWithSerial(msn: serialA);
-    // What an EDIT page seeds from currentValue: already synced, so a Storage
-    // URL rather than a local path.
-    writeRawPhotoSlot(
-        'https://firebasestorage.googleapis.com/v0/b/otq/o/OTQC_a.jpg?alt=media');
+    writeSerialSlot('X99-1234567');
     await t.pumpWidget(subject(
         component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
     await t.pumpAndSettle();
 
-    expect(ocrCalls, 0);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-    expect(find.text(seg6Resolved), findsNothing);
-    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
-  });
-
-  testWidgets('a cancelled camera leaves emptyImageUrl, which is silent too',
-      (WidgetTester t) async {
-    seedSlots();
-    seedPage();
-    seedMeterDocWithSerial(msn: serialA);
-    // `aum__--__mua` — wrapped like a real photo, but the path inside is the
-    // '--' sentinel, so digitPadPhotoPaths drops it and nothing is left.
-    writeRawPhotoSlot(emptyImageUrl);
-    await t.pumpWidget(subject(
-        component(serialField: 'msn', blockOnSerialMismatch: 'TRUE')));
-    await t.pumpAndSettle();
-
-    expect(ocrCalls, 0);
-    expect(find.byKey(const ValueKey<String>('digitPadSheetFix')), findsNothing);
-    expect(find.text(seg6Resolved), findsNothing);
-    expect(txfController[scr]![saveSendSlot]!.isEnabled, isTrue);
+    expect(find.text(seg6Resolved), findsOneWidget);
+    expect(noPumpException(), isTrue);
   });
 }
 

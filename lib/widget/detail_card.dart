@@ -59,7 +59,6 @@ class _DetailCardState extends State<DetailCard> {
   List<RowDef> _rowDefs = [];
   bool _hideEmptyRows = true;
   List<ImageBlock> _imageBlocks = [];
-  String _notFoundText = '';
 
   /// Decode a component config field via autheniumDecode (server may encode
   /// special chars as _u25FC_/_u2B58_/etc).
@@ -100,10 +99,6 @@ class _DetailCardState extends State<DetailCard> {
       _cfg('images2'),
       _cfg('imageLabels2'),
     );
-
-    // text: notFoundText
-    _notFoundText = _cfg('text').trim();
-    if (_notFoundText.isEmpty) _notFoundText = 'Data tidak ditemukan';
   }
 
   void _subscribe() {
@@ -136,33 +131,22 @@ class _DetailCardState extends State<DetailCard> {
   Widget build(BuildContext context) {
     return Obx(() {
       final Map<String, dynamic>? doc = _findDoc();
+      // No matching doc = render NOTHING, padding included. A placeholder card
+      // here is worse than absence: the same page stacks several DETAIL_CARDs
+      // and only some apply to a given record, so a "not found" box is normal
+      // state, not an error. It also removes the flash of that text before the
+      // Firestore subscription delivers its first snapshot.
+      if (doc == null) return const SizedBox.shrink();
 
       return Padding(
         padding: EdgeInsets.fromLTRB(
             widget.lPad, widget.tPad, widget.rPad, widget.bPad),
-        child: doc == null ? _buildNotFound() : _buildCard(doc),
+        child: _buildCard(doc),
       );
     });
   }
 
   // ── Card layout ───────────────────────────────────────────────────
-
-  Widget _buildNotFound() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _kBorder),
-      ),
-      child: Text(
-        _notFoundText,
-        style: const TextStyle(color: _kTextSecondary, fontSize: 14),
-        textAlign: TextAlign.center,
-      ),
-    );
-  }
 
   Widget _buildCard(Map<String, dynamic> doc) {
     final String title =

@@ -51,6 +51,7 @@ import 'screen_session.dart';
 import 'token_resolver.dart';
 import 'widget/build_theme.dart';
 import 'widget/driver_home_support.dart';
+import 'widget/visible_when.dart';
 import 'widget/ftz_webview.dart';
 import 'widget/logout_transition_support.dart';
 import 'widget/photo_camera.dart';
@@ -4958,10 +4959,39 @@ void saveSend(
       row[4] = '';
     } // end (component['type'].toString().trim().toLowerCase() == 'checker')
 
+    // visibleWhen (dev spec §3.3): a position whose ONLY declaring widgets are
+    // currently hidden must not contribute its value to the record.
+    //
+    // BLANK the slot to '', never skip it. Skipping would leave maxPosition
+    // mis-sized, and `row` is sublist'ed to `maxPosition + 15` a few lines
+    // below — the array shape must not move. Blanking preserves positional
+    // alignment for every later reader.
+    //
+    // This ONE guard covers BOTH token families, verified end to end:
+    //   * {{POS(n)}} — replacePlaceholders reads `ref`, built from this same
+    //     `row` right after the loop.
+    //   * ◁N▷ — saveSendRows serialises row[15..] into the history content and
+    //     resolveValueTokens (table_repository.dart) resolves ◁N▷ off that at
+    //     SYNC time as ref[1][N-1].
+    //
+    // A position that no widget declares conditional is never in the set, so a
+    // page without `visibleWhen` submits byte-for-byte as before.
+    final Set<int> vwHiddenPositions = hiddenVisibleWhenPositions(
+      (screenUIComponent is Map && screenUIComponent[scrName] is Map)
+          ? screenUIComponent[scrName]['children']
+          : null,
+      visibleWhenReader(txfController[scrName]),
+      scrName: scrName,
+    );
     txfController[scrName]!.forEach((k, input) {
       try {
         if (1 <= input.position && input.position <= 100) {
-          if (input.table != null) {
+          // visibleWhen: the record slot and this static-table write are two
+          // halves of ONE widget's submit contribution, so hiding must
+          // suppress both (spec 3.3 "Nilai widget tersembunyi TIDAK ikut").
+          // Without this condition a hidden MULTI_SCAN blanks its slot below
+          // but still writes its scanned-codes static table.
+          if (input.table != null && !vwHiddenPositions.contains(input.position)) {
             // if table is not null or empty
             input.table!.forEach((documentName, content) {
               String finalName = replacePlaceHoldersFromTxfController(
@@ -4975,33 +5005,29 @@ void saveSend(
           maxPosition = input.position > maxPosition
               ? input.position
               : maxPosition;
+          // visibleWhen: hidden -> submit '' (see the note above the loop).
+          // The duplicated selection expression is hoisted so the guard cannot
+          // be applied to one branch and forgotten on the other.
+          final String cellValue = vwHiddenPositions.contains(input.position)
+              ? ''
+              : (input.finalData == emptyString
+                    ? (stringCleanUp(input.controller.text) ?? '').replaceAll(
+                        "\n",
+                        "\\n",
+                      )
+                    : (stringCleanUp(input.finalData) ?? '').replaceAll(
+                        "\n",
+                        "\\n",
+                      ));
           if (pos >= row.length) {
             int dif = pos - row.length;
             for (var ii = 0; ii < dif; ii++) {
               row.add('');
             }
-            row.add(
-              input.finalData == emptyString
-                  ? (stringCleanUp(input.controller.text) ?? "").replaceAll(
-                      "\n",
-                      "\\n",
-                    )
-                  : (stringCleanUp(input.finalData) ?? '').replaceAll(
-                      "\n",
-                      "\\n",
-                    ),
-            ); // get data from txf controller
+            row.add(cellValue); // get data from txf controller
             int d = 1;
           } else {
-            row[pos] = input.finalData == emptyString
-                ? (stringCleanUp(input.controller.text) ?? '').replaceAll(
-                    "\n",
-                    "\\n",
-                  )
-                : (stringCleanUp(input.finalData) ?? '').replaceAll(
-                    "\n",
-                    "\\n",
-                  ); // get data from txf controller
+            row[pos] = cellValue; // get data from txf controller
           } // end if if (pos >= row.length)
         } // end if input.position > 0
       } catch (eEach) {
@@ -5510,7 +5536,9 @@ FunctionBody getFunctionBody(String ssid, var range) {
     "clt": defaultCluster,
     "job": job,
   };
-  var url = "https://$autsorzFunctionDomain${functionName['readSS']}";
+  var url = readSSUrl.startsWith('https://')
+      ? readSSUrl
+      : "https://$autsorzFunctionDomain${functionName['readSS']}";
   FunctionBody result = FunctionBody(url, qParams);
   return result;
   //  return http.post(url, body: qParams);

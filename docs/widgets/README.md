@@ -30,7 +30,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | OtqSwitch | [otq_switch.md](otq_switch.md) | todo | On/off switch |
 | OtqPin | [otq_pin.md](otq_pin.md) | todo | PIN input |
 | OcrCapture | [ocr_capture.md](ocr_capture.md) | draft | Photo → on-device ML Kit OCR (`ocr_capture`); own position = photo URL, recognised values written to `ocrTargets`; variants `auto` / `tap` |
-| DigitPad | [digit_pad.md](digit_pad.md) | draft | Locked digit boxes + own numpad (`DIGIT_PAD`); black + red groups with a visible comma, per-point count with an inline picker written back to three widget-owned output slots, 3-tier verdict against a `meter` doc surfaced as a bottom sheet, backward-only + unfilled-picker submit gate, plus an on-device ML Kit **serial-number identity check** (`serialField`) that catches an officer standing at the wrong meter. spec rev 2026-08-20f + meter-serial-verify 2026-08-25 (§7.8 cancelled, `ocrPattern` retired) |
+| DigitPad | [digit_pad.md](digit_pad.md) | draft | Locked digit boxes + own numpad (`DIGIT_PAD`); black + red groups with a visible comma, per-point count with an inline picker written back to three widget-owned output slots, 3-tier verdict against a `meter` doc surfaced as a bottom sheet, backward-only + unfilled-picker submit gate, plus an **absolute `deltaMax` ceiling in m³** on top of the relative spike rule, and a **serial-number identity check** that compares the `meter` doc's `msn` against a form slot the officer has already reviewed. spec rev 2026-08-20f + meter-serial-verify 2026-08-25 + digit-pad-deltamax-serial 2026-09-04 (§7.8 cancelled; `photoPosition`, `ocrPattern` and all ML Kit retired) |
 
 ### Display
 | Widget | File | Status | Description |
@@ -149,6 +149,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 ### Other
 | Widget | File | Status | Description |
 |---|---|---|---|
+| visibleWhen (cross-cutting field) | [visible_when.md](visible_when.md) | draft | Optional `visibleWhen` string on ANY component: show/hide from live form values (`◼` `⭘` `★` `◁N▷`, `!= > >= < <=`); hidden = not rendered, validation skipped, slot submits `''`, value retained |
 | FtzChecker | [ftz_checker.md](ftz_checker.md) | todo | Generic checker |
 | FtzWebview | [ftz_webview.md](ftz_webview.md) | todo | Webview |
 | FtzBluetoothPrinter | [ftz_bluetooth_printer.md](ftz_bluetooth_printer.md) | todo | Bluetooth printer |

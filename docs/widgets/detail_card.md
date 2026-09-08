@@ -47,13 +47,14 @@ DetailCard({
 | `imageLabels` | String | no | `◆`-separated label per `images` template (positional) |
 | `images2` | String | no | OPTIONAL second photo group: `◆`-separated `<field>` templates, stacked BELOW `images` |
 | `imageLabels2` | String | no | `◆`-separated label per `images2` template (positional) |
-| `text` | String | no | notFoundText when doc not found |
+| ~~`text`~~ | String | -- | **No longer read.** Was the not-found placeholder text; the card now renders nothing when no doc matches. Safe to clear in the sheet. |
 
 ## Important Behavior
 
 - **Numeric-tolerant search:** via `filterDriverHomeDocs` -> `filterByMultiClause` -> `eq()` (dsl_eq.dart). Numeric field values match regardless of String/num type.
 - **Numeric-first `<15>` keys NOT supported (v1):** template tokens must be letter-first `<field>` (shared `resolveMapTokens` regex `<[a-zA-Z][a-zA-Z0-9]*>`). Numeric-first keys like `<15>` (spec rule 5, collection-indexed reads) render literally (unresolved); deferred until an indexed-collection migration needs them.
 - **Empty optional = hidden:** subtitle, rows, gallery all auto-hide when their resolved content is empty.
+- **No matching doc = whole card hidden** (padding included), not a placeholder box. A page stacks several DETAIL_CARDs of which only some apply to a given record, so "not found" is normal state; hiding also removes the flash of placeholder text before the first Firestore snapshot arrives.
 - **hideEmptyRows = TRUE (default):** rows with empty resolved template are skipped. When FALSE, empty rows show `-`.
 - **Gallery tap:** opens `FullScreenImageView` (pinch-zoom, single image).
 - **Photo label blocks:** `images`+`imageLabels` and `images2`+`imageLabels2` are concatenated into ONE ordered template list with positionally aligned labels. Consecutive templates carrying the SAME label (including consecutive EMPTY labels) merge into one block; each block renders as a label header line (omitted when the label is empty) plus ONE horizontally scrollable strip of 90x90 thumbnails. A thumbnail carries no caption of its own. `images2` empty/absent = exactly one block, so existing pages need no config change. A block whose templates all resolve empty is hidden, header included. Merging requires the equal labels to be CONSECUTIVE: `imageLabels: "X◆Y◆X"` yields THREE blocks `X`, `Y`, `X` — two of them carrying the same header. That is the specified behaviour, not a bug.
@@ -61,6 +62,33 @@ DetailCard({
 - **Two row constructs, separated on sight:** labelled rows (`Label◼<f>`) are a key/value TABLE — secondary-grey key in a 120px column, primary-dark value beside it. Label-less rows are a LIST of results — primary-dark title, secondary-grey `w600` 12px tag right-aligned. The first labelled → label-less transition draws a divider and a wider gap, so the two conventions never read as one table that inverts halfway down.
 - **Text colours are contrast-measured, not picked by eye:** `#374151` primary (10.3:1 on white), `#6B7280` secondary (4.83:1). `Colors.grey.shade500` was replaced because it measures 2.68:1, under the WCAG AA 4.5:1 floor for normal text. Do not reintroduce a `grey.shadeNNN` here without measuring it.
 - **Label-less row split:** a `rows` entry with no `◼` is a TEMPLATE with an empty label. The resolved value is split at the **last** `" | "` (space-pipe-space) — last, not first, so a title containing a pipe stays intact; both sides are trimmed. An UNSPACED `|` is a literal character and does not split. This is the shape `CHECKLIST_DYNAMIC` writes per slot (`'<title> | <status>'`). Under `hideEmptyRows:TRUE` an unfilled `<ckN>` renders nothing.
+
+## Page context doc for conditional RBT children
+
+A `DETAIL_CARD` on a page also acts as that page's **context-doc source** for
+conditional RBT buttons. An RBT child with a field-keyed `search`
+(e.g. `search:"st◼waiting"`) is rendered only while the doc this card resolves
+still matches that clause — see
+[ftz_row_of_button_2.md](ftz_row_of_button_2.md).
+
+- **No config change.** The RBT reads this card's existing `vidtable`, `table`
+  and `search` straight from the page JSON
+  ([rbt_visibility.dart](../../lib/widget/rbt_visibility.dart)
+  `resolveRbtDocSource`) and looks the docs up in the subscription this card
+  already owns. The RBT never subscribes and never writes.
+- **Same doc the card is showing.** The button predicate runs against
+  `filterDriverHomeDocs(...).first` — the identical call `_findDoc` makes — so
+  the badge and the buttons can never disagree about which record is current.
+- **Tie-break — first card wins.** If a screen carries several `DETAIL_CARD`s,
+  the **first one in page-JSON order** whose `table` parses to a non-empty doc
+  id becomes the context source; the others are display-only. Page order, not
+  build order, so it is deterministic. A card with a missing or malformed
+  `table` is skipped (it never subscribes either).
+- **Direct child only.** The card must be a direct child of the page's
+  `children` array — the same flat list `buildPage` renders.
+- **No card, no context.** On a page with no `DETAIL_CARD`, a field-keyed child
+  `search` is fail-closed (button hidden, `devPrint` in a debug build). A child
+  with an empty `search` is unaffected and always renders.
 
 ## See Also
 

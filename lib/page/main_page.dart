@@ -496,11 +496,16 @@ class MainPageState extends State<MainPage> {
                       ? null
                       : AppBar(
                     backgroundColor: Theme.of(context).primaryColor,
+                    // Chevron sits tight to the title (mockup). The default
+                    // 16dp middle spacing reads as a hole next to a thin icon.
+                    titleSpacing: 4,
                     leading: pageName == home
                         ? null
                         : IconButton(
+                            tooltip: textList['Back'] ?? 'Back',
                             icon: const Icon(
-                              Icons.arrow_back,
+                              Icons.arrow_back_ios_new,
+                              size: 20,
                               color: Colors.white,
                             ), //= back icon
                             onPressed: () {
@@ -532,6 +537,7 @@ class MainPageState extends State<MainPage> {
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: andrew ? 18 : null,
+                              fontWeight: FontWeight.w700,
                             ),
                           )
                         : Text(
@@ -541,6 +547,7 @@ class MainPageState extends State<MainPage> {
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: andrew ? 18 : null,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                     actions: <Widget>[
@@ -591,20 +598,29 @@ class MainPageState extends State<MainPage> {
                       //     showLicensePage(context: context);
                       //   }, // end of onPressed
                       // ),
-                      Obx(() {
-                        // Read the observable BEFORE the ternary: when
-                        // _refreshing is true the amber branch short-circuits
-                        // and Obx would register zero observables → GetX
-                        // "improper use of a GetX" throw.
-                        final txOK = transactionOKFlag.value;
-                        return Icon(
-                          Icons.fiber_manual_record,
-                          color: _refreshing
-                              ? Colors.amber
-                              : (txOK ? readyColor : notReadyColor),
-                        );
-                      }),
+                      // Status dot: transactionOKFlag / refresh in-flight
+                      // ONLY -- amber = refresh running, green = ready, red =
+                      // action locked. NOT a network indicator; that is the
+                      // OfflineBannerHost strip above the body. A label here
+                      // ("Online") made the dot read as connectivity.
+                      Center(
+                        child: Obx(() {
+                          // Read the observable BEFORE the ternary: when
+                          // _refreshing is true the amber branch short-circuits
+                          // and Obx would register zero observables -> GetX
+                          // "improper use of a GetX" throw.
+                          final txOK = transactionOKFlag.value;
+                          return Icon(
+                            Icons.fiber_manual_record,
+                            size: 12,
+                            color: _refreshing
+                                ? Colors.amber
+                                : (txOK ? readyColor : notReadyColor),
+                          );
+                        }),
+                      ),
                       IconButton(
+                        tooltip: textList['Refresh'] ?? 'Refresh',
                         icon: const Icon(
                           Icons.refresh,
                           color: Colors.white,

@@ -128,6 +128,74 @@ FtzRowOfButton2(
 
 > See the source for the full chain (`do_chain`) and GPS-gated save paths — too long to inline here.
 
+## `search`: outer = LAYOUT, child = VISIBILITY
+
+Two different fields with the same name, two unrelated jobs. They are parsed in
+two different places and never interact.
+
+| field | values | meaning | parsed in |
+|---|---|---|---|
+| `RBT.search` (outer) | `"sticky"` \| anything else | **LAYOUT only.** `"sticky"` registers the row as a bottom-anchored bar via `ApproverStickyBar`; every other value (including `""`, absent, or a typo) renders inline. Never an error. | [build_display_component.dart](../../lib/widget/build_display_component.dart) `rbt` branch (`hasSearch`) |
+| child `search` | `""` \| `key◼value` (multi-clause `⭘` = AND) | **VISIBILITY only.** Evaluated on EVERY RBT — inline, sticky, and nested inside `DO_DIALOG` / `DO_BOTTOM_SHEET` chains. A hidden child is not rendered and its chain never runs. | [rbt_visibility.dart](../../lib/widget/rbt_visibility.dart) via `FtzRowOfButton2.build` |
+
+An RBT whose children declare no `search` takes a fast path with no `Obx`
+wrapper — the widget tree is exactly what it was before this feature.
+
+### The child predicate, clause by clause
+
+`search` is `autheniumDecode`d, then split on `⭘` (AND). Each clause is
+`key◼value`, and the KEY TYPE selects the evaluator:
+
+| clause | evaluator | matched against | notes |
+|---|---|---|---|
+| integer key — `2◼MENUNGGU` | `evaluateRbtSearch` ([approver_sticky_bar.dart](../../lib/widget/approver_sticky_bar.dart)) | `ItemCardDetail.currentRow`, 0-based | **case-INsensitive** (both sides uppercased); out-of-range index ⇒ hidden, never a RangeError |
+| field key — `st◼waiting` | `filterDriverHomeDocs` ([driver_home_support.dart](../../lib/widget/driver_home_support.dart)) | the page's context doc (see below) | **case-SENSITIVE**, number/String tolerant via `eq()` ([dsl_eq.dart](../../lib/widget/dsl_eq.dart)) |
+| mixed | both | both | AND of the two results |
+| empty key — `◼waiting` | — | — | hidden. `filterByMultiClause` would SKIP an empty field and match everything; a visibility gate never fails open |
+| no `◼` — `sticky` | — | — | ignored clause (parity with `evaluateRbtSearch`) |
+| `search: ""` | — | — | always visible, in every state |
+
+The case asymmetry between the two dialects is **intentional**. The keyed branch
+must keep agreeing with the `DETAIL_CARD` above it, which runs the same
+`filterDriverHomeDocs` over the same document list. Do not "harmonize" them.
+
+### Context doc, and the fail-closed matrix
+
+A keyed clause is matched against **the doc the page's `DETAIL_CARD` is
+currently showing** — resolved from the page JSON, so no extra config on the
+RBT and no sheet change. See [detail_card.md](detail_card.md) for the
+first-card-wins tie-break.
+
+| state | keyed child `search` | empty child `search` |
+|---|---|---|
+| page has no `DETAIL_CARD` | hidden + `devPrint` | visible |
+| snapshot not yet arrived | hidden + `devPrint` | visible |
+| `DETAIL_CARD` search matches no doc | hidden + `devPrint` | visible |
+| doc found, clause mismatches | hidden + `devPrint` | visible |
+
+Hidden-then-shown, never shown-then-hidden: the button cannot flash before its
+doc arrives. `devPrint` is `kDebugMode`-gated, so these lines only appear in a
+debug build.
+
+### Re-evaluation after a write
+
+No manual invalidation. `mapTableContent` is a GetX `RxMap`; the map-collection
+listener assigns whole lists (`mapTableContent[code] = docs`), which calls
+`refresh()`, which repaints this row's `Obx` and re-runs the predicate. So a
+`savesend` that moves `st` makes the button disappear in place.
+
+**Offline caveat:** `updateEventRow` queues into the local history log, so
+`mapTableContent` only changes once `historySync` has written to Firestore.
+Offline, the button stays visible until sync. Live configs whose `chain`
+navigates away on OK never expose this.
+
+### Filtering and button slots
+
+Filtering affects RENDERING only. `initState` still registers a
+`txfController` slot for every child (hidden ones included), so the submitted
+record keeps its shape. Hidden children also keep their `position` slots seeded
+by `buildDisplayComponent`.
+
 ## Save Flow (button press → Firestore)
 
 When a button is pressed, data flows through six layers. The "submit point" is `appendToSheet` in `api.dart`, which dispatches `SubmitBloc.add(AddSubmit(...))` to write a queued document to Firestore.

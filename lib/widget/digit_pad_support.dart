@@ -196,12 +196,39 @@ DigitPadVerdict digitPadVerdict({
   required num? prev,
   required num? avg,
   required num spikeMultiplier,
+  num deltaMax = 0,
+  int pow10 = 1,
 }) {
   if (value == null || prev == null) return DigitPadVerdict.none;
   if (value < prev) return DigitPadVerdict.backward;
-  if (avg != null && avg > 0 && (value - prev) > avg * spikeMultiplier) {
+  final num delta = digitPadDelta(value: value, prev: prev, pow10: pow10)!;
+  if (avg != null && avg > 0 && delta > avg * spikeMultiplier) {
     return DigitPadVerdict.spike;
   }
+  // ── ABSOLUTE ceiling (digit-pad-deltamax-serial §3, 2026-09-04) ──
+  //
+  // The relative rule above is nothing at all on a point with no `avg`, and a
+  // point with fewer than two readings has no avg — i.e. EVERY new point. This
+  // branch is the floor under it.
+  //
+  // UNITS. [value] and [prev] are RAW meter stands; [pow10] converts to m³,
+  // which is the unit [deltaMax] is authored in and the unit `avg` already
+  // carries. Comparing a raw dgm:2 stand against a m³ ceiling would miss by
+  // 100x, so the conversion has to happen — but it happens HERE, on the
+  // DIFFERENCE, exactly once (see [digitPadDelta]). Pre-divided m³ values with
+  // the default `pow10: 1` also work and are what the dgm:0 shape reduces to;
+  // what must never happen again is the caller dividing both sides and this
+  // function subtracting the two quotients.
+  //
+  // ★ STRICT `>`, exactly like the avg branch above: segment 15 says "melewati
+  // batas", and exceeding a limit is not reaching it. A reading exactly at
+  // [deltaMax] is `sane` — which is only decidable because [digitPadDelta]
+  // divides once.
+  //
+  // deltaMax <= 0 (blank cell, `0`, a negative, an unparseable value that
+  // num.tryParse turned into the 0 default) switches the branch off, which is
+  // what makes "deltaMax absent == the pre-2026-09-04 behaviour" structural.
+  if (deltaMax > 0 && delta > deltaMax) return DigitPadVerdict.spike;
   return DigitPadVerdict.sane;
 }
 
@@ -225,7 +252,13 @@ bool digitPadShouldBlock(DigitPadVerdict verdict, bool blockOnBackward) =>
 /// behaviour-preserving: it used to match and then stay literal for want of a
 /// value, and now it never matches and stays literal. Do not put it back —
 /// with §3.1's substring rule there is no single "OCR value" to display.
-final RegExp _digitPadToken = RegExp(r'\{(value|prev|delta|avg|serial|n)\}');
+/// ★ `deltaMax` is listed BEFORE `delta`. Dart's RegExp backtracks, so the
+/// other order happens to work too — but only by luck, and a reader cannot tell
+/// the two apart. Longest-alternative-first makes it unambiguous, and
+/// digit_pad_support_test.dart pins both `{delta}` and `{deltaMax}` resolving
+/// correctly from the SAME template.
+final RegExp _digitPadToken =
+    RegExp(r'\{(value|prev|deltaMax|delta|avg|serial|n)\}');
 
 String digitPadFillTokens(String template, Map<String, String> values) {
   if (template.isEmpty) return template;
@@ -510,65 +543,6 @@ String digitPadNormalizeSerial(String raw) {
   return sb.toString();
 }
 
-/// Spec §3.1 steps 2-3 as ONE question: "is there anything to warn about?"
-///
-/// TRUE  = say nothing (the serial was found, or there is no serial to look for)
-/// FALSE = the recorded serial is not in this text
-///
-/// Substring, NOT equality: a real photo also carries the brand, an SNI mark, a
-/// burned-in watermark and coordinates. §12 notes the watermark cannot make a
-/// WRONG serial match — it only adds text — which is exactly why substring is
-/// the safe direction here.
-///
-/// ★ The empty-needle case returns TRUE deliberately. `''.contains` is always
-/// true, so a naive substring call reaches the right ANSWER for the wrong
-/// REASON; and returning false would raise a mismatch on every point that has
-/// no serial recorded — §12's failure mode where officers learn to dismiss the
-/// sheet unread, taking the backward verdict down with it. This is only the
-/// SECOND line: the caller must skip the OCR call entirely when the serial is
-/// blank, because acceptance §11 measures "nol ML Kit dipanggil", not "nol
-/// peringatan".
-bool digitPadSerialSatisfied({
-  required String ocrText,
-  required String serial,
-}) {
-  final String needle = digitPadNormalizeSerial(serial);
-  if (needle.isEmpty) return true;
-  return digitPadNormalizeSerial(ocrText).contains(needle);
-}
-
-/// Local image file paths held in a `getImages` slot.
-///
-/// The slot holds `aum__<path>__mua` entries joined by `separator[5]` (`◇`):
-/// `processData` (init_values.dart) does the join and `prepareImageAsLocal`
-/// (api.dart) does the wrapping, and `renamePath` under it makes `<path>`
-/// ABSOLUTE — which is what `InputImage.fromFilePath` needs.
-///
-/// ★ Anything NOT so wrapped is DROPPED rather than attempted. An edit page
-/// seeds this slot from `currentValue`, where a previously synced photo is a
-/// plain https Storage URL that ML Kit cannot open from a file path. The
-/// `aum__--__mua` cancel sentinel (`emptyImageUrl`) goes the same way, and
-/// `digitPadNormalizeSeed` catches the `''` / `'--'` / `'null'` seeds first.
-///
-/// Split on `◇` and NOT on `◆`: this value is image data, not widget config.
-List<String> digitPadPhotoPaths(String slotValue) {
-  final String v = digitPadNormalizeSeed(slotValue).trim();
-  if (v.isEmpty) return const <String>[];
-  final List<String> out = <String>[];
-  for (final String part in v.split(whiteDiamond)) {
-    final String s = part.trim();
-    if (!s.startsWith(localImagePrefix)) continue;
-    if (!s.endsWith(localImagePostfix)) continue;
-    final String path = s
-        .substring(localImagePrefix.length, s.length - localImagePostfix.length)
-        .trim();
-    if (path.isEmpty || path == emptyString) continue;
-    if (out.contains(path)) continue;
-    out.add(path);
-  }
-  return out;
-}
-
 /// Who owns the bottom sheet when a numeric verdict and a serial mismatch are
 /// live at the same time.
 ///
@@ -577,12 +551,31 @@ List<String> digitPadPhotoPaths(String slotValue) {
 /// false-positive rate; letting it mask a BACKWARD reading would kill the one
 /// check product #21 exists for. The serial message therefore only surfaces
 /// when the numbers have nothing to say — `sane`, or no reading typed yet.
+///
+/// ★★ AMENDED 2026-09-04: whichever problem is LOCKING wins.
+///
+/// [serialBlocking] is `blockOnSerialMismatch && <serial problem> && enabled`.
+/// When it is true the serial message takes the sheet from ANY numeric verdict,
+/// because only the serial message names the thing the officer can do to
+/// unlock — and with the gate engaged `_sheetBlocked` suppresses the segment-13
+/// acknowledge button, so a sheet carrying the SPIKE copy would demand a
+/// correction that cannot lift the block. Nothing is hidden by this: the card's
+/// inline banner still renders the numeric verdict in every case (spec §5 gives
+/// the serial the sheet and nothing else).
+///
+/// When the serial problem does NOT block, the rule above is unchanged.
+///
+/// [serialMismatch] means "the serial has a PROBLEM" and since 2026-09-04 that
+/// covers `missing` as well as `mismatch` — one switch owns both.
 bool digitPadSerialOwnsSheet({
   required DigitPadVerdict verdict,
   required bool serialMismatch,
-}) =>
-    serialMismatch &&
-    (verdict == DigitPadVerdict.none || verdict == DigitPadVerdict.sane);
+  required bool serialBlocking,
+}) {
+  if (!serialMismatch) return false;
+  if (serialBlocking) return true;
+  return verdict == DigitPadVerdict.none || verdict == DigitPadVerdict.sane;
+}
 
 /// The raise-once latch key.
 ///
@@ -599,6 +592,10 @@ bool digitPadSerialOwnsSheet({
 ///
 /// [ocrKey] enters the key only when the serial actually OWNS the sheet, so a
 /// retaken photo cannot re-raise a spike warning the officer already dismissed.
+///
+/// ★ [ocrKey] keeps its name for continuity; since 2026-09-04 it carries the
+/// SERIAL-STATE key from `digitPadSerialKey`, not an OCR key. This widget has
+/// no OCR any more.
 ///
 /// ★★ The two halves are compared SEPARATELY — see [digitPadSheetKeyNumeric],
 /// [digitPadSheetKeySerial] and the per-axis comparison in
@@ -713,4 +710,220 @@ bool digitPadShouldRaiseAnySheet({
     verdictText: sheetText,
     alreadyRaisedFor: digitPadSheetKeyNumeric(latch),
   );
+}
+
+// ---------------------------------------------------------------------------
+// digit-pad-deltamax-serial (2026-09-04) — the m³ basis and the serial state
+// ---------------------------------------------------------------------------
+
+/// `10^[red]` as an exact int — the raw-stand -> m³ divisor.
+///
+/// A loop rather than dart:math's `pow`: `pow` returns `num` and its
+/// int-vs-double result for int arguments is an implementation detail, and this
+/// value divides a number that becomes a tenant's bill. Multiplying by ten
+/// [red] times is exact for every [red] this widget can produce — [red] is
+/// capped at [digitPadMaxBoxes] (12), so at most 10^12, well inside int64.
+int digitPadPow10(int red) {
+  final int n = red < 0 ? 0 : (red > digitPadMaxBoxes ? digitPadMaxBoxes : red);
+  int p = 1;
+  for (int i = 0; i < n; i++) {
+    p *= 10;
+  }
+  return p;
+}
+
+/// A raw meter stand (the meter's finest unit) -> m³.
+///
+/// §2.1 stores the WHOLE integer and calls the `/ 10^red` display-only. That
+/// was true until `deltaMax` arrived: the ceiling is authored in m³ and `avg` is
+/// authored in m³/month (the same page's DETAIL_CARD renders it as
+/// `<avg> m³/bln`), while `compareField` is raw — so the comparison has to
+/// happen after this division, not before, or a dgm:2 point misses by 100x.
+///
+/// ★ Returns [raw] UNCHANGED when [pow10] is 1 — the `dgm: 0` shape, which is
+/// the one live point today and every test component that configures no red
+/// digits. That short-circuit is what makes "no red digits == byte-identical to
+/// the pre-2026-09-04 behaviour" structural instead of argued: with no division
+/// there is no int -> double promotion, so `{prev}` and `{delta}` render exactly
+/// the strings they always did.
+///
+/// SCOPE: this converts ONE number, for DISPLAY — `{value}` and `{prev}`.
+/// It is correctly rounded (IEEE-754 requires that of a single division), so
+/// 12600 / 100 is exactly 126.0 and 2802 / 100 is the double nearest 28.02,
+/// which is the best `{prev}` that exists.
+///
+/// ★ DO NOT build a delta out of two of these. `a / p - b / p` is a difference
+/// of two SEPARATELY rounded quotients, and a difference of correctly-rounded
+/// values is not itself correctly rounded: at dgm:2, (12802 / 100) - (2802 /
+/// 100) is 100.00000000000001, so a reading of exactly 100 m³ tripped a
+/// `deltaMax: 100` ceiling and segment 15 rendered "Pemakaian
+/// 100.00000000000001 m³". Measured on 1.64% of raw prev values in 0..999999
+/// at that config, always in the same direction (sane -> spike), i.e. a false
+/// positive generator. Use [digitPadDelta], which divides the difference once.
+num? digitPadCubic(num? raw, int pow10) {
+  if (raw == null || pow10 <= 1) return raw;
+  return raw / pow10;
+}
+
+/// THE delta, in m³. One subtraction on the RAW stands, then ONE division.
+///
+/// The single definition of "how much was used", and deliberately the only
+/// one: [digitPadVerdict] calls it for the `avg * spikeMultiplier` branch AND
+/// the `deltaMax` branch, and DigitPad's token map calls it for `{delta}`. Two
+/// invocations, one expression — so the number the officer reads in the sheet
+/// is by construction the number the verdict decided on. Recomputing it
+/// anywhere else re-opens the defect described on [digitPadCubic].
+///
+/// Exactness: the subtraction of two whole meter stands is exact in binary64
+/// (they are integers far below 2^53), and the one division that follows is
+/// correctly rounded, so an exactly-representable quotient IS exact — 10000 /
+/// 100 is 100.0, never 100.000...1. That, and nothing weaker, is what makes
+/// the strict-`>` threshold decidable at the boundary.
+///
+/// Null in either operand (an incomplete reading, or no `compareField` doc) ->
+/// null: "no delta", never 0.
+num? digitPadDelta({
+  required num? value,
+  required num? prev,
+  int pow10 = 1,
+}) {
+  if (value == null || prev == null) return null;
+  return digitPadCubic(value - prev, pow10);
+}
+
+/// What the serial slot and the `meter` doc say about each other.
+///
+/// FOUR states, not two, and the difference is a product decision (spec §3):
+///   * [off]      — nothing recorded on the doc, or the feature is not wired.
+///                  ZERO checks, ZERO warnings, ZERO gate. Never train officers
+///                  to dismiss a signal.
+///   * [ok]       — they agree.
+///   * [missing]  — a serial IS recorded but the slot is empty. Skipping the
+///                  capture is NOT an escape hatch: an officer at the wrong
+///                  meter could simply not fill it. Segment 16.
+///   * [mismatch] — both filled, they disagree. Segment 6.
+enum DigitPadSerialState { off, ok, missing, mismatch }
+
+/// The serial comparison, mirroring the CF's `serialVerdict`
+/// (`internal/meter/meter.go`).
+///
+/// ⚠ That Go repository is NOT on this machine. This function was written from
+/// the spec's prose description of the CF rule, so "the two agree" is an
+/// intention, not a verified equivalence. If the CF rule ever moves, this is
+/// the second copy that has to move with it — do NOT invent a third rule here.
+///
+/// Both sides are normalised INTERNALLY (uppercase, keep only A-Z0-9), which is
+/// the only reason `B21-4471902` and a field holding `B214471902` are the same
+/// serial. Then:
+///   * either side empty        -> false (the caller decides what empty MEANS;
+///                                 see [digitPadSerialState])
+///   * min length < 4           -> exact equality required. A 1-3 character
+///                                 string substring-matches almost anything.
+///   * otherwise                -> substring in EITHER direction. The recorded
+///                                 value may be a prefix of what was read, or
+///                                 the read value may carry a brand/SNI prefix
+///                                 around it.
+///
+/// ZERO fuzzy matching, ZERO similarity threshold, ZERO Levenshtein. A check
+/// loosened until it always passes is worse than no check: officers learn to
+/// dismiss the sheet unread, and the backward verdict dies with it because it
+/// uses the same sheet.
+///
+/// ★ Two-way, unlike the deleted `digitPadSerialSatisfied`, which only asked
+/// whether the OCR text contained the serial.
+bool digitPadSerialMatch(String recorded, String read) {
+  final String a = digitPadNormalizeSerial(recorded);
+  final String b = digitPadNormalizeSerial(read);
+  if (a.isEmpty || b.isEmpty) return false;
+  final int shortest = a.length < b.length ? a.length : b.length;
+  if (shortest < 4) return a == b;
+  return a.contains(b) || b.contains(a);
+}
+
+/// Spec §3's two sentences as one state.
+///
+/// ★ [digitPadNormalizeSeed] runs BEFORE [digitPadNormalizeSerial] on the read
+/// side, and that ORDER is load-bearing. `digitPadNormalizeSerial('null')` is
+/// `'NULL'` — the letters survive. `getInitialValue` (init_values.dart) seeds a
+/// slot whose component omits `currentValue` with the literal string "null", so
+/// without the seed normaliser first an unauthored TXF would compare the serial
+/// `NULL` against the doc and report a mismatch on a page the officer never
+/// touched. `'--'` (the InputController birth value) and `''` go the same way.
+///
+/// An officer typing `"---"` is not one of those sentinels, but
+/// [digitPadNormalizeSerial] strips the dashes and it lands on [missing]
+/// anyway, which is the right answer.
+///
+/// [recorded] blank -> [off] and nothing else is even looked at: that is the
+/// "gak ada seri = aman, nol apa pun" half of the owner's rule.
+DigitPadSerialState digitPadSerialState({
+  required String recorded,
+  required String read,
+}) {
+  if (digitPadNormalizeSerial(recorded).isEmpty) {
+    return DigitPadSerialState.off;
+  }
+  if (digitPadNormalizeSerial(digitPadNormalizeSeed(read)).isEmpty) {
+    return DigitPadSerialState.missing;
+  }
+  return digitPadSerialMatch(recorded, read)
+      ? DigitPadSerialState.ok
+      : DigitPadSerialState.mismatch;
+}
+
+/// The SERIAL half of the raise-once key (see [digitPadSheetKey]).
+///
+/// ★★ Keyed on the STATE, NEVER on the value the officer is typing. The serial
+/// slot is an ordinary TXF: in the SDUI path `OtqTxf2` uses the slot's own
+/// controller (otq_txf_2.dart:365-369, no `cnt` is passed by
+/// build_display_component.dart:339), so the pad's listener fires on EVERY
+/// keystroke, and otq_txf_2's onChanged default branch writes `finalData` per
+/// character. A key carrying the read value would mint a new key per character
+/// — and the sheet is MODAL, so the officer would dismiss a bottom sheet
+/// between every two keystrokes. That is r1's W1 defect (five modal sheets for
+/// one mismatch) coming back through a different door, and §4c rule 1 is the
+/// first thing it breaks.
+///
+/// The bound is therefore ONE raise per serial STATE TRANSITION, not a fixed
+/// total per meter. `missing -> mismatch` is genuinely new information ("not
+/// just blank — actually wrong"), so it earns its own raise; a second,
+/// DIFFERENT wrong value does not, which is the safe direction, and the gate
+/// plus the dead save button are still there either way.
+///
+/// ★ Do NOT restate that bound as a raise COUNT. [digitPadNextSheetLatch] keeps
+/// exactly ONE serial key and REPLACES it on each raise
+/// (`nextSerial = raised && keySerial.isNotEmpty ? keySerial : previous`), so it
+/// remembers the last state raised, never a set of them. `missing -> mismatch ->
+/// missing` therefore raises THREE times when the reading is complete
+/// throughout, and only twice when the middle step is silent for an unrelated
+/// reason (an incomplete buffer). A count is order-dependent; the per-transition
+/// bound is not. What matters — and what holds in every order — is that no raise
+/// is ever keyed on the value being typed, so the per-keystroke sheet storm
+/// stays impossible.
+///
+/// ★★ [readingComplete] gates the MISSING raise only. Spec §2 says the slot is
+/// evaluated "saat vonis/submit ... BUKAN saat page-load", and an empty slot is
+/// the birth state of EVERY meter — raising on page load would put a modal in
+/// front of the officer on 100% of visits, which is §4c rule 1 again. A
+/// complete digit buffer is the closest in-widget proxy for "about to submit",
+/// and it matches the page flow (the OCR_CAPTURE that fills the slot sits ABOVE
+/// the pad). A MISMATCH cannot fire on page load at all — the slot has to be
+/// filled for that state to exist — so it is not gated.
+///
+/// The literal state words are written out rather than taken from `.name`, so
+/// renaming an enum value cannot silently change a latch key.
+String digitPadSerialKey({
+  required DigitPadSerialState state,
+  required String recorded,
+  required bool readingComplete,
+}) {
+  switch (state) {
+    case DigitPadSerialState.mismatch:
+      return 'mismatch|$recorded';
+    case DigitPadSerialState.missing:
+      return readingComplete ? 'missing|$recorded' : '';
+    case DigitPadSerialState.off:
+    case DigitPadSerialState.ok:
+      return '';
+  }
 }

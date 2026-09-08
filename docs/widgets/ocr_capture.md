@@ -147,6 +147,12 @@ capture at ORIGINAL resolution (ResolutionPreset.high ⇒ 1280×720)
 
 `ocrGuideRect(w, h, ratio, {widthFraction: 0.86, pad: 0.08})` returns `[x, y, cropW, cropH]`, or `[]` when degenerate. The camera overlay painter (`OcrGuidePainter`, in `photo_camera.dart`) calls it with `pad: 0` so the agent sees the tight box; the ML Kit crop uses the default pad, giving 8 % slack per side to absorb the mismatch between the `CameraPreview` rect and the captured frame. If the crop throws or degenerates, OCR falls back to the FULL frame (fail-open). `tap` ALWAYS reads the full frame — the agent must see the whole document — so `guide` affects `auto` only.
 
+### The form preview shows the WHOLE frame
+
+`previewSize`-high, full card width, `BoxFit.contain` on a light letterbox ground — never a crop and never `BoxFit.cover`. The guide box decides which text becomes the VALUE; it does not decide what the agent is allowed to see. An earlier build painted the guide-box crop (`ocrFinishSync`'s `thumbBox`) instead, which hid whether the photo was even of the right meter. `thumbBox` is now always passed empty; the parameter and its tests stay, unused, as the shrink path's neighbour.
+
+Tall documents get small at the default `previewSize:120` — raise it per screen if the page has to be readable in the form.
+
 ### `date` targets
 
 `ocrType:"date"` writes the same convention a `txf` with `variant:"date"` writes:
@@ -162,7 +168,7 @@ capture at ORIGINAL resolution (ResolutionPreset.high ⇒ 1280×720)
 
 Two independent failure modes, two required fixes:
 
-**(a) `NavPolicy.screen` LEAKS for state that is RENDERED.** Navigation is `gotoRoute` → `reloadPage`, which returns the CACHED `linkElement[scrName]` and schedules `clearData` POST-frame — the re-entered page has ALREADY painted. `NavPolicy.screen` clears only the ENTERING screen's slice, so leaving screen A never clears A, and the next visit paints the PREVIOUS capture's chips and crop, live and tappable, writing stale values into record slots. `NavPolicy.all` + `clearAllFn` wipes the whole store on the nav AWAY, off-screen, before the next visit's first paint. `SignaturePad`'s `NavPolicy.screen` precedent does NOT transfer — its store holds a filename consumed by submit, not content that is rendered; only rendered state can paint stale. The precedent to copy is `GroupPicker`.
+**(a) `NavPolicy.screen` LEAKS for state that is RENDERED.** Navigation is `gotoRoute` → `reloadPage`, which returns the CACHED `linkElement[scrName]` and schedules `clearData` POST-frame — the re-entered page has ALREADY painted. `NavPolicy.screen` clears only the ENTERING screen's slice, so leaving screen A never clears A, and the next visit paints the PREVIOUS capture's chips and photo, live and tappable, writing stale values into record slots. `NavPolicy.all` + `clearAllFn` wipes the whole store on the nav AWAY, off-screen, before the next visit's first paint. `SignaturePad`'s `NavPolicy.screen` precedent does NOT transfer — its store holds a filename consumed by submit, not content that is rendered; only rendered state can paint stale. The precedent to copy is `GroupPicker`.
 
 **(b) A `clearData` WITHOUT navigation** (`saveSend`, the `clear` RBT) wipes the store while stale UI stays painted. Two layers:
 

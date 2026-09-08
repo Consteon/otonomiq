@@ -6,9 +6,6 @@
 // to see the group go red. A test that survives its own mutation is guarding
 // nothing.
 import 'package:flutter_test/flutter_test.dart';
-// localImagePrefix / localImagePostfix / whiteDiamond / emptyImageUrl — the
-// getImages slot wrapper the photo-path helper unwraps.
-import 'package:otonomiq/global.dart';
 import 'package:otonomiq/widget/digit_pad_support.dart';
 
 void main() {
@@ -765,107 +762,6 @@ void main() {
     });
   });
 
-  group('digitPadSerialSatisfied', () {
-    // ★ THE acceptance fixture, spec §11 line 7: recorded `A21-4471908`,
-    // printed `A21 4471908`.
-    // RED if: normalisation stops being applied to BOTH sides.
-    test('a recorded serial with punctuation matches a spaced printed one', () {
-      expect(
-        digitPadSerialSatisfied(
-          ocrText: 'PDAM\nA21 4471908\n0 3 9 0 1 0\nBudi 2026-08-25 -6.29,106.66',
-          serial: 'A21-4471908',
-        ),
-        isTrue,
-      );
-    });
-
-    // RED if: `.contains` becomes `==` — the watermark, brand and coordinates
-    // in every real photo would then make EVERY point a mismatch.
-    test('extra text around the serial does not break the match', () {
-      expect(
-        digitPadSerialSatisfied(
-            ocrText: 'MERK XYZ 4471908 A21 SNI', serial: '4471908'),
-        isTrue,
-      );
-    });
-
-    test('another unit is a mismatch', () {
-      expect(
-        digitPadSerialSatisfied(
-            ocrText: 'PDAM\nA21 4471999\n039010', serial: 'A21-4471908'),
-        isFalse,
-      );
-    });
-
-    // Spec §12's headline risk, pinned as BEHAVIOUR so nobody "fixes" it into a
-    // fuzzy match: an unreadable photo is indistinguishable from a wrong meter.
-    test('an unreadable photo reads as a mismatch (§12, accepted)', () {
-      expect(digitPadSerialSatisfied(ocrText: '', serial: 'A21-4471908'),
-          isFalse);
-    });
-
-    // ★ RED if: the empty-needle short circuit is removed. `''.contains` is
-    // ALWAYS true, so a naive substring call would get silence for the WRONG
-    // reason; and returning false instead would warn on every serial-less point.
-    test('a blank or punctuation-only serial is satisfied, never a mismatch',
-        () {
-      expect(digitPadSerialSatisfied(ocrText: 'anything', serial: ''), isTrue);
-      expect(digitPadSerialSatisfied(ocrText: '', serial: '  -  '), isTrue);
-    });
-
-    // Spec §12 names this: a short numeric serial can collide by accident.
-    // Pinned so the substring rule is a decision, not an oversight.
-    test('a serial embedded in a longer digit run still matches', () {
-      expect(
-          digitPadSerialSatisfied(ocrText: 'X144719080Y', serial: '4471908'),
-          isTrue);
-    });
-  });
-
-  group('digitPadPhotoPaths', () {
-    const String p1 = '/data/user/0/app/otq_images/OTQC_a.jpg';
-    const String p2 = '/data/user/0/app/otq_images/OTQC_b.jpg';
-    String wrap(String p) => '$localImagePrefix$p$localImagePostfix';
-
-    // RED if: the split moves off separator[5]. getImages joins with ◇
-    // (processData, init_values.dart), NOT with ◆.
-    test('two photos split on ◇ and unwrap to bare paths', () {
-      expect(digitPadPhotoPaths('${wrap(p1)}$whiteDiamond${wrap(p2)}'),
-          <String>[p1, p2]);
-    });
-
-    test('a single photo unwraps', () {
-      expect(digitPadPhotoPaths(wrap(p1)), <String>[p1]);
-    });
-
-    // RED if: digitPadNormalizeSeed is dropped from the front. '--' and 'null'
-    // both pass .isNotEmpty and would be handed to ML Kit as file paths.
-    test('every empty sentinel yields no paths', () {
-      expect(digitPadPhotoPaths(''), isEmpty);
-      expect(digitPadPhotoPaths('--'), isEmpty);
-      expect(digitPadPhotoPaths('null'), isEmpty);
-      expect(digitPadPhotoPaths(emptyImageUrl), isEmpty);
-    });
-
-    test('a cancel sentinel among real photos is dropped, the rest survive', () {
-      expect(digitPadPhotoPaths('$emptyImageUrl$whiteDiamond${wrap(p1)}'),
-          <String>[p1]);
-    });
-
-    // ★ RED if: the aum__/__mua wrapper check is removed. An https Storage URL
-    // is what an EDIT page seeds from currentValue, and
-    // InputImage.fromFilePath cannot read one.
-    test('a synced https URL is not a file path and is dropped', () {
-      expect(
-          digitPadPhotoPaths('https://firebasestorage.googleapis.com/x.jpg'),
-          isEmpty);
-      expect(
-          digitPadPhotoPaths(
-              'https://firebasestorage.googleapis.com/x.jpg$whiteDiamond${wrap(p1)}'),
-          <String>[p1]);
-    });
-  });
-
   group('digitPadSerialOwnsSheet', () {
     // ★ RED if: the verdict terms are dropped. Spec §12 concedes a mismatch has
     // a high false-positive rate; letting it mask a BACKWARD reading would kill
@@ -873,33 +769,45 @@ void main() {
     test('a numeric verdict always beats the serial message', () {
       expect(
           digitPadSerialOwnsSheet(
-              verdict: DigitPadVerdict.backward, serialMismatch: true),
+              verdict: DigitPadVerdict.backward,
+              serialMismatch: true,
+              serialBlocking: false),
           isFalse);
       expect(
           digitPadSerialOwnsSheet(
-              verdict: DigitPadVerdict.spike, serialMismatch: true),
+              verdict: DigitPadVerdict.spike,
+              serialMismatch: true,
+              serialBlocking: false),
           isFalse);
     });
 
     test('the serial owns the sheet over sane and over no reading at all', () {
       expect(
           digitPadSerialOwnsSheet(
-              verdict: DigitPadVerdict.sane, serialMismatch: true),
+              verdict: DigitPadVerdict.sane,
+              serialMismatch: true,
+              serialBlocking: false),
           isTrue);
       expect(
           digitPadSerialOwnsSheet(
-              verdict: DigitPadVerdict.none, serialMismatch: true),
+              verdict: DigitPadVerdict.none,
+              serialMismatch: true,
+              serialBlocking: false),
           isTrue);
     });
 
     test('no mismatch, nothing to own', () {
       expect(
           digitPadSerialOwnsSheet(
-              verdict: DigitPadVerdict.sane, serialMismatch: false),
+              verdict: DigitPadVerdict.sane,
+              serialMismatch: false,
+              serialBlocking: false),
           isFalse);
       expect(
           digitPadSerialOwnsSheet(
-              verdict: DigitPadVerdict.none, serialMismatch: false),
+              verdict: DigitPadVerdict.none,
+              serialMismatch: false,
+              serialBlocking: false),
           isFalse);
     });
   });
@@ -1131,7 +1039,8 @@ void main() {
       int raised = 0;
       void step(DigitPadVerdict verdict, String submit) {
         final bool serialOwns =
-            digitPadSerialOwnsSheet(verdict: verdict, serialMismatch: true);
+            digitPadSerialOwnsSheet(
+                verdict: verdict, serialMismatch: true, serialBlocking: false);
         final String key = digitPadSheetKey(
             submitValue: submit, ocrKey: ocrK, serialOwns: serialOwns);
         final bool raise = digitPadShouldRaiseAnySheet(
@@ -1167,7 +1076,8 @@ void main() {
       int raised = 0;
       void step(DigitPadVerdict verdict, String submit) {
         final bool serialOwns =
-            digitPadSerialOwnsSheet(verdict: verdict, serialMismatch: true);
+            digitPadSerialOwnsSheet(
+                verdict: verdict, serialMismatch: true, serialBlocking: false);
         final String key = digitPadSheetKey(
             submitValue: submit, ocrKey: ocrK, serialOwns: serialOwns);
         final bool raise = digitPadShouldRaiseAnySheet(
@@ -1225,6 +1135,453 @@ void main() {
                 'n': '5'
               }),
           '1 2 3 4 5');
+    });
+  });
+
+  // ── digit-pad-deltamax-serial (2026-09-04) ───────────────────────────────
+
+  group('digitPadPow10', () {
+    // RED if: the cap is dropped (a runaway red count overflows), or the loop
+    // is off by one.
+    test('exact powers of ten, floored at 1 and capped at digitPadMaxBoxes',
+        () {
+      expect(digitPadPow10(0), 1);
+      expect(digitPadPow10(1), 10);
+      expect(digitPadPow10(2), 100);
+      expect(digitPadPow10(3), 1000);
+      expect(digitPadPow10(-4), 1);
+      expect(digitPadPow10(digitPadMaxBoxes), 1000000000000);
+      expect(digitPadPow10(99), digitPadPow10(digitPadMaxBoxes));
+    });
+  });
+
+  group('digitPadCubic', () {
+    // ★ RED if: the `pow10 <= 1` short circuit is removed. Nothing else in
+    // either suite can see that mutation — 1000 / 1 is 1000.0 and digitPadFmt
+    // prints both as "1000" — so this is the ONLY assertion that pins the
+    // no-promotion guarantee the zero-regression claim rests on.
+    test('pow10 1 returns the argument untouched, int stays int', () {
+      expect(digitPadCubic(1000, 1), 1000);
+      expect(digitPadCubic(1000, 1), isA<int>());
+      expect(digitPadCubic(1000, 0), isA<int>());
+      expect(digitPadCubic(null, 100), isNull);
+    });
+
+    // RED if: the division is inverted or the divisor is dropped.
+    test('a dgm 2 stand becomes m³', () {
+      expect(digitPadCubic(12600, 100), 126.0);
+      expect(digitPadCubic(17600, 100), 176.0);
+      expect(digitPadCubic(12601, 100), 126.01);
+      expect(digitPadCubic(1000, 10), 100.0);
+    });
+
+    // The pair BOTH previous boundary tests picked: 22600 and 12600 are each
+    // exactly representable after the division, so subtracting the quotients
+    // happens to give exactly 100.0. This is the LUCKY case, kept only to show
+    // that it IS lucky — see the test below for the same boundary on a prev
+    // that is not.
+    test('two exact quotients happen to subtract exactly', () {
+      final num delta =
+          digitPadCubic(22600, 100)! - digitPadCubic(12600, 100)!;
+      expect(delta, 100.0);
+      expect(digitPadFmt(delta), '100');
+    });
+  });
+
+  group('digitPadDelta', () {
+    // ★★ THE reason this function exists, stated as an assertion.
+    //
+    // ★ RED if: digitPadDelta goes back to dividing both sides. 2802 / 100 and
+    // 12802 / 100 are each the correctly-rounded nearest double, and their
+    // difference is 100.00000000000001 — which is `> 100` and so tripped a
+    // `deltaMax: 100` ceiling on a reading of exactly 100 m³. Measured at
+    // 1.64% of raw prev values in 0..999999 at dgm:2, always sane -> spike.
+    test('the DIFFERENCE is divided once, not each side separately', () {
+      // What the first cut computed, and why it was wrong:
+      expect(digitPadCubic(12802, 100)! - digitPadCubic(2802, 100)!,
+          isNot(100.0));
+      // What this function computes:
+      expect(digitPadDelta(value: 12802, prev: 2802, pow10: 100), 100.0);
+      expect(digitPadDelta(value: 12802, prev: 2802, pow10: 100)! > 100,
+          isFalse);
+      expect(digitPadFmt(digitPadDelta(value: 12802, prev: 2802, pow10: 100)!),
+          '100');
+      // The ordinary sane path the officer reads every month, which rendered
+      // "50.00999999999999" before.
+      expect(digitPadFmt(digitPadDelta(value: 17601, prev: 12600, pow10: 100)!),
+          '50.01');
+    });
+
+    // ★ RED if: the pow10 <= 1 short circuit is lost on this path. dgm:0 is the
+    // one live shape and must stay int-in / int-out, byte-identical copy.
+    test('pow10 1 keeps the delta an int', () {
+      expect(digitPadDelta(value: 1150, prev: 1000), 150);
+      expect(digitPadDelta(value: 1150, prev: 1000), isA<int>());
+    });
+
+    // Null is "no delta", never 0 — an incomplete reading must not render
+    // `{delta}` as a real number.
+    test('either side null is null, never zero', () {
+      expect(digitPadDelta(value: null, prev: 1000, pow10: 100), isNull);
+      expect(digitPadDelta(value: 1000, prev: null, pow10: 100), isNull);
+    });
+
+    // Backward stays negative through the division, which is what keeps the
+    // `value < prev` branch scale-invariant.
+    test('a backward reading keeps its sign', () {
+      expect(digitPadDelta(value: 900, prev: 1000, pow10: 100), -1.0);
+    });
+  });
+
+  group('digitPadVerdict — deltaMax', () {
+    DigitPadVerdict v(num value, num prev, {num? avg, num deltaMax = 0}) =>
+        digitPadVerdict(
+          value: value,
+          prev: prev,
+          avg: avg,
+          spikeMultiplier: 4,
+          deltaMax: deltaMax,
+        );
+
+    // ★ Acceptance §11 line 3. RED if: the `deltaMax > 0` guard is dropped —
+    // an absent cell defaults to 0 and would then flag EVERY reading.
+    test('deltaMax 0, negative or absent leaves the verdict exactly as it was',
+        () {
+      expect(v(1150, 1000, avg: 100), DigitPadVerdict.sane);
+      expect(v(1150, 1000, avg: 100, deltaMax: 0), DigitPadVerdict.sane);
+      expect(v(1150, 1000, avg: 100, deltaMax: -5), DigitPadVerdict.sane);
+      expect(v(900, 1000, deltaMax: 100), DigitPadVerdict.backward);
+    });
+
+    // ★ Acceptance §11 line 1 — the new-point hole. RED if: the deltaMax branch
+    // is never reached when avg is null.
+    test('an avg-less point finally has a ceiling', () {
+      expect(v(1150, 1000), DigitPadVerdict.sane); // no avg, no deltaMax
+      expect(v(1150, 1000, deltaMax: 100), DigitPadVerdict.spike);
+    });
+
+    // ★ RED if: the branch uses `>=`. Segment 15 says "melewati batas".
+    test('exactly at deltaMax is sane; one unit past it is a spike', () {
+      expect(v(1100, 1000, deltaMax: 100), DigitPadVerdict.sane);
+      expect(v(1101, 1000, deltaMax: 100), DigitPadVerdict.spike);
+    });
+
+    // RED if: the deltaMax branch is placed before the backward branch.
+    test('backward still wins over deltaMax', () {
+      expect(v(500, 1000, deltaMax: 100), DigitPadVerdict.backward);
+    });
+
+    // Both branches produce the SAME verdict; the message choice is the
+    // widget's, not this function's.
+    test('the avg branch and the deltaMax branch are the same verdict', () {
+      expect(v(9999, 1000, avg: 30), DigitPadVerdict.spike);
+      expect(v(9999, 1000, deltaMax: 100), DigitPadVerdict.spike);
+    });
+  });
+
+  group('digitPadFillTokens — {deltaMax}', () {
+    // ★★ THE regex-ordering test. RED if: `deltaMax` is listed after `delta` in
+    // _digitPadToken AND the engine stops backtracking, and RED today if anyone
+    // "simplifies" the alternation to `delta` alone.
+    test('{delta} and {deltaMax} both resolve from the same template', () {
+      expect(
+        digitPadFillTokens(
+          'Pemakaian {delta} m³ — melewati batas {deltaMax} m³.',
+          <String, String>{'delta': '150', 'deltaMax': '100'},
+        ),
+        'Pemakaian 150 m³ — melewati batas 100 m³.',
+      );
+    });
+
+    // The pending-safe dialect: no value -> the token stays LITERAL.
+    test('{deltaMax} with no value stays literal', () {
+      expect(
+        digitPadFillTokens('batas {deltaMax} m³', <String, String>{}),
+        'batas {deltaMax} m³',
+      );
+    });
+  });
+
+  group('digitPadSerialMatch', () {
+    // ★ Acceptance §11 line 4, first half.
+    test('punctuation and case disappear on BOTH sides', () {
+      expect(digitPadSerialMatch('B21-4471902', 'B214471902'), isTrue);
+      expect(digitPadSerialMatch('B21-4471902', 'b21 4471902'), isTrue);
+      expect(digitPadSerialMatch('B21-4471902', 'B21/4471902'), isTrue);
+    });
+
+    // ★ RED if: the match goes back to one direction only (the deleted
+    // digitPadSerialSatisfied did `read.contains(recorded)` and nothing else).
+    test('substring matches in BOTH directions', () {
+      expect(digitPadSerialMatch('B214471902', 'PDAM B214471902 SNI'), isTrue);
+      expect(digitPadSerialMatch('PDAM B214471902 SNI', 'B214471902'), isTrue);
+    });
+
+    // ★ RED if: the < 4 rule is dropped. 'A1' substring-matches half the fleet.
+    test('under four characters demands exact equality', () {
+      expect(digitPadSerialMatch('A1', 'A1'), isTrue);
+      expect(digitPadSerialMatch('A1', 'A1B2C3'), isFalse);
+      expect(digitPadSerialMatch('A1B2C3', 'A1'), isFalse);
+      expect(digitPadSerialMatch('ABC', 'ABCD'), isFalse);
+    });
+
+    test('a different unit is a mismatch', () {
+      expect(digitPadSerialMatch('B21-4471902', 'X99-1234567'), isFalse);
+    });
+
+    test('either side empty is never a match', () {
+      expect(digitPadSerialMatch('', 'B214471902'), isFalse);
+      expect(digitPadSerialMatch('B214471902', ''), isFalse);
+      expect(digitPadSerialMatch('B214471902', '  -- '), isFalse);
+    });
+  });
+
+  group('digitPadSerialState', () {
+    // ★ Acceptance §11 line 6 — the owner's second sentence.
+    test('a blank recorded serial is OFF, whatever the slot holds', () {
+      expect(digitPadSerialState(recorded: '', read: ''),
+          DigitPadSerialState.off);
+      expect(digitPadSerialState(recorded: '  ', read: 'X99'),
+          DigitPadSerialState.off);
+      expect(digitPadSerialState(recorded: '--', read: 'X99'),
+          DigitPadSerialState.off);
+    });
+
+    // ★★ RED if: digitPadNormalizeSeed is dropped from the read side. Without
+    // it 'null' normalises to the serial NULL and every unauthored TXF reports
+    // a MISMATCH instead of MISSING — on a page the officer never touched.
+    test('every empty sentinel in the slot is MISSING, never a mismatch', () {
+      for (final String seed in <String>['', '  ', '--', 'null', '---']) {
+        expect(
+          digitPadSerialState(recorded: 'B21-4471902', read: seed),
+          DigitPadSerialState.missing,
+          reason: 'slot seed "$seed" must read as MISSING',
+        );
+      }
+    });
+
+    test('a matching slot is OK and a different one is MISMATCH', () {
+      expect(
+          digitPadSerialState(recorded: 'B21-4471902', read: 'B214471902'),
+          DigitPadSerialState.ok);
+      expect(
+          digitPadSerialState(recorded: 'B21-4471902', read: 'X99-1234567'),
+          DigitPadSerialState.mismatch);
+    });
+  });
+
+  group('digitPadSerialKey', () {
+    // What this test can and cannot see, stated honestly.
+    //
+    // digitPadSerialKey has NO `read` parameter, so no mutation of THIS
+    // function can make the key carry the read value; this test therefore
+    // cannot be the pin for that defect, and its name is scoped accordingly.
+    // What it does pin is that the mismatch key ignores `readingComplete` —
+    // the one input it has that could move it mid-edit.
+    //
+    // ★ The anti-keystroke defect itself is pinned by exactly ONE test, in the
+    // other suite: `editing a wrong serial raises the sheet ONCE, not per
+    // keystroke` (test/digit_pad_widget_test.dart), which drives the real
+    // per-character writes through the call site that composes `recorded`.
+    // Do not delete it believing this group covers it.
+    //
+    // ★ RED if: the mismatch key starts varying with readingComplete.
+    test('the mismatch key ignores readingComplete', () {
+      final String a = digitPadSerialKey(
+          state: DigitPadSerialState.mismatch,
+          recorded: 'B21-4471902',
+          readingComplete: true);
+      final String b = digitPadSerialKey(
+          state: DigitPadSerialState.mismatch,
+          recorded: 'B21-4471902',
+          readingComplete: false);
+      expect(a, isNotEmpty);
+      expect(a, b);
+    });
+
+    // ★ RED if: MISSING and MISMATCH collapse to one key. `missing ->
+    // mismatch` is new information and earns its own single raise.
+    test('missing and mismatch are different keys', () {
+      expect(
+        digitPadSerialKey(
+            state: DigitPadSerialState.missing,
+            recorded: 'B21-4471902',
+            readingComplete: true),
+        isNot(digitPadSerialKey(
+            state: DigitPadSerialState.mismatch,
+            recorded: 'B21-4471902',
+            readingComplete: true)),
+      );
+    });
+
+    // ★ RED if: readingComplete stops gating MISSING — the sheet would then
+    // rise on page load for every meter in the fleet.
+    test('MISSING waits for a complete reading, MISMATCH does not', () {
+      expect(
+          digitPadSerialKey(
+              state: DigitPadSerialState.missing,
+              recorded: 'B21-4471902',
+              readingComplete: false),
+          '');
+      expect(
+          digitPadSerialKey(
+              state: DigitPadSerialState.missing,
+              recorded: 'B21-4471902',
+              readingComplete: true),
+          isNotEmpty);
+      expect(
+          digitPadSerialKey(
+              state: DigitPadSerialState.mismatch,
+              recorded: 'B21-4471902',
+              readingComplete: false),
+          isNotEmpty);
+    });
+
+    // ★ RED if: off/ok return something non-empty. '' is ALSO the re-arm
+    // signal digitPadSheetKey documents — a key that is never empty latches
+    // forever.
+    test("off and ok yield '' — the re-arm signal", () {
+      expect(
+          digitPadSerialKey(
+              state: DigitPadSerialState.off,
+              recorded: '',
+              readingComplete: true),
+          '');
+      expect(
+          digitPadSerialKey(
+              state: DigitPadSerialState.ok,
+              recorded: 'B21-4471902',
+              readingComplete: true),
+          '');
+    });
+  });
+
+  group('digitPadSerialOwnsSheet — the LOCKING problem wins', () {
+    // ★ RED if: the serialBlocking short circuit is dropped. With the gate on,
+    // _sheetBlocked hides segment 13, so a sheet carrying the SPIKE copy would
+    // demand a correction that cannot lift the block.
+    test('a blocking serial problem takes the sheet from any verdict', () {
+      for (final DigitPadVerdict v in DigitPadVerdict.values) {
+        expect(
+          digitPadSerialOwnsSheet(
+              verdict: v, serialMismatch: true, serialBlocking: true),
+          isTrue,
+          reason: 'blocking serial must own the sheet over $v',
+        );
+      }
+    });
+
+    // ★ RED if: serialBlocking is ORed in without the !serialMismatch guard.
+    test('no serial problem, nothing to own — even when blocking is true', () {
+      expect(
+        digitPadSerialOwnsSheet(
+            verdict: DigitPadVerdict.sane,
+            serialMismatch: false,
+            serialBlocking: true),
+        isFalse,
+      );
+    });
+
+    // The pre-2026-09-04 precedence, unchanged when nothing is locking.
+    test('a non-blocking serial problem still yields to the numbers', () {
+      expect(
+        digitPadSerialOwnsSheet(
+            verdict: DigitPadVerdict.backward,
+            serialMismatch: true,
+            serialBlocking: false),
+        isFalse,
+      );
+      expect(
+        digitPadSerialOwnsSheet(
+            verdict: DigitPadVerdict.sane,
+            serialMismatch: true,
+            serialBlocking: false),
+        isTrue,
+      );
+    });
+  });
+
+  group('the serial latch over a SEQUENCE — one raise per state transition', () {
+    // ★★ The end-to-end script the widget runs, driven with the same pure
+    // functions. The officer's keystrokes are the INPUT: `read` goes through
+    // digitPadSerialState exactly as _content passes it, so the mismatch steps
+    // below are derived, not asserted by hand.
+    //
+    // RED, both measured against the mutants rather than reasoned:
+    //   * missing and mismatch collapse to one key -> `raised` drops to 1;
+    //   * the MISSING raise stops waiting for a complete reading -> `raised`
+    //     stays 2 but `raisedAt` becomes [0, 2]. The count alone does NOT see
+    //     that mutant: the page-load raise DISPLACES the reading-complete
+    //     raise (both carry the same serial key, so the latch swallows the
+    //     second) instead of adding to it. That is why this test asserts the
+    //     step indices; asserting only the total was the gap.
+    //
+    // ★ NOT red if the key starts carrying the read value: digitPadSerialKey
+    // has no `read` parameter, so that defect is not expressible against these
+    // signatures at all. It is pinned by exactly ONE test, in the other suite —
+    // `editing a wrong serial raises the sheet ONCE, not per keystroke`
+    // (test/digit_pad_widget_test.dart), which drives the real per-character
+    // writes through the call site that composes `recorded`. That test is the
+    // sole pin; do not delete it believing this script covers it.
+    test('missing -> mismatch -> two edits -> match raises exactly twice', () {
+      String? latch;
+      int raised = 0;
+      // WHICH step raised, not only how many did. Measured: a count alone
+      // cannot see the missing-raise gate, because dropping it MOVES the first
+      // raise from step 1 to step 0 instead of adding one — the total stays 2.
+      final List<int> raisedAt = <int>[];
+      int stepIndex = 0;
+      void step(String read, String submit) {
+        final DigitPadSerialState state = digitPadSerialState(
+          recorded: 'B21-4471902',
+          read: read,
+        );
+        final String serialKey = digitPadSerialKey(
+          state: state,
+          recorded: 'B21-4471902',
+          readingComplete: submit.isNotEmpty,
+        );
+        final bool problem = state == DigitPadSerialState.missing ||
+            state == DigitPadSerialState.mismatch;
+        final bool owns = digitPadSerialOwnsSheet(
+          verdict: DigitPadVerdict.sane,
+          serialMismatch: problem,
+          serialBlocking: problem,
+        );
+        final String key = digitPadSheetKey(
+            submitValue: submit, ocrKey: serialKey, serialOwns: owns);
+        final bool raise = digitPadShouldRaiseAnySheet(
+          verdict: DigitPadVerdict.sane,
+          submitValue: submit,
+          sheetText: owns ? 'seri' : 'masuk akal',
+          serialOwns: owns,
+          sheetKey: key,
+          alreadyRaisedFor: latch,
+        );
+        if (raise) {
+          raised++;
+          raisedAt.add(stepIndex);
+        }
+        stepIndex++;
+        final String next = digitPadNextSheetLatch(
+            previous: latch ?? '', sheetKey: key, raised: raise);
+        latch = next.isEmpty ? null : next;
+      }
+
+      // read '' -> missing; 'B'/'B2'/'B21' -> mismatch (under four characters
+      // demands exact equality); 'B214' -> ok (substring of the recorded
+      // 'B214471902'). All four verdicts come from digitPadSerialState.
+      step('', ''); // page load — silent
+      step('', '1100'); // reading complete            -> raise 1
+      step('B', '1100'); //   mismatch, new state      -> raise 2
+      step('B2', '1100'); //  still mismatch           -> silent
+      step('B21', '1100'); // still mismatch           -> silent
+      step('B214', '1100'); // ok                      -> silent
+
+      expect(raised, 2);
+      // Step 0 is the page load and MUST be silent; the two raises are the
+      // completed reading and the first mismatch.
+      expect(raisedAt, <int>[1, 2]);
     });
   });
 }

@@ -46,7 +46,8 @@ One renderer for every form-bound picker over a table collection. Unlike [Picker
 | `max` | `0` | multi-mode cap; `0` = unlimited. Ignored in single mode (forced to 1) |
 | `position` | — | **required** form slot the value(s) are written to. Missing → dispatch degrades to `--table_picker-- missing position` (does not build) |
 | `labelPosition` | — | **required** form slot the label(s) are written to. Missing → same degrade as `position` |
-| `title` | — | field label rendered above the tap-target; also the sheet-title fallback (`text[0]`) |
+| `title` | — | card header text; also the sheet-title fallback (`text[0]`). Empty → no header row |
+| `icon` | `list_alt` | `otqIcons` key for the header icon chip, same contract as SELECTABLE_BTN. **Absent or unknown → falls back to `Icons.list_alt`**, never drops the chip (`TablePicker.resolveHeaderIcon`) |
 | `hint` | — | placeholder shown in the tap-target when nothing is selected |
 | `text` | — | `◆`-separated sheet strings (see below); all length-guarded |
 

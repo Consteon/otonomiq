@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otonomiq/widget/table_picker.dart';
 import 'package:otonomiq/widget/picker_list.dart'; // PickerList.filterRows reuse (W2)
@@ -201,6 +202,29 @@ void main() {
           PickerList.filterRows(rows, 'ps_25FC_model_u2B58_st_25FC_active');
       expect(r.length, 1);
       expect(r.single['n'], 'Alice');
+    });
+  });
+
+  // ── resolveHeaderIcon ──────────────────────────────────────────────────
+  // The card header always paints a chip. Every sheet row shipped before the
+  // card shell existed omits `icon`, so the fallback -- not the lookup -- is
+  // the path that runs in production.
+  group('TablePicker.resolveHeaderIcon', () {
+    test('a known otqIcons key wins', () {
+      expect(TablePicker.resolveHeaderIcon('person'), Icons.person);
+      expect(TablePicker.resolveHeaderIcon('  category  '), Icons.category);
+    });
+
+    test('empty, blank and unknown keys fall back to the list glyph', () {
+      expect(TablePicker.resolveHeaderIcon(''), Icons.list_alt);
+      expect(TablePicker.resolveHeaderIcon('   '), Icons.list_alt);
+      expect(TablePicker.resolveHeaderIcon('no_such_icon'), Icons.list_alt);
+    });
+
+    // getInitialValue's "null" trap has a twin here: an absent JSON key
+    // stringified by a caller lands as the 4-char word, not as empty.
+    test('the literal "null" key falls back, never throws', () {
+      expect(TablePicker.resolveHeaderIcon('null'), Icons.list_alt);
     });
   });
 }

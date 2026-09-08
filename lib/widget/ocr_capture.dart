@@ -26,7 +26,6 @@
 //    ◆-segments; every fallback is either "render nothing" or a ◁pos▷ marker.
 
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart' show compute, visibleForTesting;
@@ -100,10 +99,6 @@ String _usablePath(String value) {
 class OcrCaptureEntry {
   /// `aum__<path>__mua` written to this widget's own position.
   String photoUrl = '';
-
-  /// The CROP shown in the form (D7): the guide box for `auto`, the tapped
-  /// element's box for `tap`. Null -> fall back to the plain photo.
-  Uint8List? thumb;
 
   /// ML Kit returned nothing, or nothing matched. A RENDER flag only.
   bool failed = false;
@@ -565,33 +560,18 @@ class OcrCaptureState extends State<OcrCapture> {
       final OcrCaptureEntry entry =
           applyCaptureResult(position, fills, rawSummary);
 
-      // Thumbnail source box (D7). For `auto` WITH a guide the fill's box is in
-      // CROP space, so use the guide rect in FULL-frame space instead.
-      List<double> thumbBox = const <double>[];
-      if (cropPath.isNotEmpty && prep.width > 0 && _guide != null) {
-        final List<int> r = ocrGuideRect(prep.width, prep.height, _guide);
-        if (r.length == 4) {
-          thumbBox = <double>[
-            r[0].toDouble(),
-            r[1].toDouble(),
-            (r[0] + r[2]).toDouble(),
-            (r[1] + r[3]).toDouble(),
-          ];
-        }
-      } else if (fills.isNotEmpty) {
-        thumbBox = fills.values.first.box;
-      }
-
       final String outPath = '${tmpDir.path}/ocrup$stamp.jpg';
       final OcrFinishResult fin = await compute(ocrFinishSync, (
         imagePath: rawPath,
         outPath: outPath,
         maxSize: _uploadMaxSize,
         quality: _uploadQuality,
-        thumbBox: thumbBox,
+        // D7 (revised): the form preview shows the WHOLE captured frame. The
+        // guide box picks the VALUE, it never decides what the agent may see --
+        // a crop preview hides whether the photo is even of the right meter.
+        thumbBox: const <double>[],
       ));
       shrunkPath = fin.uploadPath;
-      entry.thumb = fin.thumb;
 
       // Fail open: a failed shrink uploads the ORIGINAL rather than losing the
       // photo. Bigger, but the evidence survives.
@@ -656,7 +636,6 @@ class OcrCaptureState extends State<OcrCapture> {
     if (position == null) return;
     final OcrCaptureEntry entry = OcrCapture.entryOf(widget.scrName, position);
     entry.photoUrl = '';
-    entry.thumb = null;
     entry.failed = false;
     _detachListeners();
     _setMeta('manual', null);
@@ -765,7 +744,7 @@ class OcrCaptureState extends State<OcrCapture> {
             if (!hasPhoto)
               _emptyZone(enabled)
             else
-              _filledZone(entry, photoUrl, enabled),
+              _filledZone(photoUrl, enabled),
             if ((entry?.failed ?? false) && failMsg.trim().isNotEmpty) ...<Widget>[
               const SizedBox(height: 8),
               Text(
@@ -835,28 +814,14 @@ class OcrCaptureState extends State<OcrCapture> {
     );
   }
 
-  /// [photoUrl] is supplied by the caller, NOT read off [entry]: the entry is
-  /// null whenever the store was wiped while the record slot still holds the
-  /// URL (W-3). The thumbnail bytes stay store-only -- they already fall back
-  /// to displayImage.
-  Widget _filledZone(OcrCaptureEntry? entry, String photoUrl, bool enabled) {
-    final Uint8List? thumb = entry?.thumb;
-    final Widget preview = thumb != null
-        ? Image.memory(
-            thumb,
-            height: _previewSize,
-            fit: BoxFit.cover,
-            // Image.memory with no errorBuilder makes EVERY failed decode a
-            // FATAL in this repo.
-            errorBuilder: (_, _, _) =>
-                SizedBox(height: _previewSize, width: _previewSize),
-          )
-        : SizedBox(
-            height: _previewSize,
-            width: _previewSize,
-            child: displayImage(imageUrl: photoUrl, cached: true),
-          );
-
+  /// [photoUrl] is supplied by the caller, NOT read off the store entry: the
+  /// entry is null whenever the store was wiped while the record slot still
+  /// holds the URL (W-3).
+  ///
+  /// BoxFit.contain, never cover: the whole photographed page must be visible
+  /// so the agent can tell WHICH document was shot. The value still comes from
+  /// the guide box -- that is a read decision, not a display one.
+  Widget _filledZone(String photoUrl, bool enabled) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -866,9 +831,12 @@ class OcrCaptureState extends State<OcrCapture> {
             onTap: (enabled && !_busy) ? _capture : null,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
+              child: Container(
                 height: _previewSize,
                 width: double.infinity,
+                // Letterbox ground: a contained photo does not fill the strip,
+                // and white-on-white would hide the photo's edges.
+                color: const Color(0xFFF1F5F9),
                 child: _busy
                     ? const Center(
                         child: SizedBox(
@@ -877,7 +845,11 @@ class OcrCaptureState extends State<OcrCapture> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         ),
                       )
-                    : FittedBox(fit: BoxFit.cover, child: preview),
+                    : displayImage(
+                        imageUrl: photoUrl,
+                        cached: true,
+                        fit: BoxFit.contain,
+                      ),
               ),
             ),
           ),
