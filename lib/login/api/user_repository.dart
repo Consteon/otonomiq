@@ -572,7 +572,7 @@ class UserRepository {
   } // end of vertrizLogin
 
   Future<int> reLogin() async {
-    // finish justReLogin procedure
+    // TODO finish justReLogin procedure
     // after logged out then re login
     // Set vid in transactionStore
     // save sheetKey to persistence.storage
@@ -694,8 +694,8 @@ class UserRepository {
     if (result == 0) {
       // if success
       try {
-        // write to handle
-        // execute instruction2 in Lif, Hub & Account
+        // TODO write to handle
+        // TODO execute instruction2 in Lif, Hub & Account
         state = transactionStore.state.screenTx;
         var sk = state['#INTERFACE_KEY'];
         // Gated on a real fetch — see _loginPagesReady. Ungated, a timed-out
@@ -845,8 +845,8 @@ class UserRepository {
     if (result == 0) {
       // if success
       try {
-        // write to handle
-        // execute instruction2 in Lif, Hub & Account
+        // TODO write to handle
+        // TODO execute instruction2 in Lif, Hub & Account
         state = transactionStore.state.screenTx;
         var sk = state['#INTERFACE_KEY'];
         // Gated on a real fetch — see _loginPagesReady. Ungated, a timed-out
@@ -921,7 +921,7 @@ class UserRepository {
 
     if (result == 0) {
       try {
-        // write to handle
+        // TODO write to handle
         var state = transactionStore.state.screenTx;
         var sk = state['#INTERFACE_KEY'];
         await storage.write(
@@ -953,17 +953,250 @@ class UserRepository {
     }
     return result;
   }
+
+  //  Future<String> getUserDataFirebase(FirebaseUser cUser) async {
+  //    var loginOk = false;
+  //    var myUid = cUser.uid;
+  //    var state = transactionStore.state.screenTx;
+  //    var _result = state['#INTERFACE_KEY'];                      // get current Interface Key as current result
+  //    var ds = await Firestore.instance.collection('users')       // search data in firebase with corresponding uid
+  //        .where('uid',isEqualTo: myUid).getDocuments();
+  //    if (ds.documents.length > 0) {                              // if uid found in firebase docs
+  //      _result = ds.documents[0]['sheetKey'];                    //   get sheetKey from firebase
+  //      if (ds.documents[0]['email'] == null) {
+  //        Firestore.instance.collection('users').document(state['#VID']).updateData({'email':ds.documents[0]['email']});  // put email in vid's data
+  //      }
+  //      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
+  //          {'#INTERFACE_KEY': _result})));                       //   set state #INTERFACE_KEY
+  //      // TODO handle if more than 1 entry found in firestore
+  //      loginOk = true;
+  //    } else {                                                    // else (uid not found in firebase docs)
+  //      if (state['#VID']== ''){                                // if vid input is empty
+  //        try {
+  //          var userData = await getNewVid(myUid, cUser.displayName,
+  //              cUser.email); // get new vid & add firestore/users
+  //          var _res = json.decode(userData.body);
+  //          var _vid = _res['vid'];
+  //          _result = _res['sheetKey'];
+  //          if (state['#SHEET_API']) {
+  //            ValueRange vu = new ValueRange.fromJson({
+  //              "values": [[cUser.displayName], [cUser.email]]
+  //            });
+  //            sheetApi.spreadsheets.values
+  //                .update(vu, _result, 'Settings!B2:B3',
+  //                valueInputOption: 'USER_ENTERED');
+  //          }
+  //          transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
+  //              {'#VID': _vid})));
+  //          transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
+  //              {'#INTERFACE_KEY': _result})));
+  //          loginOk = true;
+  //        } catch (_) {
+  //          _result = '0';
+  //        }
+  //      } else {                                                   // if user fill vid
+  //        var existingUser = await Firestore.instance.collection('users').document(state['#VID']).get();
+  //        var pname = cUser.displayName;
+  //        var pemail = cUser.email;
+  //        if (existingUser.exists && existingUser.data['pin'] == state['#PIN'] ) {
+  //          if(!existingUser.data.containsKey('email')) {
+  //            Firestore.instance.collection('users').document(state['#VID'])
+  //                .updateData({'uid':myUid,'email':cUser.email});  // put uid & email in vid's data
+  //          } else {
+  //            Firestore.instance.collection('users').document(state['#VID'])
+  //                .updateData({'uid':myUid});                      // put uid in vid's data
+  //          }
+  //          _result = existingUser.data['sheetKey'];
+  //          if (state['#SHEET_API']) {
+  //            ValueRange vu = new ValueRange.fromJson({
+  //              "values": [[cUser.email]]
+  //            });
+  //            sheetApi.spreadsheets.values
+  //                .update(vu, _result, 'Settings!B3',
+  //                valueInputOption: 'USER_ENTERED');
+  //          }
+  //          transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
+  //              {'#INTERFACE_KEY': _result})));
+  //          loginOk = true;
+  //        } else {
+  //          var vidMessage;
+  //          var vidTitle;
+  //          if(existingUser.exists) {
+  //            BlocProvider.of<LoginBloc>(context).dispatch(WrongVid());
+  //            vidTitle = 'Pin not match';
+  //            vidMessage = 'Pin salah, masukan sekali lagi.';
+  //          } else {
+  //            BlocProvider.of<LoginBloc>(context).dispatch(WrongPin());
+  //            vidTitle = 'User not found';
+  //            vidMessage = 'Vid tidak ditemukan.';
+  //          }
+  //          devPrint ('$vidTitle => $vidMessage');
+  //        }
+  //      }
+  //
+  //    }
+  //    if (loginOk) {
+  //      await storage.write(key: 'myLif', value: _result);        //   put interface key as default LIF in secure storage
+  //      await readSettings(_result);                              //   read new interface key
+  //      constructPage(home);                                    //   construct home
+  //      constructAllNotHomePages();                               //   construct other pages async
+  //    }
+  //    return _result;
+  //  }
+
+  //  Future<int> vertrizLogin() async {
+  //    /*
+  //      output :
+  //        0 = logini successfull
+  //        1 = user full error (no more available user to be assigned for the new user
+  //        2 = vid is wrong (no such vid in firestore)
+  //        3 = pin is wrong (pin not match with corresponding pin in firestore vid
+  //        4 = vertriz login fail (other error, vertriz login failure)
+  //     */
+  ////    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
+  ////        {'#VID': _vVid})));                       //   set state #INTERFACE_KEY
+  ////    transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction(
+  ////        {'#PIN': _vPin})));                       //   set state #INTERFACE_KEY
+  //    var state = transactionStore.state.screenTx;
+  //    var cUser = state['#FIREBASE_USER']; // get current firebase user data
+  //    var myUid = cUser.uid;
+  //    var _result = 4; // default 4 = Vertriz Fail
+  //    var ds = await Firestore.instance
+  //        .collection('users') // search data in firebase with corresponding uid
+  //        .where('uid', isEqualTo: myUid)
+  //        .getDocuments();
+  //    if (ds.documents.length > 0) {
+  //      // if uid found in firebase docs
+  //      transactionStore.dispatch(UpdateScreenTxAction(ScreenTransaction({
+  //        '#INTERFACE_KEY': ds.documents[0]['sheetKey']
+  //      }))); //   set state #INTERFACE_KEY
+  //      _result = 0; //   set output to successfull
+  //      if (ds.documents[0]['email'] == null) {
+  //        Firestore.instance.collection('users').document(_vVid).updateData(
+  //            {'email': ds.documents[0]['email']}); // put email in vid's data
+  //      }
+  //      // TODO handle if more than 1 entry found in firestore
+  //    } else {
+  //      // else (uid not found in firebase docs)
+  //      if (_vVid == '') {
+  //        // if vid input is empty
+  //        try {
+  //          var userData = await getNewVid(myUid, cUser.displayName,
+  //              cUser.email); // get new vid & add firestore/users
+  //          var _res = json.decode(userData.body);
+  //          if (_res['vid'] == 'Full') {
+  //            _result = 1;
+  //          } else {
+  //            var _vid = _res['vid'];
+  //            var _sKey = _res['sheetKey'];
+  //            if (state['#SHEET_API']) {
+  //              ValueRange vu = new ValueRange.fromJson({
+  //                "values": [
+  //                  [cUser.displayName],
+  //                  [cUser.email]
+  //                ]
+  //              });
+  //              sheetApi.spreadsheets.values.update(vu, _sKey, 'Settings!B2:B3',
+  //                  valueInputOption: 'USER_ENTERED');
+  //            }
+  //            transactionStore.dispatch(
+  //                UpdateScreenTxAction(ScreenTransaction({'#VID': _vid})));
+  //            transactionStore.dispatch(UpdateScreenTxAction(
+  //                ScreenTransaction({'#INTERFACE_KEY': _sKey})));
+  //            _result = 0;
+  //          }
+  //        } catch (_) {
+  //          _result = 4;
+  //        }
+  //      } else {
+  //        // if user fill vid
+  //        var existingUser =
+  //        await Firestore.instance.collection('users').document(_vVid).get();
+  //        var pname = cUser.displayName;
+  //        var pemail = cUser.email;
+  //        if (existingUser.exists && existingUser.data['pin'] == _vPin) {
+  //          if (!existingUser.data.containsKey('email')) {
+  //            Firestore.instance.collection('users').document(_vVid).updateData({
+  //              'uid': myUid,
+  //              'email': cUser.email
+  //            }); // put uid & email in vid's data
+  //          } else {
+  //            Firestore.instance
+  //                .collection('users')
+  //                .document(_vVid)
+  //                .updateData({'uid': myUid}); // put uid in vid's data
+  //          }
+  //          var sheetKey = existingUser.data['sheetKey'];
+  //          if (state['#SHEET_API']) {
+  //            ValueRange vu = new ValueRange.fromJson({
+  //              "values": [
+  //                [cUser.email]
+  //              ]
+  //            });
+  //            sheetApi.spreadsheets.values.update(vu, sheetKey, 'Settings!B3',
+  //                valueInputOption: 'USER_ENTERED');
+  //          }
+  //          transactionStore.dispatch(UpdateScreenTxAction(
+  //              ScreenTransaction({'#INTERFACE_KEY': sheetKey})));
+  //          _result = 0;
+  //        } else {
+  //          if (existingUser.exists) {
+  //            _result = 3; // pin not match
+  //          } else {
+  //            _result = 2; // no such vid
+  //          }
+  //        }
+  //      }
+  //    }
+  //    if (_result == 0) {
+  //      try {
+  //        state = transactionStore.state.screenTx;
+  //        var sk = state['#INTERFACE_KEY'];
+  //        await storage.write(
+  //            key: 'myLif',
+  //            value: sk); //   put interface key as default LIF in secure storage
+  //        await readSettings(sk); //   read new interface key
+  //        constructPage(home); //   construct home
+  //        constructAllNotHomePages(); //   construct other pages async
+  //      } catch (err) {
+  //        _result = 4;
+  //      }
+  //    }
+  //    return _result;
+  //  }
 }
 
+/// The signed-in user, WAITING for auth restoration when it has not finished.
+///
+/// `currentUser` is null until the plugin has re-read the persisted session
+/// from disk. Reading it once, synchronously, loses that race on a slow cold
+/// start -- and the slowest cold start a user ever gets is the FIRST launch
+/// after a Play Store update, while ART re-optimises the new dex. main.dart
+/// then treats the logged-in user as a guest (`fUser == null` -> myLif =
+/// defaultLifKey, main.dart:241), which skips the whole
+/// `myLif != defaultLifKey` block: no #INTERFACE_KEY for the real tenant, no
+/// #VID, and no `loadHistory()`. Worse, historySync's whole body is wrapped in
+/// `if (ssid != loginSsid)` (table_repository.dart:2897), so with the sign-in
+/// LIF in #INTERFACE_KEY it is DEAD for the entire session -- every call,
+/// silently, no error and no retry counter -- while historyAdd still runs and
+/// setDataOK still paints the dot green. The cached @screenUI keeps showing the
+/// user's own home, so nothing looks wrong while nothing reaches Firestore. A
+/// force close "fixed" it because the second launch is warm and wins the race.
+///
+/// authStateChanges() emits the restored user (or null when genuinely signed
+/// out) as soon as restoration completes, so the wait is milliseconds in
+/// practice; the timeout keeps cold start bounded.
 Future getFirebaseUser() async {
   FirebaseAuth firebaseAuth = FirebaseAuth.instance;
-  User? user;
   try {
-    user = firebaseAuth.currentUser;
+    return firebaseAuth.currentUser ??
+        await firebaseAuth.authStateChanges().first.timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => null,
+        );
   } catch (_) {
-    user = null;
+    return null;
   }
-  return user;
 }
 
 Future firebaseSignOut() async {

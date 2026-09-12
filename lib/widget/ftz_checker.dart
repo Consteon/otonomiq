@@ -318,7 +318,12 @@ class FtzCheckerState extends State<FtzChecker> {
           ? widget.component['imgWidth'] ?? 540
           : widget.component['imgHeight'] ?? 540;
       String folder = widget.component['folder'] ?? 'default';
-      String fileName = widget.component['filename'] ?? UniqueKey().toString();
+      // The sheet's `filename` is a TEMPLATE, not a unique name: the two checker
+      // tiles on the VTL home ship the same literal, and buildImageDestinationName
+      // uses it verbatim, so every selfie overwrote the same local file before it
+      // could be uploaded. Same idiom as attendance_qr_selfie_gps_verify.dart:1244.
+      String fileName =
+          '${widget.component['filename'] ?? 'chk'}_${DateTime.now().microsecondsSinceEpoch}';
       String label = title ?? 'Camera';
       int quality = widget.component['quality'] ?? 80;
       List<String> pickedFileUrl = [emptyString];
@@ -515,7 +520,7 @@ class FtzCheckerState extends State<FtzChecker> {
             resultOk = errorString;
           } // end if position
         } catch (e) {
-          // display dialog fail, and play wrong beep
+          // TODO display dialog fail, and play wrong beep
           errorReport(e);
           setDataOK(
             '1',
@@ -660,7 +665,7 @@ class FtzCheckerState extends State<FtzChecker> {
           num finalTolerance = 0;
           String lqrText =
               await checkerTakeQR(
-                newArray[4],
+                newArray[4] ?? 'LQR',
                 widget.scrName,
                 widget.component,
                 'loc',
@@ -741,7 +746,7 @@ class FtzCheckerState extends State<FtzChecker> {
             newArray = List<String>.from(tArray);
             String qrText =
                 await checkerTakeQR(
-                  newArray[9],
+                  newArray[9] ?? 'QR',
                   widget.scrName,
                   widget.component,
                   'loc',
@@ -779,7 +784,8 @@ class FtzCheckerState extends State<FtzChecker> {
                   if (takePicture) {
                     try {
                       BuildContext pContext = context;
-                      photoUrl = await checkerTakePicture(lens, newArray[10]);
+                      photoUrl =
+                          await checkerTakePicture(lens, newArray[10]) ?? '';
                     } catch (ep) {
                       photoUrl = '';
                     }
@@ -902,7 +908,7 @@ class FtzCheckerState extends State<FtzChecker> {
           setDataOK('2'); // display green
         } // end if (checkies.isNotEmpty)
       } on PlatformException catch (err) {
-        // play wrong beep
+        // TODO  play wrong beep
         setDataOK('2'); // display green without do anything
         errorReport(err);
         await showDialog(
@@ -920,7 +926,7 @@ class FtzCheckerState extends State<FtzChecker> {
 
               actions: <Widget>[
                 TextButton(
-                  child: Text(newArray[3]),
+                  child: Text(newArray[3] ?? "--Bad GPS_SEND --"),
                   onPressed: () {
                     Navigator.of(context).pop();
                   },
@@ -937,69 +943,76 @@ class FtzCheckerState extends State<FtzChecker> {
     w = MediaQuery.of(context).size.width - 20;
     double fontSize = (widget.component['fontSize'] ?? 14.0).toDouble();
     // textArray = diamondTextToList(widget.component['text']);
-    Widget button1;
-    button1 = Center(
-      child: SizedBox(
-        width: (widget.component['width'] ?? 90).toDouble(),
-        child: menuIconCard(
-          imageUrl: widget.component['url'] ?? defaultImage,
-          label: textArray[0],
-          fontSize: fontSize,
-          onTap: () async {
-            if (!tapped) {
-              // setState(() {
-              tapped = true;
-              // });
-              String title = '';
-              String body = '';
-              bool dataOk = transactionOK();
-              if (!dataOk) {
-                title = "AlertTitle";
-                body = "NeedGreen";
-                await checkerDialog(
-                  title: textList[title],
-                  message: textList[body],
-                  okString: textArray[1],
-                );
-                //setDataOK('2');
-                tapped = false;
-              } else {
-                dataOk = dataOk && await internetConnectedCheck();
-                if (!dataOk) {
-                  //setDataOK('2');
-                  tapped = false;
-                  await checkerDialog(
-                    title: textList['NoInternetTitle'],
-                    message: textList['NoInternet'],
-                    okString: textArray[1],
-                  );
-                } else {
-                  setTransactionNotOK('ftzChecker');
-                  transactionStore.dispatch(
-                    UpdateScreenTxAction(
-                      ScreenTransaction({'#DATA_OK': false}),
-                    ),
-                  );
-                  try {
-                    // OtqState currentData =
-                    //     await OtqState().setAllDataAsync();
-                    String variant =
-                        widget.component['variant'] ?? 'qr-photo-single';
-                    await checkerAcquireData(variant, textArray);
-                    // await checkerAcquireData(
-                    //     variant, textArray, currentData);
-                  } catch (e) {
-                    setDataOK('2');
-                    errorReport(e);
-                  }
-                  tapped = false;
-                } // end if !dataOK
-              } // end if (!dataOk)
-            } // end if !tapped
-          }, // end of onTap
-        ),
-      ),
+    // Built from a grid (`hgr` v6, buildGridList) the cell owns the geometry:
+    // no Center/SizedBox, and the v6 quick tile instead of the white card, so
+    // the attendance buttons match every other menu item on the page. Both
+    // legacy call sites pass single:true and keep the old shell untouched.
+    Widget button1 = menuIconCard(
+      imageUrl: widget.component['url'] ?? defaultImage,
+      // diamondTextToList('--') returns [], and this indexed [0] unguarded.
+      label: textArray.isEmpty ? '' : textArray[0].toString(),
+      fontSize: fontSize,
+      variant: widget.single ? '' : 'v6',
+      quick: !widget.single,
+      onTap: () async {
+        if (!tapped) {
+          // setState(() {
+          tapped = true;
+          // });
+          String title = '';
+          String body = '';
+          bool dataOk = transactionOK();
+          if (!dataOk) {
+            title = "AlertTitle";
+            body = "NeedGreen";
+            await checkerDialog(
+              title: textList[title],
+              message: textList[body],
+              okString: textArray[1],
+            );
+            //setDataOK('2');
+            tapped = false;
+          } else {
+            dataOk = dataOk && await internetConnectedCheck();
+            if (!dataOk) {
+              //setDataOK('2');
+              tapped = false;
+              await checkerDialog(
+                title: textList['NoInternetTitle'],
+                message: textList['NoInternet'],
+                okString: textArray[1],
+              );
+            } else {
+              setTransactionNotOK('ftzChecker');
+              transactionStore.dispatch(
+                UpdateScreenTxAction(ScreenTransaction({'#DATA_OK': false})),
+              );
+              try {
+                // OtqState currentData =
+                //     await OtqState().setAllDataAsync();
+                String variant =
+                    widget.component['variant'] ?? 'qr-photo-single';
+                await checkerAcquireData(variant, textArray);
+                // await checkerAcquireData(
+                //     variant, textArray, currentData);
+              } catch (e) {
+                setDataOK('2');
+                errorReport(e);
+              }
+              tapped = false;
+            } // end if !dataOK
+          } // end if (!dataOk)
+        } // end if !tapped
+      }, // end of onTap
     );
+    if (widget.single) {
+      button1 = Center(
+        child: SizedBox(
+          width: (widget.component['width'] ?? 90).toDouble(),
+          child: button1,
+        ),
+      );
+    }
     return button1;
   } // end of class _AttendQrGpsSelfieState build
 } // end of class _AttendQrGpsSelfieState

@@ -811,7 +811,7 @@ Future<List<String>> writeToTable(String? inp, String eventRowString) async {
       List<dynamic> ref = parseEventString(eventRow);
       //   print ('ref=$ref');
       String decodedInp = autheniumDecode(inp) ?? '';
-      List<dynamic> splitInput = splitTableInput(decodedInp);
+      List<dynamic> splitInput = splitTableInput(decodedInp ?? '');
       List<Future> tableWriteList = [];
       for (int i = 0; i < splitInput.length; i++) {
         String tempResult = '';
@@ -2346,7 +2346,9 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
         ssid = null;
       }
       if (ssid != null && ssid != loginSsid) {
-        var docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
+        var docRef = firestoreDb
+            .collection(proxyCollectionName)
+            .doc(ssid ?? 'ErrorInLoadHistory');
         try {
           dynamic proxyData = (await docRef.get()).data();
           if (proxyData['i'] == null || proxyData['i'] == 'null') {
@@ -2370,7 +2372,7 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
         // clear imageMap every app startup
         devPrint('Clearing imageMap because of clearHistoryImageMap = true');
         imageMapStr = '{}';
-        await imageMapInit(jsonDecode(imageMapStr));
+        await imageMapInit(jsonDecode(imageMapStr ?? '{}'));
         storage.write(key: imageMapSecureName, value: imageMapStr);
         if (internetConnected()) {
           try {
@@ -2379,7 +2381,9 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
               '#INTERFACE_KEY',
               20,
             )).toString();
-            var docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
+            var docRef = firestoreDb
+                .collection(proxyCollectionName)
+                .doc(ssid ?? 'ErrorInLoadHistory');
             safeFsUpdate(docRef, {'i': imageMapStr}, 'saveImageMap');
           } catch (fErr) {
             // error in firebase, do nothing
@@ -2415,7 +2419,9 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
         ssid = null;
       }
       if (ssid != null && ssid != loginSsid) {
-        var docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
+        var docRef = firestoreDb
+            .collection(proxyCollectionName)
+            .doc(ssid ?? 'ErrorInLoadHistory');
         try {
           dynamic proxyData = (await docRef.get()).data();
           if (proxyData['h'] == null || proxyData['h'] == 'null') {
@@ -2453,7 +2459,9 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
               '#INTERFACE_KEY',
               20,
             )).toString();
-            var docRef = firestoreDb.collection(proxyCollectionName).doc(ssid);
+            var docRef = firestoreDb
+                .collection(proxyCollectionName)
+                .doc(ssid ?? 'ErrorInLoadHistory');
             safeFsUpdate(docRef, {'h': historyStr}, 'saveHistory');
           } catch (fErr) {
             // error in firebase, do nothing
@@ -2835,6 +2843,23 @@ bool isAmbiguousMatchResult(String s) =>
 /// resolves on the next online cycle, and a poison record is logged loudly.
 final Map<int, int> _historySyncRetry = {};
 const int historySyncRetryMax = 5;
+
+/// True when a `historySync` skip would actually LOSE data instead of being a
+/// routine no-op: at least one queued record still has an unset sent flag.
+///
+/// History rows are `[t, p, c, ..., sent, ...]` with the sent marker at index 9
+/// (`row[9] <= 0` is the unsent test used throughout historySync). Pre-login the
+/// queue is empty or absent and skipping is correct, so gating the Crashlytics
+/// report on this keeps the normal path quiet.
+bool historySyncSkipIsLossy(dynamic queue) {
+  if (queue is! List) return false;
+  for (final dynamic row in queue) {
+    if (row is! List || row.length < 10) continue;
+    final dynamic sent = row[9];
+    if (sent is num && sent <= 0) return true;
+  }
+  return false;
+}
 
 /// In-memory count of consecutive cycles a history record has been DEFERRED
 /// because its embedded image was still unresolved (`aum__`) after
@@ -3344,8 +3369,20 @@ Future historySync(String source, bool forceSend) async {
         // await historySyncLockOld('$functionName from $source');
       } // end if (tableContent[historyName] == null)
       // historySyncUnLockOld('$functionName from $source');
+    } else if (historySyncSkipIsLossy(tableContent[historyName])) {
+      // #INTERFACE_KEY still holds the SIGN-IN lif while unsent records sit in
+      // the queue. That is NOT the pre-login idle case: the session was
+      // silently downgraded to guest (a lost auth-restore race -- see
+      // getFirebaseUser), and this skip is dropping real submits. devPrint is
+      // kDebugMode-only, so the whole failure mode used to be invisible in the
+      // field: the dot went green, historyAdd ran, and nothing was ever sent.
+      errorReport(
+        'historySync DISABLED: #INTERFACE_KEY == loginSsid ($ssid) while '
+        'unsent history is queued -- session downgraded to guest, submits '
+        'are not reaching Firestore',
+      );
     } else {
-      devPrint('Guest proxy detected, skip historySync');
+      devPrint('Guest proxy detected, skip historySync (nothing queued)');
     } // end if (ssid != null && ssid != loginSsid)
   }
 } // end of syncHistory

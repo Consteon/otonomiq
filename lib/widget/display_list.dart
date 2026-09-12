@@ -41,6 +41,17 @@ class _DisplayListState extends State<DisplayList> {
   RxList<dynamic> pickTable = [].obs; // source of table will be copied here
   bool useTable = false;
   String variant = '';
+
+  /// Both interactive variants share the renderer and the table plumbing; only
+  /// the frame below and `FtzArraySearch`'s own layout differ.
+  bool get _isInteractive =>
+      variant == 'tablecardinteractive' || variant == 'tablecardinteractivev6';
+
+  /// v6 removes the frame. The whole point of the redesign is that a report
+  /// list is not a card holding cards: `FtzArraySearch` draws its own heading,
+  /// so a bordered box with a floating title chip around it would be the third
+  /// layer of chrome the audit called out.
+  bool get _isV6 => variant == 'tablecardinteractivev6';
   late Widget listItems;
   late List<dynamic> textArray;
   bool tableLoaded = false;
@@ -71,7 +82,7 @@ class _DisplayListState extends State<DisplayList> {
         dialog: true,
         clear: false,
       );
-    } else if (variant == 'tablecard1' || variant == 'tablecardinteractive') {
+    } else if (variant == 'tablecard1' || _isInteractive) {
       useTable = true;
     }
   }
@@ -166,7 +177,7 @@ class _DisplayListState extends State<DisplayList> {
         }
 
         // Build the list items based on the current state
-        if (variant == 'tablecardinteractive') {
+        if (_isInteractive) {
           listItems = FtzArraySearch(
             localTable: pickTable,
             component: widget.component,
@@ -246,6 +257,22 @@ class _DisplayListState extends State<DisplayList> {
             (textArray.isNotEmpty && textArray[0].toString().trim() == '')
             ? 8
             : padWithTitle;
+
+        if (_isV6) {
+          return Container(
+            constraints: BoxConstraints(
+              maxHeight: (widget.component['height'] ?? 150) + 0.0,
+            ),
+            margin: EdgeInsets.only(top: margin[0], bottom: margin[1]),
+            padding: EdgeInsets.fromLTRB(
+              max(0, widget.lPad + margin[2]),
+              widget.tPad,
+              max(0, widget.rPad + margin[3]),
+              widget.bPad,
+            ),
+            child: listItems,
+          );
+        }
 
         return Container(
           constraints: BoxConstraints(

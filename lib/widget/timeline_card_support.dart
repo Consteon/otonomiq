@@ -286,3 +286,28 @@ TimelineChip inferChip({
   }
   return empty;
 }
+
+/// The chip for ONE row: a plain [chipMap] lookup on that row's own value.
+///
+/// Deliberately NOT [inferChip]. That function answers "what state is the user
+/// in right now" from the newest row, so it carries two rules a per-row chip
+/// must not inherit: entry 0 is date-free and every later entry shows only when
+/// the row is from today. Applied per row those would blank the chip on every
+/// historical line — the ones a log exists to show.
+///
+/// Null when there is no chip to draw: blank [chipField], empty [chipMap], or a
+/// value the map does not carry. Null renders nothing; it never falls back to
+/// an "empty condition" label, which belongs to the summary chip alone.
+TimelineChip? rowChip(
+  Map<String, dynamic> doc,
+  String chipField,
+  List<ChipEntry> chipMap,
+) {
+  if (chipField.isEmpty || chipMap.isEmpty) return null;
+  final int idx = chipIndexOf(
+    chipMap,
+    (doc[chipField] ?? '').toString().trim(),
+  );
+  if (idx < 0) return null;
+  return TimelineChip(chipMap[idx].label, chipMap[idx].tier);
+}

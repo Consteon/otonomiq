@@ -14,6 +14,7 @@ import '../login/page/tos_page.dart';
 import '../model/ftz_scanned_code.dart';
 import '../model/input_controller.dart';
 import '../redux/screen_transaction.dart';
+import '../theme_tokens.dart'; // otqContentInset — v6 content edge
 import '../widget/all_widget.dart';
 import '../widget/approver_sticky_bar.dart';
 import '../widget/qr_gps.dart';
@@ -36,6 +37,7 @@ import 'otq_get_images_2.dart';
 import 'otq_rdo_2.dart';
 import 'otq_txf_2.dart';
 import 'progress_bar.dart';
+import 'tab_sections.dart';
 import 'tasklist.dart';
 import 'time_presence.dart';
 import 'visible_when.dart';
@@ -314,22 +316,140 @@ Widget buildDisplayComponent(
   } else if (tip == 'hgr') {
     try {
       double fontSize = (component['fontSize'] ?? 14.0).toDouble();
-      // 4 fixed columns, wrap to new rows past 4 items (no horizontal scroll);
-      // config `width`/`row` no longer size the cells
-      result = Container(
-        margin: EdgeInsets.only(
-          top: (component['beforeSpacing'] ?? 0.0).toDouble(),
-          bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
-        ),
-        child: GridView.count(
-          crossAxisCount: 4,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          padding: EdgeInsets.zero,
-          childAspectRatio: 0.85,
-          children: buildGridList(component['children'], fontSize, scrName),
-        ),
+      // Vertika v6 shortcut grid. Absent or unrecognised `variant` keeps the
+      // 4-column card grid every menu on every screen draws today.
+      if ((component['variant'] ?? '').toString().trim().toLowerCase() ==
+          'v6') {
+        // v6 uses 5 columns for the report/form/checklist grids and 4 for the
+        // longer module list, so the count is config, not a constant.
+        final int cols = ((component['columns'] as num?)?.toInt() ?? 4).clamp(
+          1,
+          6,
+        );
+        result = Container(
+          margin: EdgeInsets.only(
+            top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+            bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+          ),
+          padding: otqContentInset(),
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints c) {
+              const double gapX = 2, gapY = 10; // v6 `.quick{gap:10px 2px}`
+              final double cell = (c.maxWidth - gapX * (cols - 1)) / cols;
+              return GridView.count(
+                crossAxisCount: cols,
+                mainAxisSpacing: gapY,
+                crossAxisSpacing: gapX,
+                // Derived from the REAL cell width, never guessed: a guessed
+                // ratio is how a grid overflows on a narrow phone.
+                childAspectRatio: cell > 0 ? cell / kQuickTileHeight : 1.0,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: EdgeInsets.zero,
+                children: buildGridList(
+                  component['children'],
+                  fontSize,
+                  scrName,
+                  variant: 'v6',
+                ),
+              );
+            },
+          ),
+        );
+      } else {
+        // 4 fixed columns, wrap to new rows past 4 items (no horizontal
+        // scroll); config `width`/`row` no longer size the cells
+        result = Container(
+          margin: EdgeInsets.only(
+            top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+            bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+          ),
+          child: GridView.count(
+            crossAxisCount: 4,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: EdgeInsets.zero,
+            childAspectRatio: 0.85,
+            children: buildGridList(component['children'], fontSize, scrName),
+          ),
+        );
+      }
+    } catch (e) {
+      result = Text('--${component['type']}-- Error: $e');
+    } // end of try
+  } else if (tip == 'tab') {
+    // Vertika v6 tabbed sections. One component holds several page sections and
+    // `mode` decides whether they stack on this page, collapse behind a link,
+    // or switch under a tab bar — so moving Formulir/Log/Terbaru between the
+    // home page and a menu page is a one-field edit, not a JSON restructure.
+    try {
+      // `source` borrows another screen's TAB children so the menu page does
+      // not carry a second copy of grids that already live on home.
+      dynamic host = component;
+      final String source = (component['source'] ?? '').toString().trim();
+      if (source.isNotEmpty) {
+        final dynamic found = findTabComponent(source);
+        if (found != null) {
+          host = found;
+        } else {
+          devPrint('TAB: source "$source" declares no TAB component');
+        }
+      }
+      final List<String> labels = diamondTextToList(
+        (host['data'] ?? '').toString(),
       );
+      final List<MapEntry<int, Widget>> built = <MapEntry<int, Widget>>[];
+      final List<dynamic> kids = tabChildren(component, host);
+      for (final dynamic c in kids) {
+        if (c is! Map) continue;
+        // A TAB inside a TAB could `source` its way back here and recurse until
+        // the stack blows, taking the whole page build with it.
+        if ((c['type'] ?? '').toString().trim().toLowerCase() == 'tab') {
+          devPrint('TAB: nested TAB skipped on "$scrName"');
+          continue;
+        }
+        final dynamic rawTab = c['tab'];
+        final int tabIndex = rawTab is num
+            ? rawTab.toInt()
+            : (int.tryParse(rawTab?.toString().trim() ?? '') ?? 0);
+        built.add(
+          MapEntry(
+            tabIndex,
+            buildDisplayComponent(
+              c,
+              scrName,
+              userRepository,
+              dialog: dialog ?? false,
+            ),
+          ),
+        );
+      }
+      if (built.isEmpty) {
+        // Visible, not a blank page: a bad `source` is otherwise silent.
+        result = Text(
+          '--${component['type']}-- no sections'
+          '${source.isEmpty ? '' : ' (source: $source)'}',
+        );
+      } else {
+        result = Container(
+          margin: EdgeInsets.only(
+            top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+            bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+          ),
+          child: TabSections(
+            scrName: scrName,
+            sections: groupTabSections(built, labels),
+            mode: (component['mode'] ?? '').toString(),
+            // Absent or unrecognised `variant` keeps plain headings and a
+            // brand-coloured indicator, so a pre-v6 screen can use TAB too.
+            v6:
+                (component['variant'] ?? '').toString().trim().toLowerCase() ==
+                'v6',
+            link: (component['link'] ?? '').toString(),
+            route: (component['route'] ?? '').toString(),
+          ),
+        );
+      }
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     } // end of try
@@ -1041,6 +1161,42 @@ Widget buildDisplayComponent(
     try {
       List<Widget> iconList = [];
       int childrenNum = component['children'].length ?? 0;
+      // Vertika v6 attendance block. Absent, blank or any unrecognised
+      // `variant` keeps the 4-column card grid this branch has always drawn,
+      // which is what the Checker block and every other screen still use.
+      final bool isV6 =
+          (component['variant'] ?? '').toString().trim().toLowerCase() == 'v6';
+      final String tone = (component['tone'] ?? 'in').toString();
+      // 0 = title, 1 = literal meta, 2 = empty-state sentence,
+      // 3 = meta prefix, 4 = "yesterday" word, 5 = nothing-recorded text.
+      final List<String> blockText = diamondTextToList(
+        component['text'] as String? ?? '',
+      );
+      // A `table` + `search` pair makes the meta LIVE: it reads the newest
+      // matching ledger row instead of the slot-1 literal. Both blank is
+      // fail-closed by construction -- no subscription, slot 1 stands.
+      final bool liveMeta =
+          isV6 &&
+          (component['table'] ?? '').toString().trim().isNotEmpty &&
+          (component['search'] ?? '').toString().trim().isNotEmpty;
+      if (isV6) {
+        for (int i = 0; i < childrenNum; i++) {
+          // Stamped onto the child map IN PLACE, not onto a copy:
+          // AttendQrGpsSelfie writes `route` back into this same map.
+          component['children'][i]['variant'] = 'v6';
+          component['children'][i]['tone'] = tone;
+          // The block's own heading ("Absen Masuk" / "Absen Pulang"), so a
+          // child that pushes a full-screen page can say which action it
+          // belongs to without inventing wording of its own. `blockText` is
+          // `[]` for a '--' text field, hence the guard.
+          component['children'][i]['blockTitle'] = blockText.isEmpty
+              ? ''
+              : blockText[0];
+          component['children'][i]['row'] = attendRowShape(childrenNum)
+              ? 'TRUE'
+              : 'FALSE';
+        }
+      }
       for (int i = 0; i < childrenNum; i++) {
         late Widget theIcon;
         var iconDefinition = component['children'][i];
@@ -1110,21 +1266,62 @@ Widget buildDisplayComponent(
         } // end switch
         iconList.add(theIcon);
       } // end for
-      // 4 fixed columns, wrap to new rows past 4 items (no horizontal scroll)
-      result = Container(
-        margin: EdgeInsets.only(
-          top: (component['beforeSpacing'] ?? 0.0).toDouble(),
-          bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
-        ),
-        child: GridView.count(
-          crossAxisCount: 4,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          padding: EdgeInsets.zero,
-          childAspectRatio: 0.85,
-          children: iconList,
-        ),
-      );
+      if (isV6) {
+        result = Container(
+          margin: EdgeInsets.only(
+            top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+            bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+          ),
+          child: Builder(
+            builder: (BuildContext context) => attendanceBlockV6(
+              context: context,
+              title: blockText.isNotEmpty ? blockText[0] : '',
+              meta: blockText.length > 1 ? blockText[1] : '',
+              tone: tone,
+              emptyText: blockText.length > 2 && blockText[2].trim().isNotEmpty
+                  ? blockText[2]
+                  : 'Belum ada metode absensi aktif. Hubungi admin.',
+              tiles: iconList,
+              metaWidget: liveMeta
+                  ? AttendMeta(
+                      key: GlobalKey(),
+                      component: component,
+                      scrName: scrName,
+                      prefix:
+                          blockText.length > 3 && blockText[3].trim().isNotEmpty
+                          ? blockText[3]
+                          : 'Terakhir',
+                      yesterday:
+                          blockText.length > 4 && blockText[4].trim().isNotEmpty
+                          ? blockText[4]
+                          : 'kemarin',
+                      none:
+                          blockText.length > 5 && blockText[5].trim().isNotEmpty
+                          ? blockText[5]
+                          : 'Belum ada',
+                      style: attendMetaStyle,
+                    )
+                  : null,
+            ),
+          ),
+        );
+      } else {
+        // 4 fixed columns, wrap to new rows past 4 items (no horizontal scroll)
+        result = Container(
+          margin: EdgeInsets.only(
+            top: (component['beforeSpacing'] ?? 0.0).toDouble(),
+            bottom: (component['afterSpacing'] ?? 0.0).toDouble(),
+          ),
+          child: GridView.count(
+            crossAxisCount: 4,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: EdgeInsets.zero,
+            childAspectRatio: 0.85,
+            children: iconList,
+          ),
+        );
+      }
     } catch (e) {
       result = Text('--${component['type']}-- Error: $e');
     } // end of try

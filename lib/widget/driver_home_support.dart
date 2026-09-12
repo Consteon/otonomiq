@@ -127,12 +127,32 @@ Map<String, dynamic>? pickActiveOpening(List<Map<String, dynamic>> docs) {
 /// docs (they are not opening-shaped) and returns null — this reads any doc
 /// shape, which is why the ClosingMatch list can only be fixed here.
 /// Returns null on an empty list.
-Map<String, dynamic>? pickNewestDoc(List<Map<String, dynamic>> docs) {
+///
+/// [field] and [descending] are additive (TIME_PRESENCE v2 `lastAction`
+/// positions 1 and 2, see docs/widgets/time_presence.md). The defaults keep
+/// the `t`-descending body byte-identical for the existing call sites: a doc
+/// whose [field] is missing or unparseable scores 0 via the `?? 0` fallback,
+/// which still beats the `-1` seed, so an all-unparseable list returns its
+/// first element rather than null.
+///
+/// ★ Ascending is NOT the mirror image, and its ceiling is measured, not
+/// assumed. The same `?? 0` fallback puts a doc that is MISSING [field] — or
+/// holds a negative value — below every real epoch-ms, so that doc always
+/// wins under `descending: false`, in either list order. And a value at or
+/// above the `1 << 62` seed never goes below it, so a list of only such docs
+/// returns null for a NON-EMPTY list — an outcome the descending path cannot
+/// produce. `descending: false` is therefore only meaningful when every doc
+/// carries a parseable [field] inside the epoch-ms band.
+Map<String, dynamic>? pickNewestDoc(
+  List<Map<String, dynamic>> docs, {
+  String field = 't',
+  bool descending = true,
+}) {
   Map<String, dynamic>? best;
-  int bestT = -1;
+  int bestT = descending ? -1 : 1 << 62; // asc: above any epoch-ms
   for (final d in docs) {
-    final int t = int.tryParse((d['t'] ?? '0').toString().trim()) ?? 0;
-    if (t > bestT) {
+    final int t = int.tryParse((d[field] ?? '0').toString().trim()) ?? 0;
+    if (descending ? t > bestT : t < bestT) {
       bestT = t;
       best = d;
     }

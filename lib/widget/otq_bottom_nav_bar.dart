@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme_tokens.dart';
+
 class OtqBottomNavBar extends StatefulWidget {
   final int selectedIndex;
   final List<OtqNavItem> items;
@@ -79,14 +81,29 @@ class _OtqBottomNavBarState extends State<OtqBottomNavBar>
     final barColor = isDark
         ? Colors.grey.shade900.withValues(alpha: 0.92)
         : Colors.white.withValues(alpha: 0.95);
-    final inactiveColor = isDark ? Colors.grey.shade500 : Colors.grey.shade400;
+    // `Colors.grey.shade400` (#BDBDBD) measured 1.88:1 on the bar's white
+    // fill -- a 12px label needs 4.5:1. OtqPalette.mutedFg is 6.73:1.
+    final inactiveColor = isDark ? Colors.grey.shade500 : OtqPalette.mutedFg;
     final pillColor = HSLColor.fromColor(primaryColor)
         .withLightness(isDark ? 0.25 : 0.92)
         .withSaturation(isDark ? 0.5 : 0.35)
         .toColor();
-    final activeColor = HSLColor.fromColor(
-      primaryColor,
-    ).withLightness(isDark ? 0.7 : 0.35).withSaturation(0.8).toColor();
+    // The old light-theme lift (`withLightness(0.35).withSaturation(0.8)`)
+    // was tuned for the navy `#001A72`, where it measured 10.52:1. On a teal
+    // `#0B6E80` the same lift collapses to 4.01:1 -- under the 4.5:1 a 12px
+    // label needs. Unlifted, teal measures 5.06:1 on the pill.
+    //
+    // But no single rule survives every primary: a light brand colour such as
+    // `#1CACC4` is only 2.32:1 on its own pill either way. So measure, and
+    // step down to the neutral foreground when the brand colour cannot carry
+    // the label. The pill keeps the brand hue regardless.
+    final activeColor = isDark
+        ? HSLColor.fromColor(
+            primaryColor,
+          ).withLightness(0.7).withSaturation(0.8).toColor()
+        : (otqContrast(primaryColor, pillColor) >= 4.5
+              ? primaryColor
+              : OtqPalette.foreground);
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),

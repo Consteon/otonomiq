@@ -131,6 +131,21 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
   Widget build(BuildContext context) {
     String selfieUrl = '';
 
+    // Vertika v6 selfie camera. `variant` and `blockTitle` are stamped onto
+    // this component by the `horizontal_icon` v6 branch, so a block that never
+    // opts in keeps the classic camera dialog with the title it has today.
+    final String camVariant = (widget.component['variant'] ?? '').toString();
+    final List camMethod = diamondTextToList(
+      (widget.component['text'] ?? '').toString(),
+    );
+    // Same composition as the QR bar: "<block> · <tile>", both the sheet's own
+    // words -- "Absen Masuk · Selfie", "Absen Pulang · QR + Selfie".
+    final String camBarTitle = scannerBarTitle(
+      (widget.component['blockTitle'] ?? '').toString(),
+      camMethod.isEmpty ? '' : camMethod[0].toString(),
+      (widget.component['label'] ?? 'Camera').toString(),
+    );
+
     Future<dynamic> attendanceSuccessDialog({
       String title = 'Success',
       String message1 = '',
@@ -232,6 +247,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
         widget.component['filename'] ?? const Uuid().v4().replaceAll('-', ''),
         h,
         w,
+        variant: camVariant,
+        barTitle: camBarTitle,
       );
       return selfieUrl;
     } // end of takePicture
@@ -757,7 +774,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
           } // end if position
         } // end if (resultOk == empty || resultOk == errorString)
       } catch (e) {
-        // display dialog fail, and play wrong beep
+        // TODO display dialog fail, and play wrong beep
         errorReport(e);
         setDataOK(
           '1',
@@ -870,6 +887,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                     const Uuid().v4().replaceAll('-', ''),
                 h,
                 w,
+                variant: camVariant,
+                barTitle: camBarTitle,
               );
               if (selfieUrl == emptyImageUrl || selfieUrl == emptyString) {
                 cameraCancel = true;
@@ -995,7 +1014,7 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
           } // end if ((actionType == 'selfie' && !cameraCancel)
         } // end if ((actionType != 'selfie') &&...
       } on PlatformException catch (err) {
-        // play wrong beep
+        // TODO  play wrong beep
         setDataOK('2'); // display green without do anything
         errorReport(err);
         await attendanceDialog(
@@ -1372,6 +1391,8 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
             widget.component['quality'] ?? 80,
             h,
             w,
+            variant: camVariant,
+            barTitle: camBarTitle,
           );
         } catch (eCam) {
           errorReport(eCam);
@@ -2057,6 +2078,17 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
         imageUrl: widget.component['url'] ?? defaultImage,
         label: textArray[0],
         fontSize: fontSize,
+        // v6 attendance block. These four keys are stamped onto this child by
+        // the `horizontal_icon` branch (build_display_component.dart) when the
+        // BLOCK carries variant:"v6"; `subtitle` is the sheet's own optional
+        // override. Absent -> menuIconCard draws the classic card as before.
+        variant: (widget.component['variant'] ?? '').toString(),
+        tone: (widget.component['tone'] ?? 'in').toString(),
+        opMode: (widget.component['opMode'] ?? '').toString(),
+        subtitle: (widget.component['subtitle'] ?? '').toString(),
+        row:
+            (widget.component['row'] ?? 'TRUE').toString().toUpperCase() !=
+            'FALSE',
         onTap: () async {
           if (!await bioGate(widget.component, context)) return;
           if (!mounted) return;
@@ -2547,7 +2579,10 @@ class AttendQrGpsSelfieState extends State<AttendQrGpsSelfie> {
                 setDataOK('2');
                 errorReport(e);
               } // end of try
-            }
+            } else {
+              setDataOK('2');
+            } // end if internetOK
+            // } // end if dataOk
             if (mounted) {
               setState(() {
                 tapped = false;

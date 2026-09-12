@@ -3,7 +3,9 @@ import 'package:get/get.dart';
 
 import '../firestore_repository/table_repository.dart'; // subscribeToMapCollection
 import '../global.dart'; // mapTableContent, devPrint, routeStack, gotoRoute, routeExist
+import '../global2.dart' show stringToIconData; // config-named icons
 import '../sdui_spec.dart';
+import '../theme_tokens.dart'; // OtqPalette, otqContentInset, otqSectionHead
 import 'driver_home_support.dart'; // resolveAppVid, filterDriverHomeDocs, coerceNum, stripRouteWrapper
 import 'list_card_support.dart'; // parseLimit, applyLimit
 import 'panel_card_support.dart'; // parseTablePath, TablePath, statusColor, statusBgColor
@@ -62,6 +64,15 @@ class _TimelineCardState extends State<TimelineCard> {
   String _sortField = '';
   bool _sortDesc = false;
 
+  /// Vertika v6 log list. Absent or unrecognised `variant` keeps the card every
+  /// screen draws today.
+  bool _v6 = false;
+
+  /// Icon NAMES (see `stringToIconData`) for `row` slots 2 and 3, in that
+  /// order. Config, never hardcoded: the design puts a pin on the location and
+  /// a method mark on the note, but which icon that is belongs to the tenant.
+  List<String> _metaIcons = const [];
+
   /// Blank-aware `text` segment accessor.
   ///
   /// NOT a plain `_spec.text(i)`: SduiSpec.text is length-guard only, so its
@@ -113,6 +124,9 @@ class _TimelineCardState extends State<TimelineCard> {
 
     _sortField = _spec.str('sortField');
     _sortDesc = _spec.str('sortDir').toLowerCase() == 'desc';
+
+    _v6 = _spec.str('variant').toLowerCase() == 'v6';
+    _metaIcons = _spec.list('metaIcons');
   }
 
   void _subscribe() {
@@ -194,6 +208,12 @@ class _TimelineCardState extends State<TimelineCard> {
       // every frame to protect against an alias that is already private.
       final List<Map<String, dynamic>> displayed = applyLimit(rows, _limit);
       final DateTime now = DateTime.now();
+
+      // v6 renders a flat log list instead of a card: no surface, no rail, a
+      // chip on EVERY row. The summary chip is deliberately not inferred here —
+      // in v6 that answer lives in the attendance strip, and inferChip is the
+      // most expensive thing on this path.
+      if (_v6) return _buildV6(displayed, now);
 
       // Chip reads the UNCAPPED list. applyLimit runs after the sort, so
       // rows.first and displayed.first are the same object whenever the list is
@@ -388,6 +408,256 @@ class _TimelineCardState extends State<TimelineCard> {
   /// matches every other `_seg` call (all default to `''`). A blank segment 5
   /// deliberately renders an empty spacer rather than inventing an Indonesian
   /// string on a tenant that never asked for one.
+  // ── Vertika v6 log list ──────────────────────────────────────────────────
+
+  /// Flat list: shared section head, day headings, one row per doc.
+  ///
+  /// No card and no inner panel. v6 separates page blocks with a 1 dp rule
+  /// (drawn by [otqSectionHead]) rather than boxing each one, so a surface here
+  /// would read as a second, competing layer.
+  Widget _buildV6(List<Map<String, dynamic>> displayed, DateTime now) {
+    final List<TimelineDayGroup> groups = _groupByDay && displayed.isNotEmpty
+        ? groupDocsByDay(displayed, _timeField, _seg(2), now)
+        : const <TimelineDayGroup>[];
+
+    final String title = _seg(0);
+    final String moreLabel = _seg(1);
+    final bool showMore = moreLabel.isNotEmpty && _moreRoute.isNotEmpty;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (title.isNotEmpty || showMore)
+          otqSectionHead(
+            context: context,
+            label: title,
+            v6: true,
+            linkLabel: showMore ? moreLabel : '',
+            onLink: showMore ? _onMoreTap : null,
+          ),
+        Padding(
+          padding: otqContentInset(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: displayed.isEmpty
+                ? <Widget>[_empty()]
+                : _timelineV6(displayed, groups),
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _timelineV6(
+    List<Map<String, dynamic>> docs,
+    List<TimelineDayGroup> groups,
+  ) {
+    if (groups.isEmpty) {
+      return <Widget>[
+        for (int i = 0; i < docs.length; i++)
+          _rowTileV6(docs[i], i == docs.length - 1),
+      ];
+    }
+    final List<Widget> out = <Widget>[];
+    for (int g = 0; g < groups.length; g++) {
+      final TimelineDayGroup grp = groups[g];
+      if (grp.label.isNotEmpty) out.add(_daySeparatorV6(grp.label, g));
+      final bool lastGroup = g == groups.length - 1;
+      for (int i = 0; i < grp.docs.length; i++) {
+        out.add(_rowTileV6(grp.docs[i], lastGroup && i == grp.docs.length - 1));
+      }
+    }
+    return out;
+  }
+
+  /// Day heading. Same ValueKey as the classic separator — the two never render
+  /// together, and the tests count separators through it either way.
+  Widget _daySeparatorV6(String label, int index) => Padding(
+    key: ValueKey<String>('tlcard-day-$index'),
+    padding: EdgeInsets.only(top: index == 0 ? 0 : 14, bottom: 2),
+    child: Text(
+      label,
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        height: 1.2,
+        color: OtqPalette.v6MutedFg,
+      ),
+    ),
+  );
+
+  /// One log row: `44 dp` time · `10 dp` dot · the rest.
+  ///
+  /// NOT tappable. v6 shows a press state, but this widget has no per-row route
+  /// (spec section 10, v1 scope) — a row that highlights and then does nothing
+  /// is worse than a row that plainly does not respond.
+  Widget _rowTileV6(Map<String, dynamic> doc, bool isLast) {
+    final String time = formatEpochHHmm(docEpochMs(doc, _timeField));
+    final String name = resolveRowSlot(_rowSlots, 1, doc);
+    final List<String> meta = <String>[
+      resolveRowSlot(_rowSlots, 2, doc),
+      resolveRowSlot(_rowSlots, 3, doc),
+    ];
+
+    final String dotValue = _chipField.isEmpty
+        ? ''
+        : (doc[_chipField] ?? '').toString().trim();
+    final Color dotColor = statusColor(_dotMap[dotValue] ?? 'muted');
+    final TimelineChip? chip = rowChip(doc, _chipField, _chipMap);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: isLast
+          ? null
+          : const BoxDecoration(
+              border: Border(bottom: BorderSide(color: OtqPalette.v6Border)),
+            ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SizedBox(
+            width: 44,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                time,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  height: 1.3,
+                  color: OtqPalette.foreground,
+                  // Tabular: without it the times jitter column to column and
+                  // the 44 dp gutter stops reading as a column at all.
+                  fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Container(
+            margin: const EdgeInsets.only(top: 6),
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                if (name.isNotEmpty || chip != null)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            height: 1.3,
+                            color: OtqPalette.foreground,
+                          ),
+                        ),
+                      ),
+                      // ★ INFLEXIBLE beside the Expanded name. A Flexible chip
+                      // here would split the free space 50/50 before either
+                      // child is measured and strand the chip mid-row.
+                      if (chip != null && chip.label.isNotEmpty)
+                        _chipPillV6(chip),
+                    ],
+                  ),
+                if (meta.any((String m) => m.isNotEmpty))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: _metaLine(meta),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Meta line: the row's last two slots, each optionally prefixed by an icon.
+  ///
+  /// One `Text.rich`, not a Wrap of Rows: a Wrap hands its children UNBOUNDED
+  /// width, so a Row inside it cannot use Flexible and a long location would
+  /// overflow the line instead of wrapping. Inline spans wrap like text, which
+  /// is what they are.
+  Widget _metaLine(List<String> meta) {
+    final List<InlineSpan> spans = <InlineSpan>[];
+    for (int i = 0; i < meta.length; i++) {
+      if (meta[i].isEmpty) continue;
+      if (spans.isNotEmpty) {
+        spans.add(const WidgetSpan(child: SizedBox(width: 12)));
+      }
+      final String iconName = i < _metaIcons.length ? _metaIcons[i].trim() : '';
+      if (iconName.isNotEmpty) {
+        // Guarded on blank because stringToIconData answers help_outline for
+        // anything it does not know — a blank name would draw a "?" bubble.
+        spans.add(
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Icon(
+                stringToIconData(iconName),
+                size: 15,
+                color: OtqPalette.v6MutedFg,
+              ),
+            ),
+          ),
+        );
+      }
+      spans.add(TextSpan(text: meta[i]));
+    }
+    return Text.rich(
+      TextSpan(children: spans),
+      style: const TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w500,
+        height: 1.35,
+        color: OtqPalette.v6MutedFg,
+      ),
+    );
+  }
+
+  /// Per-row status pill. Same contrast correction as [_chipPill] — see there
+  /// for why the shared tier colour is darkened 25% before it carries text.
+  Widget _chipPillV6(TimelineChip chip) {
+    final Color ink = Color.lerp(
+      statusColor(chip.tier),
+      const Color(0xFF000000),
+      0.25,
+    )!;
+    return Container(
+      margin: const EdgeInsets.only(left: 8),
+      height: 24,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 9),
+      decoration: BoxDecoration(
+        color: statusBgColor(chip.tier),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        chip.label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          height: 1,
+          color: ink,
+        ),
+      ),
+    );
+  }
+
   Widget _empty() => Padding(
     padding: const EdgeInsets.symmetric(vertical: 20),
     child: Center(
