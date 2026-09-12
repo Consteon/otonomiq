@@ -604,4 +604,55 @@ void main() {
           <String>['No. Invoice', '◁12▷']);
     });
   });
+
+  // ── ocrFillCompareTokens (ocr-serial-instant-check) ──────────────────────
+  group('ocrFillCompareTokens', () {
+    // RED if: either placeholder stops resolving, or the closed list changes.
+    test('fills both placeholders', () {
+      expect(
+        ocrFillCompareTokens('Seri ({value}) != ({expected})',
+            <String, String>{'value': '99999', 'expected': 'B21-4471902'}),
+        'Seri (99999) != (B21-4471902)',
+      );
+    });
+
+    // RED if: the pending-safe dialect is dropped for a plain replaceAll, which
+    // would render "()" at the officer instead of leaving the token visible.
+    test('a token with no value stays LITERAL, never "()"', () {
+      expect(
+        ocrFillCompareTokens(
+            '({value}) vs ({expected})', <String, String>{'value': '9'}),
+        '(9) vs ({expected})',
+      );
+      expect(
+        ocrFillCompareTokens('({value})', <String, String>{'value': ''}),
+        '({value})',
+      );
+    });
+
+    // RED if: the list stops being CLOSED -- routing this through TokenResolver
+    // (or widening the regex) lets a screenTx key named `serial` rewrite the
+    // warning text.
+    test('an unknown token is left alone', () {
+      expect(
+        ocrFillCompareTokens(
+            '{serial} {value}', <String, String>{'value': '9', 'serial': 'X'}),
+        '{serial} 9',
+      );
+    });
+
+    // RED if: the empty-template short circuit is removed (a blank ◆-segment is
+    // the normal "this line is off" config).
+    test('an empty template is returned unchanged', () {
+      expect(ocrFillCompareTokens('', <String, String>{'value': '9'}), '');
+    });
+
+    // RED if: replaceAllMapped becomes a single-shot replaceFirst.
+    test('repeats every occurrence', () {
+      expect(
+        ocrFillCompareTokens('{value}/{value}', <String, String>{'value': '9'}),
+        '9/9',
+      );
+    });
+  });
 }

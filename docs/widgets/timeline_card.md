@@ -159,3 +159,75 @@ Reuse with no Flutter change (spec §7):
 - [list_card.md](list_card.md) — the flat-card alternative; source of `parseLimit` / `applyLimit` / `resolveNoteTemplate`.
 - [timeline_ledger.md](timeline_ledger.md) — the `TIMELINE` variant `ledger` (grouped + expandable audit timeline); a different widget, source of `formatEpochHHmm`.
 - [docs/firestore/update_table_row.md](../firestore/update_table_row.md) — the `◀N▶` slot map, including `◀17▶`.
+
+## `variant: "v6"` — the Vertika v6 log list
+
+Opt-in per component. Absent or unrecognised `variant` keeps the card described
+above, so the two "Riwayat" cards already on home are untouched.
+
+| | classic | `v6` |
+|---|---|---|
+| Surface | white card (radius 18) + inner panel | none — flat on the page, separated by the shared section rule |
+| Heading | card header, 18/800 | [`otqSectionHead`](../../lib/theme_tokens.dart): rule + 16/600 label + right-hand link |
+| Row | dot rail with connector, time 21/800 inline with a small label | `44 dp` time · `10 dp` dot · rest; hairline under every row but the last |
+| Name | 12.5/700 tracked, muted | 14/600 foreground |
+| Meta | slots 2 and 3 as two stacked lines | one wrapping line, slots joined 12 dp apart, optional icons |
+| Chip | ONE, inferred from the newest row | **one per row**, from that row's own value |
+| Day heading | 11/800 tracked + a hairline to the edge | 13/600 muted, no rule |
+
+### Extra key
+
+| Key | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `metaIcons` | `String` | no | `''` | ◆-separated icon NAMES for `row` slots 2 and 3, in that order. Resolved through `stringToIconData` (`global2.dart`, 404 names). A blank entry draws no icon. |
+
+`stringToIconData` answers `help_outline` for a name it does not carry, so a
+typo shows a "?" mark rather than vanishing — the same behaviour as the six
+other callers in this repo, and the way a builder finds the typo. A **blank**
+name is skipped outright, because a blank is not a typo.
+
+### Per-row chip: `rowChip`, never `inferChip`
+
+`inferChip` answers "what state is the user in right now" from the newest row,
+so it carries two rules — entry 0 is date-free, every later entry shows only
+when the row is from today. Applied per row those would blank the chip on every
+historical line, which is most of a log. `rowChip` is a plain `chipMap` lookup
+with no order and no date rule, and returns **null** (draws nothing) rather than
+falling back to the empty-condition label, which belongs to the summary chip.
+
+The summary chip is not inferred at all in `v6` — that answer lives in the
+attendance strip on the same screen.
+
+### Known deviations from the mockup
+
+- **Rows are not tappable.** v6 shows a press state, but per-row `route` /
+  `routeParams` are still out of scope (spec §10). A row that highlights and
+  then does nothing is worse than one that plainly does not respond.
+- **Sizes are one step below the mockup** — name 14 not 16, meta 12 not 14,
+  chip 12/24 not 13/26 — matching the attendance tiles and section heads
+  already on the same screen.
+
+### Example
+
+Inside a `TAB` (see [tab_sections.md](tab_sections.md)), `tab` picks the group:
+
+```json
+{ "type":"TIMELINE_CARD", "tab":0, "variant":"v6",
+  "vidtable":"20342033315492",
+  "table":"84214220504259//event",
+  "search":"grp◼attendance⭘cv◼87544551624342",
+  "sortField":"t", "sortDir":"desc", "limit":3,
+  "moreRoute":"vertikaTeknoLokaciptaRiwayatAbsensi",
+  "row":"<t>◆<d>◆<i>, <lq>, <ln>◆GPS ±<acc> m",
+  "metaIcons":"location_on◆track_changes",
+  "dotMap":"clock-in◼warn⭘clock-out◼info",
+  "chipField":"ty",
+  "chipMap":"clock-in◼Sedang Bekerja◼info⭘clock-out◼Sudah Clock Out◼muted",
+  "groupByDay":"TRUE",
+  "text":"Log◆Lihat semua◆Hari ini◆◆Belum ada aktivitas" }
+```
+
+`text` slot 3 (the empty-condition chip label) is unused in `v6` — the summary
+chip is not drawn — so leave it blank.
+
+Locked by `test/timeline_card_v6_test.dart`.

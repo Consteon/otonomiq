@@ -44,6 +44,7 @@ const LocationDetector({
 |---|---|---|
 | `text` | `String` | Diamond-separated (`◆`) bundle of label strings — see text parts table below. |
 | `gps` | `Map?` | GPS configuration. Currently reads `gps['status']` as fallback status string. |
+| `variant` | `String?` | `"v4"` or `"v6"` selects the Vertika navy panel; absent/anything else keeps the classic card. `"v6"` additionally opts the map screen behind "View Map" into its v6 redesign — see [map_page.md](map_page.md). |
 | `showViewMap` | `String/bool?` | Whether to show the "View Map" button. Accepts `"TRUE"`/`"FALSE"`. Default `TRUE`. |
 | `showRefresh` | `String/bool?` | Whether to show the "Refresh" button. Accepts `"TRUE"`/`"FALSE"`. Default `TRUE`. |
 | `borderRadius` | `num?` | Card corner radius in px. Default `10`. |
@@ -138,7 +139,7 @@ if #LQR_LIST is null/empty → fallback to gps['status'] or "last_known"
 
 - **Store:** `transactionStore.state.screenTx['#LQR_LIST']` — read-only access to registered location reference points.
 - **Packages:** `geolocator` (GPS acquisition, distance calculation), `geocoding` (reverse geocoding).
-- **Navigation:** Opens [`MapPage`](../../lib/page/map_page.dart) when "View Map" is tapped.
+- **Navigation:** Opens [`MapPage`](map_page.md) when "View Map" is tapped, passing `variant` and the current `accuracy` through so the v6 map opens on the fix this card already paid for. Under `variant: "v6"` the card re-reads its own fix when the map pops, so it cannot go on showing a status the map already contradicted.
 - **No `txfController` access** — this widget is display-only and does not write to any form state.
 
 ## Important Behavior
@@ -166,5 +167,5 @@ if #LQR_LIST is null/empty → fallback to gps['status'] or "last_known"
 
 ## See Also
 
-- [MapPage](../../lib/page/map_page.dart) — full-screen map opened by "View Map" button
+- [MapPage](map_page.md) — full-screen map opened by the "View Map" button
 - [attendance_qr_selfie_gps_verify.dart](../../lib/widget/attendance_qr_selfie_gps_verify.dart) — attendance widget that also uses GPS verification

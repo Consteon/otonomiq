@@ -402,7 +402,11 @@ List<Widget> buildBannerList(var bannerList, double aspectRatio) {
 /// resolves `{driverVid}` / `{vehicleId}` / `{today}` per screen. Both call
 /// sites (`vgr` and `hgr` in build_display_component.dart) already have it in
 /// scope as the `buildDisplayComponent` parameter.
-List<Widget> buildGridList(var gridList, double fontSize, String scrName) {
+/// [variant] is the LOOK, passed down from the `hgr`/`vgr` component. Only
+/// `v6` changes anything; every other value keeps the classic card, so a
+/// screen that never sets it renders exactly as before.
+List<Widget> buildGridList(var gridList, double fontSize, String scrName,
+    {String variant = ''}) {
   // gridList is server JSON (component['children']); empty/null/non-List →
   // the deferred Builder/onTap closures below index gridList[i] at LAYOUT time,
   // outside the try/catch, throwing RangeError → fatal. Guard at the source.
@@ -413,6 +417,20 @@ List<Widget> buildGridList(var gridList, double fontSize, String scrName) {
   for (var i = 0; i < gridList.length; i++) {
     try {
       final item = gridList[i];
+      // `checker` is a WIDGET item, not a route item: it owns a scan/photo flow
+      // and cannot go through the route tile below, whose onTap only navigates.
+      // FtzChecker draws the same v6 quick tile when `single` is false, so the
+      // attendance buttons sit in this grid looking like every other menu item.
+      if (item is Map &&
+          (item['type'] ?? '').toString().toLowerCase() == 'checker') {
+        gridComponent.add(FtzChecker(
+          key: GlobalKey(),
+          component: item,
+          scrName: scrName,
+          single: false,
+        ));
+        continue;
+      }
       final bool first = i == 0;
       // MENU BADGE: resolve the vid-scoped code and start the stream ONCE, here
       // at page-build time (buildGridList runs from constructPageElements, not
@@ -427,6 +445,8 @@ List<Widget> buildGridList(var gridList, double fontSize, String scrName) {
             label: (item['text'] ?? '').toString(),
             fontSize: fontSize,
             badgeCount: badgeCount,
+            variant: variant,
+            quick: true,
             onTap: () {
               final route = item['route'];
               if (route != null &&

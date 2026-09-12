@@ -299,7 +299,12 @@ class FtzCheckerState extends State<FtzChecker> {
           ? widget.component['imgWidth'] ?? 540
           : widget.component['imgHeight'] ?? 540;
       String folder = widget.component['folder'] ?? 'default';
-      String fileName = widget.component['filename'] ?? UniqueKey().toString();
+      // The sheet's `filename` is a TEMPLATE, not a unique name: the two checker
+      // tiles on the VTL home ship the same literal, and buildImageDestinationName
+      // uses it verbatim, so every selfie overwrote the same local file before it
+      // could be uploaded. Same idiom as attendance_qr_selfie_gps_verify.dart:1244.
+      String fileName =
+          '${widget.component['filename'] ?? 'chk'}_${DateTime.now().microsecondsSinceEpoch}';
       String label = title ?? 'Camera';
       int quality = widget.component['quality'] ?? 80;
       List<String> pickedFileUrl = [emptyString];
@@ -873,15 +878,18 @@ class FtzCheckerState extends State<FtzChecker> {
     w = MediaQuery.of(context).size.width - 20;
     double fontSize = (widget.component['fontSize'] ?? 14.0).toDouble();
     // textArray = diamondTextToList(widget.component['text']);
-    Widget button1;
-    button1 = Center(
-      child: SizedBox(
-        width: (widget.component['width'] ?? 90).toDouble(),
-        child: menuIconCard(
-          imageUrl: widget.component['url'] ?? defaultImage,
-          label: textArray[0],
-          fontSize: fontSize,
-          onTap: () async {
+    // Built from a grid (`hgr` v6, buildGridList) the cell owns the geometry:
+    // no Center/SizedBox, and the v6 quick tile instead of the white card, so
+    // the attendance buttons match every other menu item on the page. Both
+    // legacy call sites pass single:true and keep the old shell untouched.
+    Widget button1 = menuIconCard(
+      imageUrl: widget.component['url'] ?? defaultImage,
+      // diamondTextToList('--') returns [], and this indexed [0] unguarded.
+      label: textArray.isEmpty ? '' : textArray[0].toString(),
+      fontSize: fontSize,
+      variant: widget.single ? '' : 'v6',
+      quick: !widget.single,
+      onTap: () async {
                   if (!tapped) {
                     // setState(() {
                     tapped = true;
@@ -927,10 +935,16 @@ class FtzCheckerState extends State<FtzChecker> {
                       } // end if !dataOK
                     } // end if (!dataOk)
                   } // end if !tapped
-          }, // end of onTap
-        ),
-      ),
+      }, // end of onTap
     );
+    if (widget.single) {
+      button1 = Center(
+        child: SizedBox(
+          width: (widget.component['width'] ?? 90).toDouble(),
+          child: button1,
+        ),
+      );
+    }
     return button1;
   } // end of class _AttendQrGpsSelfieState build
 } // end of class _AttendQrGpsSelfieState

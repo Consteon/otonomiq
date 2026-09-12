@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -9,8 +10,10 @@ import '../api.dart';
 import '../global.dart';
 import '../global2.dart';
 import '../otq_icons.dart';
+import '../theme_tokens.dart';
 import 'ftz_array_search_support.dart';
 import 'ftz_horizontal_image_list.dart';
+import 'report_detail_sheet.dart';
 
 // Card palette. Same tokens list_card.dart / task_feed_list.dart already use,
 // so every card surface in the app reads as one system.
@@ -267,7 +270,33 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
       Get.back();
       return;
     }
+    if (_isV6) {
+      _openV6Detail(pickTable[index]);
+      return;
+    }
     detailDialog(pickTable[index]);
+  }
+
+  /// v6 opens the modal sheet in `report_detail_sheet.dart`.
+  ///
+  /// Same `detail` template, same `_linesFor` parse and the same images as the
+  /// v1 dialog — only the container and the layout differ, so a screen that
+  /// switches variants shows the same fields either way.
+  void _openV6Detail(List<dynamic> row) {
+    final String template =
+        (widget.component['detail'] ?? displayObject['content'] ?? '')
+            .toString();
+    final String head = title.trim();
+    unawaited(
+      showReportDetailSheet(
+        context: context,
+        lines: _linesFor(row, template),
+        images: _imagesFor(row),
+        chipLabel: _chipLabel,
+        epochMs: reportEpoch(row, DateTime.now()),
+        title: head.isEmpty ? 'Detail laporan' : 'Detail ${head.toLowerCase()}',
+      ),
+    );
   }
 
   // ---------------------------------------------------------------- detail
@@ -581,6 +610,634 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
     );
   }
 
+  // ------------------------------------------------------------------- v6
+  //
+  // `variant: "tableCardInteractiveV6"`. Everything above stays the renderer
+  // for `tableCardInteractive`, so a screen that does not author the V6 name
+  // is byte-for-byte unchanged -- including PICKER mode, which passes a `txf`
+  // component whose `variant` is `qrScan`/`text` and can never be v6.
+
+  /// v6 drops the card-in-a-card for plain rows with a 1 dp rule, groups them
+  /// by day like the Log tab, and gives the range filter its own chips.
+  bool get _isV6 =>
+      (widget.component['variant'] ?? '').toString().trim().toLowerCase() ==
+      'tablecardinteractivev6';
+
+  /// Active time window. Default `7 hari`, per the v6 spec; session-scoped
+  /// because the widget is rebuilt from the page JSON on every navigation.
+  ReportRange _range = ReportRange.week;
+
+  /// v6 hides the search field behind an app-bar-style icon: a permanent 52 dp
+  /// box above a two-row list is most of the screen spent on a control that is
+  /// rarely used.
+  bool _searchOpen = false;
+
+  Color _toneFg(ReportTone tone) {
+    switch (tone) {
+      case ReportTone.ok:
+        return OtqPalette.successText;
+      case ReportTone.warn:
+        return OtqPalette.warningText;
+      case ReportTone.err:
+        return OtqPalette.dangerText;
+      case ReportTone.neutral:
+        return OtqPalette.v6MutedFg;
+    }
+  }
+
+  Color _toneBg(ReportTone tone) {
+    switch (tone) {
+      case ReportTone.ok:
+        return OtqPalette.v6SuccessSoft;
+      case ReportTone.warn:
+        return OtqPalette.v6WarningSoft;
+      case ReportTone.err:
+        return OtqPalette.v6DangerSoft;
+      case ReportTone.neutral:
+        return OtqPalette.v6Muted;
+    }
+  }
+
+  Widget _v6Chip(String text) {
+    final ReportTone tone = reportTone(text);
+    return Container(
+      margin: const EdgeInsets.only(left: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: _toneBg(tone),
+        borderRadius: BorderRadius.circular(13),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: _toneFg(tone),
+        ),
+      ),
+    );
+  }
+
+  /// 64 dp thumbnail, or a muted placeholder box.
+  ///
+  /// The placeholder is not optional: without it the text column of a row with
+  /// no photo starts 76 dp left of every other row, and the list stops being a
+  /// column. Its icon is [OtqPalette.v6BorderStrong] (3.20:1 on the muted
+  /// ground) rather than the mock's `--color-disabled-fg`, which measures
+  /// 2.38:1 there and misses the 3:1 non-text bar.
+  Widget _v6Thumb(List<dynamic> row) {
+    final List<String> urls = _imagesFor(row);
+    if (urls.isEmpty) {
+      return Container(
+        width: 64,
+        height: 64,
+        decoration: BoxDecoration(
+          color: OtqPalette.v6Muted,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Icon(
+          Icons.image_outlined,
+          size: 24,
+          color: OtqPalette.v6BorderStrong,
+        ),
+      );
+    }
+    return Stack(
+      children: <Widget>[
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox(
+            width: 64,
+            height: 64,
+            child: displayImage(
+              imageUrl: urls[0],
+              cached: true,
+              fit: BoxFit.cover,
+            ),
+          ),
+        ),
+        if (urls.length > 1)
+          Positioned(
+            right: 4,
+            bottom: 4,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F172A).withValues(alpha: 0.72),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Text(
+                '+${urls.length - 1}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// [text] with the live search query marked, the way the v6 search frame
+  /// draws it. Falls back to a plain `Text` when nothing is being searched.
+  Widget _v6Marked(
+    String text,
+    TextStyle style, {
+    required int maxLines,
+  }) {
+    if (searchValue.trim().isEmpty) {
+      return Text(
+        text,
+        maxLines: maxLines,
+        overflow: TextOverflow.ellipsis,
+        style: style,
+      );
+    }
+    return RichText(
+      maxLines: maxLines,
+      overflow: TextOverflow.ellipsis,
+      text: TextSpan(
+        style: style,
+        children: highlightSpans(text, searchValue)
+            .map(
+              (HighlightSpan s) => TextSpan(
+                text: s.text,
+                style: s.hit
+                    ? const TextStyle(backgroundColor: OtqPalette.v6WarningSoft)
+                    : null,
+              ),
+            )
+            .toList(),
+      ),
+    );
+  }
+
+  /// One report row. 12 dp of padding around a 64 dp thumb makes the whole row
+  /// an 88 dp target, which is why there is no chevron: the affordance is the
+  /// row, not a 18 dp glyph in its corner.
+  Widget _v6Row(int index, {required bool last, required DateTime now}) {
+    final List<dynamic> row = pickTable[index];
+    final ContentRoles roles = splitContentRoles(
+      _linesFor(row, displayObject['content']?.toString()),
+      _chipLabel,
+    );
+    final int? epochMs = reportEpoch(row, now);
+    // No usable stamp -> the eyebrow's own rendered text keeps the slot, so the
+    // row still says when it happened even on a table keyed by something else.
+    final String stamp = epochMs != null
+        ? reportClock(DateTime.fromMillisecondsSinceEpoch(epochMs))
+        : (roles.eyebrow?.value ?? '');
+    final String subline = reportSubline(roles);
+    final String note = roles.note?.value.trim() ?? '';
+    final String chip = roles.chip;
+
+    return Semantics(
+      button: true,
+      label: <String>[
+        if (stamp.isNotEmpty) 'Laporan $stamp',
+        if (chip.isNotEmpty) chip,
+        if (subline.isNotEmpty) subline,
+        'Buka detail',
+      ].join(', '),
+      child: ExcludeSemantics(
+        child: InkWell(
+          onTap: () => _onRowTap(index),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(
+              border: last
+                  ? null
+                  : const Border(
+                      bottom: BorderSide(color: OtqPalette.v6Border),
+                    ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                _v6Thumb(row),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Row(
+                        children: <Widget>[
+                          // ★ ONE flex child, and it is tight. `Flexible` for
+                          // the clock plus a `Spacer` plus `Flexible` for the
+                          // chip divides the free space three ways BEFORE the
+                          // children are measured, and the clock's unused share
+                          // is never given back -- the chip ends up floating
+                          // mid-row instead of flush right. The chip is laid
+                          // out first at its natural width (bounded, so a long
+                          // value ellipsises rather than overflowing) and the
+                          // clock takes whatever is left.
+                          Expanded(
+                            child: Text(
+                              stamp.isEmpty ? '-' : stamp,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                height: 1.2,
+                                color: OtqPalette.foreground,
+                                fontFeatures: <FontFeature>[
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
+                          ),
+                          if (chip.isNotEmpty)
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 170),
+                              child: _v6Chip(chip),
+                            ),
+                        ],
+                      ),
+                      if (subline.isNotEmpty) ...<Widget>[
+                        const SizedBox(height: 3),
+                        // Two lines, not the mock's one. The mock's own sample
+                        // always fits because it carries two fields; a real
+                        // screen can carry three, or one long site name. Wrap
+                        // costs nothing when the text fits -- the second line
+                        // only exists when the alternative is hiding text.
+                        // (ui-ux-pro-max `Essential Text Truncation`, Critical:
+                        // wrap or give a full-detail path rather than clamp
+                        // meaning away. Tapping the row does give that path,
+                        // which is why two lines is the ceiling and not four.)
+                        _v6Marked(
+                          subline,
+                          const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            height: 1.3,
+                            color: OtqPalette.v6MutedFg,
+                          ),
+                          maxLines: 2,
+                        ),
+                      ],
+                      const SizedBox(height: 6),
+                      if (note.isEmpty)
+                        // v6MutedFg, not the mock's --color-disabled-fg: this
+                        // is live content (2.72:1 would fail the text bar).
+                        const Text(
+                          'Tanpa catatan',
+                          style: TextStyle(
+                            fontSize: 14,
+                            height: 1.4,
+                            fontStyle: FontStyle.italic,
+                            color: OtqPalette.v6MutedFg,
+                          ),
+                        )
+                      else
+                        _v6Marked(
+                          note,
+                          const TextStyle(
+                            fontSize: 14,
+                            height: 1.4,
+                            color: OtqPalette.foreground,
+                          ),
+                          maxLines: 2,
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// [shown] is the number of rows the RANGE let through, not `pickTable`
+  /// length: the subtitle sits directly above the list and may not claim rows
+  /// the chips are hiding.
+  Widget _v6Header(BuildContext context, int shown) {
+    final String heading = title.trim().isEmpty ? 'Laporan' : title.trim();
+    final String sub = _searchOpen
+        ? (shown == 0
+              ? 'Hasil pencarian'
+              : '$shown laporan cocok · ${kReportRangeSummary[_range.index]}')
+        : shown == 0
+        ? 'Belum ada laporan'
+        : '$shown laporan · ${kReportRangeSummary[_range.index]}';
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: <Widget>[
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                heading,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  height: 1.2,
+                  color: OtqPalette.foreground,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                sub,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  height: 1.2,
+                  color: OtqPalette.v6MutedFg,
+                ),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          width: 44,
+          height: 44,
+          child: IconButton(
+            padding: EdgeInsets.zero,
+            tooltip: _searchOpen ? 'Tutup pencarian' : 'Cari laporan',
+            icon: Icon(
+              _searchOpen ? Icons.close : Icons.search,
+              size: 22,
+              color: OtqPalette.foreground,
+            ),
+            onPressed: () {
+              setState(() {
+                _searchOpen = !_searchOpen;
+                if (!_searchOpen) {
+                  searchController.clear();
+                  searchValue = '';
+                  pickTable = searchTable('', initialTable);
+                }
+              });
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Range chips. `Wrap`, not a horizontal scroller: the v6 mock scrolls this
+  /// row, and at 200 % text scale a scroller clips the labels it is supposed
+  /// to preserve (ui-ux-pro-max `Chip Collection Reflow`, severity High).
+  Widget _v6Filters(BuildContext context) {
+    final Color primary = Theme.of(context).primaryColor;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: List<Widget>.generate(kReportRangeChips.length, (int i) {
+        final bool on = _range.index == i;
+        return Semantics(
+          button: true,
+          selected: on,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: () => setState(() => _range = ReportRange.values[i]),
+            child: Container(
+              // ★ NOT `alignment: Alignment.center`. A Container with an
+              // alignment and no width expands to its maximum constraint, and
+              // inside a Wrap that maximum is the whole row -- every chip then
+              // takes a line of its own. `Center(widthFactor: 1)` centres
+              // vertically while still shrink-wrapping the width.
+              constraints: const BoxConstraints(minHeight: 36),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: on ? primary : OtqPalette.v6Muted,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Center(
+                widthFactor: 1,
+                child: Text(
+                  kReportRangeChips[i],
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: on ? otqOn(primary) : OtqPalette.v6MutedFg,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  Widget _v6SearchField(BuildContext context) {
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: OtqPalette.v6Muted,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: <Widget>[
+          // Honours the component's `icon` key exactly as the v1 field does:
+          // it is authored on every live screen, and a redesign that silently
+          // stops reading a configured key is dead config by another name.
+          Icon(
+            otqIcons[(widget.component['icon'] ?? '').toString()] ??
+                Icons.search,
+            size: 20,
+            color: OtqPalette.v6MutedFg,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextField(
+              controller: searchController,
+              autofocus: true,
+              textInputAction: TextInputAction.search,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: OtqPalette.foreground,
+              ),
+              decoration: InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                hintText: searchLabel.isNotEmpty ? searchLabel : hint,
+                hintStyle: const TextStyle(
+                  fontSize: 16,
+                  color: OtqPalette.v6MutedFg,
+                ),
+              ),
+              onChanged: (String value) {
+                setState(() {
+                  searchValue = value;
+                  pickTable = searchTable(searchValue, initialTable);
+                });
+              },
+            ),
+          ),
+          if (searchValue.isNotEmpty)
+            SizedBox(
+              width: 32,
+              height: 32,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                tooltip: 'Hapus pencarian',
+                icon: const Icon(
+                  Icons.close,
+                  size: 18,
+                  color: OtqPalette.v6MutedFg,
+                ),
+                onPressed: () {
+                  searchController.clear();
+                  setState(() {
+                    searchValue = '';
+                    pickTable = searchTable('', initialTable);
+                  });
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _v6Empty() {
+    final bool filtered = searchValue.trim().isNotEmpty;
+    final String headline = filtered
+        ? 'Tidak ada hasil'
+        : 'Belum ada laporan ${kReportRangeSummary[_range.index]}';
+    final String sub = filtered
+        ? 'Coba kata kunci lain, atau pilih rentang waktu yang lebih panjang.'
+        : 'Laporan pekerjaan yang Anda buat akan muncul di sini.';
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 40, 24, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: OtqPalette.v6Muted,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Icon(
+                filtered ? Icons.search_off : Icons.description_outlined,
+                size: 34,
+                color: OtqPalette.v6MutedFg,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              headline,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                height: 1.25,
+                color: OtqPalette.foreground,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              sub,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 14,
+                height: 1.45,
+                color: OtqPalette.v6MutedFg,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Flatten the visible rows into day headers + row indexes.
+  ///
+  /// Grouping is CONSECUTIVE, not a bucket-by-key: the list is already ordered
+  /// by the component's `sort`, and re-ordering it here would silently override
+  /// what the sheet asked for. On an unsorted table a day can therefore appear
+  /// more than once, which is honest about the ordering rather than hiding it.
+  List<Object> _v6Items(DateTime now) {
+    final List<Object> items = <Object>[];
+    String header = '';
+    for (int i = 0; i < pickTable.length; i++) {
+      final int? epochMs = reportEpoch(pickTable[i], now);
+      if (!inReportRange(epochMs, _range, now)) continue;
+      final String h = epochMs == null
+          ? kReportNoDateHeader
+          : reportDayHeader(
+              DateTime.fromMillisecondsSinceEpoch(epochMs),
+              now,
+            );
+      if (h != header) {
+        header = h;
+        items.add(h);
+      }
+      items.add(i);
+    }
+    return items;
+  }
+
+  Widget _buildV6(BuildContext context) {
+    final DateTime now = DateTime.now();
+    final List<Object> items = _v6Items(now);
+    final int shown = items.whereType<int>().length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _v6Header(context, shown),
+        const SizedBox(height: 8),
+        // The search field REPLACES the filter row, as in the v6 mock: both at
+        // once would stack 90 dp of chrome over a two-row list.
+        if (_searchOpen) _v6SearchField(context) else _v6Filters(context),
+        const SizedBox(height: 4),
+        Expanded(
+          child: items.isEmpty
+              ? _v6Empty()
+              : ListView.builder(
+                  scrollCacheExtent: ScrollCacheExtent.pixels(1000),
+                  padding: const EdgeInsets.only(bottom: 8),
+                  itemCount: items.length,
+                  itemBuilder: (BuildContext context, int i) {
+                    final Object item = items[i];
+                    if (item is String) {
+                      return Padding(
+                        padding: EdgeInsets.only(top: i == 0 ? 4 : 16, bottom: 4),
+                        child: Text(
+                          item,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            height: 1.2,
+                            color: OtqPalette.v6MutedFg,
+                          ),
+                        ),
+                      );
+                    }
+                    return _v6Row(
+                      item as int,
+                      // Last row of its day group: the next entry is a header
+                      // or the list ends. Keeps the rule out from under a day
+                      // heading, where it would read as an underline.
+                      last: i + 1 >= items.length || items[i + 1] is String,
+                      now: now,
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
   // ----------------------------------------------------------------- shell
 
   Widget _buildSearchField(BuildContext context) {
@@ -714,6 +1371,7 @@ class _FtzArraySearchState extends State<FtzArraySearch> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isV6) return _buildV6(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

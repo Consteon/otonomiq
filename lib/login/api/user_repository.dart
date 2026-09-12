@@ -1097,15 +1097,37 @@ class UserRepository {
 //  }
 }
 
+/// The signed-in user, WAITING for auth restoration when it has not finished.
+///
+/// `currentUser` is null until the plugin has re-read the persisted session
+/// from disk. Reading it once, synchronously, loses that race on a slow cold
+/// start -- and the slowest cold start a user ever gets is the FIRST launch
+/// after a Play Store update, while ART re-optimises the new dex. main.dart
+/// then treats the logged-in user as a guest (`fUser == null` -> myLif =
+/// defaultLifKey, main.dart:241), which skips the whole
+/// `myLif != defaultLifKey` block: no #INTERFACE_KEY for the real tenant, no
+/// #VID, and no `loadHistory()`. Worse, historySync's whole body is wrapped in
+/// `if (ssid != loginSsid)` (table_repository.dart:2897), so with the sign-in
+/// LIF in #INTERFACE_KEY it is DEAD for the entire session -- every call,
+/// silently, no error and no retry counter -- while historyAdd still runs and
+/// setDataOK still paints the dot green. The cached @screenUI keeps showing the
+/// user's own home, so nothing looks wrong while nothing reaches Firestore. A
+/// force close "fixed" it because the second launch is warm and wins the race.
+///
+/// authStateChanges() emits the restored user (or null when genuinely signed
+/// out) as soon as restoration completes, so the wait is milliseconds in
+/// practice; the timeout keeps cold start bounded.
 Future getFirebaseUser() async {
   FirebaseAuth firebaseAuth = FirebaseAuth.instance;
-  User? user;
   try {
-    user = firebaseAuth.currentUser;
+    return firebaseAuth.currentUser ??
+        await firebaseAuth.authStateChanges().first.timeout(
+              const Duration(seconds: 5),
+              onTimeout: () => null,
+            );
   } catch (_) {
-    user = null;
+    return null;
   }
-  return user;
 }
 
 Future firebaseSignOut() async {

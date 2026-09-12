@@ -222,6 +222,24 @@ List<String> ocrTargetLabels(SduiSpec spec, List<int> targets) {
   ];
 }
 
+/// The two placeholders the serial-compare banner resolves: `{value}` (what the
+/// photo read) and `{expected}` (what the reference doc records).
+///
+/// A CLOSED list, deliberately NOT routed through TokenResolver: that would open
+/// the banner to every screenTx key, so an entry named `value` could hijack the
+/// warning. Same pending-safe dialect as digitPadFillTokens
+/// (digit_pad_support.dart) -- a token with no value stays LITERAL rather than
+/// rendering an empty "()".
+final RegExp _ocrCompareToken = RegExp(r'\{(value|expected)\}');
+
+String ocrFillCompareTokens(String template, Map<String, String> values) {
+  if (template.isEmpty) return template;
+  return template.replaceAllMapped(_ocrCompareToken, (Match m) {
+    final String v = values[m.group(1)] ?? '';
+    return v.isEmpty ? m.group(0)! : v;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Normalisation (spec 5 -- anti-locale, anti String-vs-Number)
 // ---------------------------------------------------------------------------

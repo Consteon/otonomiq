@@ -440,8 +440,16 @@ void updateAppGps(Position position) async {
 
 Future secureWrite({required String key, required String value}) async {
   // write encrypted value to secure storage
+  //
+  // The `await` is load-bearing. `return storage.write(...)` inside a try does
+  // NOT run the future inside the try -- it is awaited at the return boundary,
+  // OUTSIDE it -- so this catch never fired and every caller got a rejected
+  // future instead of the null it was written to expect. Several call sites
+  // fire this un-awaited (settingUp's appSettings write), and an un-awaited
+  // rejection is recorded as a FATAL by platformDispatcher.onError
+  // (main.dart:80).
   try {
-    return storage.write(key: key, value: value);
+    return await storage.write(key: key, value: value);
   } catch (e) {
     // errorReport(e);
     return null;
@@ -450,8 +458,14 @@ Future secureWrite({required String key, required String value}) async {
 
 Future<String?> secureRead({required String key}) async {
   // read encrypted value from secure storage
+  //
+  // `await` for the same reason as secureWrite: without it the future is
+  // awaited outside the try and BOTH catches are dead code, so a Keystore /
+  // EncryptedSharedPreferences failure propagated to the 28 `await secureRead`
+  // call sites -- five of which force-unwrap the result -- instead of the null
+  // this signature promises.
   try {
-    return storage.read(key: key);
+    return await storage.read(key: key);
   } on PlatformException {
     // errorReport(e);
     return null;
@@ -5663,8 +5677,12 @@ Future<String> getPhotoCameraImage(
   String folder,
   String fileName,
   double? height,
-  double? width,
-) async {
+  double? width, {
+  // Default-off passthrough to the v6 selfie screen; a caller that omits them
+  // gets exactly the dialog it has today. See photo_camera.dart.
+  String variant = '',
+  String barTitle = '',
+}) async {
   final String pickedFileUrl = await acquireCamera(
     cameras,
     title,
@@ -5673,6 +5691,8 @@ Future<String> getPhotoCameraImage(
     quality,
     height,
     width,
+    variant: variant,
+    barTitle: barTitle,
   );
   // String url = await saveImageToCloud(
   //     imagePath: pickedFileUrl, folder: folder, fileName: fileName);

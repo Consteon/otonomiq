@@ -9,6 +9,7 @@ import '../login/api/user_repository.dart';
 import '../main_bloc/bloc.dart';
 import '../page/main_page.dart';
 import '../redux/screen_transaction.dart';
+import '../theme_tokens.dart';
 
 // Canonical fallbacks, copied from the default map already sitting in
 // buildTheme (build_theme.dart:7-12). Duplicated rather than imported because
@@ -32,15 +33,10 @@ const int _defaultBottomAppBarColor = 4293454582;
 // the null-guarded reads passed the raw dynamic to `Color(x)` with no
 // `.toInt()`, so a sheet value decoded as double threw TypeError there while
 // the unguarded ones threw NoSuchMethodError here. One helper, both classes.
-Color themeColor(String key, Color fallback) {
-  try {
-    final dynamic v = systemUIComponent?[theme]?[key];
-    if (v is num) return Color(v.toInt());
-  } catch (_) {
-    // systemUIComponent is not a Map at all.
-  }
-  return fallback;
-}
+// Now a thin alias: the body moved to lib/theme_tokens.dart so widgets can
+// read theme keys without importing this file (and with it bloc, redux and the
+// whole root MaterialApp). Behaviour is unchanged.
+Color themeColor(String key, Color fallback) => otqColor(key, fallback);
 
 class VertrizApp extends StatelessWidget {
   // This widget is the root of your application.

@@ -65,6 +65,11 @@ All config reads go through `SduiSpec` ([lib/sdui_spec.dart](../../lib/sdui_spec
 | `max` | read, **ignored** | v1 is one photo (spec §11). Deliberate and documented, not an oversight. |
 | `folder` `filename` `imageParameter` `previewSize` `currentValue` `isEnabled` | same semantics as `GET_IMAGES` | see [otq_get_images_2.dart](../../lib/widget/otq_get_images_2.dart) |
 | `camera` | `spec.intOr('camera',1)` | `0` ⇒ front lens, anything else ⇒ back |
+| `vidtable` | `resolveAppVid(component)` | serial compare only — container VID; falls back to `getTableVid(component['com'])` |
+| `table` | `parseTablePath(spec.str('table'))` | serial compare only — `<tableDocId>//<subColl>`; no `//` ⇒ subColl `content` |
+| `search` | RAW `component['search']` → `filterDriverHomeDocs` | serial compare only. **Read raw, NOT through `SduiSpec.str`** — `filterDriverHomeDocs` owns the `autheniumDecode`, and decoding here would decode twice |
+| `compareField` | `spec.str('compareField')` — **no default** | serial compare only — doc field holding the reference serial (meter: `msn`). Blank/absent ⇒ the whole compare is OFF |
+| `blockOnMismatch` | `spec.str('blockOnMismatch').toUpperCase() == 'TRUE'` | `TRUE` ⇒ a mismatching read is not written to the compared target — but ONLY when the card can say why (`text[5+n]`/`text[6+n]`) **and** that target is operator-editable; see below |
 | `text` | `spec.text(i)` | ◆-slots, see below |
 
 #### `text` ◆-slots and their fallbacks
@@ -78,7 +83,16 @@ All config reads go through `SduiSpec` ([lib/sdui_spec.dart](../../lib/sdui_spec
 | 2 | tap-screen hint | render NO hint row |
 | 3 | failure message / rejected-tap message | render NOTHING (silent) |
 | 4 | "from photo" badge prefix | render the value chip without a prefix |
-| 5.. | chip name per target, index-aligned with `ocrTargets` | `◁<pos>▷` (a position marker, not Indonesian) |
+| 5 .. 5+n-1 | chip name per target, index-aligned with `ocrTargets` (`n` = number of targets) | `◁<pos>▷` (a position marker, not Indonesian) |
+| 5+n | serial-mismatch message; `{value}` = what the photo read, `{expected}` = what the doc records | render NOTHING |
+| 6+n | retake / check-the-unit hint under the message | render NOTHING |
+
+> ⚠ **`n` is the LIVE target count, so appending an `ocrTargets` entry RENUMBERS these two.** On a
+> component already configured with ONE target, `text[6]` is the mismatch message; add a second
+> target and `text[6]` becomes the new chip's label while `text[7]` — the old retake hint — becomes
+> the mismatch message. No crash and no log: the banner just says the wrong thing. Edit both ends of
+> the ◆-row together. (Anchoring to the count is deliberate — it is what keeps these two slots out
+> of the open-ended chip-label region.)
 
 #### Alignment rules (must not crash)
 
@@ -228,6 +242,69 @@ No dialog, no retry button. The target field is left empty, `text[3]` is shown i
 
 `buildDisplayComponent` seeds `isEnabled`/`initialIsEnabled` from `component['isEnabled']`, and `run:"N:disable"` flips it at runtime. The widget reads `ic.isEnabled` inside the `GetBuilder` and nulls every `onTap`/`onPressed` when false — matching `OtqGetImages2`.
 
+### Serial compare against a reference doc (`compareField`)
+
+Optional, and OFF unless `compareField` is set — a config without it behaves exactly as before:
+no subscription, no fetch, nothing new rendered.
+
+When it is set, the widget subscribes to `MobileTable/<vidtable>/tables/<docId>/<subColl>` via
+`subscribeToMapCollection`, filters with `search` through `filterDriverHomeDocs`, takes
+`docs.first[compareField]` as the RECORDED serial, and compares it against the value destined for
+**`ocrTargets[0]`** using `digitPadSerialState` — the SAME rule `DIGIT_PAD` and the CF use. There
+is no second rule and no config key for "which target": if `compareField` is used, the serial
+**must** be the first `ocrTargets` entry.
+
+| state | what the card does |
+|---|---|
+| `off` — no `compareField`, no snapshot yet, the doc has no such field, or that field holds nothing usable (`''`, `'--'`, or the literal string `"null"`) | nothing at all |
+| `ok` | a small green check on that target's existing "dari foto" chip, and only while the slot still holds exactly what the photo wrote |
+| `missing` — a serial IS recorded but the slot is empty | **nothing here.** `DIGIT_PAD`'s segment 16 owns that state; two red messages saying the same thing teach officers to dismiss both |
+| `mismatch` | red banner under the photo: `text[5+n]` (tokens filled) then `text[6+n]` |
+
+> **`{value}` can outlive the field.** The compared value is the slot when the slot holds
+> something and the PARKED read (`OcrCaptureEntry.compareRead`) when it does not. So if the
+> officer *clears* the compared field by hand after a mismatching capture, the banner comes
+> BACK — derived from the park — and `{value}` names a serial the field no longer holds. That
+> is deliberate: the park is what makes `blockOnMismatch:"TRUE"` able to say what the photo
+> read at all, and an empty field is not evidence that the photo was right. Typing a
+> *different* value replaces it; only navigating away (`clearState`/`clearAll`) drops it.
+
+`blockOnMismatch:"TRUE"` withholds **only the compared target** — every other `ocrTargets` entry is
+written normally, and the photo still lands in the widget's own position and still uploads. The
+decision is taken **once**, inside `applyCaptureResult`; it is never re-applied on rebuild, so the
+officer's manual correction always wins. The withheld value is parked on
+`OcrCaptureEntry.compareRead` purely so `{value}` can still name it.
+
+**A block is never silent, and never a brick.** Two further terms gate the withhold, both evaluated
+once inside `applyCaptureResult`:
+
+1. **At least one of `text[5+n]` / `text[6+n]` must be non-blank.** With both blank there is nothing
+   to show — no banner (the render is gated on the SAME term), no chip (a withheld target never
+   enters `written`) and no `text[3]` (that line needs a capture that read *nothing*) — so the
+   officer's serial would vanish with no reason and no instruction. Blank segments therefore behave
+   exactly like `blockOnMismatch:"FALSE"`: the value is written, nothing renders, no data is lost.
+2. **The compared target must be operator-editable.** With `isEnabled:"FALSE"` on `ocrTargets[0]`
+   the one action that clears the gate — typing the right serial — is impossible, so the field would
+   stay permanently empty and a legitimately replaced unit could never be recorded. The card still
+   WARNS (the banner renders normally); only the block is withheld. Same doctrine as `DIGIT_PAD`'s
+   `serialSourceEnabled`.
+
+**Fail-open by design (ratified).** No doc, no snapshot, no alias on the unit, an unresolvable
+`search` — all mean silence, never a block. `DIGIT_PAD`'s `blockOnSerialMismatch` remains the hard
+save gate; this card is the early, in-context warning. A unit whose reference doc genuinely does
+not exist must never end up with a field the officer cannot fill.
+
+**Reactivity.** The verdict is DERIVED on every build, never stored: that is what makes a manual
+correction re-compare live and what lets a doc that lands after the photo raise the warning with no
+second capture. A `TextEditingController` listener on the compared slot supplies the rebuild
+(nothing else does — `ocrWriteToPosition` and `otq_txf_2` repaint only their own
+`'$scrName-$pos'` id). It is separate from, and must not be merged with, the one-shot
+`metaTargets` edit-watch.
+
+> ⚠ **`compareField` means something else on `DIGIT_PAD`.** There it is the previous-reading
+> NUMERIC field (`pv`); here it is the SERIAL field (`msn`). Component config is per-component so
+> there is no runtime collision, but MeterRead carries both widgets — do not copy the value across.
+
 ### Divergence from the dev spec: badge placement
 
 Dev spec §4a draws the `text[4]` "from photo" badge **inside the TARGET field**. This implementation renders it as a chip on the OCR widget instead: injecting a badge into a sibling `txf`'s `InputDecoration` would mean editing `otq_txf_2.dart`, a deferred refactor. Raise it with the spec owner if the in-field badge is load-bearing.
@@ -240,14 +317,16 @@ In `GET_IMAGES`, `both` is currently dead config (anything ≠ `gallery` is trea
 
 Covered:
 
-- [test/ocr_capture_support_test.dart](../../test/ocr_capture_support_test.dart) — 57 pure-logic tests: seed normalisation, config parsing, alignment/length guards, number and date normalisation, candidate selection, geometry, the two `compute()` entry points' fail-open behaviour, sibling lookup and the cross-position write. Each test names the production change that turns it RED.
-- [test/ocr_capture_widget_test.dart](../../test/ocr_capture_widget_test.dart) — 8 pump tests: label/hint slot routing, blank-slot suppression, `isEnabled`, the failure banner, the badge chip, the `"null"` seed normalisation, a missing position, and the §2.5 reset regression (`clearAll()` must repaint back to the empty state).
+- [test/ocr_capture_support_test.dart](../../test/ocr_capture_support_test.dart) — 62 pure-logic tests: seed normalisation, config parsing, alignment/length guards, number and date normalisation, candidate selection, geometry, the two `compute()` entry points' fail-open behaviour, sibling lookup, the cross-position write, and the serial banner's `{value}`/`{expected}` filler. Each test names the production change that turns it RED.
+- [test/ocr_capture_widget_test.dart](../../test/ocr_capture_widget_test.dart) — 27 pump tests: label/hint slot routing, blank-slot suppression, `isEnabled`, the failure banner, the badge chip, the `"null"` seed normalisation, a missing position, the §2.5 reset regression (`clearAll()` must repaint back to the empty state), and fourteen for the serial compare — zero-config regression, mismatch warning, the `ok` tick, `blockOnMismatch` scoping, a withheld gate the officer clears by TYPING, live re-compare on a manual correction, a late-landing doc, `missing` staying silent, the `"null"` slot seed, `search` doc selection, a reference field with no usable serial (absent, then the literal `"null"`), a lean tenant `text` whose new segments are off the end of the ◆-list, a `TRUE` block with no message segments still writing the value, and a disabled compared target that warns without withholding.
 
 **Not covered, and why:**
 
 - **The native ML Kit side.** `TextRecognizer.processImage` is a MethodChannel; under `flutter test` it raises `MissingPluginException`. **No test in this repo says anything about the native side** — that is device QA.
 - `ocrFlattenElements` — needs ML Kit types; it is a dumb 3-loop mapper with no decision in it.
 - The camera preview, the guide overlay paint, `OcrTapScreen` with a real photo, and the real Storage upload.
+- **`_deletePhoto` clearing the parked read.** Reaching it needs a filled zone, a tap on the ×, and a
+  withheld compared slot in the same fixture; the one-line reset is asserted by nobody. Owed.
 
 The accuracy harness for `auto` is a separate entrypoint, [lib/dev/ocr_spike_main.dart](../../lib/dev/ocr_spike_main.dart) (`flutter run -t lib/dev/ocr_spike_main.dart`), NOT a `flutter test` — for the same MethodChannel reason. Nothing imports it, so `flutter build` (which targets `lib/main.dart`) tree-shakes it out of every release artifact. It gates `auto` TUNING only; it does not gate shipping the widget, and `tap` is unaffected by 7-segment accuracy.
 
@@ -272,3 +351,4 @@ That is the **BUNDLED** artifact — it ships `jni/<abi>/libmlkit_google_ocr_pip
 - [otq_txf_2.md](otq_txf_2.md) — the usual target widget; its `variant:"date"` branch defines the epoch-millis contract above
 - [group_picker.md](group_picker.md) — the `NavPolicy.all` + `resetRev` reset precedent this widget copies
 - [signature_pad.md](signature_pad.md) — the `NavPolicy.screen` precedent that deliberately does NOT apply here
+- [digit_pad.md](digit_pad.md) — the SECOND layer of the serial check: it owns `missing`, owns the save gate (`blockOnSerialMismatch`), and exports the one comparison rule (`digitPadSerialState`) this widget reuses

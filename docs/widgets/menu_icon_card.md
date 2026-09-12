@@ -162,3 +162,27 @@ per-navigation clear would mean the badge never zeroes.
 Known limitation: `subscribeToMapCollection` has no unsubscribe API and the
 subscription code is deliberately shared, so a badged grid item subscribes for
 the app's lifetime. Do not put a badge on many menus without measuring.
+
+## v6 attendance tile
+
+`menuIconCard(variant: "v6", ...)` leaves the card entirely and draws the
+Vertika v6 method tile (soft tinted background, no border, icon + label +
+caption). The block layout helper `attendanceBlockV6` and the palette live in
+the same file. Every one of the eight classic call sites omits the new
+parameters and renders byte for byte as before. Contract:
+[attendance_qr_selfie_gps_verify.md](attendance_qr_selfie_gps_verify.md).
+
+## v6 shortcut grid tile
+
+`menuIconCard(variant: "v6", quick: true)` draws the v6 `.quick` tile: a 48 dp
+soft icon square (radius 14, tenant-primary tint) with the label under it at
+12/600, max 2 lines, centred — no card, no border. The icon is the sheet's own
+PNG at 24 dp. A badge hangs off the square, not the cell.
+
+`variant: "v6"` WITHOUT `quick` is the attendance method tile instead; the two
+shapes are not interchangeable.
+
+`kQuickTileHeight` (92) is exported so the `hgr` branch can derive
+`childAspectRatio` from the real cell width instead of guessing a ratio.
+Contract: [attendance_qr_selfie_gps_verify.md](attendance_qr_selfie_gps_verify.md).
+Locked by `test/quick_grid_v6_test.dart`.

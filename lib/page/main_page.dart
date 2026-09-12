@@ -495,7 +495,16 @@ class MainPageState extends State<MainPage> {
                   appBar: byPass > 0
                       ? null
                       : AppBar(
+                    // Already tracks the tenant's `primaryColor`:
+                    // vertriz_app.dart fills ThemeData.primaryColor from
+                    // themeColor('primaryColor', ...), so there is nothing to
+                    // re-plumb here -- only the v4 surface treatment.
                     backgroundColor: Theme.of(context).primaryColor,
+                    foregroundColor: Colors.white,
+                    // v4 puts no shadow on the bar; M2 defaults to elevation 4
+                    // and lifts again on scroll.
+                    elevation: 0,
+                    scrolledUnderElevation: 0,
                     // Chevron sits tight to the title (mockup). The default
                     // 16dp middle spacing reads as a hole next to a thin icon.
                     titleSpacing: 4,

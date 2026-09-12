@@ -30,6 +30,7 @@ import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart' show compute, visibleForTesting;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart'; // SchedulerPhase
 import 'package:get/get.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:image_picker/image_picker.dart';
@@ -37,12 +38,16 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../api.dart';
+import '../firestore_repository/table_repository.dart'; // subscribeToMapCollection
 import '../global.dart';
 import '../global2.dart';
 import '../model/input_controller.dart';
 import '../screen_session.dart';
 import '../sdui_spec.dart';
+import 'digit_pad_support.dart'; // digitPadSerialState -- ONE serial rule
+import 'driver_home_support.dart'; // resolveAppVid, filterDriverHomeDocs
 import 'ocr_capture_support.dart';
+import 'panel_card_support.dart'; // TablePath, parseTablePath
 import 'photo_camera.dart';
 
 /// Flatten a ML Kit result to plain [OcrElement]s.
@@ -112,6 +117,15 @@ class OcrCaptureEntry {
 
   /// One-shot: the agent has edited an OCR-written field.
   bool edited = false;
+
+  /// The serial the LAST capture read for the compared target ('' when it read
+  /// nothing for it, or when the compare is not configured).
+  ///
+  /// Parked here and not in a static, so clearState/clearAll wipe it with the
+  /// rest of the capture state on navigation. It exists for ONE reason: with
+  /// `blockOnMismatch:"TRUE"` the value never reaches the slot, and `{value}`
+  /// in the warning still has to name what the photo actually said.
+  String compareRead = '';
 }
 
 class OcrCapture extends StatefulWidget {
@@ -206,6 +220,16 @@ class OcrCaptureState extends State<OcrCapture> {
   static const Color _accent = Color(0xFF3B82F6);
   static const Color _danger = Color(0xFFDC2626);
 
+  /// Banner ink. NOT _danger: measured 4.41:1 on the _dangerBg tint below,
+  /// which fails WCAG AA for 12sp body text. This one measures 5.91:1.
+  static const Color _dangerInk = Color(0xFFB91C1C);
+  static const Color _dangerBg = Color(0xFFFEF2F2);
+  static const Color _dangerBorder = Color(0xFFFECACA);
+
+  /// D5's check. green-700, 4.61:1 on the chip's blue-50 fill (green-600 is
+  /// 3.03:1 -- over the 3:1 non-text bar, but with no margin).
+  static const Color _okInk = Color(0xFF15803D);
+
   late final SduiSpec _spec;
   late final int? _position;
   late final String _variant;
@@ -222,6 +246,19 @@ class OcrCaptureState extends State<OcrCapture> {
   late final int _uploadQuality;
   late final double _previewSize;
   late final String _lens;
+
+  /// Doc field carrying the reference serial (`msn` on a meter). BLANK = the
+  /// whole compare is off: no subscription, no fetch, nothing rendered, and the
+  /// values written exactly as before.
+  ///
+  /// Read with NO SduiSpec default on purpose. `str(key, def)` returns `def`
+  /// for an absent key, a blank cell AND a whitespace-only cell alike, so a
+  /// DEFAULTED key can never be blank and every `.isEmpty` guard on it would be
+  /// dead code that is always false.
+  late final String _compareField;
+
+  /// `TRUE` = a mismatching read is not handed to the compared target.
+  late final bool _blockOnMismatch;
 
   final Map<int, VoidCallback> _listeners = <int, VoidCallback>{};
   bool _busy = false;
@@ -252,9 +289,17 @@ class OcrCaptureState extends State<OcrCapture> {
     _uploadQuality = ip.quality;
     _previewSize = _spec.intOr('previewSize', 120).toDouble();
     _lens = _spec.intOr('camera', 1) == 0 ? 'front' : 'back';
+    // ── serial compare (ocr-serial-instant-check) ──
+    _compareField = _spec.str('compareField');
+    _blockOnMismatch = _spec.str('blockOnMismatch').toUpperCase() == 'TRUE';
 
     final int? position = _position;
     if (position != null) {
+      // INSIDE the position guard: build() bails to the "position missing" text
+      // without one, so a misconfigured component would otherwise open a
+      // Firestore listener whose result it can never render (code-review-r1
+      // I-6).
+      _subscribe();
       txfControllerCheck(widget.scrName, position);
       // Show a server-supplied currentValue on first paint. buildDisplayComponent
       // seeds finalData/initialValue but never touches controller.text.
@@ -277,7 +322,236 @@ class OcrCaptureState extends State<OcrCapture> {
     // ★ A leaked listener on a SHARED TextEditingController outlives this
     // widget and keeps flipping a meta column on a screen that no longer exists.
     _detachListeners();
+    _detachCompareWatch();
     super.dispose();
+  }
+
+  // ── reference doc for the serial compare ────────────────────────────────
+  //
+  // Copied SHAPE, never the RULE, from digit_pad.dart: parseTablePath FIRST and
+  // resolveAppVid SECOND. resolveAppVid falls through to getTableVid, which
+  // reads the `late` global appCodeController and throws
+  // LateInitializationError outside globalInit -- short-circuiting on an empty
+  // docId keeps a table-less component (and every widget test) away from it.
+  //
+  // FAIL OPEN throughout: no doc -> no verdict -> no warning, never an error
+  // and never a blocked field. That is the RATIFIED product decision (spec 10
+  // "Not Doing": digitPad stays the hard gate, the officer always wins), not an
+  // oversight -- do not "fix" it into a fail-closed gate.
+
+  /// mapTableContent key; '' when the compare is not configured.
+  String _code = '';
+
+  void _subscribe() {
+    // Zero-config regression (acceptance 11 line 1): with no compareField this
+    // widget must not subscribe, must not fetch and must render nothing new.
+    if (_compareField.isEmpty) return;
+    try {
+      final TablePath tp = parseTablePath(_spec.str('table'));
+      if (tp.tableDocId.isEmpty) return;
+      final String appVid = resolveAppVid(widget.component);
+      if (appVid.isEmpty) return;
+      // vid-scoped: mapTableContent keys omit the vid, so another tenant's same
+      // docId/subColl would dedup our stream away.
+      _code = '$appVid/${tp.tableDocId}/${tp.subColl}';
+      subscribeToMapCollection(appVid, tp.tableDocId, tp.subColl, _code);
+    } catch (e) {
+      devPrint('OCR_CAPTURE subscribe: $e');
+      _code = '';
+    }
+  }
+
+  /// The reference docs. Called from _content, i.e. INSIDE the Obx -- that read
+  /// is what makes a late-landing snapshot repaint this card without a second
+  /// capture (D3).
+  List<Map<String, dynamic>> _docs() {
+    // Not configured: read NOTHING. Deliberately unlike digit_pad, which reads
+    // mapTableContent[''] -- a key its own tests seed.
+    if (_code.isEmpty) return const <Map<String, dynamic>>[];
+    // mapTableContent is dynamic-sourced: build the typed list explicitly. A
+    // `.map().toList()` off a dynamic infers List<dynamic> at runtime and fails
+    // to assign.
+    final List<Map<String, dynamic>> all = List<Map<String, dynamic>>.from(
+        mapTableContent[_code] ?? const <Map<String, dynamic>>[]);
+    // `search` is read RAW, not through SduiSpec.str: filterDriverHomeDocs owns
+    // the autheniumDecode (step 1 of its 4-step pipeline) and reading it decoded
+    // here would decode twice.
+    final String rawSearch =
+        (widget.component['search'] ?? '').toString().trim();
+    if (rawSearch.isEmpty) return all;
+    try {
+      return filterDriverHomeDocs(all, rawSearch, widget.scrName);
+    } catch (e) {
+      devPrint('OCR_CAPTURE search: $e');
+      return const <Map<String, dynamic>>[];
+    }
+  }
+
+  /// D2: the compared value is the one written to `ocrTargets[0]`. There is NO
+  /// separate config key for it -- the spec never named one, and inventing an
+  /// operator-facing name is how a previous round shipped permanently dead
+  /// config.
+  int? get _compareTarget =>
+      (_compareField.isEmpty || _targets.isEmpty) ? null : _targets[0];
+
+  /// Whether this card can say WHY a serial was rejected: at least one of the
+  /// two ◆-segments the banner renders is non-blank.
+  ///
+  /// The banner AND the withhold both hang off this ONE term, so they cannot
+  /// drift apart. A block with nothing to render would empty the officer's
+  /// serial field with no reason and no instruction: showCmp is false, the
+  /// withheld target is deliberately absent from entry.written so the chip loop
+  /// draws nothing for it either, and text[3] stays quiet because a fill DID
+  /// exist. Blank segments therefore mean this whole line is OFF -- the same
+  /// ratified "a blank segment renders nothing" reading every other text slot
+  /// gets, and it loses no data (code-review-r1 C-1).
+  bool get _cmpVoiced =>
+      _spec.text(5 + _targets.length).trim().isNotEmpty ||
+      _spec.text(6 + _targets.length).trim().isNotEmpty;
+
+  /// The serial RECORDED on the reference doc. '' when the compare is off, when
+  /// the snapshot has not landed yet, and when the unit has no alias (spec 4.5)
+  /// -- all three then answer `off` through the ONE rule below, with no extra
+  /// branch to keep in sync.
+  String _recordedSerial() {
+    if (_compareField.isEmpty) return '';
+    final List<Map<String, dynamic>> docs = _docs();
+    if (docs.isEmpty) return '';
+    // Firestore values are dynamic and flip String/num per tenant: stringify,
+    // never cast.
+    //
+    // Seed-normalised, unlike the digit_pad twin: digitPadSerialState runs
+    // digitPadNormalizeSeed on its `read` side ONLY, so a doc field literally
+    // holding the string "null" -- getInitialValue's seed for an absent value,
+    // which has reached Firestore through a form slot before -- survives
+    // digitPadNormalizeSerial as "NULL" and warns about a meter that simply has
+    // no serial on file. The `?? ''` catches a Dart null and nothing else.
+    // Fixing it once inside digitPadSerialState is the right shape, but
+    // digit_pad is out of this plan's scope, so the two sides now disagree on
+    // exactly that one input: this card goes silent, digitPad still reports a
+    // mismatch (code-review-r1 W-1, owed as a separate ticket).
+    return digitPadNormalizeSeed(
+        (docs.first[_compareField] ?? '').toString().trim());
+  }
+
+  /// The live verdict for THIS build.
+  ///
+  /// DERIVED every build, never latched. That is what makes a manual correction
+  /// re-compare live (spec 4.6) and what lets a doc that lands AFTER the photo
+  /// surface the warning with no second capture (D3). A stored verdict would go
+  /// stale in both directions.
+  ///
+  /// The comparison rule itself is digitPadSerialState -- the SAME function
+  /// digitPad and the CF use. Spec 2 and 10: one rule, not a second one.
+  ({DigitPadSerialState state, String read, String recorded}) _compareNow(
+      OcrCaptureEntry? entry) {
+    final int? target = _compareTarget;
+    if (target == null) {
+      return (state: DigitPadSerialState.off, read: '', recorded: '');
+    }
+    final String recorded = _recordedSerial();
+    final String slot = txfController[widget.scrName]?[target]?.finalData ?? '';
+    // The SLOT wins whenever it holds something -- the officer's own typing is
+    // the truth, and a parked read must never outrank it. The park is the
+    // fallback for exactly one situation: blockOnMismatch withheld the value,
+    // so the slot is empty and `{value}` would have nothing to name.
+    //
+    // Emptiness runs through the repo's sentinel-aware pair: '', 'null' and
+    // '--' all mean empty here and a bare .isEmpty catches only the first.
+    final String read =
+        digitPadNormalizeSerial(digitPadNormalizeSeed(slot)).isEmpty
+            ? entry?.compareRead ?? ''
+            : slot;
+    return (
+      state: digitPadSerialState(recorded: recorded, read: read),
+      read: read,
+      recorded: recorded,
+    );
+  }
+
+  // ── the compared target is an INPUT slot once we have written it (4.6) ───
+  //
+  // Nothing else rebuilds this widget when a SIBLING slot's text changes:
+  // ocrWriteToPosition and otq_txf_2 each repaint only their OWN
+  // '$scrName-$pos' id, and our GetBuilder id is our own. Without this listener
+  // the officer corrects the serial by hand and the warning never clears.
+  //
+  // This is NOT _attachEditWatch. That one is a ONE-SHOT provenance watch that
+  // detaches itself after the first edit; this one has to survive every edit.
+  // Two listeners on one controller is fine -- different callbacks, different
+  // lifetimes. Do not merge them.
+
+  /// The controller we are currently listening to, held by REFERENCE.
+  ///
+  /// ★ Held, never re-looked-up at detach time: buildPage(clear:true) re-mints
+  /// txfController[scrName], so the map entry at dispose() time can be a
+  /// DIFFERENT controller and the listener would survive on the old one.
+  TextEditingController? _compareCtl;
+  bool _compareDirty = false;
+  bool _watchPending = false;
+
+  /// Attach AFTER the frame: the compared component may sit anywhere in the
+  /// page's `children`, so its InputController may not exist while we build.
+  /// Called from _content, so we are always already inside a frame -- which is
+  /// why addPostFrameCallback (which does NOT schedule one) is enough here.
+  void _scheduleCompareWatch() {
+    if (_watchPending || _compareTarget == null) return;
+    _watchPending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _watchPending = false;
+      if (!mounted) return;
+      _ensureCompareWatch();
+    });
+  }
+
+  void _ensureCompareWatch() {
+    final int? target = _compareTarget;
+    if (target == null) return;
+    final InputController? ic = txfController[widget.scrName]?[target];
+    // Slot not minted yet: the next build's post-frame tries again. Do NOT
+    // txfControllerCheck it into existence here -- buildDisplayComponent owns
+    // the seeding of initialValue/isEnabled for that slot.
+    if (ic == null) return;
+    if (identical(_compareCtl, ic.controller)) return;
+    _detachCompareWatch();
+    _compareCtl = ic.controller;
+    ic.controller.addListener(_onCompareChanged);
+  }
+
+  void _detachCompareWatch() {
+    final TextEditingController? c = _compareCtl;
+    _compareCtl = null;
+    if (c == null) return;
+    try {
+      // removeListener is documented safe on an already-disposed ChangeNotifier
+      // ("allowed to be called on disposed instances for usability reasons").
+      c.removeListener(_onCompareChanged);
+    } catch (e) {
+      devPrint('OCR_CAPTURE compare watch detach: $e');
+    }
+  }
+
+  /// The compared slot changed -- rebuild so _content re-derives the verdict.
+  ///
+  /// ★ Deferred ONLY during SchedulerPhase.persistentCallbacks: marking an
+  /// already-built element dirty inside the build phase is a "setState() called
+  /// during build" assertion. Every other phase is safe, and setState is what
+  /// SCHEDULES the frame -- addPostFrameCallback only appends to a list, so
+  /// deferring unconditionally would DROP the rebuild at idle, which is the
+  /// normal case here (a keystroke callback).
+  void _onCompareChanged() {
+    if (!mounted) return;
+    if (WidgetsBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      if (_compareDirty) return;
+      _compareDirty = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _compareDirty = false;
+        if (mounted) setState(() {});
+      });
+      return;
+    }
+    setState(() {});
   }
 
   // ── target writing ──────────────────────────────────────────────────────
@@ -431,11 +705,59 @@ class OcrCaptureState extends State<OcrCapture> {
     entry.written.clear();
     entry.edited = false;
     entry.rawSummary = rawSummary;
+
+    // ── serial compare: the ONE point-in-time decision (D6) ──
+    //
+    // blockOnMismatch is honoured HERE and NOWHERE ELSE. It must never become
+    // "keep the slot cleared while mismatched": that would wipe the officer's
+    // manual correction on every rebuild and produce a gate nobody can clear --
+    // a shape this codebase has already shipped three times. Once withheld, the
+    // officer's typing always wins.
+    final int? cmpTarget = _compareTarget;
+    final OcrFill? cmpFill = cmpTarget == null ? null : fills[cmpTarget];
+    // Parked even when nothing was withheld, and RESET to '' when this capture
+    // read nothing for the compared target -- a stale park must not outlive the
+    // photo that produced it.
+    entry.compareRead = cmpFill?.display ?? '';
+    // ★ Mirrors digitPad's serialSourceEnabled doctrine (digit_pad.dart): the
+    // verdict still computes and the banner still WARNS, but a value is
+    // withheld only when the officer can actually retype it. On an
+    // isEnabled:"FALSE" compared target a withheld serial could never be
+    // entered by the one action that clears the gate -- a brick, and the exact
+    // shape this codebase has shipped three times (code-review-r1 W-2).
+    // Map.[] takes Object?, so a null cmpTarget simply misses and answers
+    // false -- no block, which is where fail-open already points.
+    final bool cmpTargetEnabled =
+        txfController[widget.scrName]?[cmpTarget]?.isEnabled ?? false;
+    final bool withheld = cmpFill != null &&
+        _blockOnMismatch &&
+        // No banner configured, no block: see _cmpVoiced. A silent withhold is
+        // indistinguishable from an OCR failure in the field.
+        _cmpVoiced &&
+        cmpTargetEnabled &&
+        digitPadSerialState(
+              recorded: _recordedSerial(),
+              read: cmpFill.display,
+            ) ==
+            DigitPadSerialState.mismatch;
+
     fills.forEach((int pos, OcrFill f) {
+      // D6: ONLY the compared target is held back. Every other ocrTargets entry
+      // is written normally, and the photo still lands in this widget's own
+      // position and still uploads -- withholding data nobody suspects only
+      // makes the officer retype what was already right.
+      if (withheld && pos == cmpTarget) return;
       ocrWriteToPosition(widget.scrName, pos,
           display: f.display, finalData: f.finalData);
       entry.written[pos] = f.display;
     });
+    if (withheld && cmpTarget != null) {
+      // Spec 4.4, "field seri tetap kosong". Clearing is not cosmetic: a
+      // PREVIOUS capture's matching serial left in the slot would outrank the
+      // parked read in _compareNow and paint a green check over a photo of the
+      // wrong meter.
+      ocrWriteToPosition(widget.scrName, cmpTarget, display: '', finalData: '');
+    }
     entry.failed = fills.isEmpty;
 
     if (fills.isEmpty) {
@@ -637,6 +959,12 @@ class OcrCaptureState extends State<OcrCapture> {
     final OcrCaptureEntry entry = OcrCapture.entryOf(widget.scrName, position);
     entry.photoUrl = '';
     entry.failed = false;
+    // The parked read is the PHOTO's number: with the photo gone the banner must
+    // not keep naming it. entry.written stays (D8 -- the human-approved numbers
+    // survive the photo), so this only silences the case where the compared slot
+    // is empty and the park was the last thing left to compare (code-review-r1
+    // I-4).
+    entry.compareRead = '';
     _detachListeners();
     _setMeta('manual', null);
     ocrWriteToPosition(widget.scrName, position, display: '', finalData: '');
@@ -708,6 +1036,47 @@ class OcrCaptureState extends State<OcrCapture> {
     final String photoUrl = storeUrl.isNotEmpty ? storeUrl : slotUrl;
     final bool hasPhoto = photoUrl.isNotEmpty;
 
+    // ── serial compare (ocr-serial-instant-check) ──
+    // Derived here on EVERY build, never latched. Cheap: one map read plus two
+    // string normalisations, and a no-op when _compareField is blank.
+    _scheduleCompareWatch();
+    final ({DigitPadSerialState state, String read, String recorded}) cmp =
+        _compareNow(entry);
+    final bool cmpOk = cmp.state == DigitPadSerialState.ok;
+    // D4: ONLY `mismatch` warns here. A capture that read nothing already shows
+    // text[3]; a second red line saying the same thing teaches officers to
+    // dismiss both. `missing` stays digitPad's business (its segment 16), which
+    // is the spec's own "dua lapis".
+    final bool cmpMismatch = cmp.state == DigitPadSerialState.mismatch;
+    // D1: anchored to the TARGET COUNT, so these can never collide with the
+    // open-ended chip-label region (text[5..5+n-1], ocrTargetLabels). With one
+    // target that is text[6] and text[7], exactly the spec's example. Both are
+    // blank-tolerant: SduiSpec.text is a length guard, and a blank segment
+    // renders nothing at all -- zero hardcoded Indonesian.
+    final String cmpMessage = cmpMismatch
+        ? ocrFillCompareTokens(
+            _spec.text(5 + _targets.length),
+            <String, String>{'value': cmp.read, 'expected': cmp.recorded},
+          )
+        : '';
+    final String cmpHint = cmpMismatch ? _spec.text(6 + _targets.length) : '';
+    // ONE term, two consumers (see _cmpVoiced): cmpMessage is the token-filled
+    // form of the SAME segment, so this is byte-for-byte the gate the withhold
+    // now applies at capture time.
+    final bool showCmp = cmpMismatch && _cmpVoiced;
+    // D5's tick belongs to the value the PHOTO produced. After a manual
+    // correction the chip still shows what OCR read, and a tick there would
+    // claim the photo agreed with the record when the agreement is the
+    // officer's own typing. Baseline is the one _attachEditWatch already uses:
+    // controller.text against the exact string we wrote.
+    final int? cmpTarget = _compareTarget;
+    final bool cmpTick = cmpOk &&
+        cmpTarget != null &&
+        entry != null &&
+        entry.written.containsKey(cmpTarget) &&
+        (txfController[widget.scrName]?[cmpTarget]?.controller.text ?? '') ==
+            entry.written[cmpTarget];
+
     return Padding(
       padding: pad,
       child: Container(
@@ -752,6 +1121,50 @@ class OcrCaptureState extends State<OcrCapture> {
                 style: const TextStyle(fontSize: 12, color: _danger),
               ),
             ],
+            if (showCmp) ...<Widget>[
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                decoration: BoxDecoration(
+                  color: _dangerBg,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _dangerBorder),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    const Icon(Icons.error_outline, size: 16, color: _dangerInk),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          if (cmpMessage.trim().isNotEmpty)
+                            Text(
+                              cmpMessage,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: _dangerInk,
+                              ),
+                            ),
+                          if (cmpHint.trim().isNotEmpty) ...<Widget>[
+                            if (cmpMessage.trim().isNotEmpty)
+                              const SizedBox(height: 4),
+                            Text(
+                              cmpHint,
+                              style: const TextStyle(fontSize: 12, color: _ink),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             if ((entry?.written.isNotEmpty ?? false)) ...<Widget>[
               const SizedBox(height: 10),
               Wrap(
@@ -768,11 +1181,27 @@ class OcrCaptureState extends State<OcrCapture> {
                           borderRadius: BorderRadius.circular(999),
                           border: Border.all(color: const Color(0xFFBFDBFE)),
                         ),
-                        child: Text(
-                          badge.trim().isEmpty
-                              ? '${ocrTargetLabels(_spec, _targets)[i]}: ${entry.written[_targets[i]]}'
-                              : '$badge · ${ocrTargetLabels(_spec, _targets)[i]}: ${entry.written[_targets[i]]}',
-                          style: const TextStyle(fontSize: 11, color: _ink),
+                        // D5: `ok` is a small check on the chip that already
+                        // exists -- no new widget, no new string, no new
+                        // ◆-slot. Flexible, not a bare Text: a Row lays a
+                        // non-flex child out with UNBOUNDED width, so a long
+                        // chip label that used to soft-wrap would overflow.
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            if (cmpTick && _targets[i] == cmpTarget) ...<Widget>[
+                              const Icon(Icons.check, size: 12, color: _okInk),
+                              const SizedBox(width: 4),
+                            ],
+                            Flexible(
+                              child: Text(
+                                badge.trim().isEmpty
+                                    ? '${ocrTargetLabels(_spec, _targets)[i]}: ${entry.written[_targets[i]]}'
+                                    : '$badge · ${ocrTargetLabels(_spec, _targets)[i]}: ${entry.written[_targets[i]]}',
+                                style: const TextStyle(fontSize: 11, color: _ink),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                 ],
