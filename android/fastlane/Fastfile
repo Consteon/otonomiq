@@ -7,9 +7,15 @@ platform :android do
     package_name = options[:package_name] || "com.autsorz.mobile"
     aab_path = options[:aab_path] || Dir["../../frontez-releases/*.aab"].last || Dir["../build/app/outputs/bundle/release/*.aab"].first
     
-    key_file = ENV["GOOGLE_PLAY_KEY_PATH"] || File.expand_path("~/.fastlane/google-play-key.json")
-    if !File.exist?(key_file) && File.exist?(File.expand_path("google-play-key.json", __dir__))
-      key_file = File.expand_path("google-play-key.json", __dir__)
+    key_file = ENV["GOOGLE_PLAY_KEY_PATH"]
+    if key_file.nil? || !File.exist?(key_file)
+      if File.exist?(File.expand_path("~/.credentials/google-play-key.json"))
+        key_file = File.expand_path("~/.credentials/google-play-key.json")
+      elsif File.exist?(File.expand_path("~/.fastlane/google-play-key.json"))
+        key_file = File.expand_path("~/.fastlane/google-play-key.json")
+      elsif File.exist?(File.expand_path("google-play-key.json", __dir__))
+        key_file = File.expand_path("google-play-key.json", __dir__)
+      end
     end
     
     # Copy AAB to /tmp to avoid Google Drive cloud sync locks or slow I/O buffering during upload

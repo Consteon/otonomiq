@@ -6,8 +6,8 @@ platform :ios do
   lane :beta do
     sh("security unlock-keychain -p '' ~/Library/Keychains/login.keychain-db 2>/dev/null || security unlock-keychain -p '' ~/Library/Keychains/login.keychain 2>/dev/null || true")
     sh("xattr -cr .. 2>/dev/null || true")
-    # Locate any AuthKey_*.p8 file in fastlane directory, ios directory, or unique directory
-    p8_files = Dir["fastlane/AuthKey_*.p8"] + Dir["AuthKey_*.p8"] + Dir["../../unique/*/ios/AuthKey_*.p8"] + Dir["../../unique/autsorz/ios/AuthKey_*.p8"]
+    # Locate any AuthKey_*.p8 file in ~/.credentials, fastlane directory, ios directory, or unique directory
+    p8_files = Dir[File.expand_path("~/.credentials/AuthKey_*.p8")] + Dir["fastlane/AuthKey_*.p8"] + Dir["AuthKey_*.p8"] + Dir["../../unique/*/ios/AuthKey_*.p8"] + Dir["../../unique/autsorz/ios/AuthKey_*.p8"]
     p8_file = p8_files.first ? File.expand_path(p8_files.first) : nil
     key_id = p8_file ? File.basename(p8_file, ".p8").sub("AuthKey_", "") : nil
     issuer_id = ENV["APP_STORE_CONNECT_ISSUER_ID"] || "37e3df4e-280e-4b95-bd06-5d1f88da7828"
