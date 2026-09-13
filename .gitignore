@@ -7,9 +7,21 @@
 /start.sct
 /.agents/
 /skills-lock.json
-/google-play-key.json
-android/fastlane/google-play-key.json
 /.firebaserc
+
+# Security, Certificates, Keys & Secrets (SOC 2 CC6.1 / ISO 27001 A.8.24)
+*.p8
+*.p12
+*.cer
+*.certSigningRequest
+*.keystore
+*.jks
+*.mobileprovision
+google-play-key.json
+*google-play-key*.json
+*telegram.env
+.env*
+key.properties
 
 # Miscellaneous
 *.class
