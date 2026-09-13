@@ -22,14 +22,34 @@ platform :ios do
       )
     end
 
-    # Pre-fetch or generate App Store Provisioning Profile via Fastlane sigh if API key is present
+    # Pre-fetch or generate App Store Provisioning Profile & Certificates via Fastlane
     app_id = CredentialsManager::AppfileConfig.try_fetch_value(:app_identifier)
     team_id = CredentialsManager::AppfileConfig.try_fetch_value(:team_id) || "8376259CR4"
-    if api_key && app_id
+    if p8_file && File.exist?(p8_file) && app_id
       begin
+        require "json"
+        key_json_path = "/tmp/app_store_connect_key.json"
+        File.write(key_json_path, JSON.dump({
+          key_id: key_id,
+          issuer_id: issuer_id,
+          key: File.read(p8_file),
+          duration: 1200,
+          in_house: false
+        }))
+        
+        # Ensure Apple Distribution certificate is present in Keychain
+        begin
+          get_certificates(
+            api_key_path: key_json_path,
+            team_id: team_id
+          )
+        rescue => cert_err
+          UI.important("Certificate check notice: #{cert_err.message}")
+        end
+
         UI.message("Syncing App Store Provisioning Profile for #{app_id} (Team: #{team_id})...")
         get_provisioning_profile(
-          api_key: api_key,
+          api_key_path: key_json_path,
           app_identifier: app_id,
           team_id: team_id
         )
@@ -46,16 +66,17 @@ platform :ios do
     ipa_path = possible_build_dirs.map { |d| Dir["#{d}/ios/ipa/*.ipa"].first }.compact.first
     
     # If no IPA was produced by flutter build ipa (e.g. xcodebuild -exportArchive failed due to missing Xcode GUI accounts),
-    # export the generated archive using xcodebuild with the App Store Connect API Key directly!
+    # export the generated archive using xcodebuild with the local Distribution Certificate & Provisioning Profile!
     if (ipa_path.nil? || !File.exist?(ipa_path))
       archive_path = possible_build_dirs.map { |d| Dir["#{d}/ios/archive/Runner.xcarchive"].first }.compact.first
-      if archive_path && File.exist?(archive_path) && p8_file && File.exist?(p8_file)
-        UI.message("📦 Runner.xcarchive found at #{archive_path}. Exporting IPA with App Store Connect API Key...")
+      if archive_path && File.exist?(archive_path)
+        UI.message("📦 Runner.xcarchive found at #{archive_path}. Exporting IPA with local Distribution Signing...")
         
         real_build_dir = File.dirname(File.dirname(archive_path))
         export_dir = "#{real_build_dir}/ios/ipa"
         FileUtils.mkdir_p(export_dir)
         
+        profile_name = ENV["sigh_#{app_id}_appstore_profile-name"] || "#{app_id} AppStore"
         export_plist_path = "/tmp/ExportOptions_AppStore.plist"
         File.write(export_plist_path, <<~PLIST)
           <?xml version="1.0" encoding="UTF-8"?>
@@ -69,9 +90,14 @@ platform :ios do
               <key>method</key>
               <string>app-store</string>
               <key>signingStyle</key>
-              <string>automatic</string>
+              <string>manual</string>
               <key>teamID</key>
               <string>#{team_id}</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>#{app_id}</key>
+                  <string>#{profile_name}</string>
+              </dict>
               <key>stripSwiftSymbols</key>
               <true/>
               <key>uploadSymbols</key>
@@ -85,11 +111,7 @@ platform :ios do
           "-exportArchive",
           "-archivePath", "\"#{archive_path}\"",
           "-exportPath", "\"#{export_dir}\"",
-          "-exportOptionsPlist", "\"#{export_plist_path}\"",
-          "-allowProvisioningUpdates",
-          "-authenticationKeyPath", "\"#{p8_file}\"",
-          "-authenticationKeyID", "\"#{key_id}\"",
-          "-authenticationKeyIssuerID", "\"#{issuer_id}\""
+          "-exportOptionsPlist", "\"#{export_plist_path}\""
         ].join(" ")
 
         UI.message("Executing: #{export_cmd}")
