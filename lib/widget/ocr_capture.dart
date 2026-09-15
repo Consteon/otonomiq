@@ -265,6 +265,81 @@ class OcrCaptureState extends State<OcrCapture> {
   double _h = 0;
   double _w = 0;
 
+  /// Drop this widget's OWN position from a target list.
+  ///
+  /// Slot [_position] holds the PHOTO URL. Anything else written there replaces
+  /// the evidence with a string `displayImage` reads as a network url -- a
+  /// broken preview on screen, and no photo at all in the submitted record. Not
+  /// hypothetical: `_attachEditWatch` fires `_setMeta('ocr_edit', null)` on the
+  /// first manual correction, so a `metaTargets` pointing here writes the four
+  /// characters `ocr_edit` over the url.
+  ///
+  /// Filtering at PARSE time covers every write site at once -- `_setMeta`, the
+  /// `fills.forEach` loop, the withheld-target clear and `_compareTarget` all
+  /// draw their positions from these two lists and nowhere else.
+  ///
+  /// Cost, on an already-misconfigured sheet only: `_targets` shrinks, so the
+  /// chip labels (`text[5 + i]`) and the compare banner (`text[5 + n]` /
+  /// `text[6 + n]`) shift down one slot. Those come out of the `text` ◆-list,
+  /// which is addressed by ABSOLUTE slot number and cannot be renumbered from
+  /// here. The per-target `ocrPattern` / `ocrType` do NOT shift: they are
+  /// addressed by ordinal, and [_alignToTargets] drops the same ordinals from
+  /// both, so every surviving target keeps the pattern and the type the sheet
+  /// declared for it. Losing the evidence photo is worse than a label shift.
+  List<int> _dropOwnPosition(List<int> raw, String key) {
+    final int? own = _position;
+    if (own == null || !raw.contains(own)) return raw;
+    // Dead SDUI config fails SILENTLY here -- no crash, no analyzer finding.
+    // Name what was dropped or nobody can diagnose it.
+    devPrint(
+      'OCR_CAPTURE: $key drops own position $own '
+      '(that slot holds the photo url)',
+    );
+    return raw.where((int p) => p != own).toList();
+  }
+
+  /// Re-index a per-target config list -- `ocrPattern` or `ocrType` -- the same
+  /// way [_dropOwnPosition] just re-indexed [raw]. Both are addressed by the
+  /// ORDINAL of the target inside `ocrTargets`: auto reads index 0
+  /// (`ocrPickAuto`), the tap screen reads `_active` (`_tapElement`). A dropped
+  /// target must therefore take its pattern and its type with it, or
+  /// `ocrTargets:'4,7'` + `ocrPattern:'A◆B'` + `ocrType:'text◆number'` validates
+  /// the surviving slot 7 with `A` and writes it as `text`. Nothing throws --
+  /// [ocrPatternAt] and [ocrTypeAt] are both length-guarded -- the value just
+  /// silently lands in the wrong shape.
+  ///
+  /// [cfg] is routinely SHORTER than [raw] on a lean sheet. An ordinal past its
+  /// end is simply not carried over, so the result never grows and those two
+  /// accessors keep answering their own default for it -- exactly what they
+  /// answered for that ordinal before the drop.
+  ///
+  /// NO diagnostic here: [_dropOwnPosition] already logged the drop, and the
+  /// own-position fixtures assert that log as an exact ONE-element list.
+  List<String> _alignToTargets(List<int> raw, List<String> cfg) {
+    final int? own = _position;
+    if (own == null || !raw.contains(own)) return cfg;
+    final List<String> out = <String>[];
+    for (int i = 0; i < raw.length; i++) {
+      if (raw[i] != own && i < cfg.length) out.add(cfg[i]);
+    }
+    return out;
+  }
+
+  /// The SINGLE SOURCE OF TRUTH for per-target validation config: the `ocrType`
+  /// and the compiled `ocrPattern` applied to the i-th SURVIVING target.
+  ///
+  /// The auto path below calls this -- do NOT "simplify" it back to two inline
+  /// `ocrTypeAt(_types, 0)` / `ocrPatternAt(_patterns, 0)` calls. The tests can
+  /// only reach this expression (the auto path itself sits behind the camera
+  /// and ML Kit), so an inline copy there would be a SECOND expression that can
+  /// drift away from the pinned one with the suite still green.
+  ///
+  /// `OcrTapScreen` deliberately does not use it: that widget is handed
+  /// `_patterns` / `_types` wholesale and indexes them by its own `_active`
+  /// chip, which [_alignToTargets] already keeps aligned.
+  ({String type, RegExp? pattern}) validationForTarget(int i) =>
+      (type: ocrTypeAt(_types, i), pattern: ocrPatternAt(_patterns, i));
+
   @override
   void initState() {
     super.initState();
@@ -276,10 +351,16 @@ class OcrCaptureState extends State<OcrCapture> {
     _variant = _spec.str('variant', 'auto').toLowerCase() == 'tap'
         ? 'tap'
         : 'auto';
-    _targets = ocrParsePositions(_spec.str('ocrTargets'));
-    _patterns = _spec.list('ocrPattern');
-    _types = _spec.list('ocrType');
-    _metaTargets = ocrParsePositions(_spec.str('metaTargets'));
+    final List<int> rawTargets = ocrParsePositions(_spec.str('ocrTargets'));
+    _targets = _dropOwnPosition(rawTargets, 'ocrTargets');
+    // Same ordinals out of all three lists, or the surviving target is checked
+    // against the dropped one's pattern and normalised as its type.
+    _patterns = _alignToTargets(rawTargets, _spec.list('ocrPattern'));
+    _types = _alignToTargets(rawTargets, _spec.list('ocrType'));
+    _metaTargets = _dropOwnPosition(
+      ocrParsePositions(_spec.str('metaTargets')),
+      'metaTargets',
+    );
     _guide = ocrParseRatio(_spec.str('guide'));
     _maxSide = ocrMaxSideOf(_spec);
     _source = _spec.str('source').toLowerCase();
@@ -876,12 +957,9 @@ class OcrCaptureState extends State<OcrCapture> {
       } else {
         if (_targets.isNotEmpty) {
           final int target = _targets[0]; // spec 3.2: auto uses index 0 only
-          final String type = ocrTypeAt(_types, 0);
-          final OcrFill? pick = ocrPickAuto(
-            els,
-            ocrPatternAt(_patterns, 0),
-            type,
-          );
+          final ({String type, RegExp? pattern}) cfg = validationForTarget(0);
+          final String type = cfg.type;
+          final OcrFill? pick = ocrPickAuto(els, cfg.pattern, type);
           if (pick != null) {
             final ({String display, String finalData})? df = ocrDisplayAndFinal(
               pick.raw,

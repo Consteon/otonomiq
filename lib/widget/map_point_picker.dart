@@ -23,6 +23,21 @@ const double _fallbackLat = -2.5;
 const double _fallbackLng = 118.0;
 const double _fallbackZoom = 5.0;
 
+// Indonesia bounding box. A pasted link whose coordinates fall outside it is
+// rejected (spec §5.3) -- catches foreign links and non-maps URLs that happen
+// to contain two decimal numbers. No config key by design: the spec names none.
+const double _idMinLat = -11.0;
+const double _idMaxLat = 6.0;
+const double _idMinLng = 95.0;
+const double _idMaxLng = 141.0;
+
+// Short-link expansion budget (spec §5.1). _shortLinkTimeout is the TOTAL
+// wall-clock budget for the whole redirect chain, NOT one timeout per hop --
+// see expandMapsShortLink. Per-hop it would allow 3 x 8 = 24 s, which breaks
+// the 8 s promise in the acceptance criteria.
+const int _shortLinkMaxHops = 3;
+const Duration _shortLinkTimeout = Duration(seconds: 8);
+
 // ── Exported pure helpers (tested in test/map_point_picker_test.dart) ─
 
 /// Format lat,lng as a locale-independent string: dot-decimal, 6dp,
@@ -66,6 +81,169 @@ LatLng? parseLatLng(String? value) {
   if (lat == null || lng == null) return null;
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
   return LatLng(lat, lng);
+}
+
+/// Join a reverse-geocoded address and an optional note for `addressPosition`.
+///
+/// Leaves no dangling separator in either direction (spec acceptance item 7):
+/// an empty note yields the bare address -- byte-identical to v1 -- and an
+/// empty address yields the bare note. The separator is U+2014 EM DASH with
+/// one ASCII space on each side; it is not in [forbiddenCharacter], so
+/// stringCleanUp carries it intact all the way to Firestore.
+///
+/// Top-level and exported on purpose: this is the only new business rule in
+/// the note half of the feature, and _writeToController (a State method)
+/// cannot be reached by a test in this repo.
+String joinAddressNote(String address, String note) {
+  if (note.isEmpty) return address;
+  if (address.isEmpty) return note;
+  return '$address — $note';
+}
+
+/// Coordinate patterns for a pasted Google Maps link, most precise first
+/// (spec §5.2). The first pattern that matches wins: an `@lat,lng` pair is the
+/// map viewport, i.e. the screen centre, not the point the customer shared, so
+/// it only runs when nothing better is present.
+///
+/// The `query=` entry is Google's own documented Maps-URLs share format
+/// (`/maps/search/?api=1&query=lat,lng`). It is case-insensitive and accepts
+/// the percent-encoded comma that shape usually carries; it sits below `q=` so
+/// the established priority order is untouched.
+///
+/// The last pattern accepts bare pasted text such as `-6.316754, 106.644907`.
+/// Its `(?:^|\s)` prefix is load-bearing: without it, digits buried in a URL
+/// path (`https://example.com/foo/-6.3,106.6`) would be read as coordinates.
+final List<RegExp> _mapsCoordPatterns = [
+  RegExp(r'!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)'),
+  RegExp(r'[?&]q=(?:loc:)?(-?\d+\.\d+),\s*(-?\d+\.\d+)'),
+  RegExp(
+    r'[?&]query=(-?\d+\.\d+)(?:,|%2C)\s*(-?\d+\.\d+)',
+    caseSensitive: false,
+  ),
+  RegExp(r'/maps/place/(-?\d+\.\d+),(-?\d+\.\d+)'),
+  RegExp(r'@(-?\d+\.\d+),(-?\d+\.\d+)'),
+  RegExp(r'(?:^|\s)(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)'),
+];
+
+/// Extract a coordinate from pasted Google Maps link text, or from bare
+/// "lat, lng" text. Returns null when nothing matches OR when the match falls
+/// outside Indonesia -- the caller shows text segment 12 for both cases.
+///
+/// No Google API is involved: this is pure string work on the link the
+/// customer already shared over WhatsApp (spec §10, zero-cost decision).
+LatLng? extractLatLngFromText(String text) {
+  final s = text.trim();
+  if (s.isEmpty) return null;
+  for (final pattern in _mapsCoordPatterns) {
+    final m = pattern.firstMatch(s);
+    if (m == null) continue;
+    final lat = double.tryParse(m.group(1) ?? '');
+    final lng = double.tryParse(m.group(2) ?? '');
+    if (lat == null || lng == null) return null;
+    if (lat < _idMinLat || lat > _idMaxLat) return null;
+    if (lng < _idMinLng || lng > _idMaxLng) return null;
+    return LatLng(lat, lng);
+  }
+  return null;
+}
+
+/// Hosts whose short links may be expanded by an HTTP GET.
+///
+/// Matched against the PARSED host, never as a substring of the pasted text:
+/// `https://evil.example.com/x?ref=maps.app.goo.gl` carries the allowlisted
+/// name but is not on the allowlisted host, and must never be fetched.
+const Set<String> _shortLinkHosts = {'maps.app.goo.gl', 'goo.gl'};
+
+/// First http(s) URL inside a block of text. Case-insensitive because a pasted
+/// link can arrive upper-cased (`HTTPS://MAPS.APP.GOO.GL/...`).
+final RegExp _urlInText = RegExp(r'https?://\S+', caseSensitive: false);
+
+/// True when [u] is an http(s) URI on an allowlisted Google short-link host.
+///
+/// Applied to the pasted URL AND again before every redirect hop, so a chain
+/// that leaves the allowlist ends there instead of becoming the target of
+/// another GET.
+bool _isAllowedShortLinkHost(Uri u) {
+  if (u.scheme != 'http' && u.scheme != 'https') return false;
+  final host = u.host.toLowerCase();
+  // Uri.tryParse('https://') yields a hostless URI rather than null, so
+  // "it parsed" is not the same as "it is a valid target".
+  if (host.isEmpty || !_shortLinkHosts.contains(host)) return false;
+  // goo.gl is a general-purpose shortener; only its /maps space is ours.
+  if (host == 'goo.gl' && !u.path.toLowerCase().startsWith('/maps')) {
+    return false;
+  }
+  return true;
+}
+
+/// The allowlisted Google short-link URI inside [text], or null.
+///
+/// The URL is pulled out of the surrounding message first, because the
+/// feature's primary input is a whole WhatsApp message -- "Ini lokasi rumah
+/// saya https://maps.app.goo.gl/X" -- and `Uri.tryParse` returns null for that
+/// string as a whole. The bare-coordinate path already tolerates surrounding
+/// prose; this makes the short-link path match it.
+Uri? mapsShortLinkUri(String text) {
+  final match = _urlInText.firstMatch(text);
+  if (match == null) return null;
+  final uri = Uri.tryParse(match.group(0)!);
+  if (uri == null) return null;
+  return _isAllowedShortLinkHost(uri) ? uri : null;
+}
+
+/// Follow a Google Maps short link to the long URL that carries the
+/// coordinates, without downloading a page body.
+///
+/// Takes a [Uri] already vetted by [mapsShortLinkUri] -- no re-parsing of free
+/// text here. Sends GET with automatic redirects OFF and reads the `location`
+/// response header, at most [_shortLinkMaxHops] times, stopping early as soon
+/// as the URL contains coordinates. EVERY hop is host-checked, not just the
+/// first, so the `location` header of one response can never aim the next GET
+/// off the allowlist. The whole chain shares ONE [_shortLinkTimeout] budget,
+/// so the caller's spinner can never outlive it. Returns the last URL reached,
+/// or null on timeout / offline / malformed URL. Every failure mode reaches
+/// the user the same way (text segment 12), so the caller does not need to
+/// tell them apart.
+Future<String?> expandMapsShortLink(Uri url) async {
+  final client = http.Client();
+  // ONE total budget for the whole chain, not one per hop: a per-hop timeout
+  // would let 3 slow hops hold the spinner for 24 s, while §3.1 and manual
+  // check 5 both promise the failure lands within _shortLinkTimeout.
+  final deadline = DateTime.now().add(_shortLinkTimeout);
+  try {
+    Uri current = url;
+    for (int hop = 0; hop < _shortLinkMaxHops; hop++) {
+      final remaining = deadline.difference(DateTime.now());
+      if (remaining <= Duration.zero) return null;
+      // A finalized Request cannot be resent -- build a fresh one per hop.
+      final request = http.Request('GET', current)..followRedirects = false;
+      final response = await client.send(request).timeout(remaining);
+      final location = response.headers['location'];
+      if (location == null || location.isEmpty) {
+        // ponytail: no <meta http-equiv=refresh> parser. If Google starts
+        // serving a consent interstitial here instead of a 30x, add one more
+        // hop that pulls the refresh URL out of the body (spec §12).
+        return current.toString();
+      }
+      final next = current.resolve(location);
+      final nextUrl = next.toString();
+      if (extractLatLngFromText(nextUrl) != null) return nextUrl;
+      // The redirect target is fetched only while it is STILL allowlisted.
+      // Otherwise hand it back and let the caller read coordinates out of it:
+      // the normal Google chain lands on www.google.com, which is a fine
+      // ANSWER but must never become the next GET.
+      if (!_isAllowedShortLinkHost(next)) return nextUrl;
+      current = next;
+    }
+    return current.toString();
+  } catch (_) {
+    // TimeoutException, socket error, FormatException from a malformed URL.
+    return null;
+  } finally {
+    // IOClient.close() force-closes, so the undrained redirect body cannot
+    // hold a socket open. No stream.drain() needed.
+    client.close();
+  }
 }
 
 // ── Nominatim service (private, rate-limited, cached) ────────────────
@@ -219,6 +397,8 @@ class _MapPointPickerState extends State<MapPointPicker> {
   late final double _zoom;
   late final bool _searchEnabled;
   late final String _searchCountry;
+  late final bool _pasteEnabled;
+  late final bool _noteEnabled;
   late final List<String> _texts;
   late final LatLng? _initialCenter;
 
@@ -229,6 +409,20 @@ class _MapPointPickerState extends State<MapPointPicker> {
   String _displayName = '';
   String? _errorText;
   double? _accuracy;
+
+  /// Optional free-text note (gate: `noteEnabled`). It is joined onto the
+  /// address only at write time -- never into [_displayName], which the card
+  /// splits on its first comma (see _primaryName / _secondaryAddress).
+  ///
+  /// The controller is the single source of truth; [_note] reads through it so
+  /// there is no second copy to keep in sync. It is always constructed (even
+  /// when the gate is off) so dispose() has nothing to branch on.
+  late final TextEditingController _noteController;
+
+  /// Gated at the getter, so a stale note left in `stateObject` by an earlier
+  /// config revision cannot leak into the output after `noteEnabled` is
+  /// switched off server-side.
+  String get _note => _noteEnabled ? _noteController.text.trim() : '';
 
   @override
   void initState() {
@@ -245,11 +439,27 @@ class _MapPointPickerState extends State<MapPointPicker> {
             'TRUE') ==
         'TRUE';
     _searchCountry = widget.component['searchCountry']?.toString() ?? '';
+    // Both v2 gates default OFF -- that is what makes a v1 config (no flags,
+    // 10 text segments) render and behave exactly as before. Note the
+    // asymmetry with _searchEnabled above, which defaults to TRUE.
+    _pasteEnabled =
+        widget.component['pasteEnabled']?.toString().toUpperCase() == 'TRUE';
+    _noteEnabled =
+        widget.component['noteEnabled']?.toString().toUpperCase() == 'TRUE';
     _texts = diamondTextToList(widget.component['text'] as String? ?? '');
     _initialCenter = parseLatLng(widget.component['initialCenter']?.toString());
 
+    // Must exist before _restoreFromController(), which writes into it.
+    _noteController = TextEditingController();
+
     // Restore from txfController if a value was previously selected
     _restoreFromController();
+  }
+
+  @override
+  void dispose() {
+    _noteController.dispose();
+    super.dispose();
   }
 
   void _restoreFromController() {
@@ -262,9 +472,14 @@ class _MapPointPickerState extends State<MapPointPicker> {
         _lat = restored.latitude;
         _lng = restored.longitude;
         _state = _PickState.selected;
-        // Recover display name from stateObject (persisted across rebuilds)
+        // Recover display name + note from stateObject (persisted across
+        // rebuilds). The note is NOT parsed back out of addressPosition by
+        // splitting on " -- ": a Nominatim display_name can legitimately
+        // contain an em dash, so that round trip is not safe.
         if (ctrl.stateObject is Map) {
-          _displayName = (ctrl.stateObject as Map)['name']?.toString() ?? '';
+          final st = ctrl.stateObject as Map;
+          _displayName = st['name']?.toString() ?? '';
+          _noteController.text = st['note']?.toString() ?? '';
         }
         if (_displayName.isEmpty) {
           _displayName = formatLatLng(_lat!, _lng!);
@@ -276,6 +491,8 @@ class _MapPointPickerState extends State<MapPointPicker> {
   // ── Write values to txfController ──────────────────────────────────
 
   void _writeToController() {
+    // Early return by design: a note typed before a point is picked simply
+    // waits here, and is joined the moment the point lands.
     if (_lat == null || _lng == null) return;
     final value = formatLatLng(_lat!, _lng!);
 
@@ -284,13 +501,16 @@ class _MapPointPickerState extends State<MapPointPicker> {
       _position,
       widget.scrName,
       value,
-      stateObject: {'name': _displayName},
+      stateObject: {'name': _displayName, 'note': _note},
     );
 
     // Optional auxiliary positions (direct writes, no table/stateObject)
     _writeAux(_latPosition, _lat!.toStringAsFixed(6));
     _writeAux(_lngPosition, _lng!.toStringAsFixed(6));
-    _writeAux(_addressPosition, _displayName);
+    // The note rides on the address slot (spec §2, §8) -- no new DB field.
+    // The four-branch join lives in joinAddressNote (Task 3) so it can be
+    // unit-tested; this method cannot be reached by a test.
+    _writeAux(_addressPosition, joinAddressNote(_displayName, _note));
   }
 
   void _writeAux(int? pos, String value) {
@@ -389,6 +609,7 @@ class _MapPointPickerState extends State<MapPointPicker> {
           zoom: zoom,
           searchEnabled: _searchEnabled,
           searchCountry: _searchCountry,
+          pasteEnabled: _pasteEnabled,
           texts: _texts,
         ),
       ),
@@ -418,6 +639,9 @@ class _MapPointPickerState extends State<MapPointPicker> {
       _errorText = null;
       _state = _PickState.empty;
     });
+    // Hapus is a full field reset: the note goes with the point. A surviving
+    // note would silently re-attach to the next, different point.
+    _noteController.clear();
     // Empty out main + aux slots so submit and restore see no stale value
     _writeAux(_position, '');
     txfController[widget.scrName]?[_position]?.stateObject = null;
@@ -683,6 +907,61 @@ class _MapPointPickerState extends State<MapPointPicker> {
                 ],
               ),
             ],
+
+            // ── Note field (gate: noteEnabled) ─────────────────────
+            // Always visible when enabled, NOT gated on a point being
+            // selected: a note typed first is held in the controller and
+            // picked up when the point lands (_writeToController early-returns
+            // while _lat is null). Requires addressPosition to be configured;
+            // without it the note has nowhere to go.
+            if (_noteEnabled) ...[
+              const SizedBox(height: 14),
+              const Divider(height: 1, color: Color(0xFFE5E7EB)),
+              const SizedBox(height: 12),
+              Text(
+                mapPickerSlot(_texts, 13, 'Catatan (opsional)'),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF6B7280),
+                ),
+              ),
+              const SizedBox(height: 6),
+              TextField(
+                controller: _noteController,
+                onChanged: (_) => _writeToController(),
+                textCapitalization: TextCapitalization.sentences,
+                minLines: 1,
+                maxLines: 2,
+                style: const TextStyle(fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: mapPickerSlot(_texts, 14, ''),
+                  hintStyle: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF9CA3AF),
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Color(0xFF3B82F6)),
+                  ),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  filled: true,
+                  fillColor: const Color(0xFFF9FAFB),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -726,6 +1005,7 @@ class _MapPointPickerScreen extends StatefulWidget {
   final double zoom;
   final bool searchEnabled;
   final String searchCountry;
+  final bool pasteEnabled;
   final List<String> texts;
 
   const _MapPointPickerScreen({
@@ -733,6 +1013,7 @@ class _MapPointPickerScreen extends StatefulWidget {
     required this.zoom,
     required this.searchEnabled,
     required this.searchCountry,
+    required this.pasteEnabled,
     required this.texts,
   });
 
@@ -743,6 +1024,7 @@ class _MapPointPickerScreen extends StatefulWidget {
 class _MapPointPickerScreenState extends State<_MapPointPickerScreen> {
   late final MapController _mapController;
   late final TextEditingController _searchController;
+  late final TextEditingController _pasteController;
   Timer? _idleTimer;
   Timer? _searchDebounce;
 
@@ -755,12 +1037,32 @@ class _MapPointPickerScreenState extends State<_MapPointPickerScreen> {
   bool _showResults = false;
   Offset _pinDragOffset = Offset.zero;
   bool _isDraggingPin = false;
+  bool _isExpandingLink = false;
+
+  // ── Floating-overlay geometry ──────────────────────────────────────
+  // The top bar starts at y=8 and each floating row is ~44 high with an 8 px
+  // gap -- that is where v1's hard-coded `top: 60` for the search results came
+  // from, and _resultsTop reproduces exactly 60 when pasteEnabled is false.
+  // ponytail: hand-tuned, not measured. If the paste row grows, bump
+  // _pasteRowHeight; being a few px off only shifts a floating card.
+  static const double _barTop = 8;
+  static const double _barRowHeight = 44;
+  static const double _barGap = 8;
+  static const double _pasteRowHeight = 52;
+
+  double get _pasteRowTop => _barTop + _barRowHeight + _barGap; // 60
+  double get _resultsTop => widget.pasteEnabled
+      ? _pasteRowTop +
+            _pasteRowHeight +
+            _barGap // 120
+      : _barTop + _barRowHeight + _barGap; // 60 -- v1, unchanged
 
   @override
   void initState() {
     super.initState();
     _mapController = MapController();
     _searchController = TextEditingController();
+    _pasteController = TextEditingController();
     _centerLat = widget.initialCenter.latitude;
     _centerLng = widget.initialCenter.longitude;
     // Initial reverse-geocode for the starting center
@@ -771,6 +1073,7 @@ class _MapPointPickerScreenState extends State<_MapPointPickerScreen> {
   void dispose() {
     _mapController.dispose();
     _searchController.dispose();
+    _pasteController.dispose();
     _idleTimer?.cancel();
     _searchDebounce?.cancel();
     super.dispose();
@@ -855,6 +1158,19 @@ class _MapPointPickerScreenState extends State<_MapPointPickerScreen> {
 
   void _onSearchSubmitted(String query) {
     _searchDebounce?.cancel();
+    // The paste field sits directly under this one, so admins do paste the
+    // WhatsApp link into the wrong box. Try coordinates first, fall through to
+    // Nominatim otherwise. Gated on pasteEnabled so a v1 config (no flags, no
+    // paste field) behaves exactly as before -- spec acceptance item 8.
+    // Extraction only, no network hop: a short link typed here still searches.
+    if (widget.pasteEnabled) {
+      final pasted = extractLatLngFromText(query);
+      if (pasted != null) {
+        _searchController.clear();
+        _jumpToPastedPoint(pasted);
+        return;
+      }
+    }
     _doSearch(query);
   }
 
@@ -884,6 +1200,64 @@ class _MapPointPickerScreenState extends State<_MapPointPickerScreen> {
     });
     _mapController.move(LatLng(result.lat, result.lng), widget.zoom);
     FocusScope.of(context).unfocus();
+  }
+
+  // ── Paste a Google Maps link ───────────────────────────────────────
+
+  /// Read coordinates out of pasted text, expanding a Google short link first
+  /// when the text needs it.
+  ///
+  /// Every failure mode -- no coordinates, coordinates outside Indonesia,
+  /// timeout, offline, malformed URL -- lands on the same segment-12 SnackBar
+  /// and leaves the picker fully usable by hand (spec acceptance items 4, 5).
+  Future<void> _onPasteSubmitted(String raw) async {
+    final text = raw.trim();
+    if (text.isEmpty || _isExpandingLink) return;
+
+    LatLng? point = extractLatLngFromText(text);
+
+    // Host-vetted once here; expandMapsShortLink re-checks every hop.
+    final shortLink = point == null ? mapsShortLinkUri(text) : null;
+    if (shortLink != null) {
+      setState(() => _isExpandingLink = true);
+      final expanded = await expandMapsShortLink(shortLink);
+      if (!mounted) return;
+      setState(() => _isExpandingLink = false);
+      if (expanded != null) point = extractLatLngFromText(expanded);
+    }
+
+    if (!mounted) return;
+    if (point == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            mapPickerSlot(widget.texts, 12, 'Link tidak memuat koordinat'),
+          ),
+        ),
+      );
+      return;
+    }
+    _pasteController.clear();
+    _jumpToPastedPoint(point);
+  }
+
+  /// Move the map -- and therefore the selected point, since the invariant is
+  /// "selection == map centre" -- to [point].
+  ///
+  /// MapController.move() does NOT emit MapEventMoveEnd: flutter_map 8.3.0
+  /// fires that only from gesture handling (MapControllerImpl.moveEnded), so
+  /// the 800 ms idle reverse-geocode in _onMapEvent never runs for a
+  /// programmatic move. Call it explicitly, exactly as _jumpToGps does.
+  void _jumpToPastedPoint(LatLng point) {
+    _mapController.move(point, widget.zoom);
+    setState(() {
+      _centerLat = point.latitude;
+      _centerLng = point.longitude;
+      _searchResults = [];
+      _showResults = false;
+    });
+    FocusScope.of(context).unfocus();
+    _reverseGeocode(point.latitude, point.longitude);
   }
 
   // ── GPS jump ───────────────────────────────────────────────────────
@@ -1096,10 +1470,87 @@ class _MapPointPickerScreenState extends State<_MapPointPickerScreen> {
                       ],
                     ),
                   ),
-                  // Search results overlay (below top bar)
+                  // ── Paste-a-Maps-link field (gate: pasteEnabled) ──
+                  // Own Positioned rather than a second row inside the top
+                  // bar: that leaves v1's Row untouched, and the only v1 line
+                  // affected is the results offset below, which now derives
+                  // from _resultsTop instead of a literal 60.
+                  if (widget.pasteEnabled)
+                    Positioned(
+                      top: _pasteRowTop,
+                      left: 64,
+                      right: 12,
+                      child: Material(
+                        elevation: 3,
+                        shadowColor: Colors.black26,
+                        borderRadius: BorderRadius.circular(12),
+                        child: TextField(
+                          controller: _pasteController,
+                          onSubmitted: _onPasteSubmitted,
+                          textInputAction: TextInputAction.go,
+                          keyboardType: TextInputType.url,
+                          style: const TextStyle(fontSize: 13),
+                          decoration: InputDecoration(
+                            labelText: mapPickerSlot(
+                              widget.texts,
+                              10,
+                              'Tempel Link Lokasi',
+                            ),
+                            labelStyle: const TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFF6B7280),
+                            ),
+                            hintText: mapPickerSlot(widget.texts, 11, ''),
+                            hintStyle: const TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFF9CA3AF),
+                            ),
+                            prefixIcon: const Icon(
+                              Icons.content_paste,
+                              size: 18,
+                              color: Color(0xFF6B7280),
+                            ),
+                            suffixIcon: _isExpandingLink
+                                ? const Padding(
+                                    padding: EdgeInsets.all(12),
+                                    child: SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  )
+                                : IconButton(
+                                    icon: const Icon(
+                                      Icons.arrow_forward,
+                                      size: 18,
+                                      color: Color(0xFF3B82F6),
+                                    ),
+                                    onPressed: () => _onPasteSubmitted(
+                                      _pasteController.text,
+                                    ),
+                                  ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            filled: true,
+                            fillColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  // Search results overlay (below the top bar, and below the
+                  // paste row when that is on)
                   if (_showResults && _searchResults.isNotEmpty)
                     Positioned(
-                      top: 60,
+                      top: _resultsTop,
                       left: 64,
                       right: 12,
                       child: Material(

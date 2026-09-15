@@ -458,9 +458,9 @@ class FtzCheckerState extends State<FtzChecker> {
             eventContent += '${position!.latitude.toString()}${separator[1]}';
             eventContent += '${position!.longitude.toString()}${separator[1]}';
             eventContent +=
-                '${placeMark.isNotEmpty ? placeMark[0].isoCountryCode! : invalidCountry}${separator[1]}';
+                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].isoCountryCode! : invalidCountry)}${separator[1]}';
             eventContent +=
-                '${placeMark.isNotEmpty ? placeMark[0].postalCode! : ""}${separator[1]}';
+                '${cleanupString(placeMark.isNotEmpty ? placeMark[0].postalCode! : "")}${separator[1]}';
             eventContent +=
                 '${cleanupString(placeMark.isNotEmpty ? placeMark[0].administrativeArea! : "")}${separator[1]}';
             eventContent +=

@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 
 import '../api.dart';
 import '../crypto/auth_crypto.dart';
+import '../gateway/ledger_publish.dart';
 import '../global.dart';
 import '../global2.dart';
 import '../model/ftz_scanned_code.dart';
@@ -45,9 +46,7 @@ Future<int> getNumber(String documentName) async {
 
   try {
     // Run a transaction to ensure atomic increment.
-    final newCounterValue = await FirebaseFirestore.instance.runTransaction((
-      transaction,
-    ) async {
+    final newCounterValue = await fsTransaction((transaction) async {
       final snapshot = await transaction.get(docRef);
 
       if (!snapshot.exists) {
@@ -60,7 +59,7 @@ Future<int> getNumber(String documentName) async {
       final newCounter = (snapshot.data()!['c'] ?? 0) + 1;
       transaction.update(docRef, {'c': newCounter});
       return newCounter;
-    });
+    }, 'getNumber');
 
     return newCounterValue;
   } catch (e) {
@@ -2362,7 +2361,12 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
         } // end try (eFirestore)
         storage.write(key: imageMapSecureName, value: imageMapStr);
         //write history to proxy firestore here
-        await docRef.update({'i': imageMapStr});
+        // The read above already tolerates a MISSING proxy doc (data() null →
+        // catch → '{}'), but a raw update() on a doc that does not exist
+        // rejects with [cloud_firestore/not-found] — awaited here, outside any
+        // try, so it reached platformDispatcher.onError as a FATAL. Same guard
+        // the sibling writes in this function already use.
+        await safeFsUpdate(docRef, {'i': imageMapStr}, 'loadHistory-imageMap');
       } else {
         guestSsid = true;
       } // end if (ssid != null && ssid != loginSsid)
@@ -2435,7 +2439,9 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
         } // end try (eFirestore)
         storage.write(key: historyName, value: historyStr);
         //write history to proxy firestore here
-        await docRef.update({'h': historyStr});
+        // Twin of the imageMap write above — missing proxy doc = not-found
+        // rejection = fatal.
+        await safeFsUpdate(docRef, {'h': historyStr}, 'loadHistory-history');
       } else {
         guestSsid = true;
       } // end if (ssid != null && ssid != loginSsid)
@@ -2679,9 +2685,8 @@ void _scheduleProxyBackup(String historyStr) {
         '#INTERFACE_KEY',
         20,
       )).toString();
-      final dynamic docRef = firestoreDb
-          .collection(proxyCollectionName)
-          .doc(ssid);
+      final dynamic docRef =
+          firestoreDb.collection(proxyCollectionName).doc(ssid);
       safeFsUpdate(docRef, {
         'h': pending,
         'i': jsonEncode(imageMap),
@@ -2895,6 +2900,29 @@ bool shouldDeferForImage({
   return newTries < max;
 }
 
+/// Sync-time back-fill of the placemark slots of a history location segment
+/// (getLocationString layout, 0-based: 7 isoCountryCode, 8 postalCode,
+/// 9 administrativeArea ... 14 subThoroughfare). A slot is only filled while it
+/// still holds the placeholder placeMarkCopy leaves for a missing field ('88'
+/// country, '--' the rest) — typically a tap-time geocode that failed offline.
+///
+/// Every value goes through cleanupString, exactly as getLocationString does at
+/// tap time. Geocoder output is free text ("Jalan H. Mas'ud"); written raw, a
+/// quote broke the row on the sheet backend and a separator shifts its columns.
+/// Extracted so the sanitising is unit-testable without Firestore or the locks.
+void backfillPlacemarkSlots(List<String> locArray, Placemark place) {
+  String fill(String current, String placeholder, String? value) =>
+      current == placeholder ? cleanupString(value ?? emptyString) : current;
+  locArray[7] = fill(locArray[7], '88', place.isoCountryCode);
+  locArray[8] = fill(locArray[8], emptyString, place.postalCode);
+  locArray[9] = fill(locArray[9], emptyString, place.administrativeArea);
+  locArray[10] = fill(locArray[10], emptyString, place.subAdministrativeArea);
+  locArray[11] = fill(locArray[11], emptyString, place.locality);
+  locArray[12] = fill(locArray[12], emptyString, place.subLocality);
+  locArray[13] = fill(locArray[13], emptyString, place.thoroughfare);
+  locArray[14] = fill(locArray[14], emptyString, place.subThoroughfare);
+}
+
 Future historySync(String source, bool forceSend) async {
   // sent unsent history to event
   // trim history at the end
@@ -3064,30 +3092,7 @@ Future historySync(String source, bool forceSend) async {
                           double.parse(locArray[4]),
                           double.parse(locArray[5]),
                         );
-                        locArray[7] = locArray[7] == '88'
-                            ? thePlace[0].isoCountryCode ?? emptyString
-                            : locArray[7];
-                        locArray[8] = locArray[8] == emptyString
-                            ? thePlace[0].postalCode ?? emptyString
-                            : locArray[8];
-                        locArray[9] = locArray[9] == emptyString
-                            ? thePlace[0].administrativeArea ?? emptyString
-                            : locArray[9];
-                        locArray[10] = locArray[10] == emptyString
-                            ? (thePlace[0].subAdministrativeArea ?? emptyString)
-                            : locArray[10];
-                        locArray[11] = locArray[11] == emptyString
-                            ? (thePlace[0].locality ?? emptyString)
-                            : locArray[11];
-                        locArray[12] = locArray[12] == emptyString
-                            ? (thePlace[0].subLocality ?? emptyString)
-                            : locArray[12];
-                        locArray[13] = locArray[13] == emptyString
-                            ? (thePlace[0].thoroughfare ?? emptyString)
-                            : locArray[13];
-                        locArray[14] = locArray[14] == emptyString
-                            ? (thePlace[0].subThoroughfare ?? emptyString)
-                            : locArray[14];
+                        backfillPlacemarkSlots(locArray, thePlace[0]);
                         contentArray[0] = locArray.join(separator[1]);
                         eventTemp = contentArray.join(separator[0]);
                       } catch (ePlace) {
@@ -3214,6 +3219,24 @@ Future historySync(String source, bool forceSend) async {
                         eventHistory[1],
                         eventHistory[2],
                       ]);
+                      // publishLedger: the 6th segment. Deliberately OUTSIDE the
+                      // CRUD try below (a CRUD throw must not skip it) and NEVER
+                      // tallied — owner decision K4 keeps this record's
+                      // send/retry/partial/drop outcome byte-identical.
+                      final String publishStr = publishSegmentFromTb(rawTb);
+                      if (publishStr.isNotEmpty) {
+                        try {
+                          await enqueueLedgerPublish(
+                            publishStr,
+                            eventRowString,
+                          );
+                        } catch (ePub) {
+                          errorReport(
+                            'enqueueLedgerPublish failed for historyId '
+                            '${eventHistory[0]}: $ePub',
+                          );
+                        }
+                      }
                       try {
                         if (addStr.isNotEmpty) {
                           final res = await writeToTable(
@@ -3385,6 +3408,15 @@ Future historySync(String source, bool forceSend) async {
       devPrint('Guest proxy detected, skip historySync (nothing queued)');
     } // end if (ssid != null && ssid != loginSsid)
   }
+  // Drain the ledger outbox on every historySync tick — the 1-min timers
+  // (api.dart scheduleSendImagesInImageMap), submit_repository, connection_data
+  // and loadHistory triggers are all inherited, so NO new trigger is added.
+  // Un-awaited on purpose: publish must never delay the history queue, and
+  // safeUnawaited keeps a rejection off platformDispatcher.onError.
+  safeUnawaited(
+    drainLedgerOutbox('historySync'),
+    'historySync ledger drain',
+  );
 } // end of syncHistory
 
 Future updateHistoryImage() async {

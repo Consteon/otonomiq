@@ -1,14 +1,16 @@
+// import 'package:audioplayers/audioplayers.dart';
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-// import 'package:audioplayers/audioplayers.dart';
-import 'package:collection/collection.dart';
 import 'package:vibration/vibration.dart';
+
 import '../crypto/auth_crypto.dart';
+import '../firestore_repository/table_repository.dart';
 import '../global.dart';
 import '../global2.dart';
-import '../firestore_repository/table_repository.dart';
 import '../model/ftz_scanned_code.dart';
+import 'ftz_scanner_screen.dart' show disposeScannerController;
 
 const int _kSnackBarDuration = 1;
 const String _kOkButtonColor = 'blue';
@@ -32,11 +34,7 @@ class ListOptions {
   final int? groupField;
   final int? sortField;
 
-  ListOptions({
-    required this.displayFields,
-    this.groupField,
-    this.sortField,
-  });
+  ListOptions({required this.displayFields, this.groupField, this.sortField});
 
   factory ListOptions.fromString(String? rawOptionsString) {
     if (rawOptionsString == null || rawOptionsString.isEmpty) {
@@ -110,9 +108,9 @@ validateManualCode({
     }
     if (!isFoundInMainRef) {
       return (
-      status: ValidationStatus.notFoundInRef,
-      row: null,
-      qrCode: qrCode
+        status: ValidationStatus.notFoundInRef,
+        row: null,
+        qrCode: qrCode,
       );
     }
   }
@@ -120,18 +118,18 @@ validateManualCode({
   if (isPositiveRefCheckEnabled &&
       !positiveRefData.map((e) => e.toString()).contains(qrCode)) {
     return (
-    status: ValidationStatus.notInPositiveRef,
-    row: foundRow,
-    qrCode: qrCode
+      status: ValidationStatus.notInPositiveRef,
+      row: foundRow,
+      qrCode: qrCode,
     );
   }
 
   if (isNegativeRefCheckEnabled &&
       negativeRefData.map((e) => e.toString()).contains(qrCode)) {
     return (
-    status: ValidationStatus.foundInNegativeRef,
-    row: foundRow,
-    qrCode: qrCode
+      status: ValidationStatus.foundInNegativeRef,
+      row: foundRow,
+      qrCode: qrCode,
     );
   }
 
@@ -173,9 +171,9 @@ validateManualCode({
     if (!isFoundInMainRef) {
       // debugPrint('$qrCode not found in mainRefData');
       return (
-      status: ValidationStatus.notFoundInRef,
-      row: null,
-      qrCode: qrCode
+        status: ValidationStatus.notFoundInRef,
+        row: null,
+        qrCode: qrCode,
       );
     } else {
       // debugPrint('$qrCode found in mainRefData row $foundRow');
@@ -185,18 +183,18 @@ validateManualCode({
   if (isPositiveRefCheckEnabled &&
       !positiveRefData.map((e) => e.toString()).contains(qrCode)) {
     return (
-    status: ValidationStatus.notInPositiveRef,
-    row: foundRow,
-    qrCode: qrCode
+      status: ValidationStatus.notInPositiveRef,
+      row: foundRow,
+      qrCode: qrCode,
     );
   }
 
   if (isNegativeRefCheckEnabled &&
       negativeRefData.map((e) => e.toString()).contains(qrCode)) {
     return (
-    status: ValidationStatus.foundInNegativeRef,
-    row: foundRow,
-    qrCode: qrCode
+      status: ValidationStatus.foundInNegativeRef,
+      row: foundRow,
+      qrCode: qrCode,
     );
   }
 
@@ -267,28 +265,32 @@ class _MultiScanWidgetState extends State<MultiScanWidget> {
     _position = widget.component['position'] as int?;
     if (_position != null) {
       // State is managed by txfController, retrieve it.
-      _finalScannedCodes = txfController[widget.scrName]![_position]!
-          .stateObject as List<ScannedCode>;
+      _finalScannedCodes =
+          txfController[widget.scrName]![_position]!.stateObject
+              as List<ScannedCode>;
     } else {
       // Fallback for widgets without a position (state will be ephemeral).
       _finalScannedCodes = [];
     } // end if _position != null
     _titleColor = stringToColor(
-        (widget.component['titleColor'] as String? ?? 'black').toLowerCase());
+      (widget.component['titleColor'] as String? ?? 'black').toLowerCase(),
+    );
     _flashDefaultOn =
         (widget.component['flash'] as String? ?? 'off').toLowerCase() == 'on';
     _defaultCamera =
-    (widget.component['camera'] as String? ?? 'back').toLowerCase() ==
-        'front'
+        (widget.component['camera'] as String? ?? 'back').toLowerCase() ==
+            'front'
         ? CameraFacing.front
         : CameraFacing.back;
     _userAction = (widget.component['userAction'] as String? ?? 'add delete')
         .toLowerCase();
     _scanIcon = stringToIconData(
-        (widget.component['scanIcon'] as String? ?? 'qr_code_scanner')
-            .toLowerCase());
+      (widget.component['scanIcon'] as String? ?? 'qr_code_scanner')
+          .toLowerCase(),
+    );
     _listIcon = stringToIconData(
-        (widget.component['listIcon'] as String? ?? 'list_alt').toLowerCase());
+      (widget.component['listIcon'] as String? ?? 'list_alt').toLowerCase(),
+    );
     _targetTables = widget.component['targetTables'] as String? ?? '';
     _refTable = autheniumDecode(widget.component['refTable'] as String?) ?? '';
     _refTablePositive =
@@ -297,14 +299,17 @@ class _MultiScanWidgetState extends State<MultiScanWidget> {
         autheniumDecode(widget.component['refTableNegative'] as String?) ?? '';
 
     _scrName = widget.scrName;
-    _margin =
-        stringToEdgeInsets(widget.component['margin'] as String? ?? '8,16,0,0');
+    _margin = stringToEdgeInsets(
+      widget.component['margin'] as String? ?? '8,16,0,0',
+    );
     _titleSize =
         (widget.component['titleSize'] ?? 16).toDouble() as double? ?? 20.0;
     _otherTextSize =
         (widget.component['size'] ?? 16).toDouble() as double? ?? 16.0;
-    _listOptions = ListOptions.fromString((widget.component['listOptions'])
-        .replaceAll("_u25C6_", separator[1]) as String?);
+    _listOptions = ListOptions.fromString(
+      (widget.component['listOptions']).replaceAll("_u25C6_", separator[1])
+          as String?,
+    );
     _table = widget.component['table'] as String?;
 
     // DO NOT run _setupRefTables() here anymore.
@@ -340,8 +345,9 @@ class _MultiScanWidgetState extends State<MultiScanWidget> {
         String tableName = normalizeTableName(parts[0]);
         final fieldPart = parts[1].split(separator[5]);
         int fieldNum = int.tryParse(fieldPart[0]) ?? 1;
-        int manualFieldNum =
-        fieldPart.length > 1 ? (int.tryParse(fieldPart[1]) ?? 2) : 2;
+        int manualFieldNum = fieldPart.length > 1
+            ? (int.tryParse(fieldPart[1]) ?? 2)
+            : 2;
         String rawFilterString = parts.length > 2 ? parts[2] : '';
         String filterString = processFilterString(rawFilterString);
 
@@ -350,20 +356,22 @@ class _MultiScanWidgetState extends State<MultiScanWidget> {
           _mainRefField = fieldNum;
           _mainManualRefField = manualFieldNum;
 
-          final future = readFromFirestoreTable(
-            currentTableVid,
-            tableName,
-            tableName,
-            index: fieldNum,
-            indexTableString: filterString,
-          ).then((data) {
-            if (mounted) {
-              _mainRefData = data ??
-                  [
-                    ['no Data from line 326 ftz_multi_scan.dart']
-                  ];
-            }
-          });
+          final future =
+              readFromFirestoreTable(
+                currentTableVid,
+                tableName,
+                tableName,
+                index: fieldNum,
+                indexTableString: filterString,
+              ).then((data) {
+                if (mounted) {
+                  _mainRefData =
+                      data ??
+                      [
+                        ['no Data from line 326 ftz_multi_scan.dart'],
+                      ];
+                }
+              });
           futures.add(future);
         }
       }
@@ -380,20 +388,21 @@ class _MultiScanWidgetState extends State<MultiScanWidget> {
 
         if (tableName.isNotEmpty && fieldNum > 0) {
           _isPositiveRefCheckEnabled = true;
-          final future = readFromFirestoreTable(
-            currentTableVid,
-            tableName,
-            tableName,
-            index: fieldNum,
-            indexTableString: filterString,
-          ).then((data) {
-            if (mounted && data != null) {
-              _positiveRefData = data
-                  .where((row) => row.length >= fieldNum)
-                  .map((row) => row[fieldNum - 1])
-                  .toList();
-            }
-          });
+          final future =
+              readFromFirestoreTable(
+                currentTableVid,
+                tableName,
+                tableName,
+                index: fieldNum,
+                indexTableString: filterString,
+              ).then((data) {
+                if (mounted && data != null) {
+                  _positiveRefData = data
+                      .where((row) => row.length >= fieldNum)
+                      .map((row) => row[fieldNum - 1])
+                      .toList();
+                }
+              });
           futures.add(future);
         }
       }
@@ -410,20 +419,21 @@ class _MultiScanWidgetState extends State<MultiScanWidget> {
 
         if (tableName.isNotEmpty && fieldNum > 0) {
           _isNegativeRefCheckEnabled = true;
-          final future = readFromFirestoreTable(
-            currentTableVid,
-            tableName,
-            tableName,
-            index: fieldNum,
-            indexTableString: filterString,
-          ).then((data) {
-            if (mounted && data != null) {
-              _negativeRefData = data
-                  .where((row) => row.length >= fieldNum)
-                  .map((row) => row[fieldNum - 1])
-                  .toList();
-            }
-          });
+          final future =
+              readFromFirestoreTable(
+                currentTableVid,
+                tableName,
+                tableName,
+                index: fieldNum,
+                indexTableString: filterString,
+              ).then((data) {
+                if (mounted && data != null) {
+                  _negativeRefData = data
+                      .where((row) => row.length >= fieldNum)
+                      .map((row) => row[fieldNum - 1])
+                      .toList();
+                }
+              });
           futures.add(future);
         }
       }
@@ -499,8 +509,9 @@ class _MultiScanWidgetState extends State<MultiScanWidget> {
               _finalScannedCodes;
         }
       });
-      widget.onScanCompleted
-          ?.call(result.map((sc) => [sc.code, sc.status.toString()]).toList());
+      widget.onScanCompleted?.call(
+        result.map((sc) => [sc.code, sc.status.toString()]).toList(),
+      );
     }
   }
 
@@ -543,8 +554,9 @@ class _MultiScanWidgetState extends State<MultiScanWidget> {
               _finalScannedCodes;
         }
       });
-      widget.onScanCompleted
-          ?.call(result.map((sc) => [sc.code, sc.status.toString()]).toList());
+      widget.onScanCompleted?.call(
+        result.map((sc) => [sc.code, sc.status.toString()]).toList(),
+      );
     }
   }
 
@@ -580,8 +592,9 @@ class _MultiScanWidgetState extends State<MultiScanWidget> {
           child: Text(
             'Component text configuration error. The "text" field is mandatory and cannot be empty.',
             style: TextStyle(
-                color: colorScheme.onErrorContainer,
-                fontWeight: FontWeight.bold),
+              color: colorScheme.onErrorContainer,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
       );
@@ -595,8 +608,9 @@ class _MultiScanWidgetState extends State<MultiScanWidget> {
           child: Text(
             'Component text configuration error. Expected 37 labels, but found ${_labels.length}. Please check the diamond-separated string.',
             style: TextStyle(
-                color: colorScheme.onErrorContainer,
-                fontWeight: FontWeight.bold),
+              color: colorScheme.onErrorContainer,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
       );
@@ -644,9 +658,7 @@ class _MultiScanWidgetState extends State<MultiScanWidget> {
                     Text(
                       _labels[1],
                       textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: _otherTextSize,
-                      ),
+                      style: TextStyle(fontSize: _otherTextSize),
                     ),
                     Text(
                       '$validCodeCount',
@@ -677,31 +689,33 @@ class _MultiScanWidgetState extends State<MultiScanWidget> {
                               borderRadius: BorderRadius.circular(8.0),
                             ),
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 12),
-                            textStyle: TextStyle(
-                              fontSize: _otherTextSize,
+                              horizontal: 8,
+                              vertical: 12,
                             ),
+                            textStyle: TextStyle(fontSize: _otherTextSize),
                           ),
                           child: _isLoading
                               ? const SizedBox(
-                            height: 24,
-                            width: 24,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white),
-                          )
+                                  height: 24,
+                                  width: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
                               : Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(_scanIcon),
-                              const SizedBox(width: 8),
-                              Flexible(
-                                child: Text(
-                                  _labels[2],
-                                  textAlign: TextAlign.center,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(_scanIcon),
+                                    const SizedBox(width: 8),
+                                    Flexible(
+                                      child: Text(
+                                        _labels[2],
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                            ],
-                          ),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -717,7 +731,9 @@ class _MultiScanWidgetState extends State<MultiScanWidget> {
                               borderRadius: BorderRadius.circular(8.0),
                             ),
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 12),
+                              horizontal: 8,
+                              vertical: 12,
+                            ),
                             textStyle: TextStyle(fontSize: _otherTextSize),
                           ),
                           child: Row(
@@ -738,7 +754,7 @@ class _MultiScanWidgetState extends State<MultiScanWidget> {
                     ],
                   ),
                 ),
-              )
+              ),
             ],
           ),
         ],
@@ -826,22 +842,31 @@ class _DataManagerDialogState extends State<_DataManagerDialog> {
     );
     String codeToAdd = validationResult.qrCode;
     if (_codeStrings.contains(codeToAdd)) {
-      Get.snackbar(widget.labels[25], widget.labels[16],
-          snackPosition: SnackPosition.BOTTOM,
-          duration: const Duration(seconds: _kSnackBarDuration),
-          margin: const EdgeInsets.all(12));
+      Get.snackbar(
+        widget.labels[25],
+        widget.labels[16],
+        snackPosition: SnackPosition.BOTTOM,
+        duration: const Duration(seconds: _kSnackBarDuration),
+        margin: const EdgeInsets.all(12),
+      );
       return;
     }
     if (_codeStrings.contains(validationResult.qrCode)) {
-      Get.snackbar(widget.labels[25], widget.labels[16],
-          snackPosition: SnackPosition.BOTTOM,
-          duration: const Duration(seconds: _kSnackBarDuration),
-          margin: const EdgeInsets.all(12));
+      Get.snackbar(
+        widget.labels[25],
+        widget.labels[16],
+        snackPosition: SnackPosition.BOTTOM,
+        duration: const Duration(seconds: _kSnackBarDuration),
+        margin: const EdgeInsets.all(12),
+      );
       return;
     }
     setState(() {
-      final newScannedCode = ScannedCode(codeToAdd, validationResult.status,
-          refDataRow: validationResult.row);
+      final newScannedCode = ScannedCode(
+        codeToAdd,
+        validationResult.status,
+        refDataRow: validationResult.row,
+      );
       _codes.add(newScannedCode);
       _codeStrings.add(codeToAdd);
     });
@@ -877,20 +902,26 @@ class _DataManagerDialogState extends State<_DataManagerDialog> {
         return;
     }
 
-    Get.snackbar(title, message,
-        snackPosition: SnackPosition.BOTTOM,
-        duration: const Duration(seconds: _kSnackBarDuration),
-        margin: const EdgeInsets.all(12));
+    Get.snackbar(
+      title,
+      message,
+      snackPosition: SnackPosition.BOTTOM,
+      duration: const Duration(seconds: _kSnackBarDuration),
+      margin: const EdgeInsets.all(12),
+    );
   }
 
   void _handleDelete(int index) {
     final removedCode = _codes.removeAt(index);
     _codeStrings.remove(removedCode.code);
     setState(() {});
-    Get.snackbar(widget.labels[27], widget.labels[18],
-        snackPosition: SnackPosition.BOTTOM,
-        duration: const Duration(seconds: _kSnackBarDuration),
-        margin: const EdgeInsets.all(12));
+    Get.snackbar(
+      widget.labels[27],
+      widget.labels[18],
+      snackPosition: SnackPosition.BOTTOM,
+      duration: const Duration(seconds: _kSnackBarDuration),
+      margin: const EdgeInsets.all(12),
+    );
   }
 
   void _toggleValidationStatus(int index) {
@@ -901,8 +932,8 @@ class _DataManagerDialogState extends State<_DataManagerDialog> {
       if (widget.isMainRefCheckEnabled &&
           currentCode.refDataRow != null &&
           currentCode.refDataRow!.length > widget.mainRefField) {
-        codeForValidation =
-            currentCode.refDataRow![widget.mainRefField].toString();
+        codeForValidation = currentCode.refDataRow![widget.mainRefField]
+            .toString();
       }
       dynamic validation = validateCode(
         code: codeForValidation,
@@ -922,8 +953,11 @@ class _DataManagerDialogState extends State<_DataManagerDialog> {
         newStatus = validation.status;
       }
 
-      _codes[index] = ScannedCode(currentCode.code, newStatus,
-          refDataRow: currentCode.refDataRow);
+      _codes[index] = ScannedCode(
+        currentCode.code,
+        newStatus,
+        refDataRow: currentCode.refDataRow,
+      );
     });
   }
 
@@ -948,7 +982,8 @@ class _DataManagerDialogState extends State<_DataManagerDialog> {
               Get.back();
             },
             style: TextButton.styleFrom(
-                foregroundColor: Theme.of(context).colorScheme.error),
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
             child: Text(widget.labels[23]),
           ),
         ],
@@ -1024,11 +1059,11 @@ class _DataManagerDialogState extends State<_DataManagerDialog> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Container(
-                  constraints: const BoxConstraints(
-                    maxWidth: 120,
+                  constraints: const BoxConstraints(maxWidth: 120),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
                   ),
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
                     color: backgroundColor,
                     borderRadius: BorderRadius.circular(4),
@@ -1036,9 +1071,10 @@ class _DataManagerDialogState extends State<_DataManagerDialog> {
                   child: Text(
                     statusText,
                     style: TextStyle(
-                        color: textColor,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold),
+                      color: textColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
                     textAlign: TextAlign.end,
                   ),
                 ),
@@ -1086,13 +1122,17 @@ class _DataManagerDialogState extends State<_DataManagerDialog> {
   }
 
   Widget _buildGroupSummary(
-      Map<String, List<ScannedCode>> groupedCodes, TextTheme textTheme) {
-    final notValidGroupName =
-    widget.labels.length > 35 ? widget.labels[35] : 'Not Valid';
+    Map<String, List<ScannedCode>> groupedCodes,
+    TextTheme textTheme,
+  ) {
+    final notValidGroupName = widget.labels.length > 35
+        ? widget.labels[35]
+        : 'Not Valid';
 
     final displayableGroups = groupedCodes.entries
         .where(
-            (entry) => entry.key != notValidGroupName && entry.value.isNotEmpty)
+          (entry) => entry.key != notValidGroupName && entry.value.isNotEmpty,
+        )
         .toList();
 
     if (displayableGroups.isEmpty) {
@@ -1115,8 +1155,9 @@ class _DataManagerDialogState extends State<_DataManagerDialog> {
                   Text(
                     '${entry.value.length}',
                     style: textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: stringToColor(_kValidCounterColor)),
+                      fontWeight: FontWeight.bold,
+                      color: stringToColor(_kValidCounterColor),
+                    ),
                   ),
                 ],
               ),
@@ -1131,50 +1172,57 @@ class _DataManagerDialogState extends State<_DataManagerDialog> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final validCodeCount =
-        _codes.where((c) => c.status == ValidationStatus.valid).length;
+    final validCodeCount = _codes
+        .where((c) => c.status == ValidationStatus.valid)
+        .length;
 
     Map<String, List<ScannedCode>> groupedCodesForAllItems = {};
     List<ScannedCode> sortedCodes = List.from(_codes);
 
     final groupFieldIndex = widget.listOptions.groupField;
     final sortFieldIndex = widget.listOptions.sortField;
-    final notValidGroupName =
-    widget.labels.length > 35 ? widget.labels[35] : 'Not Valid';
+    final notValidGroupName = widget.labels.length > 35
+        ? widget.labels[35]
+        : 'Not Valid';
 
     Map<String, List<ScannedCode>> summaryGroupedCodes = {};
     if (widget.isMainRefCheckEnabled &&
         groupFieldIndex != null &&
         groupFieldIndex >= 0) {
-      final validCodes =
-      _codes.where((c) => c.status == ValidationStatus.valid).toList();
+      final validCodes = _codes
+          .where((c) => c.status == ValidationStatus.valid)
+          .toList();
       summaryGroupedCodes = groupBy(
-          validCodes,
-              (code) => (code.refDataRow != null &&
-              code.refDataRow!.length > groupFieldIndex)
-              ? code.refDataRow![groupFieldIndex].toString()
-              : notValidGroupName);
+        validCodes,
+        (code) =>
+            (code.refDataRow != null &&
+                code.refDataRow!.length > groupFieldIndex)
+            ? code.refDataRow![groupFieldIndex].toString()
+            : notValidGroupName,
+      );
     }
 
     if (widget.isMainRefCheckEnabled &&
         groupFieldIndex != null &&
         groupFieldIndex >= 0) {
       groupedCodesForAllItems = groupBy(
-          _codes,
-              (code) => (code.refDataRow != null &&
-              code.refDataRow!.length > groupFieldIndex)
-              ? code.refDataRow![groupFieldIndex].toString()
-              : notValidGroupName);
+        _codes,
+        (code) =>
+            (code.refDataRow != null &&
+                code.refDataRow!.length > groupFieldIndex)
+            ? code.refDataRow![groupFieldIndex].toString()
+            : notValidGroupName,
+      );
 
       groupedCodesForAllItems.forEach((key, value) {
         value.sort((a, b) {
           if (sortFieldIndex != null && sortFieldIndex >= 0) {
             final aVal =
-            (a.refDataRow != null && a.refDataRow!.length > sortFieldIndex)
+                (a.refDataRow != null && a.refDataRow!.length > sortFieldIndex)
                 ? a.refDataRow![sortFieldIndex].toString()
                 : '';
             final bVal =
-            (b.refDataRow != null && b.refDataRow!.length > sortFieldIndex)
+                (b.refDataRow != null && b.refDataRow!.length > sortFieldIndex)
                 ? b.refDataRow![sortFieldIndex].toString()
                 : '';
             return aVal.compareTo(bVal);
@@ -1189,8 +1237,9 @@ class _DataManagerDialogState extends State<_DataManagerDialog> {
     final validGroupEntries = groupedCodesForAllItems.entries
         .where((entry) => entry.key != notValidGroupName)
         .toList();
-    final notValidGroupEntry = groupedCodesForAllItems.entries
-        .firstWhereOrNull((entry) => entry.key == notValidGroupName);
+    final notValidGroupEntry = groupedCodesForAllItems.entries.firstWhereOrNull(
+      (entry) => entry.key == notValidGroupName,
+    );
 
     return Dialog(
       child: SizedBox(
@@ -1206,15 +1255,18 @@ class _DataManagerDialogState extends State<_DataManagerDialog> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Expanded(
-                    child: Text(widget.labels[12],
-                        style: textTheme.headlineSmall?.copyWith()),
+                    child: Text(
+                      widget.labels[12],
+                      style: textTheme.headlineSmall?.copyWith(),
+                    ),
                   ),
                   TextButton.icon(
                     onPressed: widget.isEnabled ? _clearAllData : null,
                     icon: const Icon(Icons.delete_sweep_outlined),
                     label: Text(widget.labels[19]),
                     style: TextButton.styleFrom(
-                        foregroundColor: colorScheme.error),
+                      foregroundColor: colorScheme.error,
+                    ),
                   ),
                 ],
               ),
@@ -1223,92 +1275,114 @@ class _DataManagerDialogState extends State<_DataManagerDialog> {
                 child: _codes.isEmpty
                     ? Center(child: Text(widget.labels[13]))
                     : Column(
-                  children: [
-                    Expanded(
-                      child: widget.isMainRefCheckEnabled &&
-                          groupFieldIndex != null &&
-                          groupFieldIndex >= 0
-                          ? ListView(
                         children: [
-                          ...validGroupEntries.map((entry) {
-                            final groupName = entry.key;
-                            final items = entry.value;
-                            final validCount = items
-                                .where((i) =>
-                            i.status ==
-                                ValidationStatus.valid)
-                                .length;
-                            return ExpansionTile(
-                              title: RichText(
-                                text: TextSpan(
-                                  style:
-                                  textTheme.bodyLarge?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                    color:
-                                    textTheme.bodyLarge?.color,
+                          Expanded(
+                            child:
+                                widget.isMainRefCheckEnabled &&
+                                    groupFieldIndex != null &&
+                                    groupFieldIndex >= 0
+                                ? ListView(
+                                    children: [
+                                      ...validGroupEntries.map((entry) {
+                                        final groupName = entry.key;
+                                        final items = entry.value;
+                                        final validCount = items
+                                            .where(
+                                              (i) =>
+                                                  i.status ==
+                                                  ValidationStatus.valid,
+                                            )
+                                            .length;
+                                        return ExpansionTile(
+                                          title: RichText(
+                                            text: TextSpan(
+                                              style: textTheme.bodyLarge
+                                                  ?.copyWith(
+                                                    fontWeight: FontWeight.bold,
+                                                    color: textTheme
+                                                        .bodyLarge
+                                                        ?.color,
+                                                  ),
+                                              children: <TextSpan>[
+                                                TextSpan(text: '$groupName ('),
+                                                TextSpan(
+                                                  text: '$validCount',
+                                                  style: TextStyle(
+                                                    color: stringToColor(
+                                                      _kValidCounterColor,
+                                                    ),
+                                                  ),
+                                                ),
+                                                TextSpan(
+                                                  text: ' / ${items.length})',
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          children: items.map((code) {
+                                            final index = _codes.indexOf(code);
+                                            return _buildStatusTile(
+                                              code,
+                                              index,
+                                            );
+                                          }).toList(),
+                                        );
+                                      }),
+                                      if (notValidGroupEntry != null &&
+                                          notValidGroupEntry.value.isNotEmpty)
+                                        ExpansionTile(
+                                          collapsedTextColor: stringToColor(
+                                            _kNotValidGroupColor,
+                                          ),
+                                          textColor: stringToColor(
+                                            _kNotValidGroupColor,
+                                          ),
+                                          iconColor: stringToColor(
+                                            _kNotValidGroupColor,
+                                          ),
+                                          collapsedIconColor: stringToColor(
+                                            _kNotValidGroupColor,
+                                          ),
+                                          title: Text(
+                                            '${notValidGroupEntry.key} (${notValidGroupEntry.value.length})',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          children: notValidGroupEntry.value
+                                              .map((code) {
+                                                final index = _codes.indexOf(
+                                                  code,
+                                                );
+                                                return _buildStatusTile(
+                                                  code,
+                                                  index,
+                                                );
+                                              })
+                                              .toList(),
+                                        ),
+                                    ],
+                                  )
+                                : ListView.builder(
+                                    itemCount: sortedCodes.length,
+                                    itemBuilder: (context, index) {
+                                      final code = sortedCodes[index];
+                                      final originalIndex = _codes.indexOf(
+                                        code,
+                                      );
+                                      return _buildStatusTile(
+                                        code,
+                                        originalIndex,
+                                      );
+                                    },
                                   ),
-                                  children: <TextSpan>[
-                                    TextSpan(text: '$groupName ('),
-                                    TextSpan(
-                                        text: '$validCount',
-                                        style: TextStyle(
-                                            color: stringToColor(
-                                                _kValidCounterColor))),
-                                    TextSpan(
-                                        text:
-                                        ' / ${items.length})'),
-                                  ],
-                                ),
-                              ),
-                              children: items.map((code) {
-                                final index = _codes.indexOf(code);
-                                return _buildStatusTile(
-                                    code, index);
-                              }).toList(),
-                            );
-                          }),
-                          if (notValidGroupEntry != null &&
-                              notValidGroupEntry.value.isNotEmpty)
-                            ExpansionTile(
-                              collapsedTextColor: stringToColor(
-                                  _kNotValidGroupColor),
-                              textColor: stringToColor(
-                                  _kNotValidGroupColor),
-                              iconColor: stringToColor(
-                                  _kNotValidGroupColor),
-                              collapsedIconColor: stringToColor(
-                                  _kNotValidGroupColor),
-                              title: Text(
-                                '${notValidGroupEntry.key} (${notValidGroupEntry.value.length})',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold),
-                              ),
-                              children: notValidGroupEntry.value
-                                  .map((code) {
-                                final index = _codes.indexOf(code);
-                                return _buildStatusTile(
-                                    code, index);
-                              }).toList(),
-                            ),
+                          ),
+                          if (widget.isMainRefCheckEnabled &&
+                              groupFieldIndex != null &&
+                              groupFieldIndex >= 0)
+                            _buildGroupSummary(summaryGroupedCodes, textTheme),
                         ],
-                      )
-                          : ListView.builder(
-                        itemCount: sortedCodes.length,
-                        itemBuilder: (context, index) {
-                          final code = sortedCodes[index];
-                          final originalIndex =
-                          _codes.indexOf(code);
-                          return _buildStatusTile(
-                              code, originalIndex);
-                        },
                       ),
-                    ),
-                    if (widget.isMainRefCheckEnabled &&
-                        groupFieldIndex != null &&
-                        groupFieldIndex >= 0)
-                      _buildGroupSummary(summaryGroupedCodes, textTheme),
-                  ],
-                ),
               ),
               if (widget.userAction.contains('add') && widget.isEnabled)
                 Padding(
@@ -1316,17 +1390,21 @@ class _DataManagerDialogState extends State<_DataManagerDialog> {
                   child: Row(
                     children: [
                       Expanded(
-                          child: TextField(
-                              controller: _manualInputController,
-                              decoration: InputDecoration(
-                                  labelText: widget.labels[6],
-                                  labelStyle: const TextStyle(),
-                                  border: const OutlineInputBorder()))),
+                        child: TextField(
+                          controller: _manualInputController,
+                          decoration: InputDecoration(
+                            labelText: widget.labels[6],
+                            labelStyle: const TextStyle(),
+                            border: const OutlineInputBorder(),
+                          ),
+                        ),
+                      ),
                       const SizedBox(width: 8),
                       ElevatedButton(
-                          onPressed: _addManualCode,
-                          style: ElevatedButton.styleFrom(),
-                          child: Text(widget.labels[7])),
+                        onPressed: _addManualCode,
+                        style: ElevatedButton.styleFrom(),
+                        child: Text(widget.labels[7]),
+                      ),
                     ],
                   ),
                 ),
@@ -1335,58 +1413,79 @@ class _DataManagerDialogState extends State<_DataManagerDialog> {
                 children: [
                   Column(
                     children: [
-                      Text(widget.labels[5],
-                          style: textTheme.titleMedium?.copyWith()),
-                      Text('${_codes.length}',
-                          style: textTheme.headlineLarge
-                              ?.copyWith(fontWeight: FontWeight.bold)),
+                      Text(
+                        widget.labels[5],
+                        style: textTheme.titleMedium?.copyWith(),
+                      ),
+                      Text(
+                        '${_codes.length}',
+                        style: textTheme.headlineLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ],
                   ),
                   Column(
                     children: [
-                      Text(widget.labels[30],
-                          style: textTheme.titleMedium?.copyWith(
-                              color: stringToColor(_kValidCounterColor))),
-                      Text('$validCodeCount',
-                          style: textTheme.headlineLarge?.copyWith(
-                              color: stringToColor(_kValidCounterColor),
-                              fontWeight: FontWeight.bold)),
+                      Text(
+                        widget.labels[30],
+                        style: textTheme.titleMedium?.copyWith(
+                          color: stringToColor(_kValidCounterColor),
+                        ),
+                      ),
+                      Text(
+                        '$validCodeCount',
+                        style: textTheme.headlineLarge?.copyWith(
+                          color: stringToColor(_kValidCounterColor),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ],
-                  )
+                  ),
                 ],
               ),
               Align(
                 alignment: Alignment.centerRight,
                 child: TextButton(
-                    onPressed: widget.isEnabled
-                        ? () {
-                      Map<String, dynamic> tempTable = {};
-                      if (widget.isMainRefCheckEnabled) {
-                        tempTable = writeMultipleTablesTemporary(
-                            widget.targetTables, groupedCodesForAllItems);
-                      } else {
-                        final Map<String, List<ScannedCode>> allCodesMap =
-                        {'all': _codes};
-                        tempTable = writeMultipleTablesTemporary(
-                            widget.targetTables, allCodesMap);
-                      }
+                  onPressed: widget.isEnabled
+                      ? () {
+                          Map<String, dynamic> tempTable = {};
+                          if (widget.isMainRefCheckEnabled) {
+                            tempTable = writeMultipleTablesTemporary(
+                              widget.targetTables,
+                              groupedCodesForAllItems,
+                            );
+                          } else {
+                            final Map<String, List<ScannedCode>> allCodesMap = {
+                              'all': _codes,
+                            };
+                            tempTable = writeMultipleTablesTemporary(
+                              widget.targetTables,
+                              allCodesMap,
+                            );
+                          }
 
-                      final validCodes = _codes
-                          .where(
-                              (sc) => sc.status == ValidationStatus.valid)
-                          .map((sc) => sc.code)
-                          .toList();
-                      final content = validCodes.join(separator[5]);
-                      addToTxfController(
-                          widget.position, widget.scrName, content,
-                          table: tempTable,
-                          stateObject: _codes); // Pass the state object
+                          final validCodes = _codes
+                              .where(
+                                (sc) => sc.status == ValidationStatus.valid,
+                              )
+                              .map((sc) => sc.code)
+                              .toList();
+                          final content = validCodes.join(separator[5]);
+                          addToTxfController(
+                            widget.position,
+                            widget.scrName,
+                            content,
+                            table: tempTable,
+                            stateObject: _codes,
+                          ); // Pass the state object
 
-                      Get.back(result: _codes);
-                    }
-                        : () => Get.back(result: _codes),
-                    style: TextButton.styleFrom(),
-                    child: Text(widget.labels[14])),
+                          Get.back(result: _codes);
+                        }
+                      : () => Get.back(result: _codes),
+                  style: TextButton.styleFrom(),
+                  child: Text(widget.labels[14]),
+                ),
               ),
             ],
           ),
@@ -1470,7 +1569,7 @@ class _ScannerDialogState extends State<_ScannerDialog> {
 
   @override
   void dispose() {
-    _scannerController.dispose();
+    disposeScannerController(_scannerController);
     // _audioPlayer.dispose();
     _manualInputController.dispose();
     super.dispose();
@@ -1502,9 +1601,13 @@ class _ScannerDialogState extends State<_ScannerDialog> {
     if (_scannedBarcodeStrings.contains(validationResult.qrCode)) return;
 
     setState(() {
-      _scannedBarcodes.add(ScannedCode(
-          validationResult.qrCode, validationResult.status,
-          refDataRow: validationResult.row));
+      _scannedBarcodes.add(
+        ScannedCode(
+          validationResult.qrCode,
+          validationResult.status,
+          refDataRow: validationResult.row,
+        ),
+      );
       _scannedBarcodeStrings.add(validationResult.qrCode);
     });
 
@@ -1534,15 +1637,23 @@ class _ScannerDialogState extends State<_ScannerDialog> {
       }
     }
     if (_scannedBarcodeStrings.contains(codeToAdd)) {
-      Get.snackbar(widget.labels[25], widget.labels[16],
-          snackPosition: SnackPosition.BOTTOM,
-          duration: const Duration(seconds: _kSnackBarDuration),
-          margin: const EdgeInsets.all(12));
+      Get.snackbar(
+        widget.labels[25],
+        widget.labels[16],
+        snackPosition: SnackPosition.BOTTOM,
+        duration: const Duration(seconds: _kSnackBarDuration),
+        margin: const EdgeInsets.all(12),
+      );
       return;
     }
     setState(() {
-      _scannedBarcodes.add(ScannedCode(codeToAdd, validationResult.status,
-          refDataRow: validationResult.row));
+      _scannedBarcodes.add(
+        ScannedCode(
+          codeToAdd,
+          validationResult.status,
+          refDataRow: validationResult.row,
+        ),
+      );
       _scannedBarcodeStrings.add(codeToAdd);
     });
 
@@ -1579,10 +1690,13 @@ class _ScannerDialogState extends State<_ScannerDialog> {
         return;
     }
 
-    Get.snackbar(title, message,
-        snackPosition: SnackPosition.BOTTOM,
-        duration: const Duration(seconds: _kSnackBarDuration),
-        margin: const EdgeInsets.all(12));
+    Get.snackbar(
+      title,
+      message,
+      snackPosition: SnackPosition.BOTTOM,
+      duration: const Duration(seconds: _kSnackBarDuration),
+      margin: const EdgeInsets.all(12),
+    );
   }
 
   void _pauseScanning() => setState(() {
@@ -1598,24 +1712,25 @@ class _ScannerDialogState extends State<_ScannerDialog> {
     _pauseScanning();
     final result = await Get.dialog<List<ScannedCode>>(
       _DataManagerDialog(
-          initialCodes: _scannedBarcodes,
-          labels: widget.labels,
-          listIcon: widget.listIcon,
-          scrName: widget.scrName,
-          position: widget.position,
-          targetTables: widget.targetTables,
-          userAction: widget.userAction,
-          listOptions: widget.listOptions,
-          isMainRefCheckEnabled: widget.isMainRefCheckEnabled,
-          mainRefData: widget.mainRefData,
-          mainRefField: widget.mainRefField,
-          mainManualRefField: widget.mainManualRefField,
-          isPositiveRefCheckEnabled: widget.isPositiveRefCheckEnabled,
-          positiveRefData: widget.positiveRefData,
-          isNegativeRefCheckEnabled: widget.isNegativeRefCheckEnabled,
-          negativeRefData: widget.negativeRefData,
-          table: widget.table,
-          isEnabled: widget.isEnabled),
+        initialCodes: _scannedBarcodes,
+        labels: widget.labels,
+        listIcon: widget.listIcon,
+        scrName: widget.scrName,
+        position: widget.position,
+        targetTables: widget.targetTables,
+        userAction: widget.userAction,
+        listOptions: widget.listOptions,
+        isMainRefCheckEnabled: widget.isMainRefCheckEnabled,
+        mainRefData: widget.mainRefData,
+        mainRefField: widget.mainRefField,
+        mainManualRefField: widget.mainManualRefField,
+        isPositiveRefCheckEnabled: widget.isPositiveRefCheckEnabled,
+        positiveRefData: widget.positiveRefData,
+        isNegativeRefCheckEnabled: widget.isNegativeRefCheckEnabled,
+        negativeRefData: widget.negativeRefData,
+        table: widget.table,
+        isEnabled: widget.isEnabled,
+      ),
       barrierDismissible: false,
     );
     if (result != null) {
@@ -1648,7 +1763,8 @@ class _ScannerDialogState extends State<_ScannerDialog> {
               Get.back();
             },
             style: TextButton.styleFrom(
-                foregroundColor: Theme.of(context).colorScheme.error),
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
             child: Text(widget.labels[23]),
           ),
         ],
@@ -1673,15 +1789,18 @@ class _ScannerDialogState extends State<_ScannerDialog> {
           appBar: AppBar(
             title: Text(widget.labels[4]),
             leading: IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Get.back(result: _scannedBarcodes)),
+              icon: const Icon(Icons.close),
+              onPressed: () => Get.back(result: _scannedBarcodes),
+            ),
             actions: [
               IconButton(
-                  icon: Icon(_isTorchOn ? Icons.flash_on : Icons.flash_off),
-                  onPressed: _toggleTorch),
+                icon: Icon(_isTorchOn ? Icons.flash_on : Icons.flash_off),
+                onPressed: _toggleTorch,
+              ),
               IconButton(
-                  icon: const Icon(Icons.flip_camera_ios_outlined),
-                  onPressed: () => _scannerController.switchCamera()),
+                icon: const Icon(Icons.flip_camera_ios_outlined),
+                onPressed: () => _scannerController.switchCamera(),
+              ),
             ],
           ),
           body: Column(
@@ -1713,49 +1832,66 @@ class _ScannerDialogState extends State<_ScannerDialog> {
                           children: [
                             Column(
                               children: [
-                                Text(widget.labels[5],
-                                    style: textTheme.titleMedium?.copyWith()),
-                                Text('${_scannedBarcodes.length}',
-                                    style: textTheme.headlineLarge?.copyWith(
-                                        fontWeight: FontWeight.bold)),
+                                Text(
+                                  widget.labels[5],
+                                  style: textTheme.titleMedium?.copyWith(),
+                                ),
+                                Text(
+                                  '${_scannedBarcodes.length}',
+                                  style: textTheme.headlineLarge?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                               ],
                             ),
                             Column(
                               children: [
-                                Text(widget.labels[30],
-                                    style: textTheme.titleMedium?.copyWith(
-                                        color: stringToColor(
-                                            _kValidCounterColor))),
-                                Text('$validCodeCount',
-                                    style: textTheme.headlineLarge?.copyWith(
-                                        color:
-                                        stringToColor(_kValidCounterColor),
-                                        fontWeight: FontWeight.bold)),
+                                Text(
+                                  widget.labels[30],
+                                  style: textTheme.titleMedium?.copyWith(
+                                    color: stringToColor(_kValidCounterColor),
+                                  ),
+                                ),
+                                Text(
+                                  '$validCodeCount',
+                                  style: textTheme.headlineLarge?.copyWith(
+                                    color: stringToColor(_kValidCounterColor),
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                               ],
-                            )
+                            ),
                           ],
                         ),
                         const SizedBox(height: 16),
                         if (widget.userAction.contains('add'))
                           Padding(
-                            padding:
-                            const EdgeInsets.symmetric(horizontal: 8.0),
-                            child: Row(children: [
-                              Expanded(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8.0,
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
                                   child: TextField(
-                                      controller: _manualInputController,
-                                      enabled: widget.isEnabled,
-                                      decoration: InputDecoration(
-                                          labelText: widget.labels[6],
-                                          labelStyle: const TextStyle(),
-                                          border: const OutlineInputBorder()))),
-                              const SizedBox(width: 8),
-                              ElevatedButton(
-                                  onPressed:
-                                  widget.isEnabled ? _addManualCode : null,
+                                    controller: _manualInputController,
+                                    enabled: widget.isEnabled,
+                                    decoration: InputDecoration(
+                                      labelText: widget.labels[6],
+                                      labelStyle: const TextStyle(),
+                                      border: const OutlineInputBorder(),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                ElevatedButton(
+                                  onPressed: widget.isEnabled
+                                      ? _addManualCode
+                                      : null,
                                   style: ElevatedButton.styleFrom(),
-                                  child: Text(widget.labels[7])),
-                            ]),
+                                  child: Text(widget.labels[7]),
+                                ),
+                              ],
+                            ),
                           ),
                         const SizedBox(height: 16),
                         Wrap(
@@ -1765,26 +1901,32 @@ class _ScannerDialogState extends State<_ScannerDialog> {
                           children: [
                             if (_isScanning)
                               ElevatedButton.icon(
-                                  onPressed:
-                                  widget.isEnabled ? _pauseScanning : null,
-                                  icon: const Icon(Icons.pause),
-                                  style: ElevatedButton.styleFrom(),
-                                  label: Text(widget.labels[8]))
+                                onPressed: widget.isEnabled
+                                    ? _pauseScanning
+                                    : null,
+                                icon: const Icon(Icons.pause),
+                                style: ElevatedButton.styleFrom(),
+                                label: Text(widget.labels[8]),
+                              )
                             else
                               ElevatedButton.icon(
-                                  onPressed:
-                                  widget.isEnabled ? _resumeScanning : null,
-                                  icon: const Icon(Icons.play_arrow),
-                                  style: ElevatedButton.styleFrom(),
-                                  label: Text(widget.labels[9])),
-                            ElevatedButton.icon(
-                                icon: Icon(widget.listIcon),
+                                onPressed: widget.isEnabled
+                                    ? _resumeScanning
+                                    : null,
+                                icon: const Icon(Icons.play_arrow),
                                 style: ElevatedButton.styleFrom(),
-                                label: Text(widget.labels[10]),
-                                onPressed: _showListDialog),
+                                label: Text(widget.labels[9]),
+                              ),
+                            ElevatedButton.icon(
+                              icon: Icon(widget.listIcon),
+                              style: ElevatedButton.styleFrom(),
+                              label: Text(widget.labels[10]),
+                              onPressed: _showListDialog,
+                            ),
                             OutlinedButton.icon(
-                              onPressed:
-                              widget.isEnabled ? _clearAllData : null,
+                              onPressed: widget.isEnabled
+                                  ? _clearAllData
+                                  : null,
                               icon: const Icon(Icons.delete_sweep_outlined),
                               label: Text(widget.labels[19]),
                               style: OutlinedButton.styleFrom(
@@ -1796,60 +1938,66 @@ class _ScannerDialogState extends State<_ScannerDialog> {
                               icon: const Icon(Icons.check_circle_outline),
                               label: Text(widget.labels[11]),
                               style: ElevatedButton.styleFrom(
-                                  backgroundColor:
-                                  stringToColor(_kOkButtonColor),
-                                  foregroundColor: colorScheme.onPrimary),
+                                backgroundColor: stringToColor(_kOkButtonColor),
+                                foregroundColor: colorScheme.onPrimary,
+                              ),
                               onPressed: widget.isEnabled
                                   ? () {
-                                final groupFieldIndex =
-                                    widget.listOptions.groupField;
-                                final notValidGroupName =
-                                widget.labels.length > 35
-                                    ? widget.labels[35]
-                                    : 'Not Valid';
-                                Map<String, List<ScannedCode>>
-                                groupedCodes = {};
+                                      final groupFieldIndex =
+                                          widget.listOptions.groupField;
+                                      final notValidGroupName =
+                                          widget.labels.length > 35
+                                          ? widget.labels[35]
+                                          : 'Not Valid';
+                                      Map<String, List<ScannedCode>>
+                                      groupedCodes = {};
 
-                                if (widget.isMainRefCheckEnabled &&
-                                    groupFieldIndex != null &&
-                                    groupFieldIndex >= 0) {
-                                  groupedCodes = groupBy(
-                                      _scannedBarcodes,
-                                          (code) => (code.refDataRow !=
-                                          null &&
-                                          code.refDataRow!.length >
-                                              groupFieldIndex)
-                                          ? code.refDataRow![
-                                      groupFieldIndex]
-                                          .toString()
-                                          : notValidGroupName);
-                                } else {
-                                  groupedCodes = {
-                                    'all': _scannedBarcodes
-                                  };
-                                }
+                                      if (widget.isMainRefCheckEnabled &&
+                                          groupFieldIndex != null &&
+                                          groupFieldIndex >= 0) {
+                                        groupedCodes = groupBy(
+                                          _scannedBarcodes,
+                                          (code) =>
+                                              (code.refDataRow != null &&
+                                                  code.refDataRow!.length >
+                                                      groupFieldIndex)
+                                              ? code.refDataRow![groupFieldIndex]
+                                                    .toString()
+                                              : notValidGroupName,
+                                        );
+                                      } else {
+                                        groupedCodes = {
+                                          'all': _scannedBarcodes,
+                                        };
+                                      }
 
-                                Map<String, dynamic> tempTable =
-                                writeMultipleTablesTemporary(
-                                    widget.targetTables,
-                                    groupedCodes);
+                                      Map<String, dynamic> tempTable =
+                                          writeMultipleTablesTemporary(
+                                            widget.targetTables,
+                                            groupedCodes,
+                                          );
 
-                                final validCodes = _scannedBarcodes
-                                    .where((sc) =>
-                                sc.status ==
-                                    ValidationStatus.valid)
-                                    .map((sc) => sc.code)
-                                    .toList();
-                                final content =
-                                validCodes.join(separator[5]);
-                                addToTxfController(widget.position,
-                                    widget.scrName, content,
-                                    table: tempTable,
-                                    stateObject:
-                                    _scannedBarcodes); // Pass the state object
+                                      final validCodes = _scannedBarcodes
+                                          .where(
+                                            (sc) =>
+                                                sc.status ==
+                                                ValidationStatus.valid,
+                                          )
+                                          .map((sc) => sc.code)
+                                          .toList();
+                                      final content = validCodes.join(
+                                        separator[5],
+                                      );
+                                      addToTxfController(
+                                        widget.position,
+                                        widget.scrName,
+                                        content,
+                                        table: tempTable,
+                                        stateObject: _scannedBarcodes,
+                                      ); // Pass the state object
 
-                                Get.back(result: _scannedBarcodes);
-                              }
+                                      Get.back(result: _scannedBarcodes);
+                                    }
                                   : null,
                             ),
                           ],
@@ -1858,7 +2006,7 @@ class _ScannerDialogState extends State<_ScannerDialog> {
                     ),
                   ),
                 ),
-              )
+              ),
             ],
           ),
         ),

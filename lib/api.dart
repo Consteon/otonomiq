@@ -37,6 +37,7 @@ import 'firestore_repository/firestore_generic_repository.dart';
 import 'firestore_repository/proxy_repository.dart';
 import 'firestore_repository/table_repository.dart';
 import 'ftz_secret.dart';
+import 'gateway/ledger_publish.dart';
 import 'global.dart';
 import 'global2.dart';
 import 'login/api/user_repository.dart';
@@ -856,14 +857,48 @@ Widget displayImage({
       );
       File localFile = File(localImage);
       if (!localFile.existsSync()) {
-        result = CachedNetworkImage(
-          imageUrl: defaultImage,
-          placeholder: (context, url) => Container(
-            color: Colors.transparent, // Set transparency
-            width: double.infinity, // Match image size
-            height: double.infinity, // Match image size
-          ),
-        ); // default image
+        // The local copy is gone -- _capture deletes its own shrunk temp file,
+        // renamePath's double-failure fallback can return that same path as the
+        // url, and app storage can be cleared. imageMap is the local-path -> url
+        // ledger and a synchronous Map lookup, so trying it here is safe from
+        // build(); isValidImageUrl is what rejects both the '--' placeholder
+        // and the aum__InvalidImagePath-NN__mua give-up marker. Index 1 is
+        // length-guarded: this is dynamic data.
+        final List<dynamic>? mapEntry = imageMapGet(localImage);
+        final String cloudUrl = (mapEntry != null && mapEntry.length > 1)
+            ? '${mapEntry[1]}'
+            : '';
+        if (isValidImageUrl(cloudUrl)) {
+          result = CachedNetworkImage(
+            imageUrl: cloudUrl,
+            fit: fit,
+            placeholder: (context, url) => Container(
+              color: Colors.transparent,
+              width: double.infinity,
+              height: double.infinity,
+            ),
+            errorWidget: (context, url, error) => const Icon(Icons.error),
+            fadeInDuration: const Duration(milliseconds: duration),
+          );
+        } else if (mapEntry != null) {
+          // Registered but not uploaded yet: a PENDING state, never the
+          // give-up placeholder. Static on purpose -- the photo is not being
+          // fetched, it is waiting to upload, and a spinner here would also
+          // stop pumpAndSettle from ever settling.
+          result = const Icon(
+            Icons.cloud_upload_outlined,
+            color: Color(0xFF9CA3AF),
+          );
+        } else {
+          result = CachedNetworkImage(
+            imageUrl: defaultImage,
+            placeholder: (context, url) => Container(
+              color: Colors.transparent, // Set transparency
+              width: double.infinity, // Match image size
+              height: double.infinity, // Match image size
+            ),
+          ); // default image
+        }
       } else {
         result = Image.file(
           localFile,
@@ -1636,13 +1671,13 @@ Future setStatus(msgId, status) async {
   // had its own `.catchError`; its sibling did not. Nobody consumes the
   // return value, so never rejecting is the whole contract.
   safeUnawaited(
-    FirebaseFirestore.instance.runTransaction((Transaction tx) async {
+    fsTransaction((Transaction tx) async {
       final docSnapshot = await tx.get<Map<String, dynamic>>(notifRef);
       // A thread doc can exist without `urd` (server CF, half-applied offline
       // write) or not exist at all — either way tx.update would throw here.
       if (!docSnapshot.exists) return;
       tx.update(notifRef, {"urd": decUnread(docSnapshot.data()?['urd'])});
-    }),
+    }, 'setStatus urd'),
     'setStatus urd',
   ); // end of firebase transaction
 }
@@ -1684,12 +1719,12 @@ Future sendMessage(mTo, mFrom, mDisplay, mData, mIn, mStatus) async {
           .doc(sendCollection)
           .get();
       final postRef = FirebaseFirestore.instance.doc(sendCollection);
-      await FirebaseFirestore.instance.runTransaction((Transaction tx) async {
+      await fsTransaction((Transaction tx) async {
         final docSnapshot = await tx.get<Map<String, dynamic>>(postRef);
         var currentUnread = docSnapshot.data()!['urd'] + 1;
         var updateData = {"lm": mDisplay, "urd": currentUnread, "lt": tStamp};
         tx.update(postRef, updateData);
-      }); // end of firebase transaction
+      }, 'sendMessage unread'); // end of firebase transaction
     } catch (eTrans) {
       // Was `errorReport(e)`: there is no `e` in scope here, so it silently
       // resolved to dart:math's Euler constant and every failed transaction
@@ -3571,6 +3606,7 @@ Future signOut() async {
     historyUnLock(functionName);
     await imageMapClear();
     await storage.write(key: imageMapSecureName, value: 'null');
+    await clearLedgerOutbox(); // ledger publish outbox dies with the session
     // devPrint("After in = false; try to signOut from firebaseAuth");
     if (!demoApp) {
       //        FirebaseAuth.instance.signOut(); // signOut from firebase
@@ -4191,7 +4227,7 @@ Future<int> launchCheck() async {
       // would block login on that round-trip, so keep it fire-and-forget and
       // guard it. The write is retried by the next launchCheck.
       safeUnawaited(
-        FirebaseFirestore.instance.runTransaction((Transaction tx) async {
+        fsTransaction((Transaction tx) async {
           result = 9929;
           var msgSnapshot = await tx.get<Map<String, dynamic>>(docRef);
           Map<String, dynamic> updateMsg = {};
@@ -4223,7 +4259,7 @@ Future<int> launchCheck() async {
           // skip the write rather than issue a pointless transaction update.
           if (updateMsg.isNotEmpty) tx.update(docRef, updateMsg);
           result = 9936;
-        }),
+        }, 'launchCheck msgDoc'),
         'launchCheck msgDoc',
       ); // end of firebase transaction
     }
@@ -5148,7 +5184,41 @@ void saveSend(
       updateEventString = '';
     }
 
-    if (updateEventString.isNotEmpty) {
+    // publishLedger (pub-sub-gateway phase 1) — the 6th ⬤ segment of tb. Same
+    // pre-pass as addToEvent above, own try/catch so a failure here can never
+    // discard the other segments.
+    String publishString = '';
+    try {
+      String raw = component['publishLedger'] ?? '';
+      if (raw.isNotEmpty) {
+        publishString = autheniumDecode(raw) ?? '';
+        publishString = resolveDriverCurlyTokens(publishString, scrName);
+        publishString = replacePlaceholders(publishString, ref);
+        publishString = TokenResolver.screenTxMarkers(publishString);
+        // ⬤ -> space (outer tb frame) + Idempotency-Key stamped HERE, at tap
+        // time, and reused by every retry — including after an app restart.
+        publishString = buildPublishSegment(publishString);
+      }
+    } catch (e) {
+      publishString = '';
+    }
+
+    if (publishString.isNotEmpty) {
+      if (updateEventString.isNotEmpty) {
+        devPrint(
+          '[saveSend] updateEventRow composed, '
+          'length=${updateEventString.length}',
+        );
+      }
+      devPrint(
+        '[saveSend] publishLedger composed, length=${publishString.length}',
+      );
+      // ALL SIX segments, empties included, so tbParts[5] is always the publish
+      // segment when a publish is present. historySync length-guards every
+      // index, and the shorter forms below stay byte-identical when it is not.
+      tableString =
+          '${tableString ?? ''}${separator[0]}$updateString${separator[0]}$deleteString${separator[0]}$eventString${separator[0]}$updateEventString${separator[0]}$publishString';
+    } else if (updateEventString.isNotEmpty) {
       devPrint(
         '[saveSend] updateEventRow composed, '
         'length=${updateEventString.length}',
