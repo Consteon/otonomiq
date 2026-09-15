@@ -93,7 +93,7 @@ Documentation for the custom widgets in [lib/widget/](../../lib/widget/).
 | TaskItemBuilder | [task_item_builder.md](task_item_builder.md) | draft | Item-line builder for Admin create-task wizard (P2) |
 | TaskManifestList | [task_manifest_list.md](task_manifest_list.md) | draft | Per-task accordion list with drop/pickup aggregates for P5 CustodyNotification |
 | VehicleCargoSummary | [vehicle_cargo_summary.md](vehicle_cargo_summary.md) | draft | Intro paragraph + cargo card (Sisa di Kendaraan) and vehicleId publisher for P12 ReturnVehicle |
-| TimelinePeriodic | [timeline_periodic.md](timeline_periodic.md) | draft | Config-driven event timeline (TIMELINE variant periodic) with period selector, badge chips, gap pills, image gallery |
+| TimelinePeriodic | [timeline_periodic.md](timeline_periodic.md) | draft | Config-driven event timeline (TIMELINE variant periodic) with period selector, badge chips, gap pills, image gallery; a `text` ◆-segment whose tokens all resolve empty is blanked in place |
 | TimelineLedger | [timeline_ledger.md](timeline_ledger.md) | draft | Config-generic grouped + expandable audit timeline (TIMELINE variant ledger) with category badge palette, period filter, flat/grouped modes |
 | TimelineCard | [timeline_card.md](timeline_card.md) | draft | Day-grouped timeline card (`TIMELINE_CARD`): coloured dots, big time column, `row` 4-slot template with auto-hide, status chip inferred from the newest row, optional "see all" header link |
 | OtqFormattedText | [otq_formatted_text.md](otq_formatted_text.md) | todo | Text with formatter |

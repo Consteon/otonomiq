@@ -54,7 +54,7 @@ All config reads go through `SduiSpec` ([lib/sdui_spec.dart](../../lib/sdui_spec
 | key | read via | notes |
 |---|---|---|
 | `variant` | `spec.str('variant','auto').toLowerCase()` | anything not `tap` ⇒ `auto` |
-| `position` | `component['position']` | the widget's OWN slot — receives the photo URL |
+| `position` | `component['position']` | the widget's OWN slot — receives the photo URL. It is FILTERED OUT of `ocrTargets` and `metaTargets` at parse time; see "Never a target of itself". |
 | `ocrTargets` | `ocrParsePositions(spec.str('ocrTargets'))` | split on `separator[4]` (`,`) — **not** a hardcoded comma |
 | `ocrPattern` | `spec.list('ocrPattern')` | ◆-split, index-guarded, per target |
 | `ocrType` | `spec.list('ocrType')` | ◆-split, index-guarded; `text` \| `number` \| `date`, default `text` |
@@ -224,10 +224,21 @@ In `tap`, the pattern validates **on tap**; it NEVER filters what is tappable. A
 | ML Kit returned nothing / nothing matched | `manual` | `ocrRawSummary(elements)`, truncated to 200 chars |
 | `×` delete pressed | `manual` | unchanged |
 | `metaTargets` empty | nothing written at all | — |
+| `metaTargets` names this widget's own `position` | that entry is DROPPED in `initState` (with a `devPrint`); if it was the only entry, nothing is written at all | — |
 
 Implemented as a `TextEditingController` listener, NOT a submit hook — the `api.dart` submit path is untouched. The listener compares against the exact string WE wrote (so our own write never trips it), flips once, and detaches itself; `dispose()` detaches unconditionally, because a leaked listener on a SHARED `TextEditingController` outlives the widget.
 
 Raw values are joined with `separator[4]` (`,`). **Not ◆ or any other `forbiddenCharacter`**: `saveSend` replaces all 36 of them with SPACE, so a ◆-joined raw column would arrive mangled. A comma inside a raw OCR string makes this column ambiguous — accepted; it is a measurement column, never parsed.
+
+#### Never a target of itself
+
+The widget's own `position` holds the **photo URL**. Anything else written there replaces the evidence with a string `displayImage` reads as a network url: a broken preview on screen, and no photo at all in the submitted record. The concrete path is `_attachEditWatch` → `_setMeta('ocr_edit', null)` on the officer's first manual correction, which writes the four characters `ocr_edit` over the url. With `ocrTargets` it is worse — the photo write at the end of `_capture` trips the edit-watch itself, so the false `ocr_edit` fires with zero officer action.
+
+`initState` therefore drops the own position from **both** `ocrTargets` and `metaTargets` before anything reads them (`_dropOwnPosition`), which covers every write site at once: `_setMeta`, the `fills.forEach` loop, the withheld-target clear and `_compareTarget` all draw their positions from those two lists and nowhere else. Each drop logs `OCR_CAPTURE: <key> drops own position <n>` — dead SDUI config fails silently in this repo, so a misconfiguration must at least be diagnosable.
+
+> ⚠ **Known cost, on an already-misconfigured sheet: the `text` slots only.** Dropping an `ocrTargets` entry shrinks `n`, so the chip labels (`text[5 + i]`) and the compare banner (`text[5 + n]` / `text[6 + n]`) shift down one slot — the same renumbering the `text` slot-table warning describes, arriving from the other direction. That one is unavoidable here: those strings come out of the `text` ◆-list, which is addressed by ABSOLUTE slot number, so the widget cannot renumber them. Losing the evidence photo is strictly worse, so the filter wins; fix the sheet.
+>
+> **`ocrPattern` and `ocrType` do NOT shift.** They are addressed by the target's ORDINAL inside `ocrTargets` (auto reads index 0, the tap screen reads the active chip), so `_alignToTargets` drops the same ordinals from both lists: every surviving target keeps the pattern and the type the sheet declared for it. Without that, `ocrTargets:'4,7'` + `ocrPattern:'A◆B'` + `ocrType:'text◆number'` would validate the surviving slot 7 with `A` and normalise it as `text` — no crash (both accessors are length-guarded), just the wrong shape in the record. A list shorter than `ocrTargets` stays shorter: an ordinal past its end is not carried over, and that target keeps falling back to the accessor's own default exactly as it did before the drop.
 
 ### Failure is never an error
 
@@ -318,7 +329,7 @@ In `GET_IMAGES`, `both` is currently dead config (anything ≠ `gallery` is trea
 Covered:
 
 - [test/ocr_capture_support_test.dart](../../test/ocr_capture_support_test.dart) — 62 pure-logic tests: seed normalisation, config parsing, alignment/length guards, number and date normalisation, candidate selection, geometry, the two `compute()` entry points' fail-open behaviour, sibling lookup, the cross-position write, and the serial banner's `{value}`/`{expected}` filler. Each test names the production change that turns it RED.
-- [test/ocr_capture_widget_test.dart](../../test/ocr_capture_widget_test.dart) — 27 pump tests: label/hint slot routing, blank-slot suppression, `isEnabled`, the failure banner, the badge chip, the `"null"` seed normalisation, a missing position, the §2.5 reset regression (`clearAll()` must repaint back to the empty state), and fourteen for the serial compare — zero-config regression, mismatch warning, the `ok` tick, `blockOnMismatch` scoping, a withheld gate the officer clears by TYPING, live re-compare on a manual correction, a late-landing doc, `missing` staying silent, the `"null"` slot seed, `search` doc selection, a reference field with no usable serial (absent, then the literal `"null"`), a lean tenant `text` whose new segments are off the end of the ◆-list, a `TRUE` block with no message segments still writing the value, and a disabled compared target that warns without withholding.
+- [test/ocr_capture_widget_test.dart](../../test/ocr_capture_widget_test.dart) — 38 pump tests: label/hint slot routing, blank-slot suppression, `isEnabled`, the failure banner, the badge chip, the `"null"` seed normalisation, a missing position, the §2.5 reset regression (`clearAll()` must repaint back to the empty state), seven for the own-position filter (a `metaTargets` self-reference that must not eat the photo url, its control on a slot elsewhere, and an `ocrTargets` self-reference that realigns the chip labels — all three also capture `devPrint` and assert the drop diagnostic as a pair, so the key name in the log is pinned and the no-collision fixture proves it stays silent; plus four for the per-target config realignment — a dropped own target taking its `ocrPattern`/`ocrType` with it, the no-collision identity control, a lean-sheet config list shorter than `ocrTargets`, and `ocrTargets:'4'` emptying `_targets` entirely), and eighteen for the serial compare — zero-config regression, mismatch warning, the `ok` tick, `blockOnMismatch` scoping, a withheld gate the officer clears by TYPING, live re-compare on a manual correction, a late-landing doc, `missing` staying silent, the `"null"` slot seed, `search` doc selection, a reference field with no usable serial (absent, then the literal `"null"`), a lean tenant `text` whose new segments are off the end of the ◆-list, a `TRUE` block with no message segments still writing the value, a disabled compared target that warns without withholding, and four that pin the photo as independent of the verdict (spec §11.1–11.3 plus the `TRUE` withhold).
 
 **Not covered, and why:**
 

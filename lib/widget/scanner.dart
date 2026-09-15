@@ -12,6 +12,7 @@ import '../global.dart';
 import '../model/otq_state.dart';
 import '../redux/screen_transaction.dart';
 import 'driver_home_support.dart';
+import 'ftz_scanner_screen.dart' show disposeScannerController;
 
 /// Length-guarded slot access for Scanner text slots.
 ///
@@ -321,7 +322,7 @@ class _ScannerState extends State<Scanner> with SingleTickerProviderStateMixin {
   @override
   void dispose() {
     // Order matters -- camera first, animation second.
-    _cameraController.dispose();
+    disposeScannerController(_cameraController);
     _scanLineController.dispose();
     super.dispose();
   }

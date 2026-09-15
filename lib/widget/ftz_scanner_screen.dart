@@ -61,6 +61,32 @@ Rect scannerFrameRect({
   );
 }
 
+/// Disposes a scanner's [controller] without leaking the camera session.
+///
+/// mobile_scanner (7.2.0, still so in 7.4.2) records the session only when
+/// the platform `start` call returns. A controller disposed while that call is
+/// in flight -- a scanner closed before its preview came up, e.g. X tapped as
+/// the checker loop reopens it -- finds nothing to stop; the start then lands
+/// with no owner, the camera stays on, and the NEXT scanner fails with "The
+/// MobileScannerController is already running. Stop it before starting
+/// again." Debug builds rarely show it: in kDebugMode MobileScanner
+/// force-stops the platform on every mount.
+///
+/// So a controller that is still starting is disposed when its start lands.
+void disposeScannerController(MobileScannerController controller) {
+  if (!controller.value.isStarting) {
+    controller.dispose();
+    return;
+  }
+  void settle() {
+    if (controller.value.isStarting) return;
+    controller.removeListener(settle);
+    // Not from inside notifyListeners: ChangeNotifier asserts against that.
+    scheduleMicrotask(controller.dispose);
+  }
+  controller.addListener(settle);
+}
+
 /// A screen that displays a camera view for scanning QR codes.
 class FtzScannerScreen extends StatefulWidget {
   // NEW: Parameter for the AppBar title.
@@ -748,7 +774,7 @@ class _FtzScannerScreenState extends State<FtzScannerScreen>
     _popTimer?.cancel();
     _sweep.dispose();
     WidgetsBinding.instance.removeObserver(this);
-    _controller.dispose();
+    disposeScannerController(_controller);
     super.dispose();
   }
 }

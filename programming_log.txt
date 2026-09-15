@@ -249,4 +249,7 @@ flutter clean
 flutter build appbundle --release
 cp -f ~/Frontez/autsorz/build/app/outputs/bundle/release/app-release.aab ~/"hsangkanparan@vertesc.com - Google Drive"/"My Drive"/FrontezReleases/autsorzmobile_0_9_new.aab
 
+HH 14 Sep 2026
+pubsub-gateway-phase1: new server-driven write verb publishLedger -> pub-sub-gateway (Cloud Run). 6th ⬤ segment of tb, own outbox in secure storage _LEDGER_OUTBOX, drained at the end of every historySync. GATEWAY_URL only via --dart-define. New: lib/gateway/gateway_client.dart, lib/gateway/ledger_publish.dart, docs/firestore/publish_ledger.md. History-queue retry/partial/drop semantics unchanged (owner decision K4).
+
 

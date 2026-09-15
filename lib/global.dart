@@ -2117,6 +2117,39 @@ void devPrint(dynamic e) {
 /// (e.g. `firestoreDb.collection(...).doc(...)`); it is cast to
 /// [DocumentReference] internally. Returns the (already guarded) write Future
 /// so a caller may still await it — it resolves normally even on failure.
+/// Char budget for one Firestore document write, below Firestore's own hard
+/// limit of 1 MiB per document (which counts field names and encoding overhead
+/// on top of the values).
+const int fsMaxPayloadChars = 900000;
+
+/// Whether [data] is too large to write to one Firestore document.
+///
+/// An oversized write does not merely fail — it POISONS the offline cache.
+/// Offline the mutation is stored in SQLite `document_overlays`, one row per
+/// document, and Android caps a single CursorWindow row at 2 MB. The next
+/// listen on that document reads the overlay back, throws
+/// `SQLiteBlobTooBigException: Row too big to fit into CursorWindow`, and
+/// Firestore's AsyncQueue answers with `panic` — a FATAL
+/// `Internal error in Cloud Firestore` that repeats on every launch, because
+/// the listen is re-established at boot. Online the same payload is rejected
+/// with `[cloud_firestore/invalid-argument]`.
+///
+/// The payloads that actually get there are the Proxy-doc history / imageMap
+/// mirrors (`h`, `i`, `h2`, `i2`): whole `jsonEncode`d queues that grow without
+/// bound while the device stays offline.
+///
+/// Counts UTF-16 code units (`String.length`, O(1)) over String values only —
+/// a lower bound is enough under a limit this coarse, it costs nothing on the
+/// many tiny writes that share this path, and unlike `jsonEncode` it cannot
+/// throw on a value (FieldValue, Timestamp) that is not JSON-encodable.
+bool fsPayloadTooBig(Map<String, dynamic> data) {
+  int chars = 0;
+  for (final Object? value in data.values) {
+    if (value is String) chars += value.length;
+  }
+  return chars > fsMaxPayloadChars;
+}
+
 Future<void> safeFsUpdate(dynamic ref, Map<String, dynamic> data, String tag) {
   if (data.isEmpty) {
     devPrint('[safeFsUpdate] $tag skipped empty update');
@@ -2129,10 +2162,76 @@ Future<void> safeFsUpdate(dynamic ref, Map<String, dynamic> data, String tag) {
     errorReport('[safeFsUpdate] $tag not a DocumentReference: $e');
     return Future<void>.value();
   }
+  if (fsPayloadTooBig(data)) {
+    // Skipping loses nothing that could ever have been written — the server
+    // rejects it — and it keeps the write out of the offline overlay, where it
+    // would crash the app on the next listen. See [fsPayloadTooBig].
+    errorReport(
+      '[safeFsUpdate] $tag OVERSIZED skipped ${docRef.path} '
+      'keys=${data.keys.toList()}',
+    );
+    return Future<void>.value();
+  }
   return docRef.update(data).catchError((Object e) {
     errorReport('[safeFsUpdate] $tag ${docRef.path} data=$data err=$e');
   });
 } // end of safeFsUpdate
+
+/// Run [handler] in a Firestore transaction without letting a handler error
+/// become `Bad state: Future already completed`.
+///
+/// `method_channel_firestore.dart:284` calls `completer.completeError` from
+/// INSIDE the transaction stream listener whenever the Dart handler throws,
+/// and the plugin guards none of its three completion points with
+/// `isCompleted`. So once a second event has already settled that completer (a
+/// native `error` / `complete`, or the next retry attempt), the handler's own
+/// throw settles it a second time — and `Bad state` is raised in the
+/// listener's zone, NOT on `runTransaction`'s future. `await`, `try/catch`,
+/// `.catchError` and [safeUnawaited] all watch that future, so none of them
+/// can catch it: it goes straight to `platformDispatcher.onError` as a FATAL
+/// with zero app frames.
+///
+/// The only app-side cure is to make the handler incapable of throwing into
+/// the plugin. The error is captured, the handler returns normally, and the
+/// error is rethrown here once the plugin has settled — so every caller keeps
+/// the exact failure behaviour it had before.
+///
+/// ponytail: a handler that stages a write BEFORE a line that can throw would
+/// now COMMIT it (the plugin is told "success" with whatever was staged) where
+/// it previously aborted. Every current caller reads first and stages last —
+/// keep it that way, or build the writes into locals and stage them at the end.
+Future<T?> fsTransaction<T>(
+  Future<T> Function(Transaction tx) handler,
+  String tag,
+) async {
+  Object? caught;
+  StackTrace? caughtStack;
+  T? result;
+  try {
+    result = await FirebaseFirestore.instance.runTransaction<T?>((
+      Transaction tx,
+    ) async {
+      try {
+        return await handler(tx);
+      } catch (e, s) {
+        caught = e;
+        caughtStack = s;
+        return null;
+      }
+    });
+  } catch (e, s) {
+    // Native / transport failure (offline, maxAttempts exhausted). A handler
+    // error wins: it is the cause, this is the consequence.
+    caught ??= e;
+    caughtStack ??= s;
+  }
+  final Object? err = caught;
+  if (err != null) {
+    devPrint('[fsTransaction] $tag failed: $err');
+    Error.throwWithStackTrace(err, caughtStack ?? StackTrace.current);
+  }
+  return result;
+} // end of fsTransaction
 
 /// Fire-and-forget [f] WITHOUT letting a rejection become a fatal crash.
 ///

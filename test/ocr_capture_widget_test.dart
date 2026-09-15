@@ -74,6 +74,7 @@ void main() {
     int position = 4,
     String currentValue = '',
     String metaTargets = '',
+    String ocrTargets = '7',
     String text =
         'Foto Meteran◆Pas-in angka◆Ketuk angkanya◆Gak kebaca◆dari foto◆Stand Meter',
   }) =>
@@ -81,7 +82,7 @@ void main() {
         'type': 'ocr_capture',
         'variant': variant,
         'position': position,
-        'ocrTargets': '7',
+        'ocrTargets': ocrTargets,
         'ocrPattern': r'\d{4,6}',
         'ocrType': 'number',
         'metaTargets': metaTargets,
@@ -384,6 +385,257 @@ void main() {
     await t.pumpWidget(subject(c, 'scr_h'));
     await t.pump();
     expect(find.textContaining('position missing'), findsOneWidget);
+  });
+
+  // ── the widget's own position is never a target (meter-renderer-fixes A-1) ─
+  //
+  // Slot `position` holds the PHOTO URL. A sheet that also names it in
+  // metaTargets/ocrTargets turns every later write into "the photo is gone":
+  // displayImage reads a non-`aum__` string as a network url, paints the error
+  // icon, and the record submits `ocr_edit` where the evidence should be.
+
+  const String photoUrl = 'aum__/tmp/ocrup1757000000000.jpg__mua';
+  OcrFill fillOf(String v) =>
+      (display: v, finalData: v, raw: v, box: const <double>[0, 0, 10, 10]);
+
+  /// The two statements _capture runs right after applyCaptureResult. The
+  /// upload is plugin-backed and unreachable here; this is its record effect.
+  void photoLands(String scr) {
+    OcrCapture.entryOf(scr, 4).photoUrl = photoUrl;
+    ocrWriteToPosition(scr, 4, display: photoUrl, finalData: photoUrl);
+  }
+
+  /// Pump [w] with devPrint captured. devPrint (global.dart:2096) forwards to
+  /// debugPrint under kDebugMode -- true under flutter_test -- and
+  /// _dropOwnPosition logs from initState, i.e. inside pumpWidget.
+  ///
+  /// The swap is the pattern stat_card_row_test.dart:77-80 already uses.
+  ///
+  /// ★ The restore is INLINE, in a finally. NEVER addTearDown: debugPrint is a
+  /// foundation debug variable and testWidgets asserts it is back to its
+  /// original value BEFORE tearDown runs, so a deferred restore fails with
+  /// "The value of a foundation debug variable was changed by the test".
+  Future<List<String>> pumpCapturingLog(WidgetTester t, Widget w) async {
+    final List<String> logs = <String>[];
+    final original = debugPrint;
+    debugPrint = (String? message, {int? wrapWidth}) => logs.add(message ?? '');
+    try {
+      await t.pumpWidget(w);
+    } finally {
+      debugPrint = original;
+    }
+    return logs;
+  }
+
+  List<String> dropLines(List<String> logs) =>
+      logs.where((String l) => l.contains('drops own position')).toList();
+
+  // ★ RED pre-fix: _setMeta('ocr_edit', null) writes to _metaTargets[0] == 4,
+  // replacing the photo url in the submitted record with the string 'ocr_edit'.
+  testWidgets('metaTargets naming the own position is dropped, photo survives',
+      (WidgetTester t) async {
+    const String scrName = 'own_meta';
+    txfControllerCheck(scrName, 7);
+    final List<String> logs = await pumpCapturingLog(
+        t, subject(component(metaTargets: '4'), scrName));
+    // The diagnostic is the ONLY channel by which anyone learns the sheet is
+    // wrong. Exact list: it pins the KEY NAME and that exactly one drop fired.
+    expect(dropLines(logs), <String>[
+      'OCR_CAPTURE: metaTargets drops own position 4 '
+          '(that slot holds the photo url)',
+    ]);
+    await t.pump();
+    t
+        .state<OcrCaptureState>(find.byType(OcrCapture))
+        .applyCaptureResult(4, <int, OcrFill>{7: fillOf('99999')}, '99999');
+    photoLands(scrName);
+    await t.pump();
+    expect(txfController[scrName]![4]!.finalData, photoUrl);
+
+    // The officer corrects the read -> _attachEditWatch fires.
+    txfController[scrName]![7]!.controller.text = '99998';
+    await t.pump();
+
+    expect(txfController[scrName]![4]!.finalData, photoUrl);
+    expect(find.byIcon(Icons.cancel_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.add_a_photo_outlined), findsNothing);
+  });
+
+  // The CONTROL for the test above: without it, a green run there would be
+  // satisfied by an edit-watch that never fires at all.
+  testWidgets('a metaTargets slot elsewhere still receives ocr_edit',
+      (WidgetTester t) async {
+    const String scrName = 'other_meta';
+    txfControllerCheck(scrName, 7);
+    txfControllerCheck(scrName, 9);
+    final List<String> logs = await pumpCapturingLog(
+        t, subject(component(metaTargets: '9'), scrName));
+    // The NEGATIVE half of the log pair: no collision, no diagnostic. Without
+    // it, a _dropOwnPosition that logged unconditionally would still pass the
+    // two positive assertions.
+    expect(dropLines(logs), isEmpty);
+    await t.pump();
+    t
+        .state<OcrCaptureState>(find.byType(OcrCapture))
+        .applyCaptureResult(4, <int, OcrFill>{7: fillOf('99999')}, '99999');
+    photoLands(scrName);
+    await t.pump();
+    expect(txfController[scrName]![9]!.finalData, 'ocr');
+
+    txfController[scrName]![7]!.controller.text = '99998';
+    await t.pump();
+
+    expect(txfController[scrName]![9]!.finalData, 'ocr_edit');
+    expect(txfController[scrName]![4]!.finalData, photoUrl);
+  });
+
+  // ★ RED pre-fix: _targets == [4, 7], so ocrTargetLabels pairs the written
+  // slot 7 with text[6] ('Kode') instead of text[5]. That index shift is the
+  // documented cost of the filter -- and the only thing a direct
+  // applyCaptureResult call can observe, because that method writes whatever
+  // fills it is handed and never consults _targets.
+  testWidgets('ocrTargets naming the own position is dropped, labels realign',
+      (WidgetTester t) async {
+    const String scrName = 'own_target';
+    txfControllerCheck(scrName, 7);
+    final List<String> logs = await pumpCapturingLog(
+      t,
+      subject(
+        component(
+          ocrTargets: '4,7',
+          text: 'Foto Meteran◆cam◆tap◆fail◆dari foto◆Stand Meter◆Kode',
+        ),
+        scrName,
+      ),
+    );
+    expect(dropLines(logs), <String>[
+      'OCR_CAPTURE: ocrTargets drops own position 4 '
+          '(that slot holds the photo url)',
+    ]);
+    await t.pump();
+    t
+        .state<OcrCaptureState>(find.byType(OcrCapture))
+        .applyCaptureResult(4, <int, OcrFill>{7: fillOf('99999')}, '99999');
+    // Also the repaint: ocrWriteToPosition on slot 4 is the only thing that
+    // updates the '$scrName-4' GetBuilder id the card rebuilds on.
+    photoLands(scrName);
+    await t.pump();
+    expect(find.text('dari foto · Stand Meter: 99999'), findsOneWidget);
+    expect(find.textContaining('Kode'), findsNothing);
+  });
+
+  /// component() hardcodes ONE pattern and ONE type (the live meter config).
+  /// Realignment needs two of each, one per target, so the two keys are set on
+  /// the returned literal rather than by widening the shared helper.
+  Map<String, dynamic> twoTargetComponent({
+    required String ocrTargets,
+    String ocrPattern = r'A◆\d{4,6}',
+    String ocrType = 'text◆number',
+  }) =>
+      component(ocrTargets: ocrTargets)
+        ..['ocrPattern'] = ocrPattern
+        ..['ocrType'] = ocrType;
+
+  /// The per-target validation config for the i-th surviving target. This is
+  /// the SAME expression the auto path runs -- `_capture` calls
+  /// `validationForTarget(0)` and hands the result straight to `ocrPickAuto`,
+  /// so there is no second copy that could drift from what is pinned here.
+  /// `_capture` itself is unreachable under flutter_test (camera + ML Kit).
+  ({String type, RegExp? pattern}) validationAt(WidgetTester t, int i) =>
+      t.state<OcrCaptureState>(find.byType(OcrCapture)).validationForTarget(i);
+
+  // ★ RED pre-fix: _dropOwnPosition shrinks _targets to [7] while _patterns and
+  // _types still hold BOTH entries, so the surviving slot 7 is validated with
+  // slot 4's pattern ('A') and written as slot 4's type ('text'). Nothing
+  // throws -- ocrPatternAt/ocrTypeAt are length-guarded -- the value just lands
+  // in the wrong shape.
+  testWidgets('dropping the own target drops its ocrPattern/ocrType with it',
+      (WidgetTester t) async {
+    const String scrName = 'align_drop';
+    txfControllerCheck(scrName, 7);
+    await t.pumpWidget(subject(twoTargetComponent(ocrTargets: '4,7'), scrName));
+    await t.pump();
+    expect(validationAt(t, 0).type, 'number');
+    expect(validationAt(t, 0).pattern?.pattern, r'\d{4,6}');
+  });
+
+  // The IDENTITY half, and the common sheet by a wide margin: no collision, so
+  // both lists must arrive untouched, ordinal for ordinal. Without this a
+  // filter that simply truncated either list would still pass the test above.
+  testWidgets('with no own-position collision the config lists are untouched',
+      (WidgetTester t) async {
+    const String scrName = 'align_keep';
+    txfControllerCheck(scrName, 7);
+    txfControllerCheck(scrName, 9);
+    await t.pumpWidget(subject(twoTargetComponent(ocrTargets: '7,9'), scrName));
+    await t.pump();
+    expect(validationAt(t, 0).type, 'text');
+    expect(validationAt(t, 0).pattern?.pattern, 'A');
+    expect(validationAt(t, 1).type, 'number');
+    expect(validationAt(t, 1).pattern?.pattern, r'\d{4,6}');
+  });
+
+  // PROBE: the own position at a NON-ZERO ordinal. NOT a duplicate of the
+  // '4,7' fixture above: there -- and in every other drop fixture -- position 4
+  // is ordinal 0, so a blind "drop the FIRST entry" (`cfg.sublist(1)`) passes
+  // the whole file. Here ordinal 0 belongs to the SURVIVING target 7 and the
+  // own position sits at ordinal 1, so the survivor must keep ordinal 0's
+  // config ('A' / text). RED the moment the drop stops following the own
+  // position's ordinal.
+  testWidgets('own position at ordinal 1 drops ordinal 1, not ordinal 0',
+      (WidgetTester t) async {
+    const String scrName = 'align_ord1';
+    txfControllerCheck(scrName, 7);
+    await t.pumpWidget(subject(twoTargetComponent(ocrTargets: '7,4'), scrName));
+    await t.pump();
+    expect(validationAt(t, 0).type, 'text');
+    expect(validationAt(t, 0).pattern?.pattern, 'A');
+  });
+
+  // A lean tenant sheet: ONE pattern and ONE type for three targets. Ordinal 0
+  // is the own position, so the survivors (7, 9) must fall back to the
+  // length-guarded defaults -- the same answer they got for ordinals 1 and 2
+  // BEFORE the drop. The short list must not be padded, reused or indexed out
+  // of range.
+  testWidgets('a config list shorter than ocrTargets is never padded or reused',
+      (WidgetTester t) async {
+    const String scrName = 'align_lean';
+    txfControllerCheck(scrName, 7);
+    txfControllerCheck(scrName, 9);
+    await t.pumpWidget(subject(
+      twoTargetComponent(
+          ocrTargets: '4,7,9', ocrPattern: 'A', ocrType: 'number'),
+      scrName,
+    ));
+    await t.pump();
+    expect(validationAt(t, 0).pattern, isNull);
+    expect(validationAt(t, 0).type, 'text'); // ocrTypeAt's own default
+    expect(validationAt(t, 1).pattern, isNull);
+    expect(validationAt(t, 1).type, 'text');
+  });
+
+  // r1 I-1: ocrTargets can name ONLY the own position, which empties _targets
+  // completely. Nothing may throw, the capture degrades to the manual meta
+  // path (fills.isEmpty), and the photo still lands in the own slot.
+  testWidgets('ocrTargets naming only the own position empties it safely',
+      (WidgetTester t) async {
+    const String scrName = 'own_only';
+    txfControllerCheck(scrName, 9);
+    final List<String> logs = await pumpCapturingLog(
+        t, subject(component(ocrTargets: '4', metaTargets: '9'), scrName));
+    expect(dropLines(logs), <String>[
+      'OCR_CAPTURE: ocrTargets drops own position 4 '
+          '(that slot holds the photo url)',
+    ]);
+    await t.pump();
+    expect(find.byIcon(Icons.add_a_photo_outlined), findsOneWidget);
+    t
+        .state<OcrCaptureState>(find.byType(OcrCapture))
+        .applyCaptureResult(4, <int, OcrFill>{}, 'tidak terbaca');
+    photoLands(scrName);
+    await t.pump();
+    expect(txfController[scrName]![4]!.finalData, photoUrl);
+    expect(txfController[scrName]![9]!.finalData, 'manual');
   });
 
   // ── serial compare against a reference doc (ocr-serial-instant-check) ─────
@@ -902,6 +1154,103 @@ void main() {
         findsOneWidget,
       );
       expect(find.text(hintOne), findsOneWidget);
+    });
+
+    // ── the photo is independent of the verdict (spec 11.1-11.3) ───────────
+    //
+    // These four are REGRESSION PINS, not a fix: applyCaptureResult already
+    // holds back only `cmpTarget`, and the photo lands afterwards in the
+    // widget's own slot. They go RED the day someone makes the verdict touch
+    // the photo.
+
+    const String photo = 'aum__/tmp/ocrup1757000000001.jpg__mua';
+    void photoLanded(String scr) {
+      OcrCapture.entryOf(scr, 4).photoUrl = photo;
+      ocrWriteToPosition(scr, 4, display: photo, finalData: photo);
+    }
+
+    testWidgets('11.1 a mismatch with FALSE warns and keeps the photo',
+        (WidgetTester t) async {
+      const String scr = 'photo_false';
+      mintSlots(scr, <int>[7]);
+      seedDoc(serialA);
+      await t.pumpWidget(subject(cmp(), scr));
+      await t.pump();
+      t
+          .state<OcrCaptureState>(find.byType(OcrCapture))
+          .applyCaptureResult(4, <int, OcrFill>{7: fill('99999')}, '99999');
+      photoLanded(scr);
+      await repaint(t, scr);
+      expect(
+        find.text(
+            'Seri di foto (99999) tidak cocok dengan yang tercatat ($serialA)'),
+        findsOneWidget,
+      );
+      expect(txfController[scr]![4]!.finalData, photo);
+      expect(OcrCapture.peek(scr, 4)?.photoUrl, photo);
+      expect(find.byIcon(Icons.cancel_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.add_a_photo_outlined), findsNothing);
+    });
+
+    testWidgets('11.2 a manual serial correction leaves the photo alone',
+        (WidgetTester t) async {
+      const String scr = 'photo_fix';
+      mintSlots(scr, <int>[7]);
+      seedDoc(serialA);
+      await t.pumpWidget(subject(cmp(), scr));
+      await t.pump();
+      t
+          .state<OcrCaptureState>(find.byType(OcrCapture))
+          .applyCaptureResult(4, <int, OcrFill>{7: fill('99999')}, '99999');
+      photoLanded(scr);
+      await repaint(t, scr);
+      expect(find.byIcon(Icons.error_outline), findsOneWidget);
+
+      txfController[scr]![7]!.finalData = serialA;
+      txfController[scr]![7]!.controller.text = serialA;
+      await t.pump();
+
+      expect(find.byIcon(Icons.error_outline), findsNothing);
+      expect(txfController[scr]![4]!.finalData, photo);
+      expect(find.byIcon(Icons.cancel_outlined), findsOneWidget);
+    });
+
+    testWidgets('11.3 a unit doc with no msn warns about nothing, photo normal',
+        (WidgetTester t) async {
+      const String scr = 'photo_nomsn';
+      mintSlots(scr, <int>[7]);
+      mapTableContent[docCode] = <Map<String, dynamic>>[
+        <String, dynamic>{'lk': 'A1'},
+      ];
+      await t.pumpWidget(subject(cmp(), scr));
+      await t.pump();
+      t
+          .state<OcrCaptureState>(find.byType(OcrCapture))
+          .applyCaptureResult(4, <int, OcrFill>{7: fill('99999')}, '99999');
+      photoLanded(scr);
+      await repaint(t, scr);
+      expect(find.byIcon(Icons.error_outline), findsNothing);
+      expect(find.textContaining('tidak cocok'), findsNothing);
+      expect(txfController[scr]![4]!.finalData, photo);
+      expect(find.byIcon(Icons.cancel_outlined), findsOneWidget);
+    });
+
+    testWidgets('a TRUE withhold takes the value only, never the photo',
+        (WidgetTester t) async {
+      const String scr = 'photo_true';
+      mintSlots(scr, <int>[7]);
+      seedDoc(serialA);
+      await t.pumpWidget(subject(cmp(blockOnMismatch: 'TRUE'), scr));
+      await t.pump();
+      t
+          .state<OcrCaptureState>(find.byType(OcrCapture))
+          .applyCaptureResult(4, <int, OcrFill>{7: fill('99999')}, '99999');
+      photoLanded(scr);
+      await repaint(t, scr);
+      expect(txfController[scr]![7]!.finalData, '');
+      expect(txfController[scr]![4]!.finalData, photo);
+      expect(OcrCapture.peek(scr, 4)?.photoUrl, photo);
+      expect(find.byIcon(Icons.cancel_outlined), findsOneWidget);
     });
   });
 }

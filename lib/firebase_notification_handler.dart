@@ -86,23 +86,39 @@ Future<void> bridgePushToInbox(String? ioPath, Map<String, dynamic> data) async 
 
     // 3. Update/create thread doc (mirrors sendMessage pattern at api.dart:1497-1502)
     final threadRef = FirebaseFirestore.instance.doc('$ioPath/$threadVid');
+    Object? txError;
     await FirebaseFirestore.instance.runTransaction((Transaction tx) async {
-      final snapshot = await tx.get<Map<String, dynamic>>(threadRef);
-      if (snapshot.exists) {
-        final currentUrd = (snapshot.data()?['urd'] ?? 0) as int;
-        tx.update(threadRef, {
-          ...threadUpdate,
-          'urd': currentUrd + 1,
-        });
-      } else {
-        // New thread -- create with urd=1 and la=0
-        tx.set(threadRef, {
-          ...threadUpdate,
-          'urd': 1,
-          'la': 0,
-        });
+      // Never throw INTO the plugin: method_channel_firestore.dart:284
+      // completes an already-completed completer, and the resulting
+      // 'Bad state: Future already completed' is raised in the stream
+      // listener's zone -- the outer try/catch below cannot see it, so it
+      // becomes a FATAL. Capture here, report after the plugin has settled.
+      // (inline fsTransaction pattern -- fsTransaction is in global.dart and
+      // reports through Crashlytics, not available in background isolate)
+      try {
+        final snapshot = await tx.get<Map<String, dynamic>>(threadRef);
+        if (snapshot.exists) {
+          final currentUrd = (snapshot.data()?['urd'] ?? 0) as int;
+          tx.update(threadRef, {
+            ...threadUpdate,
+            'urd': currentUrd + 1,
+          });
+        } else {
+          // New thread -- create with urd=1 and la=0
+          tx.set(threadRef, {
+            ...threadUpdate,
+            'urd': 1,
+            'la': 0,
+          });
+        }
+      } catch (e) {
+        txError = e;
       }
     });
+    if (txError != null) {
+      // ignore: avoid_print
+      print('[fcm_bridge] thread transaction error: $txError');
+    }
   } catch (e) {
     // ponytail: Firestore SDK queues writes when offline; errors here are
     // permission/corruption -- log but don't crash. errorReport is not

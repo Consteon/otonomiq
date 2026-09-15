@@ -9,6 +9,7 @@ import '../global.dart';
 import '../global2.dart';
 import '../firestore_repository/table_repository.dart';
 import '../model/ftz_scanned_code.dart';
+import 'ftz_scanner_screen.dart' show disposeScannerController;
 
 const int _kSnackBarDuration = 1;
 const String _kOkButtonColor = 'blue';
@@ -1470,7 +1471,7 @@ class _ScannerDialogState extends State<_ScannerDialog> {
 
   @override
   void dispose() {
-    _scannerController.dispose();
+    disposeScannerController(_scannerController);
     // _audioPlayer.dispose();
     _manualInputController.dispose();
     super.dispose();

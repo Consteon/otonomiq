@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 
 import '../api.dart';
 import '../crypto/auth_crypto.dart';
+import '../gateway/ledger_publish.dart';
 import '../global.dart';
 import '../global2.dart';
 import '../model/ftz_scanned_code.dart';
@@ -45,9 +46,7 @@ Future<int> getNumber(String documentName) async {
 
   try {
     // Run a transaction to ensure atomic increment.
-    final newCounterValue = await FirebaseFirestore.instance.runTransaction((
-      transaction,
-    ) async {
+    final newCounterValue = await fsTransaction((transaction) async {
       final snapshot = await transaction.get(docRef);
 
       if (!snapshot.exists) {
@@ -60,7 +59,7 @@ Future<int> getNumber(String documentName) async {
       final newCounter = (snapshot.data()!['c'] ?? 0) + 1;
       transaction.update(docRef, {'c': newCounter});
       return newCounter;
-    });
+    }, 'getNumber');
 
     return newCounterValue;
   } catch (e) {
@@ -2362,7 +2361,12 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
         } // end try (eFirestore)
         storage.write(key: imageMapSecureName, value: imageMapStr);
         //write history to proxy firestore here
-        await docRef.update({'i': imageMapStr});
+        // The read above already tolerates a MISSING proxy doc (data() null →
+        // catch → '{}'), but a raw update() on a doc that does not exist
+        // rejects with [cloud_firestore/not-found] — awaited here, outside any
+        // try, so it reached platformDispatcher.onError as a FATAL. Same guard
+        // the sibling writes in this function already use.
+        await safeFsUpdate(docRef, {'i': imageMapStr}, 'loadHistory-imageMap');
       } else {
         guestSsid = true;
       } // end if (ssid != null && ssid != loginSsid)
@@ -2435,7 +2439,9 @@ Future loadHistory(bool clearHistoryImageMap, String parent) async {
         } // end try (eFirestore)
         storage.write(key: historyName, value: historyStr);
         //write history to proxy firestore here
-        await docRef.update({'h': historyStr});
+        // Twin of the imageMap write above — missing proxy doc = not-found
+        // rejection = fatal.
+        await safeFsUpdate(docRef, {'h': historyStr}, 'loadHistory-history');
       } else {
         guestSsid = true;
       } // end if (ssid != null && ssid != loginSsid)
@@ -3213,6 +3219,24 @@ Future historySync(String source, bool forceSend) async {
                         eventHistory[1],
                         eventHistory[2],
                       ]);
+                      // publishLedger: the 6th segment. Deliberately OUTSIDE the
+                      // CRUD try below (a CRUD throw must not skip it) and NEVER
+                      // tallied — owner decision K4 keeps this record's
+                      // send/retry/partial/drop outcome byte-identical.
+                      final String publishStr = publishSegmentFromTb(rawTb);
+                      if (publishStr.isNotEmpty) {
+                        try {
+                          await enqueueLedgerPublish(
+                            publishStr,
+                            eventRowString,
+                          );
+                        } catch (ePub) {
+                          errorReport(
+                            'enqueueLedgerPublish failed for historyId '
+                            '${eventHistory[0]}: $ePub',
+                          );
+                        }
+                      }
                       try {
                         if (addStr.isNotEmpty) {
                           final res = await writeToTable(
@@ -3384,6 +3408,15 @@ Future historySync(String source, bool forceSend) async {
       devPrint('Guest proxy detected, skip historySync (nothing queued)');
     } // end if (ssid != null && ssid != loginSsid)
   }
+  // Drain the ledger outbox on every historySync tick — the 1-min timers
+  // (api.dart scheduleSendImagesInImageMap), submit_repository, connection_data
+  // and loadHistory triggers are all inherited, so NO new trigger is added.
+  // Un-awaited on purpose: publish must never delay the history queue, and
+  // safeUnawaited keeps a rejection off platformDispatcher.onError.
+  safeUnawaited(
+    drainLedgerOutbox('historySync'),
+    'historySync ledger drain',
+  );
 } // end of syncHistory
 
 Future updateHistoryImage() async {

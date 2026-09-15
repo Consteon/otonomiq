@@ -357,6 +357,7 @@ Error when executing method get() from document reference. Should be gone when a
     'gpsPlaceMark' = last gps place mark.
     'appSettings' = last result from GCF functionName['appSettings'] ~ /appSettings3.
     'driverLogin' = persisted driver VID (mirrors #has_user_login in transactionStore). Written on a successful scanner VID scan, deleted on Keluar logout (and on a workforce not-found scan). Read at globalInit to restore the driver session.
+    '_LEDGER_OUTBOX' = pub-sub-gateway publish outbox. JSON list of pending messages: [{key (Idempotency-Key), uid, ledgerCode, body (the once-encoded {"schemaVersion":N,"data":{…}} string), actionAt, historyId, attempted, notBefore, failed, error, errorId, failedAt}]. Written by enqueueLedgerPublish / drainLedgerOutbox (lib/gateway/ledger_publish.dart), cleared on signOut. See docs/firestore/publish_ledger.md.
 
 # Shared Persistence Keys:
     '@pages' = deprecated 1 Feb 2024,last all pages. Get from readSettings.Deleted when logout.

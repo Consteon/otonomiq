@@ -334,7 +334,7 @@ class _TimelinePeriodicState extends State<TimelinePeriodic> {
     final Map<String, dynamic> doc = Map<String, dynamic>.from(e)
       ..['ts'] = relativeTimestamp(eventEpoch(e), _nowMs);
     final List<String> seg = diamondTextToList(
-      resolveMapTokens(textTemplate, doc, computed),
+      resolveHidingEmptySegments(textTemplate, doc, computed),
     );
     String at(int i) => seg.length > i ? seg[i] : '';
     final List<String> imageUrls = _splitImages(

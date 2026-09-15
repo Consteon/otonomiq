@@ -73,11 +73,29 @@ void main() async {
   FlutterError.onError = (errorDetails) {
     if (kDebugMode) {
       FlutterError.presentError(errorDetails);
+    } else if (skipCrashReport(
+      errorDetails.exception,
+      internetConnectionFlag.value,
+    )) {
+      // Offline is a normal state in this app, and a failed image fetch
+      // reaches THIS handler (not errorReport) whenever the image has no
+      // error listener — ImageStreamCompleter.reportError falls through to
+      // FlutterError.reportError. So "Failed host lookup" on a Storage photo
+      // was filed as a FATAL while the app kept running. Same network-noise
+      // gate errorReport() uses: non-network framework errors (build, layout,
+      // cast) and far-end faults (ECONNRESET, TLS) still report.
+      debugPrint('offline (fatal report skipped): ${errorDetails.exception}');
     } else {
       FirebaseCrashlytics.instance.recordFlutterFatalError(errorDetails);
     }
   };
   WidgetsBinding.instance.platformDispatcher.onError = (error, stack) {
+    // Same gate on the async side: an un-awaited http / Firestore rejection
+    // while the radio is down is offline noise, not a crash.
+    if (skipCrashReport(error, internetConnectionFlag.value)) {
+      debugPrint('offline (fatal report skipped): $error');
+      return true;
+    }
     FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
     return true;
   };

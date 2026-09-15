@@ -476,11 +476,11 @@ class _NotificationListState extends State<NotificationList> {
     if (r.unread) {
       // keep the chip's unread count honest after removing an unread item
       final ioRef = FirebaseFirestore.instance.doc('$firestoreIO/${r.vid}');
-      FirebaseFirestore.instance.runTransaction<void>((tx) async {
+      fsTransaction<void>((tx) async {
         final snap = await tx.get(ioRef);
         if (!snap.exists) return; // tx.update on a missing doc throws
         tx.update(ioRef, {'urd': decUnread(snap.data()?['urd'])});
-      }).catchError((_) {}); // offline: tx fails, next _loadAll heals it
+      }, 'notificationList urd').catchError((_) {}); // offline: tx fails, next _loadAll heals it
     }
   }
 }

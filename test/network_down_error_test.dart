@@ -179,6 +179,23 @@ void main() {
       );
     });
 
+    test('the reported Storage image fetch is dropped while online', () {
+      // This one reached FlutterError.onError, NOT errorReport: an image with
+      // no error listener falls through ImageStreamCompleter.reportError to
+      // FlutterError.reportError, which main.dart filed as a FATAL. http's
+      // IOClient wraps the dart:io failure as "ClientException with
+      // SocketException", so the substring match must survive that wording.
+      const String img =
+          'ClientException with SocketException: Failed host lookup: '
+          "'firebasestorage.googleapis.com' (OS Error: No address associated "
+          'with hostname, errno = 7), '
+          'uri=https://firebasestorage.googleapis.com/v0/b/otq-01-ase2/o/'
+          'id%2F2024%2Ffield-report%2F459603924.jpg?alt=media&token=aee6d4cd';
+      expect(isNoRouteError(img), isTrue);
+      expect(skipCrashReport(img, true), isTrue);
+      expect(skipCrashReport(img, false), isTrue);
+    });
+
     test('tagged call sites keep their prefix and are still matched', () {
       // callHttpPost reports 'callHttpPost <uri>: <e>' — a string, not the
       // exception object. Substring matching must survive that.

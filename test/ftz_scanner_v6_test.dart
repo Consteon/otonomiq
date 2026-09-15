@@ -1,6 +1,9 @@
-import 'dart:ui';
+import 'dart:async';
 
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:otonomiq/widget/ftz_scanner_screen.dart';
 
 // Vertika v6 QR camera screen (`variant: "v6"` on the attendance block).
@@ -9,7 +12,8 @@ import 'package:otonomiq/widget/ftz_scanner_screen.dart';
 // plugin and this repo carries no mock packages -- so what is covered here is
 // the two decisions that are pure and that break silently on a real device:
 // what the bar says, and where the viewfinder lands on a screen that is not
-// the 390x844 the mock was drawn on.
+// the 390x844 the mock was drawn on. The dispose group drives mobile_scanner's
+// real Dart side with its native side faked on the platform channels.
 
 void main() {
   group('scannerBarTitle', () {
@@ -114,5 +118,99 @@ void main() {
         expect(r.top, greaterThanOrEqualTo(top + 56));
       }
     });
+  });
+
+  // Field bug: the checker's "1. Scan QR ID Card" came up with "The
+  // MobileScannerController is already running" (twice: code + detail). The
+  // plugin keeps ONE camera session per app, and a scanner disposed while its
+  // native start was still in flight left that session running with no owner.
+  group('disposeScannerController', () {
+    const MethodChannel method =
+        MethodChannel('dev.steenbakker.mobile_scanner/scanner/method');
+    const List<EventChannel> events = <EventChannel>[
+      EventChannel('dev.steenbakker.mobile_scanner/scanner/event'),
+      EventChannel('dev.steenbakker.mobile_scanner/scanner/deviceOrientation'),
+    ];
+
+    testWidgets('a scanner closed mid-start does not block the next one',
+        (WidgetTester tester) async {
+      final TestDefaultBinaryMessenger messenger =
+          tester.binding.defaultBinaryMessenger;
+      Completer<void>? slowStart;
+      int nextTexture = 0;
+      messenger.setMockMethodCallHandler(method, (MethodCall call) async {
+        if (call.method == 'state') return 1; // authorized
+        if (call.method != 'start') return null; // stop, updateScanWindow
+        final Map<String, Object?> view = <String, Object?>{
+          'textureId': ++nextTexture,
+          'cameraDirection': 1,
+          'numberOfCameras': 2,
+          'currentTorchState': 0,
+          'size': <String, Object?>{'width': 1920.0, 'height': 1080.0},
+        };
+        final Completer<void>? hold = slowStart;
+        if (hold != null) await hold.future;
+        return view;
+      });
+      for (final EventChannel c in events) {
+        messenger.setMockStreamHandler(
+            c, MockStreamHandler.inline(onListen: (_, _) {}));
+      }
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(method, null);
+        for (final EventChannel c in events) {
+          messenger.setMockStreamHandler(c, null);
+        }
+      });
+
+      final MobileScannerController a =
+          MobileScannerController(autoStart: false);
+      final MobileScannerController b =
+          MobileScannerController(autoStart: false);
+      Widget scanners({required bool withA}) => Directionality(
+            textDirection: TextDirection.ltr,
+            child: Column(children: <Widget>[
+              if (withA)
+                SizedBox(
+                    key: const ValueKey<String>('a'),
+                    height: 100,
+                    child: MobileScanner(controller: a)),
+              SizedBox(
+                  key: const ValueKey<String>('b'),
+                  height: 100,
+                  child: MobileScanner(controller: b)),
+            ]),
+          );
+
+      // Mount both up front: MobileScanner force-stops the platform on every
+      // mount in debug, which would wipe the leak before B could trip on it.
+      await tester.pumpWidget(scanners(withA: true));
+      await tester.pump();
+
+      final Completer<void> landing = Completer<void>();
+      slowStart = landing;
+      final Future<void> aStarting = a.start();
+      await tester.pump();
+      expect(a.value.isStarting, isTrue);
+
+      // A closes before its preview came up: the child MobileScanner unmounts
+      // first, then the screen's State.dispose hands the controller back...
+      await tester.pumpWidget(scanners(withA: false));
+      disposeScannerController(a);
+
+      // ...and only then does its native start land.
+      slowStart = null;
+      landing.complete();
+      await aStarting;
+      await tester.pump();
+
+      await b.start();
+      await tester.pump();
+      expect(b.value.error?.errorDetails?.message, isNull);
+      expect(b.value.isRunning, isTrue);
+
+      await tester.pumpWidget(const SizedBox());
+      await b.dispose();
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
   });
 }

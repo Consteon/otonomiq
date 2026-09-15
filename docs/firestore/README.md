@@ -11,6 +11,7 @@ Dokumentasi untuk operasi CRUD pada Firestore dynamic tables (`MobileTable`).
 | deleteFromTable | [delete_from_table.md](delete_from_table.md) | done | Hapus row dari dynamic table berdasarkan search query |
 | addToEvent | [add_to_event.md](add_to_event.md) | done | Tulis dokumen event keyed ke collection bernama (tambahan, selain Event spreadsheet) |
 | updateEventRow | [update_event_row.md](update_event_row.md) | done | keyed sparse merge of an existing keyed doc |
+| publishLedger | [publish_ledger.md](publish_ledger.md) | done | Publish pesan JSON ke pub-sub-gateway (HTTPS, bukan Firestore) lewat outbox terpisah |
 
 ## Arsitektur
 
@@ -33,13 +34,19 @@ Server JSON (component)
                     historySync (saat online)
                          │ split eventHistory[14] by separator[0]
                          │
-                         ├── tbParts[0] (addStr)    → writeToTable()    → addContent()
-                         ├── tbParts[1] (updateStr) → updateTableRow()  → updateContent()
-                         └── tbParts[2] (deleteStr) → deleteFromTable() → deleteContent()
-                                                                              │
-                                                                              ▼
-                                                                         Firestore
-                                                                    MobileTable/{vid}/tables/{name}/content/{id}
+                         ├── tbParts[0] (addStr)    → writeToTable()    → addContent()    ─┐
+                         ├── tbParts[1] (updateStr) → updateTableRow()  → updateContent() ─┤ Firestore
+                         ├── tbParts[2] (deleteStr) → deleteFromTable() → deleteContent() ─┤ MobileTable/{vid}/tables/{name}/content/{id}
+                         ├── tbParts[3] (eventStr)  → writeToEvent()                      ─┤
+                         ├── tbParts[4] (updEvStr)  → writeUpdateEventRow()               ─┘
+                         └── tbParts[5] (publish)   → enqueueLedgerPublish()
+                                                          │  _LEDGER_OUTBOX (secure storage)
+                                                          ▼
+                                                    drainLedgerOutbox()
+                                                          │
+                                                          ▼
+                                                    POST pub-sub-gateway
+                                                    (NOT Firestore — see publish_ledger.md)
 ```
 
 ## Dispatch Points
